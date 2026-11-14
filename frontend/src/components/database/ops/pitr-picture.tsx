@@ -91,11 +91,16 @@ export function ArchivePathPicture({ container: name }: { container: string }) {
                 nodeRef={marks[place.key]}
                 align="start"
                 mark={
-                  <WirePlaceholder
-                    size="sm"
-                    product={"product" in place ? place.product : undefined}
-                    fallback={"fallback" in place ? place.fallback : undefined}
-                  />
+                  // Narrow, the marks stand in one column: a smaller ring is
+                  // centred in the width of the marks above it, so the line
+                  // down them meets its middle.
+                  <span className="flex w-11 justify-center lg:w-auto">
+                    <WirePlaceholder
+                      size="sm"
+                      product={"product" in place ? place.product : undefined}
+                      fallback={"fallback" in place ? place.fallback : undefined}
+                    />
+                  </span>
                 }
                 title={<span className="text-muted-foreground">{place.title}</span>}
                 hint={place.hint}

@@ -44,11 +44,12 @@ import {
   Trash,
 } from "@/components/icons"
 import { Panel, PanelHeader } from "@/components/panel"
-import { EmptyState, LoadingPanel } from "@/components/state"
+import { EmptyState } from "@/components/state"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -418,7 +419,7 @@ export function Backups() {
               <CouldNotRead what="the dumps" error={backups.error} onRetry={backups.refresh} />
             </div>
           ) : (
-            <LoadingPanel plain rows={4} />
+            <DumpsSilhouette table={width === 0 || width >= TABLE_FROM} />
           )
         ) : (
           <div className="animate-rise space-y-3 pt-3">
@@ -578,6 +579,48 @@ export function Backups() {
       )}
       {dialog}
     </SectionFrame>
+  )
+}
+
+/**
+ * The list before it has come, in the shape it will have: the framed table's
+ * head and four lines, or four cards where there is no room for columns. It
+ * was rows on hairlines, a different height from the table that took their
+ * place, so everything under the dumps moved when they landed.
+ */
+function DumpsSilhouette({ table }: { table: boolean }) {
+  const rows = [0, 1, 2, 3]
+  return (
+    <div role="status" aria-label="Reading the dumps" className="pt-3">
+      {table ? (
+        <Panel aria-hidden>
+          <div className="flex h-10 items-center border-b border-hairline px-4">
+            <Skeleton className="h-2.5 w-12" />
+          </div>
+          {rows.map((row) => (
+            <div
+              key={row}
+              className="flex h-11 items-center gap-8 border-b border-hairline px-4 last:border-0"
+            >
+              <Skeleton className="h-3 w-16 shrink-0" />
+              <Skeleton className={row % 2 ? "h-3 w-56" : "h-3 w-72"} />
+              <Skeleton className="ml-auto h-3 w-14 shrink-0" />
+            </div>
+          ))}
+        </Panel>
+      ) : (
+        <ul aria-hidden className="space-y-2">
+          {rows.map((row) => (
+            <li key={row} className="rounded-xl border bg-choice-surface px-3 py-2 text-xs">
+              <div className="flex h-8 items-center">
+                <Skeleton className={row % 2 ? "h-3 w-40" : "h-3 w-52"} />
+              </div>
+              <p className="text-hint">&nbsp;</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

@@ -394,7 +394,7 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
             // The path the log would take, one sentence and the one command.
             // Where it cannot be set up, the same picture under the server's
             // own reason, and no command.
-            <div data-slot="pitr-empty" className="space-y-1">
+            <div data-slot="pitr-empty" className="space-y-4 lg:space-y-1">
               <ArchivePathPicture container={data.container ?? ""} />
               <div className="flex min-w-0 flex-col items-center gap-3 text-center">
                 <p className="max-w-prose text-body text-pretty">

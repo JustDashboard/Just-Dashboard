@@ -715,13 +715,14 @@ for (const width of [1280, 390]) {
       .evaluateAll((rows) =>
         rows.map((row) => {
           const box = row.getBoundingClientRect()
-          return { top: Math.round(box.top), height: Math.round(box.height) }
+          return { top: box.top, height: box.height }
         }),
       )
     expect(boxes).toHaveLength(4)
-    expect(new Set(boxes.map((box) => box.height)).size).toBe(1)
-    const steps = boxes.slice(1).map((box, at) => box.top - boxes[at].top)
-    expect(new Set(steps).size).toBe(1)
+    const spread = (values: number[]) => Math.max(...values) - Math.min(...values)
+    expect(spread(boxes.map((box) => box.height))).toBeLessThan(0.5)
+    // Nothing hangs between two dumps: each starts where the last ended, plus the same gap.
+    expect(spread(boxes.slice(1).map((box, at) => box.top - boxes[at].top))).toBeLessThan(0.5)
     // One brand-faced command beside the title, and the rest as words in a menu.
     const head = dumps(page).locator("[data-slot=panel-header]").first()
     await expect(head.getByRole("button")).toHaveCount(2)
@@ -731,28 +732,38 @@ for (const width of [1280, 390]) {
   })
 }
 
-test("the dumps hold their place from loading to loaded", async ({ page }) => {
-  let release = () => {}
-  const held = new Promise<void>((resolve) => (release = resolve))
-  await mockOperate(page, {
-    answers: {
-      "GET 1/backups": async () => {
-        await held
-        return BACKUPS
+for (const width of [1280, 390]) {
+  test(`at ${width} px the dumps and what is under them hold their place from loading to loaded`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await mockOperate(page, {
+      answers: {
+        "GET 1/backups": async () => {
+          await held
+          return BACKUPS
+        },
       },
-    },
+    })
+    await visit(page, "/databases/1/backups")
+    const head = dumps(page).locator("[data-slot=panel-header]").first()
+    // The section under the dumps: it is what moved when the list landed at another height.
+    const under = page.getByRole("region", { name: "Point-in-time recovery", exact: true })
+    await expect(dumps(page).getByRole("status", { name: "Reading the dumps" })).toBeVisible()
+    await expect(under).toBeVisible()
+    await risen(page)
+    const before = [await head.boundingBox(), await under.boundingBox()]
+    release()
+    await expect(dumpEntry(page, "shop_main-new.dump")).toBeVisible()
+    await risen(page)
+    const after = [await head.boundingBox(), await under.boundingBox()]
+    expect(Math.round(after[0]!.y)).toBe(Math.round(before[0]!.y))
+    // Four dumps are kept, which is what the silhouette draws.
+    expect(Math.abs(after[1]!.y - before[1]!.y)).toBeLessThanOrEqual(1)
   })
-  await visit(page, "/databases/1/backups")
-  const head = dumps(page).locator("[data-slot=panel-header]").first()
-  await expect(head).toBeVisible()
-  await risen(page)
-  const before = await head.boundingBox()
-  release()
-  await expect(dumpEntry(page, "shop_main-new.dump")).toBeVisible()
-  await risen(page)
-  const after = await head.boundingBox()
-  expect(Math.round(after!.y)).toBe(Math.round(before!.y))
-})
+}
 
 test("the backup schedule keeps its state and next run beside its action", async ({ page }) => {
   let enabled = false
@@ -861,6 +872,63 @@ test("a transfer already running is shown on arrival, and can be stopped by the 
 
   await progress(page).getByRole("button", { name: "Stop" }).click()
   await expect.poll(() => server.sent.map((one) => one.request)).toContain("POST /jobs/j7/cancel")
+})
+
+/**
+ * How far past its window's edge the page reaches at any point of the border
+ * light's lap. The light is moved round the frame by one animation, which is
+ * stepped through a lap here rather than waited for: at four seconds a lap, a
+ * check that looked once saw the light on the right edge one time in ten.
+ */
+function widestDuringLap(page: Page, unclipped = false) {
+  return progress(page).evaluate(async (el, bare) => {
+    if (bare) el.querySelector("span.overflow-hidden")?.classList.remove("overflow-hidden")
+    const laps = el
+      .getAnimations({ subtree: true })
+      .filter((animation) =>
+        (animation.effect as KeyframeEffect | null)
+          ?.getKeyframes()
+          .some((frame) => String(frame.transform ?? "").includes("translate(")),
+      )
+    const scrolls = [
+      document.documentElement,
+      ...document.querySelectorAll("[data-slot=page]"),
+    ].map((node) => node.parentElement ?? node)
+    let most = 0
+    for (const lap of laps) {
+      const duration = Number(lap.effect?.getComputedTiming().duration ?? 0)
+      lap.pause()
+      for (let at = 0; at < 1; at += 0.02) {
+        lap.currentTime = at * duration
+        await new Promise(requestAnimationFrame)
+        most = Math.max(most, ...scrolls.map((node) => node.scrollWidth - node.clientWidth))
+      }
+      lap.play()
+    }
+    return { laps: laps.length, most }
+  }, unclipped)
+}
+
+test("a running transfer's border light never reaches past the page on a phone", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOperate(page, {
+    answers: {
+      "GET 1/backups": { ...BACKUPS, job: job("j7", "backup", "running") },
+      "GET /jobs/j7": {
+        job: job("j7", "backup", "running"),
+        lines: [line(1, "status", "Dumping shop")],
+      },
+    },
+  })
+  await visit(page, "/databases/1/backups")
+  await expect(progress(page)).toHaveAttribute("aria-label", "Dump shop, running")
+  const clipped = await widestDuringLap(page)
+  expect(clipped.laps).toBe(1)
+  expect(clipped.most).toBeLessThanOrEqual(1)
+  // The check sees what it is for: without the clip the light's box widens the page.
+  expect((await widestDuringLap(page, true)).most).toBeGreaterThan(20)
 })
 
 test("a restore says where it goes, takes a safety dump first, and is confirmed with the database named", async ({
