@@ -3,6 +3,7 @@ import {
   draftOfPooling,
   micros,
   poolerAddresses,
+  poolerCaptions,
   poolerIsIdle,
   poolerReading,
   poolingChanges,
@@ -172,5 +173,76 @@ describe("the figures", () => {
     expect(poolerIsIdle({ pools: [], stats: [{ totalQueryCount: 0 }] })).toBe(true)
     expect(poolerIsIdle({ pools: [], stats: [{ totalQueryCount: 4 }] })).toBe(false)
     expect(poolerIsIdle({ pools: [pool({})], stats: [] })).toBe(false)
+  })
+})
+
+describe("the figures as the picture's captions", () => {
+  const pool = (over = {}) => ({
+    database: "shop_main",
+    user: "app",
+    clActive: 14,
+    clWaiting: 2,
+    svActive: 6,
+    svIdle: 3,
+    svUsed: 1,
+    maxWaitSec: 1,
+    ...over,
+  })
+  const stat = (over = {}) => ({
+    database: "shop_main",
+    avgQueryCount: 96,
+    avgXactCount: 38,
+    avgQueryTime: 1500,
+    avgWaitTime: 400,
+    avgRecv: 0,
+    avgSent: 0,
+    totalQueryCount: 1204551,
+    ...over,
+  })
+
+  test("who is connected, who waits, what the server holds, and the wait in words", () => {
+    expect(
+      poolerCaptions({
+        pools: [
+          pool(),
+          pool({
+            user: "reports",
+            clActive: 1,
+            clWaiting: 0,
+            svActive: 1,
+            svIdle: 2,
+            svUsed: 0,
+            maxWaitSec: 0,
+          }),
+        ],
+        stats: [stat()],
+      }),
+    ).toEqual({
+      clients: "15 clients",
+      waiting: "2 waiting",
+      active: "7 active",
+      idle: "6 idle",
+      wait: "waits 0.4 ms for a connection",
+      longest: "the longest now 1 s",
+      work: "96 queries · 38 transactions a second",
+      cost: "1.5 ms a query · 1,204,551 queries so far",
+    })
+  })
+
+  test("nobody waiting is not said, and one of a thing is one", () => {
+    const says = poolerCaptions({
+      pools: [pool({ clActive: 1, clWaiting: 0, maxWaitSec: 0 })],
+      stats: [stat({ avgQueryCount: 1, avgXactCount: 1, totalQueryCount: 1 })],
+    })
+    expect(says.clients).toBe("1 client")
+    expect(says.waiting).toBeUndefined()
+    expect(says.longest).toBeUndefined()
+    expect(says.work).toBe("1 query · 1 transaction a second")
+    expect(says.cost).toBe("1.5 ms a query · 1 query so far")
+  })
+
+  test("a pooler nothing has used has nothing to say", () => {
+    expect(poolerCaptions({ pools: [], stats: [] })).toBeUndefined()
+    expect(poolerCaptions({ pools: [], stats: [stat({ totalQueryCount: 0 })] })).toBeUndefined()
   })
 })
