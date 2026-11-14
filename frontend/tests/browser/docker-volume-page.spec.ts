@@ -121,6 +121,14 @@ test("the views are in the address, and each says what the sheet said", async ({
 
   await tab(page, "Files").click()
   await expect(page).toHaveURL(/\/docker\/volumes\/shop_uploads$/)
+
+  // The view a volume was left on is the one the next opens on from its row,
+  // and the address says which, so a link copied from it opens the same view.
+  await tab(page, "Configuration").click()
+  await page.locator("[data-slot=page]").getByRole("link", { name: "Volumes" }).click()
+  await page.getByRole("link", { name: "nextcloud_db", exact: true }).click()
+  await expect(page).toHaveURL(/\/docker\/volumes\/nextcloud_db\?tab=configuration$/)
+  await expect(tab(page, "Configuration")).toHaveAttribute("aria-selected", "true")
 })
 
 test("a paused job the job list does not name still has its line, and says so", async ({

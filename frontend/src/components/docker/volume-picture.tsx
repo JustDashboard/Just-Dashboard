@@ -175,18 +175,23 @@ function mounter(user: VolumeUser, productOf: Map<string, string>): WireFlowNode
         {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Box aria-hidden />}
       </WireMark>
     ),
-    // What the path under the name cannot say goes here, so the path is whole.
+    // What the path under the name cannot say goes here, so the path is whole:
+    // its stack, and that it is stopped or may only read. "Container" is said
+    // only when there is nothing else to say.
     eyebrow: (
       <span className="block truncate">
-        {user.stack ? (
-          <span style={{ color: holderHue({ kind: "stack", name: user.stack }) }}>
-            {user.stack}
-          </span>
-        ) : (
-          "Container"
-        )}
-        {!up && " · stopped"}
-        {user.readOnly && " · read-only"}
+        {[
+          user.stack && (
+            <span key="stack" style={{ color: holderHue({ kind: "stack", name: user.stack }) }}>
+              {user.stack}
+            </span>
+          ),
+          !up && "stopped",
+          user.readOnly && "read-only",
+        ]
+          .filter(Boolean)
+          .flatMap((part, i) => (i > 0 ? [" · ", part] : [part]))}
+        {!user.stack && up && !user.readOnly && "Container"}
       </span>
     ),
     title: (

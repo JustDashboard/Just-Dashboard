@@ -112,6 +112,13 @@ export function VolumePage() {
   const requested = search.get("tab")
   const [remembered, remember] = useViewState<string>("docker.volume.tab", VOLUME_TABS[0])
   const [chosen, setChosen] = useState<string>(requested ?? remembered)
+  // The address can change under the page — Back, Forward, a link to another
+  // view of the volume on screen — and the view follows it.
+  const [seen, setSeen] = useState(requested)
+  if (requested !== seen) {
+    setSeen(requested)
+    setChosen(requested ?? VOLUME_TABS[0])
+  }
   const tab: VolumeTab = (VOLUME_TABS as readonly string[]).includes(chosen)
     ? (chosen as VolumeTab)
     : VOLUME_TABS[0]
@@ -130,6 +137,14 @@ export function VolumePage() {
     [remember],
   )
   const open = useCallback((next: string) => router.push(volumeHref(next, tab)), [router, tab])
+  // Opened from a row, the page shows the view it was left on; the address
+  // says so, so the link copied from it opens the same view.
+  useEffect(() => {
+    if (new URL(window.location.href).searchParams.has("tab") || tab === VOLUME_TABS[0]) return
+    window.history.replaceState(null, "", volumeHref(name, tab))
+    // Once, on arrival: afterwards every change of view writes the address itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name])
 
   const rail = useRail()
   const at = rail.volumes.findIndex((volume) => volume.name === name)
