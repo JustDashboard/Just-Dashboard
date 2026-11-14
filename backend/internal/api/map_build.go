@@ -943,7 +943,7 @@ func mapStacks(list []dockerx.Container) []mapItem {
 
 func mapVolume(v dockerx.Volume, mounted bool) mapItem {
 	item := mapItem{
-		ID: "volume:" + v.Name, Name: v.Name, Href: "/docker/volumes?volume=" + url.QueryEscape(v.Name),
+		ID: "volume:" + v.Name, Name: v.Name, Href: "/docker/volumes/" + url.PathEscape(v.Name),
 		Tone: mapIdle, State: "unused",
 	}
 	if mounted || v.InUse || v.RefCount > 0 {
