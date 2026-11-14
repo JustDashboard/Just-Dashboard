@@ -3892,10 +3892,13 @@ a new block on this page takes it too:
 - **Then its one coloured picture:** each limit's gauge, the severities' bar, the ribbon of days, the
   releases per day. The hues are the existing ones (§3, §10), and the reading it replaces is said in the
   words beside it, so nothing is colour alone.
-- **The live readings are lines,** `ReadingLine` in `deploy/live-readings.tsx`: a measurement's glyph on
-  its own tint (`WireMark hue`, the `HUE` map's colours), a name, the reading as words ("0.1% of one core"),
-  a detail and its last hour at the line's end. Each is one height in every state and opens the page that
-  has the rest.
+- **The live readings are lines,** `ReadingLine` in `components/reading-line.tsx`, drawn for this page by
+  `deploy/live-readings.tsx`: a measurement's glyph on its own tint (`WireMark hue`, the `HUE` map's
+  colours), a name, the reading as words ("0.1% of one core"), a detail and its last hour at the line's
+  end. Each is one height in every state and opens the page that has the rest. The component is shared
+  (0.8.7): `ReadingLines` lays a run of them in two columns, `NoReading` holds a reading's place until it
+  arrives, and a line without an `href` is a reading that opens nothing. It is what a tile row becomes on
+  a page being brought to this one's shape.
 
 - **A block that shows only in one state takes the shape too.** The release watch and the sleeping
   block were missed in 0.8.5 because each is drawn only while a release is on watch or the environment
