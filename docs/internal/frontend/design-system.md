@@ -265,6 +265,17 @@ grey bar after a real space, so the line box is the one the words will have. The
 wrap and a single bar in their place did not. Both pictures are `marks` on a phone, since the lists under
 them name each node again, which is also what stops a stacked column growing with every source.
 
+**A section page beside Notifications reads as Notifications does.** Log drains, Secret stores, Shared
+variables and Templates each open on a `WireFlow` picture (`marks` on a phone, since the list under it
+names every node again) and then draw one-line `ChoiceRow`s, or the picker's cards for templates. A row's
+state is a dot and a word in a column of fixed width, with one figure or count after it, and the count of
+the whole list, with what needs a look, is on the section's head. What used to be a second and third line
+under a row (a destination's refusal in its own words, the variables that read a store) opens from that
+word or that count in a popover, so every row is one height in every state; a press inside the popover
+stops there, because the row around it opens the editor. A project in these pictures is
+`projectNode` from `deploy/section-picture.tsx`. Before the first item there is a picture only where
+something real is already wired (a drain's projects), never two empty rings.
+
 **And one kind of block came back to the frame: a table.** The 2026-09-21 pass found what sweeping
 tables into the second bullet had cost. A table's container is `overflow-auto`, so at any width where
 its columns stop fitting the grid is *already* clipped — and with nothing drawn at the boundary, a row

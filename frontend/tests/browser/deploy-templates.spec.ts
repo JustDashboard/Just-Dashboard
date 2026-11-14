@@ -272,20 +272,31 @@ test("the Templates page lists, imports and removes this dashboard's templates",
   })
   await page.goto("/deploy/templates")
 
-  const rows = page.getByRole("list", { name: "Your templates" })
-  await expect(rows.getByRole("listitem")).toHaveCount(2)
-  const shop = rows.getByRole("listitem").filter({ hasText: "Shop front" })
-  await expect(
-    shop.getByText(/user-shop-front · v1\.0\.0 · Saved from a deployment by operator/),
-  ).toBeVisible()
-  await expect(shop.getByText("2 deployments use it")).toBeVisible()
-  await expect(shop.getByRole("link", { name: "Deploy Shop front" })).toHaveAttribute(
-    "href",
-    "/deploy/new?source=template&template=user-shop-front",
-  )
-  const stack = rows.getByRole("listitem").filter({ hasText: "Cached site" })
+  // Drawn as the picker draws them: a card each, and the chosen one over them.
+  const grid = page.getByRole("group", { name: "Your templates" })
+  const cards = grid.locator("[data-slot=choice-card]")
+  await expect(cards).toHaveCount(2)
+  const picture = page.locator("[data-slot=wire-flow]")
+  const shop = cards.filter({ hasText: "Shop front" })
+  await expect(shop.getByText("nginx:1.27-alpine")).toBeVisible()
+  await expect(shop.getByText("Used by 2")).toBeVisible()
+  // The first is the one drawn: its id and version, where it was saved from
+  // and by whom, and how many deployments use it.
+  await expect(picture.getByText("user-shop-front · v1.0.0")).toBeVisible()
+  await expect(picture.getByText("Saved from", { exact: true })).toBeVisible()
+  await expect(picture.getByText(/^operator · /)).toBeVisible()
+  await expect(picture.getByText("2 deployments use it")).toBeVisible()
+  // Deploying is one press from the card, into the picker with it chosen.
+  await shop.getByRole("button", { name: "Deploy Shop front" }).click()
+  await expect(page).toHaveURL(/\/deploy\/new\?source=template&template=user-shop-front/)
+  await page.goBack()
+  const stack = cards.filter({ hasText: "Cached site" })
   await expect(stack.getByText("2 services: cache, web")).toBeVisible()
   await expect(stack.getByText("Compose stack")).toBeVisible()
+  await stack.getByRole("button", { name: "Show Cached site" }).click()
+  await expect(picture.getByText("A Compose file", { exact: true })).toBeVisible()
+  await expect(picture.getByText("redis:7.4-alpine")).toBeVisible()
+  await expect(picture.getByText("No deployment uses it")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("templates-page.png") })
 
   await page.getByTestId("template-import-file").setInputFiles({
@@ -302,7 +313,7 @@ test("the Templates page lists, imports and removes this dashboard's templates",
   await expect(confirmation.getByText(/2 deployments use it, and each keeps running/)).toBeVisible()
   await confirmation.getByRole("button", { name: "Remove template" }).click()
   await expect.poll(() => deleted).toEqual(["user-shop-front"])
-  await expect(rows.getByRole("listitem")).toHaveCount(1)
+  await expect(cards).toHaveCount(1)
 })
 
 test("an empty Templates page offers the three ways to add one", async ({ page }) => {
