@@ -1483,7 +1483,8 @@ Eighteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 ro
 rules, monitored egress groups, firewall, gateway/NAT, protections/blocklists,
 WireGuard/Tailscale/Headscale, resolver/hosts/lookup and private retained native DNS policy/trust
 evidence, traffic/shaping/eBPF, connections and tools. Connection path (a tool of the Tools
-workbench since 0.8.7; `/network/investigate` redirects to it) adds source/container
+workbench since 0.8.7; `/network/investigate` redirects to it, and the command palette finds it by
+its name through `TOOL_ALIASES` in `components/command-search/model.ts`) adds source/container
 evidence with explicit basis and scope, the native nginx stream on the destination port as observed
 evidence with the backend leg nginx logged for a measured connection, and each forwarding site's
 service policy; Saved runs adds bounded durable lifecycle, retention, export and compatible
@@ -1551,7 +1552,9 @@ verification and a Linux kill-switch download, with archived tunnels restorable 
 Tailscale/Headscale approval and key expiry read-only (`components/network/vpn/record.tsx`,
 Connections opens an address into its tuples, closes and layers, reads a past hour from socket
 history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
-opens each VPN on its own identity line with no tile row, opts in to IPv6 addressing and separate
+opens on its own line and shows one kind at a time as a view in the address (`?tab=wireguard`, the
+default, `tailscale`, `headscale` where this server runs one, `log`; `components/network/vpn/views.ts`),
+each kind on its own identity line with no tile row, opts in to IPv6 addressing and separate
 egress with per-family evidence and translated-connection counts on the row that switches that
 family's exit; each tunnel's picture marks stale always-on handshakes, captured transports and
 passed budgets on the peer they are about, a tunnel has a page of its own (`/network/vpn/<name>`:
@@ -1562,7 +1565,10 @@ download, with archived tunnels restorable, tailnet machines and Headscale nodes
 the exit-node offer and subnet routes as settings on one save bar, a Tailscale that waits for
 sign-in offering the address it waits at, and Headscale approval and key expiry read-only
 (`components/network/vpn/`: `tunnel-page.tsx`, `tunnel-reading.ts`, `tailscale-offers.tsx`,
-`peer-actions.tsx`, `archive.tsx`). Twenty-six admin-only server diagnostics, each rendering one
+`peer-actions.tsx`, `archive.tsx`). A session opened through Just Hub is not offered what the server
+refuses it there (adding or editing a peer, a peer's configuration, restoring a tunnel) nor, on DNS,
+connecting an engine or changing its connection: `components/network/hub-session.ts` reads the
+account's own sessions once and finds the one in use. Twenty-six admin-only server diagnostics, each rendering one
 shared structured result (verdict, checks, findings with owners, facts with their basis, tables with
 in-product row links, metrics and limits) with raw output behind a disclosure, a server-held quick
 result that saves without rerunning, trusted SSH fingerprints and saved Wake-on-LAN devices; an
@@ -1631,7 +1637,10 @@ none has a `StatGrid`:
   is one line and the chosen one is read out under the table; the totals of the rows shown are the
   table's foot, native counters and kernel payload apart; the day's twenty-four hours are a strip
   that reads one hour on a fixed line. Sampling policy is a sheet, Erase is in the menu, and the
-  kernel observer keeps its own reviewed activation.
+  kernel observer keeps its own reviewed activation. Under the picture it is three views in the
+  address (`?tab=`, `flows/views.ts`): the day's socket hours with its recorded hours (the default),
+  the kernel observer, and the latest sample with the measurement boundaries. A node of the picture
+  opens the view it stands for.
 
 Every reading these pages gave as "Unknown" is still given as "Unknown": a check that expired or was
 cancelled measured nothing, a UDP row has no byte counters, and an hour with no block was not sampled.
@@ -1834,10 +1843,17 @@ Every block waits for the first read at the height it had on the last visit (`gh
 
 The DNS page's Services view mounts `components/network/dns/services.tsx` for administrators, including while
 the host resolver reading is unavailable. Native connections default read-only; replacement requires
-the complete native credential and selected custom CA again. Engine sheets keep listeners, runtime,
-upstreams, client access/settings, authoritative zones, local overrides, native views, filtering groups,
-named networks/translations and bounded native query history distinct, with their native evidence
-basis and unknowns. Retained native changes and owned Docker setup reviews open separate sheets.
+the complete native credential and selected custom CA again. A connected engine is a page of its own,
+`/network/dns/services/<id>` (`components/network/dns/engine-page.tsx`, `engine-rail.tsx`,
+`engine-views.ts`): the engine as the product it is on the identity line, Review a change as its
+command, updating the connection and disconnecting it in the menu, and its views in the address
+(`?tab=`): Overview (owner, runtime, listeners, upstreams, limitations), Clients (access, client
+settings, native views, named networks/translations, filtering groups), Records (authoritative zones,
+local overrides), Queries (the bounded native history), Filters, DHCP and Changes. Each keeps its
+native evidence basis and unknowns. A retained native change's review is part of Changes
+(`?change=<id>`). From `xl` the connected engines stand beside it as a rail, and Alt+↑/↓ walk them
+with the view kept. The connection's form, the owned Docker setup's form and an owned setup's review
+stay sheets.
 Apply requires a fresh matching owner/policy, unchanged reviewed intent and explicit confirmation;
 an attempted apply stays held across navigation/reload through account-scoped browser attempt IDs.
 Only explicit native `verified` state reports verification. Owned removal separately names the

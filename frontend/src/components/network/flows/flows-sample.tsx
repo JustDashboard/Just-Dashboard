@@ -21,7 +21,7 @@ import { UTCTime } from "@/components/network/flows/marks"
  */
 export function FlowsSample({ cycle }: { cycle: FlowCycle | null }) {
   return (
-    <Panel plain aria-label="Latest native sample">
+    <Panel plain id="flow-sample" aria-label="Latest native sample" className="scroll-mt-6">
       <PanelHeader
         title="Latest native sample"
         actions={

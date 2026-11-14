@@ -4197,15 +4197,27 @@ pixels each, under a row of six equal buttons and a switch. Where each went
 - **The picture** (`egress-picture.tsx`) is a `WireFlow`: the selected traffic, the group, its
   members by tier, each drawn as what carries it (a tunnel's product, else a router). Only the
   carrying member's wire moves, and only while the group is on; a member that is down is dashed,
-  red where it is the one carrying. Every node says the same number of lines, and the loading
-  picture is `WireFlow`'s own with those lines given to it (`loadingLines`) and as many members as
-  the group had on the last visit, so the views under it do not move when a group lands.
+  red where it is the one carrying. The group in the middle is its own mark on a logo tile, as the
+  list and the rail draw it (it was the filled brand tile, the command's face, unlike every other
+  picture's hub). Every node says the same number of lines, and the loading picture is `WireFlow`'s
+  own with those lines given to it (`loadingLines`) and as many members as the group had on the
+  last visit, so the views under it do not move when a group lands.
 - **Members** stays a framed table, because its rows are read down their columns (state, round
   trip, loss, the strip of recent samples), one line a member. The second line of each row and the
   sixth column (path, tier, mark, table, probe source) were a member's fixed identity rather than
   readings: they are the **Bound to** list under it, with **How it decides** (probes, thresholds,
   holds, connections, protected addresses), which only the form showed before. What the rules would
   do now (`advice`) is a notice above the table when they would act.
+**The VPN page is one kind of VPN at a time** since 2026-11-14: it opens on its own line (VPN, how
+many tunnels are up and whether the server is on its tailnet, then each kind in a few words under its
+mark), and under it WireGuard, Tailscale, Headscale (where this server runs one) and the log are views
+named in the address (`?tab=`, `vpn/views.ts`), WireGuard first as it always was. Each view still opens
+on its own identity line. The tailnet's view stays in the document once opened, so a draft of its
+offers under the save bar outlives a look at a tunnel. A session opened through Just Hub is refused a
+new peer, a change to one, a peer's configuration and restoring a tunnel
+(`httpx.RefuseHubSession`); `components/network/hub-session.ts` finds that out from the account's own
+list of sessions, and none of those controls is drawn for it.
+
 **The VPN page lost its tiles on 2026-11-13**, in the run that brought the older pages to the deploy
 pages' look. It opened on four figures (WireGuard 2/5, Tailnet 4/6, Exit, Moved), each said again a
 screen lower, over a tunnel whose head was a row of small grey buttons, a box of alerts, a list of

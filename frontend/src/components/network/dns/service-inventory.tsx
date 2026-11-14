@@ -5,7 +5,6 @@ import { useAuth } from "@/hooks/use-auth"
 import { errorMessage, post } from "@/lib/api"
 import {
   DNS_SERVICE_BASE,
-  dnsEngineName,
   readDNSChange,
   readDNSChangeRequest,
   type DNSChangeRequest,
@@ -16,15 +15,18 @@ import {
 } from "@/lib/network-dns-services"
 import { Field, OptionRow } from "@/components/form"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { dnsDraftLines, dnsStageProblem } from "./service-form"
 import { DNSServicePolicyForm, type DNSPolicyAction } from "./service-policy-form"
-import { DNSServiceDHCP } from "./service-dhcp"
-import { DNSServiceFilters } from "./service-filters"
 
+/**
+ * A section of the inventory: a title and a hairline, its count at the far
+ * end where it counts rows (design-system §5).
+ */
 function InventorySection({
   title,
   count,
@@ -35,20 +37,22 @@ function InventorySection({
   children: ReactNode
 }) {
   return (
-    <section className="min-w-0 space-y-4" aria-label={title}>
-      <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline pb-3">
-        <h3 className="text-base font-semibold">{title}</h3>
-        {count !== undefined && (
-          <span
-            className="numeric text-2xl font-semibold"
-            aria-label={`${count} ${title.toLowerCase()}`}
-          >
-            {count}
-          </span>
-        )}
-      </div>
-      {children}
-    </section>
+    <Panel plain aria-label={title}>
+      <PanelHeader
+        title={title}
+        actions={
+          count !== undefined && (
+            <span
+              className="numeric text-hint text-muted-foreground"
+              aria-label={`${count} ${title.toLowerCase()}`}
+            >
+              {count}
+            </span>
+          )
+        }
+      />
+      <PanelBody className="space-y-4">{children}</PanelBody>
+    </Panel>
   )
 }
 
@@ -116,28 +120,300 @@ function Groups({ groups }: { groups: DNSNativeGroup[] }) {
     <p className="text-body text-muted-foreground">No group rows in this native reading.</p>
   )
 }
+/** The views of an engine's page that are read straight from its native snapshot. */
+export type DNSEngineReadingTab = "overview" | "clients" | "records" | "queries"
 
-export function DNSServiceInventory(props: {
+/**
+ * One view of what a connected engine reports about itself. It was one column
+ * of twelve sections in a sheet; on the engine's page they are four views:
+ * who owns it, where it listens and what it forwards to; who may ask it and
+ * how each client is treated; the names it answers for itself; and the
+ * queries it kept. Reading register: a count heads its own flat section, and
+ * native provenance stays beside each reading, including empty, partial and
+ * unsupported data.
+ */
+export function DNSEngineReadings({
+  view,
+  tab,
+}: {
+  view: DNSServiceView
+  tab: DNSEngineReadingTab
+}) {
+  const snapshot = view.snapshot
+  if (!snapshot)
+    return (
+      <p className="text-body text-muted-foreground">
+        No authenticated native inventory is available. Refresh the connection to inspect its
+        current owner.
+      </p>
+    )
+  return (
+    <div className="flex min-w-0 flex-col gap-8" aria-label="Native DNS service inventory">
+      {tab === "overview" && (
+        <>
+          <InventorySection title="Native owner and transport">
+            <p className="text-body break-words">
+              Connection: {view.connection.ownership} · generation {view.connection.generation}
+            </p>
+            <p className="text-hint text-muted-foreground">
+              Native version {snapshot.version || "Unknown"} · observed{" "}
+              <time dateTime={snapshot.observedAt}>
+                {new Date(snapshot.observedAt).toLocaleString()}
+              </time>
+            </p>
+            <p className="text-body break-words">
+              Roles: {snapshot.roles.join(" · ") || "No roles declared"}
+            </p>
+            <Reading label="Runtime" value={snapshot.runtime} />
+            <Reading label="Transport" value={snapshot.transport} />
+            {snapshot.process && (
+              <p className="text-body break-words">
+                Native PID {snapshot.process.pid} · startup interval{" "}
+                {new Date(snapshot.process.startedAt).toLocaleString()} →{" "}
+                {new Date(snapshot.process.startedBefore).toLocaleString()}
+              </p>
+            )}
+          </InventorySection>
+          <InventorySection title="Configured listeners" count={snapshot.listeners.length}>
+            <ul className="min-w-0 divide-y divide-hairline">
+              {snapshot.listeners.map((listener, index) => (
+                <li key={index} className="min-w-0 py-3 text-body">
+                  <p className="font-mono break-all">
+                    {listener.address.includes(":") && !listener.address.startsWith("[")
+                      ? `[${listener.address}]`
+                      : listener.address}
+                    :{listener.port} · {listener.protocol}
+                  </p>
+                  <p className="break-words text-muted-foreground">Scope: {listener.scope}</p>
+                </li>
+              ))}
+            </ul>
+            {!snapshot.listeners.length && (
+              <p className="text-body text-muted-foreground">
+                No configured listener rows were returned. Runtime evidence remains separate.
+              </p>
+            )}
+          </InventorySection>
+          <InventorySection title="Native upstreams" count={snapshot.upstreams.length}>
+            <p className="text-body">
+              Native upstream protocol: {snapshot.upstreamProtocol || "Unspecified"}
+            </p>
+            <Values
+              values={snapshot.upstreams}
+              empty="No upstream entries in this native reading."
+            />
+            <p className="text-body">
+              Native protection {snapshot.protection ? "enabled" : "disabled"}
+              {snapshot.protectionTemporary && " · temporary setting"}
+            </p>
+          </InventorySection>
+          <InventorySection title="Native limitations" count={snapshot.limitations.length}>
+            <ul className="min-w-0 list-inside list-disc space-y-2 text-body text-muted-foreground">
+              {snapshot.limitations.map((limitation, index) => (
+                <li key={index} className="break-words">
+                  {limitation}
+                </li>
+              ))}
+            </ul>
+          </InventorySection>
+        </>
+      )}
+      {tab === "clients" && (
+        <>
+          <InventorySection
+            title="Client access policy"
+            count={snapshot.allowedClients.length + snapshot.deniedClients.length}
+          >
+            <Reading label="Native access" value={snapshot.access} />
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <p className="text-body font-medium">
+                  Allowed clients · {snapshot.allowedClients.length}
+                </p>
+                <Values
+                  values={snapshot.allowedClients}
+                  empty="No explicit allowed-client entries; consult the native access reading."
+                />
+              </div>
+              <div className="space-y-2">
+                <p className="text-body font-medium">
+                  Denied clients · {snapshot.deniedClients.length}
+                </p>
+                <Values
+                  values={snapshot.deniedClients}
+                  empty="No explicit denied-client entries."
+                />
+              </div>
+            </div>
+          </InventorySection>
+          <InventorySection
+            title="Native client settings"
+            count={
+              snapshot.clientEvidence.state === "configured" ? snapshot.clients.length : undefined
+            }
+          >
+            <Reading label="Client evidence" value={snapshot.clientEvidence} />
+            <ul className="min-w-0 divide-y divide-hairline">
+              {snapshot.clients.map((client, index) => (
+                <li key={`${index}-${client.id}`} className="min-w-0 space-y-1 py-3 text-body">
+                  <p className="font-medium break-words">
+                    {client.name || client.id} ·{" "}
+                    {client.inherited ? "Inherited settings" : "Client-specific settings"}
+                  </p>
+                  <p className="font-mono break-all">
+                    ID {client.id} · {client.addresses.join(", ") || "No declared addresses"}
+                  </p>
+                  <p>
+                    Filtering:{" "}
+                    {client.filtering === undefined
+                      ? "Unspecified"
+                      : client.filtering
+                        ? "Enabled"
+                        : "Disabled"}
+                    ; group IDs: {client.groups?.join(", ") || "None declared"}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </InventorySection>
+          <InventorySection title="Native views" count={snapshot.viewGroups.length}>
+            <Reading label="View evidence" value={snapshot.views} />
+            <Groups groups={snapshot.viewGroups} />
+          </InventorySection>
+          <InventorySection
+            title="Named networks"
+            count={Object.keys(snapshot.namedNetworks).length}
+          >
+            <dl className="min-w-0 divide-y divide-hairline">
+              {Object.entries(snapshot.namedNetworks).map(([name, scopes]) => (
+                <div
+                  key={name}
+                  className="grid min-w-0 gap-1 py-3 text-body sm:grid-cols-[12rem_minmax(0,1fr)]"
+                >
+                  <dt className="font-medium break-words">{name}</dt>
+                  <dd className="font-mono break-all">
+                    {scopes.join(", ") || "No declared scopes"}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-body">
+              Native translations:{" "}
+              {snapshot.translationEnabled === undefined
+                ? "Unspecified"
+                : snapshot.translationEnabled
+                  ? "Enabled"
+                  : "Disabled"}
+              . Mappings are listed with their native view groups.
+            </p>
+          </InventorySection>
+          <InventorySection
+            title="Native filtering groups"
+            count={
+              snapshot.appClientEvidence.state === "configured"
+                ? snapshot.filterGroups.length
+                : undefined
+            }
+          >
+            <p className="text-body">
+              Installed-app protection:{" "}
+              {snapshot.appProtection === undefined
+                ? "Unspecified"
+                : snapshot.appProtection
+                  ? "Enabled"
+                  : "Disabled"}
+            </p>
+            <Reading label="App client evidence" value={snapshot.appClientEvidence} />
+            <Groups groups={snapshot.filterGroups} />
+          </InventorySection>
+        </>
+      )}
+      {tab === "records" && (
+        <>
+          <InventorySection title="Authoritative zones" count={snapshot.zones.length}>
+            <Reading label="Zone evidence" value={snapshot.zoneEvidence} />
+            <ul className="min-w-0 divide-y divide-hairline">
+              {snapshot.zones.map((zone, index) => (
+                <li key={`${index}-${zone.name}`} className="min-w-0 py-3 text-body">
+                  <p className="font-mono break-all">
+                    {zone.name} · {zone.type} · {zone.disabled ? "Disabled" : "Enabled"}
+                  </p>
+                  <p className="text-muted-foreground">
+                    Configured DNSSEC: {zone.dnssec || "Unspecified"}; no cryptographic verification
+                    was measured here.
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </InventorySection>
+          <InventorySection title="Local overrides" count={snapshot.localOverrides.length}>
+            <Reading label="Override evidence" value={snapshot.overrideEvidence} />
+            <ul className="min-w-0 divide-y divide-hairline">
+              {snapshot.localOverrides.map((override, index) => (
+                <li
+                  key={`${index}-${override.name}`}
+                  className="min-w-0 py-3 font-mono text-body break-all"
+                >
+                  {override.name} · {override.type} → {override.value}
+                  {override.enabled === undefined
+                    ? " · Native enabled state unspecified"
+                    : override.enabled
+                      ? " · Enabled"
+                      : " · Disabled"}
+                </li>
+              ))}
+            </ul>
+          </InventorySection>
+        </>
+      )}
+      {tab === "queries" && (
+        <>
+          <InventorySection title="Native query history" count={snapshot.queries.length}>
+            <Reading label="Query evidence" value={snapshot.queryEvidence} />
+            <ol className="min-w-0 divide-y divide-hairline">
+              {snapshot.queries.map((query, index) => (
+                <li key={`${index}-${query.at}`} className="min-w-0 space-y-1 py-3 text-body">
+                  <p className="font-mono break-all">
+                    {query.name} · {query.type} · {query.status}
+                  </p>
+                  <p className="break-all text-muted-foreground">
+                    {query.at} · client {query.client} · protocol {query.protocol || "Unspecified"}
+                  </p>
+                </li>
+              ))}
+            </ol>
+            <p className="text-hint text-muted-foreground">
+              These bounded rows are the native engine&apos;s query history; they do not establish
+              an independent client reachability test.
+            </p>
+          </InventorySection>
+        </>
+      )}
+    </div>
+  )
+}
+
+export function DNSServiceChangeForm(props: {
   view: DNSServiceView
   stale: boolean
   onReview: (change: DNSServiceChange) => void
-  onRefresh: () => void
 }) {
-  return <Inventory key={props.view.connection.id} {...props} />
+  return <ChangeForm key={props.view.connection.id} {...props} />
 }
 
-/** Reading register: counts head their own flat sections; native provenance
- * remains beside each reading, including empty, partial and unsupported data. */
-function Inventory({
+/**
+ * A change to the engine's own policy, staged as a retained review before
+ * anything is applied: the kind of change, its draft, and the review the
+ * server keeps of it. The draft outlives a look at another view.
+ */
+function ChangeForm({
   view,
   stale,
   onReview,
-  onRefresh,
 }: {
   view: DNSServiceView
   stale: boolean
   onReview: (change: DNSServiceChange) => void
-  onRefresh: () => void
 }) {
   const { can } = useAuth()
   const id = useId()
@@ -279,425 +555,144 @@ function Inventory({
     "filter_add",
     "filter_remove",
   ].includes(action)
-  if (!admin)
-    return (
-      <p className="text-body text-muted-foreground">
-        Native DNS inventory requires system administration access.
-      </p>
-    )
   return (
-    <div className="flex min-w-0 flex-col gap-8" aria-label="Native DNS service inventory">
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 border-b border-hairline pb-3">
-        <div className="min-w-0 space-y-1">
-          <p className="text-base font-semibold">
-            {view.connection.name} · {dnsEngineName(view.connection.engine)}
-          </p>
-          <p className="font-mono text-body break-all">{view.connection.endpoint}</p>
-          <p className="text-hint text-muted-foreground">
-            {view.state} ·{" "}
-            {view.connection.management ? "Reviewed management allowed" : "Read-only connection"} ·{" "}
-            {view.connection.ownership} · generation {view.connection.generation}
-          </p>
-          {snapshot && (
-            <p className="text-hint text-muted-foreground">
-              Native version {snapshot.version || "Unknown"} · observed{" "}
-              <time dateTime={snapshot.observedAt}>
-                {new Date(snapshot.observedAt).toLocaleString()}
-              </time>
-            </p>
-          )}
-        </div>
-        <Button variant="outline" onClick={onRefresh} disabled={busy}>
-          Refresh native reading
-        </Button>
-      </div>
-      {(stale || view.state !== "available" || view.error) && (
-        <div role="status">
-          <Notice
-            tone="warning"
-            title={stale ? "Last native reading retained" : "Native service needs review"}
-          >
-            {view.error && <p>{view.error}</p>}
-            <p>
-              {stale
-                ? "The refresh failed. The prior inventory remains visible; native changes are blocked."
-                : `Native state: ${view.state}. A returned response does not establish verified native success.`}
-            </p>
-          </Notice>
-        </div>
-      )}
-      {!snapshot ? (
-        <p className="text-body text-muted-foreground">
-          No authenticated native inventory is available. Refresh the connection to inspect its
-          current owner.
-        </p>
-      ) : (
-        <>
-          <InventorySection title="Native owner and transport">
-            <p className="text-body break-words">
-              Roles: {snapshot.roles.join(" · ") || "No roles declared"}
-            </p>
-            <Reading label="Runtime" value={snapshot.runtime} />
-            <Reading label="Transport" value={snapshot.transport} />
-            {snapshot.process && (
-              <p className="text-body break-words">
-                Native PID {snapshot.process.pid} · startup interval{" "}
-                {new Date(snapshot.process.startedAt).toLocaleString()} →{" "}
-                {new Date(snapshot.process.startedBefore).toLocaleString()}
-              </p>
-            )}
-          </InventorySection>
-          <InventorySection title="Configured listeners" count={snapshot.listeners.length}>
-            <ul className="min-w-0 divide-y divide-hairline">
-              {snapshot.listeners.map((listener, index) => (
-                <li key={index} className="min-w-0 py-3 text-body">
-                  <p className="font-mono break-all">
-                    {listener.address.includes(":") && !listener.address.startsWith("[")
-                      ? `[${listener.address}]`
-                      : listener.address}
-                    :{listener.port} · {listener.protocol}
-                  </p>
-                  <p className="break-words text-muted-foreground">Scope: {listener.scope}</p>
-                </li>
-              ))}
-            </ul>
-            {!snapshot.listeners.length && (
-              <p className="text-body text-muted-foreground">
-                No configured listener rows were returned. Runtime evidence remains separate.
-              </p>
-            )}
-          </InventorySection>
-          <InventorySection title="Native upstreams" count={snapshot.upstreams.length}>
-            <p className="text-body">
-              Native upstream protocol: {snapshot.upstreamProtocol || "Unspecified"}
-            </p>
-            <Values
-              values={snapshot.upstreams}
-              empty="No upstream entries in this native reading."
-            />
-            <p className="text-body">
-              Native protection {snapshot.protection ? "enabled" : "disabled"}
-              {snapshot.protectionTemporary && " · temporary setting"}
-            </p>
-          </InventorySection>
-          <InventorySection
-            title="Client access policy"
-            count={snapshot.allowedClients.length + snapshot.deniedClients.length}
-          >
-            <Reading label="Native access" value={snapshot.access} />
-            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <p className="text-body font-medium">
-                  Allowed clients · {snapshot.allowedClients.length}
-                </p>
-                <Values
-                  values={snapshot.allowedClients}
-                  empty="No explicit allowed-client entries; consult the native access reading."
-                />
-              </div>
-              <div className="space-y-2">
-                <p className="text-body font-medium">
-                  Denied clients · {snapshot.deniedClients.length}
-                </p>
-                <Values
-                  values={snapshot.deniedClients}
-                  empty="No explicit denied-client entries."
-                />
-              </div>
-            </div>
-          </InventorySection>
-          <InventorySection
-            title="Native client settings"
-            count={
-              snapshot.clientEvidence.state === "configured" ? snapshot.clients.length : undefined
-            }
-          >
-            <Reading label="Client evidence" value={snapshot.clientEvidence} />
-            <ul className="min-w-0 divide-y divide-hairline">
-              {snapshot.clients.map((client, index) => (
-                <li key={`${index}-${client.id}`} className="min-w-0 space-y-1 py-3 text-body">
-                  <p className="font-medium break-words">
-                    {client.name || client.id} ·{" "}
-                    {client.inherited ? "Inherited settings" : "Client-specific settings"}
-                  </p>
-                  <p className="font-mono break-all">
-                    ID {client.id} · {client.addresses.join(", ") || "No declared addresses"}
-                  </p>
-                  <p>
-                    Filtering:{" "}
-                    {client.filtering === undefined
-                      ? "Unspecified"
-                      : client.filtering
-                        ? "Enabled"
-                        : "Disabled"}
-                    ; group IDs: {client.groups?.join(", ") || "None declared"}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </InventorySection>
-          <InventorySection title="Authoritative zones" count={snapshot.zones.length}>
-            <Reading label="Zone evidence" value={snapshot.zoneEvidence} />
-            <ul className="min-w-0 divide-y divide-hairline">
-              {snapshot.zones.map((zone, index) => (
-                <li key={`${index}-${zone.name}`} className="min-w-0 py-3 text-body">
-                  <p className="font-mono break-all">
-                    {zone.name} · {zone.type} · {zone.disabled ? "Disabled" : "Enabled"}
-                  </p>
-                  <p className="text-muted-foreground">
-                    Configured DNSSEC: {zone.dnssec || "Unspecified"}; no cryptographic verification
-                    was measured here.
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </InventorySection>
-          <InventorySection title="Local overrides" count={snapshot.localOverrides.length}>
-            <Reading label="Override evidence" value={snapshot.overrideEvidence} />
-            <ul className="min-w-0 divide-y divide-hairline">
-              {snapshot.localOverrides.map((override, index) => (
-                <li
-                  key={`${index}-${override.name}`}
-                  className="min-w-0 py-3 font-mono text-body break-all"
-                >
-                  {override.name} · {override.type} → {override.value}
-                  {override.enabled === undefined
-                    ? " · Native enabled state unspecified"
-                    : override.enabled
-                      ? " · Enabled"
-                      : " · Disabled"}
-                </li>
-              ))}
-            </ul>
-          </InventorySection>
-          <InventorySection title="Native views" count={snapshot.viewGroups.length}>
-            <Reading label="View evidence" value={snapshot.views} />
-            <Groups groups={snapshot.viewGroups} />
-          </InventorySection>
-          <InventorySection
-            title="Named networks"
-            count={Object.keys(snapshot.namedNetworks).length}
-          >
-            <dl className="min-w-0 divide-y divide-hairline">
-              {Object.entries(snapshot.namedNetworks).map(([name, scopes]) => (
-                <div
-                  key={name}
-                  className="grid min-w-0 gap-1 py-3 text-body sm:grid-cols-[12rem_minmax(0,1fr)]"
-                >
-                  <dt className="font-medium break-words">{name}</dt>
-                  <dd className="font-mono break-all">
-                    {scopes.join(", ") || "No declared scopes"}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-            <p className="text-body">
-              Native translations:{" "}
-              {snapshot.translationEnabled === undefined
-                ? "Unspecified"
-                : snapshot.translationEnabled
-                  ? "Enabled"
-                  : "Disabled"}
-              . Mappings are listed with their native view groups.
-            </p>
-          </InventorySection>
-          <InventorySection
-            title="Native filtering groups"
-            count={
-              snapshot.appClientEvidence.state === "configured"
-                ? snapshot.filterGroups.length
-                : undefined
-            }
-          >
-            <p className="text-body">
-              Installed-app protection:{" "}
-              {snapshot.appProtection === undefined
-                ? "Unspecified"
-                : snapshot.appProtection
-                  ? "Enabled"
-                  : "Disabled"}
-            </p>
-            <Reading label="App client evidence" value={snapshot.appClientEvidence} />
-            <Groups groups={snapshot.filterGroups} />
-          </InventorySection>
-          <InventorySection title="Native query history" count={snapshot.queries.length}>
-            <Reading label="Query evidence" value={snapshot.queryEvidence} />
-            <ol className="min-w-0 divide-y divide-hairline">
-              {snapshot.queries.map((query, index) => (
-                <li key={`${index}-${query.at}`} className="min-w-0 space-y-1 py-3 text-body">
-                  <p className="font-mono break-all">
-                    {query.name} · {query.type} · {query.status}
-                  </p>
-                  <p className="break-all text-muted-foreground">
-                    {query.at} · client {query.client} · protocol {query.protocol || "Unspecified"}
-                  </p>
-                </li>
-              ))}
-            </ol>
-            <p className="text-hint text-muted-foreground">
-              These bounded rows are the native engine&apos;s query history; they do not establish
-              an independent client reachability test.
-            </p>
-          </InventorySection>
-          <InventorySection title="Native limitations" count={snapshot.limitations.length}>
-            <ul className="min-w-0 list-inside list-disc space-y-2 text-body text-muted-foreground">
-              {snapshot.limitations.map((limitation, index) => (
-                <li key={index} className="break-words">
-                  {limitation}
-                </li>
-              ))}
-            </ul>
-          </InventorySection>
-        </>
-      )}
-      <DNSServiceFilters
-        key={JSON.stringify(view.connection)}
-        connection={view.connection}
-        ownerStale={stale}
-      />
-      <DNSServiceDHCP
-        key={`dhcp:${JSON.stringify(view.connection)}`}
-        connection={view.connection}
-        ownerStale={stale}
-      />
-      <InventorySection title="Review a native change">
-        <ChoiceGrid columns={2} aria-label="Native DNS change kinds">
-          {choices.map((choice) => (
-            <ChoiceCard
-              key={choice.action}
-              selected={action === choice.action}
-              title={choice.label}
-              verb={`Review ${choice.label.toLowerCase()}`}
-              disabled={busy}
-              onClick={() => {
-                setAction(choice.action)
-                setFieldError(undefined)
-              }}
-            />
-          ))}
-        </ChoiceGrid>
-        {policyAction ? (
-          <DNSServicePolicyForm
-            action={action as DNSPolicyAction}
-            view={view}
-            problem={problem}
-            stale={stale}
-            busy={busy}
-            onStage={stage}
-          />
-        ) : (
-          <form
-            className="flex min-w-0 flex-col gap-4"
-            aria-label="Review native DNS change"
-            aria-busy={busy}
-            onSubmit={(event) => {
-              event.preventDefault()
-              void stage()
+    <InventorySection title="Review a native change">
+      <ChoiceGrid columns={2} aria-label="Native DNS change kinds">
+        {choices.map((choice) => (
+          <ChoiceCard
+            key={choice.action}
+            selected={action === choice.action}
+            title={choice.label}
+            verb={`Review ${choice.label.toLowerCase()}`}
+            disabled={busy}
+            onClick={() => {
+              setAction(choice.action)
+              setFieldError(undefined)
             }}
-          >
-            {action === "protection" && (
-              <OptionRow
-                title="Native protection"
-                checked={protection}
+          />
+        ))}
+      </ChoiceGrid>
+      {policyAction ? (
+        <DNSServicePolicyForm
+          action={action as DNSPolicyAction}
+          view={view}
+          problem={problem}
+          stale={stale}
+          busy={busy}
+          onStage={stage}
+        />
+      ) : (
+        <form
+          className="flex min-w-0 flex-col gap-4"
+          aria-label="Review native DNS change"
+          aria-busy={busy}
+          onSubmit={(event) => {
+            event.preventDefault()
+            void stage()
+          }}
+        >
+          {action === "protection" && (
+            <OptionRow
+              title="Native protection"
+              checked={protection}
+              disabled={Boolean(problem) || busy}
+              onCheckedChange={setProtection}
+              hint="The review sets persistent native protection; installed-app protection remains a separate reading."
+            />
+          )}
+          {action === "upstreams" && (
+            <Field
+              label="Classic DNS upstream endpoints"
+              htmlFor={`${id}-upstreams`}
+              error={fieldError}
+              hint="1–16 literal IP:port endpoints, one per line; bracket IPv6. This review replaces the native upstream list with classic DNS."
+            >
+              <Textarea
+                id={`${id}-upstreams`}
+                className="font-mono"
+                value={upstreams}
+                onChange={(event) => setUpstreams(event.target.value)}
                 disabled={Boolean(problem) || busy}
-                onCheckedChange={setProtection}
-                hint="The review sets persistent native protection; installed-app protection remains a separate reading."
+                maxLength={8192}
+                spellCheck={false}
+                aria-invalid={Boolean(fieldError)}
               />
-            )}
-            {action === "upstreams" && (
+            </Field>
+          )}
+          {action === "access" && (
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
               <Field
-                label="Classic DNS upstream endpoints"
-                htmlFor={`${id}-upstreams`}
+                label="Allowed client prefixes"
+                htmlFor={`${id}-allowed`}
                 error={fieldError}
-                hint="1–16 literal IP:port endpoints, one per line; bracket IPv6. This review replaces the native upstream list with classic DNS."
+                hint="1–128 canonical IP prefixes, one per line. This is an explicit allow scope."
               >
                 <Textarea
-                  id={`${id}-upstreams`}
+                  id={`${id}-allowed`}
                   className="font-mono"
-                  value={upstreams}
-                  onChange={(event) => setUpstreams(event.target.value)}
+                  value={allowedClients}
+                  onChange={(event) => setAllowedClients(event.target.value)}
                   disabled={Boolean(problem) || busy}
                   maxLength={8192}
                   spellCheck={false}
                   aria-invalid={Boolean(fieldError)}
                 />
               </Field>
-            )}
-            {action === "access" && (
-              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-                <Field
-                  label="Allowed client prefixes"
-                  htmlFor={`${id}-allowed`}
-                  error={fieldError}
-                  hint="1–128 canonical IP prefixes, one per line. This is an explicit allow scope."
-                >
-                  <Textarea
-                    id={`${id}-allowed`}
-                    className="font-mono"
-                    value={allowedClients}
-                    onChange={(event) => setAllowedClients(event.target.value)}
-                    disabled={Boolean(problem) || busy}
-                    maxLength={8192}
-                    spellCheck={false}
-                    aria-invalid={Boolean(fieldError)}
-                  />
-                </Field>
-                <Field
-                  label="Denied client prefixes"
-                  htmlFor={`${id}-denied`}
-                  hint="Up to 128 canonical prefixes; none may overlap an identical allowed entry."
-                >
-                  <Textarea
-                    id={`${id}-denied`}
-                    className="font-mono"
-                    value={deniedClients}
-                    onChange={(event) => setDeniedClients(event.target.value)}
-                    disabled={Boolean(problem) || busy}
-                    maxLength={8192}
-                    spellCheck={false}
-                  />
-                </Field>
-              </div>
-            )}
-            {action === "zone_create" && (
               <Field
-                label="Primary zone name"
-                htmlFor={`${id}-zone`}
-                error={fieldError}
-                hint="A lower-case Technitium primary zone, separate from local overrides."
+                label="Denied client prefixes"
+                htmlFor={`${id}-denied`}
+                hint="Up to 128 canonical prefixes; none may overlap an identical allowed entry."
               >
-                <Input
-                  id={`${id}-zone`}
+                <Textarea
+                  id={`${id}-denied`}
                   className="font-mono"
-                  value={zone}
-                  onChange={(event) => setZone(event.target.value)}
+                  value={deniedClients}
+                  onChange={(event) => setDeniedClients(event.target.value)}
                   disabled={Boolean(problem) || busy}
-                  maxLength={253}
+                  maxLength={8192}
                   spellCheck={false}
-                  aria-invalid={Boolean(fieldError)}
                 />
               </Field>
-            )}
-            {problem && <p className="text-body text-muted-foreground">{problem}</p>}
-            <div>
-              <Button type="submit" disabled={Boolean(problem) || busy} pending={busy}>
-                Create retained review
-              </Button>
             </div>
-          </form>
-        )}
-        {(error || fieldError) && (
-          <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-sm focus-ring">
-            <Notice tone="warning" title="Native review unavailable">
-              <p>{error || fieldError}</p>
-              <p>
-                Your draft is retained. Refresh the native reading before retrying if its owner or
-                baseline changed.
-              </p>
-            </Notice>
+          )}
+          {action === "zone_create" && (
+            <Field
+              label="Primary zone name"
+              htmlFor={`${id}-zone`}
+              error={fieldError}
+              hint="A lower-case Technitium primary zone, separate from local overrides."
+            >
+              <Input
+                id={`${id}-zone`}
+                className="font-mono"
+                value={zone}
+                onChange={(event) => setZone(event.target.value)}
+                disabled={Boolean(problem) || busy}
+                maxLength={253}
+                spellCheck={false}
+                aria-invalid={Boolean(fieldError)}
+              />
+            </Field>
+          )}
+          {problem && <p className="text-body text-muted-foreground">{problem}</p>}
+          <div>
+            <Button type="submit" disabled={Boolean(problem) || busy} pending={busy}>
+              Create retained review
+            </Button>
           </div>
-        )}
-      </InventorySection>
-    </div>
+        </form>
+      )}
+      {(error || fieldError) && (
+        <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-sm focus-ring">
+          <Notice tone="warning" title="Native review unavailable">
+            <p>{error || fieldError}</p>
+            <p>
+              Your draft is retained. Refresh the native reading before retrying if its owner or
+              baseline changed.
+            </p>
+          </Notice>
+        </div>
+      )}
+    </InventorySection>
   )
 }

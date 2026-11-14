@@ -608,6 +608,16 @@ test.describe("a group's page", () => {
     await expect(picture).toContainText("Down · no probe answered")
     await expect(picture).toContainText("Carrying · 19.8 ms")
     await expect(picture).toContainText("198.51.100.1 · eth1")
+    // The group in the middle is its own mark on a logo tile, as the list and
+    // the rail draw it: not the filled brand tile, which is the command's face.
+    const tiles = await picture.evaluate((root) =>
+      [...root.querySelectorAll("span")]
+        .filter((mark) => mark.className.includes("size-14"))
+        .map((mark) => mark.className),
+    )
+    expect(tiles).toHaveLength(1)
+    expect(tiles[0]).toContain("bg-background")
+    expect(tiles[0]).not.toContain("bg-brand")
 
     const members = page.getByRole("table", { name: "Members of providers" })
     const a = members.getByRole("row", { name: "Member provider-a" })
@@ -942,6 +952,24 @@ test.describe("a group's page", () => {
     await expect(page).toHaveURL(/\/network\/egress\/vpn%20clients\?tab=decisions$/)
   })
 
+  test("the rail holds every group the list does", async ({ page }) => {
+    // The first captures showed three cards on the list and two rows in the
+    // rail: they were taken from two fixtures. One read, both places.
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const data = { ...view, groups: [providers, vpn, lab] }
+    await openList(page, [], { data })
+    await expect(cards(page)).toHaveCount(3)
+    await expect(
+      page.getByRole("list", { name: "Egress groups" }).getByRole("link", { name: /^Open / }),
+    ).toHaveCount(3)
+    await page.getByRole("link", { name: `Open ${lab.name}` }).click()
+    await expect(header(page)).toContainText(lab.name)
+    const rail = page.locator('[data-slot="egress-rail"]')
+    await expect(rail).toContainText("3 groups")
+    await expect(rail.getByRole("link")).toHaveText([/^providers/, /^vpn clients/, /^lab uplinks/])
+    await expect(rail.getByRole("link", { name: lab.name })).toHaveAttribute("aria-current", "page")
+  })
+
   test("a read that fails says so, with the way back", async ({ page }) => {
     await mockNetwork(page, [])
     await page.route("**/api/v1/network/egress", (route) =>
@@ -988,6 +1016,32 @@ test.describe("a group's page", () => {
       const settled = await box(picture)
       expect(settled.y).toBe(drawn.y)
       expect(settled.height).toBe(drawn.height)
+    })
+
+    test(`a group of three waits at three members on the next visit at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const third = { ...providers.members[1], id: 9, name: "provider-c", priority: 3 }
+      const three = { ...providers, members: [...providers.members, { ...third, active: false }] }
+      const data = { ...view, groups: [three, vpn] }
+      await openGroup(page, "providers", [], { data })
+      const picture = page.locator('[data-slot="wire-flow"]')
+      await expect(picture).toContainText("provider-c")
+      await risen(page)
+      const drawn = await box(picture)
+      // The page remembers how many members the group had, and reads again.
+      await page.unrouteAll({ behavior: "ignoreErrors" })
+      await mockNetwork(page, [], { overrides: { "/network/egress": data } })
+      const release = await holdEgress(page, data)
+      await page.reload()
+      await expect(picture).toHaveAttribute("data-loading", "true")
+      await risen(page)
+      const waiting = await box(picture)
+      expect(waiting.y).toBe(drawn.y)
+      expect(waiting.height).toBe(drawn.height)
+      release()
+      await expect(picture).toContainText("provider-c")
     })
 
     test(`members are one height with and without a reason at ${width}`, async ({ page }) => {
@@ -1072,13 +1126,15 @@ test.describe("screenshots", () => {
         await expect(page.getByText("netlink is not answering")).toBeVisible()
         await shot(page, "egress-failed")
       })
+      // The same three groups the list's capture reads, so its rail is that list.
+      const all = { ...view, groups: [providers, vpn, lab] }
       test(`a group at ${width}`, async ({ page }) => {
-        await openGroup(page, "providers")
+        await openGroup(page, "providers", [], { data: all })
         await shot(page, "group-full")
       })
       for (const tab of ["decisions", "simulation"]) {
         test(`a group's ${tab} at ${width}`, async ({ page }) => {
-          await openGroup(page, "providers", [], { tab })
+          await openGroup(page, "providers", [], { tab, data: all })
           await shot(page, `group-${tab}`)
         })
       }
