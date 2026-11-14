@@ -2034,6 +2034,7 @@ test("the frame's one head says which database, carries the table's verbs and ho
     "Read the rows again",
     "Show the row",
     "Hide the tables",
+    "Query",
     "Check connection",
     "Restart",
     "Stop",

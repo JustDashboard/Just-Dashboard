@@ -8,12 +8,15 @@ import { risen } from "./risen"
  *
  * A database is an address (`/databases/<id>/…`), the rail drills into it a
  * level below Databases with the engine's own pages in the engine's own
- * words, and a strip over each page says which database this is. These are
- * the claims that makes — the ones the areas built inside it rely on and
- * none of them can check for itself: a page is never mounted on an engine
- * that lacks it, a stale or mistyped address never opens another database,
- * the reader's table survives a trip through a page that cannot hold it, and
- * nothing on the strip is drawn over anything else at any width.
+ * words, and every page opens on a line that says which database this is:
+ * the database's header, the frame's own head on a workbench, a one-line
+ * strip over the page of one item. These are the claims that makes — the
+ * ones the areas built inside it rely on and none of them can check for
+ * itself: a page is never mounted on an engine that lacks it, a stale or
+ * mistyped address never opens another database, the reader's table survives
+ * a trip through a page that cannot hold it, the header is in one place at
+ * one height on every page, and nothing on it is drawn over anything else at
+ * any width.
  */
 
 const rail = (page: Page) => page.getByRole("navigation", { name: "Sidebar" })

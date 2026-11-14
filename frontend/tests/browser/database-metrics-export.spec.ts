@@ -80,7 +80,14 @@ async function mockExport(page: Page, options: ExportMock = {}) {
   return { ...server, puts, keys }
 }
 
-const opener = (page: Page) => page.getByRole("button", { name: "Metrics export" })
+/** The menu at the end of the control center's identity line, where the dialog is a word. */
+const more = (page: Page) => page.getByRole("button", { name: "More about the databases" })
+const opener = (page: Page) => page.getByRole("menuitem", { name: "Metrics export" })
+/** Opens the dialog the way a pointer does: the menu, then its word. */
+async function press(page: Page) {
+  await more(page).click()
+  await opener(page).click()
+}
 const dialogOf = (page: Page) => page.getByRole("dialog", { name: "Metrics export" })
 const sizeList = (dialog: Locator) => dialog.getByRole("list", { name: "Space each window takes" })
 const sizes = (dialog: Locator) => sizeList(dialog).getByRole("listitem")
@@ -88,7 +95,7 @@ const retention = (dialog: Locator) => dialog.getByRole("radiogroup", { name: "K
 
 async function open(page: Page) {
   await page.goto("/databases")
-  await opener(page).click()
+  await press(page)
   const dialog = dialogOf(page)
   await expect(dialog.getByText("Metrics URL")).toBeVisible()
   return dialog
@@ -211,7 +218,7 @@ test.describe("metrics export", () => {
     const gate = hold()
     await mockExport(page, { gate: gate.until, failures: 1 })
     await page.goto("/databases")
-    await opener(page).click()
+    await press(page)
     const dialog = dialogOf(page)
     await expect(dialog.getByRole("status", { name: "Loading metrics export" })).toBeVisible()
 
@@ -253,7 +260,10 @@ test.describe("metrics export", () => {
   test("is reachable by keyboard from the page's commands to the choice", async ({ page }) => {
     await mockExport(page)
     await page.goto("/databases")
-    await opener(page).focus()
+    // The menu opens on its first word, which is this one.
+    await more(page).focus()
+    await page.keyboard.press("Enter")
+    await expect(opener(page)).toBeFocused()
     await page.keyboard.press("Enter")
     const dialog = dialogOf(page)
     await expect(dialog.getByText("Metrics URL")).toBeVisible()
@@ -265,7 +275,8 @@ test.describe("metrics export", () => {
     )
     await page.keyboard.press("Escape")
     await expect(dialog).toHaveCount(0)
-    await expect(opener(page)).toBeFocused()
+    // The keyboard goes back to the menu the dialog was opened from.
+    await expect(more(page)).toBeFocused()
   })
 
   test("is drawn in each state it has @shots", async ({ page }) => {
@@ -274,10 +285,10 @@ test.describe("metrics export", () => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockExport(page)
     await page.goto("/databases")
-    await expect(opener(page)).toBeVisible()
+    await expect(more(page)).toBeVisible()
     await page.screenshot({ path: `${shots}/control-center-1440.png` })
 
-    await opener(page).click()
+    await press(page)
     const dialog = dialogOf(page)
     await expect(dialog.getByText("Metrics URL")).toBeVisible()
     await settled(dialog)
@@ -314,7 +325,7 @@ test.describe("metrics export", () => {
     await page.unrouteAll({ behavior: "ignoreErrors" })
     await mockExport(page, { viewer: true })
     await page.goto("/databases")
-    await opener(page).click()
+    await press(page)
     const reader = dialogOf(page)
     await expect(reader.getByText("Metrics URL")).toBeVisible()
     await retention(reader).scrollIntoViewIfNeeded()
