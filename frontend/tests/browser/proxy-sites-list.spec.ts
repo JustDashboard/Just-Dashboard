@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { availability, json, mockProxy, mockShowcase, user, vhosts } from "./proxy-fixtures"
 import { pendingNone } from "./fixtures/proxy/sites"
 import { siteSpec } from "./fixtures/proxy/siteform"
+import { risen } from "./risen"
 import type { SiteRead } from "@/lib/proxy/types-siteform"
 
 /**
@@ -219,7 +220,13 @@ async function serveSites(page: Page, sites: unknown[]) {
 const card = (page: Page, name: string) =>
   page.locator("[data-slot='choice-row']").filter({ has: page.getByText(name, { exact: true }) })
 
-/** The line the page opens on: the host's facts and, at its end, the verdict. */
+/**
+ * What a site's row has no line for, on the site's own page: what its link
+ * or its owner makes of it, and what it does besides naming and listening.
+ */
+const about = (page: Page) => page.locator("[data-slot='site-about']")
+
+/** The line the page opens on: the host's facts and, beside its name, the verdict. */
 const identity = (page: Page) => page.locator("[data-slot='host-identity']")
 
 async function openMenu(page: Page, name: string) {
@@ -901,7 +908,7 @@ test("a delete whose reload failed says a running nginx still serves the site", 
   await expect(page.getByText("Delete app.example.com completed")).toBeVisible()
 })
 
-test("a ?site= link gives a reader the config viewer and an administrator the form", async ({
+test("a ?site= link gives a reader the config viewer and an administrator the site's Settings", async ({
   page,
 }) => {
   await mockProxy(page, { included: true })
@@ -941,12 +948,16 @@ test("a ?site= link gives a reader the config viewer and an administrator the fo
     editorLoad,
   )
 
+  // The form was a sheet over this list; it is the site's Settings now, and
+  // the address that opened the sheet lands there.
   await page.unroute("**/api/v1/auth/session")
   asked.length = 0
   await page.goto("/proxy/sites?site=app.example.com")
-  await expect(page.getByRole("dialog")).toBeVisible()
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com\?tab=settings$/)
+  await expect(page.getByRole("navigation", { name: "Parts of the settings" })).toBeVisible()
   await expect.poll(() => asked.includes("form")).toBe(true)
   expect(asked).not.toContain("config")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
 test("a copy in sites-enabled opens as the served copy and is never deleted", async ({ page }) => {
@@ -1002,13 +1013,11 @@ test("a site file kept outside the nginx directory keeps its switch", async ({ p
   await page.goto("/proxy/sites")
 
   const site = card(page, "outside.example.com")
-  await expect(site).toContainText(
-    "sites-available/outside.example.com links to /srv/app/deploy/nginx.conf, outside the nginx directory, so this page does not open it.",
-  )
   // Nothing to open that would only answer "outside the proxy configuration directory".
-  await expect(site.getByRole("button", { name: /^(Raw config|Edit|Open outside)/ })).toHaveCount(0)
   const menu = await openMenu(page, "outside.example.com")
-  await expect(menu.getByRole("menuitem", { name: /^(Delete|Duplicate)$/ })).toHaveCount(0)
+  await expect(
+    menu.getByRole("menuitem", { name: /^(Raw config|View config|Edit|Delete|Duplicate)$/ }),
+  ).toHaveCount(0)
   await menu.getByRole("menuitem", { name: "Disable" }).click()
   await page
     .getByRole("dialog", { name: "Disable outside.example.com" })
@@ -1018,14 +1027,22 @@ test("a site file kept outside the nginx directory keeps its switch", async ({ p
   expect(posted).toEqual({ enabled: false, reload: true })
 
   // In conf.d there is no switch, and the delete could only answer "no such site".
-  await expect(card(page, "outside.conf")).toContainText(
-    "conf.d/outside.conf links to /srv/app/deploy/conf.d.conf, outside the nginx directory",
-  )
   const confdMenu = await openMenu(page, "outside.conf")
   await expect(confdMenu.getByRole("menuitem", { name: "Open site" })).toBeVisible()
   await expect(
     confdMenu.getByRole("menuitem", { name: /^(Delete|Duplicate|Enable|Disable)$/ }),
   ).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  // Why is on each one's page.
+  await site.getByRole("link", { name: "Open outside.example.com" }).click()
+  await expect(about(page)).toContainText(
+    "sites-available/outside.example.com links to /srv/app/deploy/nginx.conf, outside the nginx directory, so this page does not open it.",
+  )
+  await page.goto("/proxy/sites/outside.conf")
+  await expect(about(page)).toContainText(
+    "conf.d/outside.conf links to /srv/app/deploy/conf.d.conf, outside the nginx directory",
+  )
 })
 
 test("an enable that re-points a stale link asks first when it takes another file out of nginx", async ({
@@ -1133,7 +1150,6 @@ test("a site served through a link under another name reads serving and names th
 
   const site = card(page, "default")
   await expect(site.getByText("serving", { exact: true })).toBeVisible()
-  await expect(site).toContainText("nginx serves this file through sites-enabled/00-default.")
   await expect(identity(page)).toContainText("2 serving")
   const menu = await openMenu(page, "default")
   // Deleting it would leave 00-default pointing at nothing.
@@ -1144,6 +1160,12 @@ test("a site served through a link under another name reads serving and names th
   )
   await page.keyboard.press("Escape")
 
+  // Its page names the link it is served through.
+  await site.getByRole("link", { name: "Open default" }).click()
+  await expect(about(page)).toContainText(
+    "nginx serves this file through sites-enabled/00-default.",
+  )
+
   await page.goto("/proxy")
   await expect(page.getByText("default is on disk but not serving")).toHaveCount(0)
 })
@@ -1151,7 +1173,7 @@ test("a site served through a link under another name reads serving and names th
 test("the password-file warning says what nginx really does without the file", async ({ page }) => {
   await mockShowcase(page)
   await page.goto("/proxy/sites")
-  await page.getByRole("button", { name: "More actions", exact: true }).click()
+  await page.getByRole("button", { name: "More actions for staging" }).click()
   await page.getByRole("menuitem", { name: "Delete file" }).click()
   const confirm = page.getByRole("dialog", { name: "Delete staging" })
   await expect(confirm).toContainText(
@@ -1163,6 +1185,9 @@ test("the password-file warning says what nginx really does without the file", a
 test("a deployment's route leads to its deployment and is edited only after asking", async ({
   page,
 }) => {
+  // Two openings of the file viewer, each waiting on Monaco: 27s of a 30s
+  // timeout on a machine at load 22.
+  test.slow()
   await mockProxy(page, { included: true })
   await serveSites(page, [app, owned, leftBehind])
   const asked: string[] = []
@@ -1192,12 +1217,12 @@ test("a deployment's route leads to its deployment and is edited only after aski
 
   const shop = card(page, "just-dashboard-env-7.conf")
   await expect(shop).toContainText("Managed by shop · production")
-  await expect(shop).toContainText("The next deploy of shop writes this route again")
-  await expect(shop.getByRole("button", { name: "Open deployment" })).toBeVisible()
-  await expect(shop.getByRole("button", { name: "View config" })).toBeVisible()
-  await expect(shop.getByRole("button", { name: "Edit" })).toHaveCount(0)
   const menu = await openMenu(page, "just-dashboard-env-7.conf")
-  await expect(menu.getByRole("menuitem", { name: /^(Delete|Disable|Duplicate)$/ })).toHaveCount(0)
+  await expect(menu.getByRole("menuitem", { name: "Open deployment" })).toBeVisible()
+  await expect(menu.getByRole("menuitem", { name: "View config" })).toBeVisible()
+  await expect(
+    menu.getByRole("menuitem", { name: /^(Edit|Delete|Disable|Duplicate)$/ }),
+  ).toHaveCount(0)
   await expect(menu.getByRole("menuitem", { name: "Access log" })).toBeVisible()
   await expect(menu.getByRole("menuitem", { name: "Error log" })).toBeVisible()
   await expect(menu.getByRole("menuitem", { name: "Edit anyway" })).toBeVisible()
@@ -1207,7 +1232,11 @@ test("a deployment's route leads to its deployment and is edited only after aski
   await shop.getByRole("link", { name: "Open just-dashboard-env-7.conf" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-env-7\.conf$/)
   await expect(page.getByRole("heading", { name: "just-dashboard-env-7.conf" })).toBeVisible()
-  await page.getByRole("button", { name: "View config" }).first().click()
+  await expect(about(page)).toContainText("The next deploy of shop writes this route again")
+  // The deployment is the page's command; the file is behind its menu.
+  await expect(page.getByRole("button", { name: "Open deployment" })).toBeVisible()
+  await page.getByRole("button", { name: "More actions for just-dashboard-env-7.conf" }).click()
+  await page.getByRole("menuitem", { name: "View config" }).click()
   const viewer = page.getByRole("dialog")
   await expect(viewer.locator(".monaco-editor .view-lines")).toContainText(
     "server_name shop.example.com",
@@ -1227,8 +1256,8 @@ test("a deployment's route leads to its deployment and is edited only after aski
   await expect(page.getByRole("dialog").getByRole("button", { name: /^Save/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
 
-  // Editing anyway says what the next deploy does, then opens the form.
-  const readsBeforeEdit = asked.filter((request) => request === "form").length
+  // Editing anyway says what the next deploy does, then opens the route's
+  // Settings on the form rather than on the same question.
   await (
     await openMenu(page, "just-dashboard-env-7.conf")
   )
@@ -1237,22 +1266,35 @@ test("a deployment's route leads to its deployment and is edited only after aski
   const confirm = page.getByRole("dialog", { name: "Edit just-dashboard-env-7.conf anyway" })
   await expect(confirm).toContainText("shop writes this route on every deploy")
   await confirm.getByRole("button", { name: "Edit anyway" }).click()
-  await expect
-    .poll(() => asked.filter((request) => request === "form").length)
-    .toBeGreaterThan(readsBeforeEdit)
+  await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-env-7\.conf\?tab=settings$/)
+  await expect(page.getByRole("textbox", { name: "Domains" })).toHaveValue("shop.example.com")
   await expect(page.getByText(/anyway completed/)).toHaveCount(0)
-  await page.keyboard.press("Escape")
+  await expect(page.getByText("shop writes this route", { exact: true })).toHaveCount(0)
+  expect(asked).toContain("form")
+})
 
+// Its own test: with the visits above it ran within seconds of its timeout
+// on a busy machine.
+test("an archived deployment's route is the operator's, and a live one's menu leads to its deployment", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, owned, leftBehind])
   // An archived environment deploys nothing: its route is the operator's.
-  const left = card(page, "just-dashboard-env-9.conf")
-  await expect(left).toContainText("Written by shop · pr-12, which is archived")
-  await expect(left.getByRole("button", { name: "Edit" })).toBeVisible()
-  await expect(
-    (await openMenu(page, "just-dashboard-env-9.conf")).getByRole("menuitem", { name: "Delete" }),
-  ).toBeVisible()
+  await page.goto("/proxy/sites")
+  const leftMenu = await openMenu(page, "just-dashboard-env-9.conf")
+  await expect(leftMenu.getByRole("menuitem", { name: "Edit", exact: true })).toBeVisible()
+  await expect(leftMenu.getByRole("menuitem", { name: "Delete" })).toBeVisible()
   await page.keyboard.press("Escape")
+  await page.goto("/proxy/sites/just-dashboard-env-9.conf")
+  await expect(about(page)).toContainText("Written by shop · pr-12, which is archived")
 
-  await shop.getByRole("button", { name: "Open deployment" }).click()
+  await page.goto("/proxy/sites")
+  await (
+    await openMenu(page, "just-dashboard-env-7.conf")
+  )
+    .getByRole("menuitem", { name: "Open deployment" })
+    .click()
   await expect(page).toHaveURL(/\/deploy\/3$/)
 })
 
@@ -1267,8 +1309,8 @@ test("a reader sees who manages a route and reaches its deployment, and nothing 
   await page.goto("/proxy/sites")
   const shop = card(page, "just-dashboard-env-7.conf")
   await expect(shop).toContainText("Managed by shop · production")
-  await expect(shop.getByRole("button", { name: "Open deployment" })).toBeVisible()
   const menu = await openMenu(page, "just-dashboard-env-7.conf")
+  await expect(menu.getByRole("menuitem", { name: "Open deployment" })).toBeVisible()
   await expect(menu.getByRole("menuitem", { name: /anyway|Enable|Disable|Delete/ })).toHaveCount(0)
 })
 
@@ -1366,7 +1408,7 @@ test("a broken site link remains removable from its inventory", async ({ page })
   await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
-test("a card names the servers behind its upstream block, what the site does, and the logs it writes", async ({
+test("a row names the servers behind its upstream block and the logs it writes, and its page what it does", async ({
   page,
 }) => {
   await mockProxy(page, { included: true })
@@ -1374,9 +1416,6 @@ test("a card names the servers behind its upstream block, what the site does, an
   await page.goto("/proxy/sites")
   const pool = card(page, "pool.example.com")
   await expect(pool).toContainText("http://app_pool (10.0.0.2:8080, 10.0.0.3:8080)")
-  for (const word of ["password", "IP-restricted", "WebSockets", "HTTP/2", "maintenance"]) {
-    await expect(pool.getByText(word, { exact: true })).toBeVisible()
-  }
 
   const plain = await openMenu(page, "legacy.example.com")
   await expect(plain.getByRole("menuitem", { name: /^(Access|Error) log$/ })).toHaveCount(0)
@@ -1390,6 +1429,12 @@ test("a card names the servers behind its upstream block, what the site does, an
   await expect(menu.getByRole("menuitem", { name: "Error log" })).toBeVisible()
   await menu.getByRole("menuitem", { name: "Access log" }).click()
   await expect(page).toHaveURL(/\/logs\?source=%2Fvar%2Flog%2Fnginx%2Fpool\.access\.log$/)
+
+  // What it does besides naming and listening is on its page, one word each.
+  await page.goto("/proxy/sites/pool.example.com")
+  for (const word of ["password", "IP-restricted", "WebSockets", "HTTP/2", "maintenance"]) {
+    await expect(about(page).getByText(word, { exact: true })).toBeVisible()
+  }
 })
 
 for (const width of [390, 1280]) {
@@ -1408,7 +1453,18 @@ for (const width of [390, 1280]) {
     ])
     await page.goto("/proxy/sites")
     await expect(card(page, "ghost")).toBeVisible()
-    await expect(card(page, "outside.example.com")).toContainText("/srv/app/deploy/nginx.conf")
+    await risen(page)
+    // A link to nothing, a stale link, a deployment's route, a site with
+    // every feature and one with none: each is one line, and one height.
+    const rows = page.getByRole("region", { name: "Sites" }).locator("[data-slot='choice-row']")
+    const boxes = await rows.evaluateAll((items) =>
+      items.map((item) => item.getBoundingClientRect()).map(({ top, height }) => ({ top, height })),
+    )
+    expect(boxes).toHaveLength(12)
+    expect(new Set(boxes.map((box) => box.height)).size).toBe(1)
+    expect(boxes[0].height).toBeLessThanOrEqual(64)
+    // No card of sites stands at the head of the page.
+    await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
     expect(
       await page
         .locator("[data-slot='page']")
@@ -1694,7 +1750,11 @@ test("a save that did not reload is read at once, and one that did waits for ngi
   const site = card(page, "app.example.com")
   await expect(site.getByText("serving", { exact: true })).toBeVisible()
 
-  await site.getByRole("button", { name: "Raw config" }).click()
+  await (
+    await openMenu(page, "app.example.com")
+  )
+    .getByRole("menuitem", { name: "Raw config" })
+    .click()
   const sheet = page.getByRole("dialog")
   const lines = sheet.locator(".monaco-editor .view-lines")
   await expect(lines).toContainText("server", editorLoad)
@@ -1746,4 +1806,68 @@ test("the identity line does not call a disabled site nginx still serves not ser
   await expect(card(page, "off.example.com").getByText("disabled", { exact: true })).toBeVisible()
   await expect(identity(page)).toContainText("1 disabled")
   await expect(page.getByText(/still served until nginx reloads/)).toHaveCount(0)
+})
+
+for (const width of [1280, 390]) {
+  test(`the list's line is in one place while the sites load and once they have at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProxy(page, { included: true })
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/proxy/vhosts", async (route) => {
+      await held
+      await json(route, [app, legacy])
+    })
+    await page.goto("/proxy/sites")
+    await expect(identity(page)).toContainText("Reading the sites")
+    await risen(page)
+    const loading = await identity(page).boundingBox()
+    release()
+    await expect(identity(page)).toContainText("2 sites")
+    await risen(page)
+    const loaded = await identity(page).boundingBox()
+    expect(loaded!.y).toBe(loading!.y)
+    expect(loaded!.x).toBe(loading!.x)
+  })
+}
+
+test("the list's commands are New site on its line and the rest behind the menu", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/sites")
+  const line = identity(page)
+  await expect(line).toHaveAttribute("data-layout", "project")
+  await expect(line.getByRole("button", { name: "New site", exact: true })).toBeVisible()
+  await line.getByRole("button", { name: "More site actions" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Import", "Export all"])
+  await page.getByRole("menuitem", { name: "Import" }).click()
+  await expect(page.getByRole("dialog", { name: /Import/ })).toBeVisible()
+})
+
+test("Edit on a row is the site's Settings, and a copy starts in the new-site sheet", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/sites")
+  await (
+    await openMenu(page, "legacy.example.com")
+  )
+    .getByRole("menuitem", { name: "Duplicate" })
+    .click()
+  const copy = page.getByRole("dialog", { name: "New site from legacy.example.com" })
+  await expect(copy.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:8080")
+  await expect(copy.getByRole("textbox", { name: "Domains" })).toHaveValue("")
+  await page.keyboard.press("Escape")
+  await expect(copy).toBeHidden()
+
+  await (
+    await openMenu(page, "legacy.example.com")
+  )
+    .getByRole("menuitem", { name: "Edit", exact: true })
+    .click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/legacy\.example\.com\?tab=settings$/)
+  await expect(page.getByRole("textbox", { name: "Domains" })).toHaveValue("legacy.example.com")
 })
