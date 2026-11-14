@@ -1291,7 +1291,7 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   const band = page.locator("[data-slot='pm2-band']")
   await expect(band.getByRole("button", { name: "Only api" })).toHaveCount(2)
   await band.getByRole("button", { name: "Only api" }).first().hover()
-  await expect(band.locator("[data-slot=reading-line]").first()).toContainText("×2")
+  await expect(band.locator("[data-slot=bar-reading-line]").first()).toContainText("×2")
   const states = page.locator("[aria-label='State']")
   await expect(states.getByRole("button", { name: /Online/ })).toContainText("2")
   await expect(states.getByRole("button", { name: /Errored/ })).toContainText("1")

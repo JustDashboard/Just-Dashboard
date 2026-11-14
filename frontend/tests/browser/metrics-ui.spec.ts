@@ -120,7 +120,7 @@ test("each resource reads what it is now beside what it did", async ({ page }) =
   ).toBeVisible()
   await expect(memory.getByText("6.5 GB", { exact: true })).toBeVisible()
   await expect(memory.locator("[data-slot=reading-span]")).toHaveCount(2)
-  const line = memory.locator("[data-slot=reading-line]")
+  const line = memory.locator("[data-slot=bar-reading-line]")
   await expect(line).toHaveCount(1)
   await expect(line).toContainText("Programs")
   await expect(line).toContainText("9.0 GB")

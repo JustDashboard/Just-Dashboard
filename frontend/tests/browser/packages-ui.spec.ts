@@ -309,7 +309,7 @@ test("the page opens on software and updates without summary cards", async ({ pa
   await expect(band.locator("img[src='/logos/docker.svg']")).toHaveCount(1)
   const updates = band.getByLabel("Updates waiting")
   await updates.getByRole("button", { name: "Inspect update for openssl" }).hover()
-  const line = updates.locator("[data-slot=reading-line]")
+  const line = updates.locator("[data-slot=bar-reading-line]")
   await expect(line).toContainText("openssl")
   await expect(line).toContainText("security")
   await page.mouse.move(0, 0)

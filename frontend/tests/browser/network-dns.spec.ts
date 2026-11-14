@@ -946,13 +946,13 @@ test.describe("Traffic", () => {
     await expect(page.getByRole("region", { name: "Bandwidth by device" })).toBeVisible()
     await expect(page.getByRole("radio", { name: "24h" })).toBeVisible()
     const programs = page.getByRole("region", { name: "Traffic by program" })
-    const line = programs.locator("[data-slot=reading-line]")
+    const line = programs.locator("[data-slot=bar-reading-line]")
     await expect(line).toContainText("caddy")
     await programs.getByRole("button", { name: "Who postgres talks to" }).hover()
     await expect(line).toContainText("postgres")
     const containers = page.getByRole("region", { name: "Traffic by container" })
     await containers.getByRole("link", { name: "Open adguardhome's traffic" }).hover()
-    await expect(containers.locator("[data-slot=reading-line]")).toContainText("adguardhome")
+    await expect(containers.locator("[data-slot=bar-reading-line]")).toContainText("adguardhome")
   })
 
   test("pressing a program opens the peers it talks to", async ({ page }) => {

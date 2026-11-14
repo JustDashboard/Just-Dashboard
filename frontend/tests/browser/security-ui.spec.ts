@@ -888,8 +888,15 @@ test("the ssh page reads its auth log through the lens, the day's counts as its 
   await expect(lines.getByText("sudo", { exact: true })).toHaveCount(0)
 
   // A reading's line is a press away from the lines it counts, asked of the
-  // pane further down.
-  await page.getByRole("button", { name: "Show the lines behind accepted logins" }).click()
+  // pane further down. The press is the line's own (`ReadingLine`'s
+  // `onPress`): its button is in the line and covers it, so a press anywhere
+  // on the line is one, and the line is still one height with its neighbours.
+  const accepted = reading(page, "Accepted logins")
+  const press = accepted.getByRole("button", { name: "Show the lines behind accepted logins" })
+  const [lineBox, pressBox] = [(await accepted.boundingBox())!, (await press.boundingBox())!]
+  expect(pressBox).toEqual(lineBox)
+  expect(lineBox.height).toBe((await reading(page, "Failed attempts").boundingBox())!.height)
+  await accepted.click({ position: { x: 12, y: 12 } })
   await expect.poll(() => logs.sockets.at(-1)?.getAll("f")).toEqual(["event:ssh_accepted"])
   await expect(page.getByRole("button", { name: /^Accepted\b/ })).toHaveAttribute(
     "aria-pressed",

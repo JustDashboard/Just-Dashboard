@@ -227,12 +227,12 @@ test("/proxy/sites reads each standing and application on the band's line", asyn
   const band = page.locator("[data-slot=site-band]")
   const certificates = band.getByRole("region", { name: "Certificates" })
   await expect(certificates.getByRole("listitem").first()).toBeVisible()
-  await expect(certificates.locator("[data-slot=reading-line]")).toContainText(
+  await expect(certificates.locator("[data-slot=bar-reading-line]")).toContainText(
     /\d+ (valid|renewal due|expired)/,
   )
 
   const applications = band.getByRole("region", { name: "Applications" })
-  const line = applications.locator("[data-slot=reading-line]")
+  const line = applications.locator("[data-slot=bar-reading-line]")
   // The one that does not answer leads.
   await expect(line).toContainText("refused")
   await applications.getByRole("link", { name: "Open app.example.com" }).hover()

@@ -502,7 +502,7 @@ function Line({
   return (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the part's mark in the strip above is the control a keyboard presses
     <div
-      data-slot="reading-line"
+      data-slot="bar-reading-line"
       title={title}
       onClick={onPress}
       className={cn(

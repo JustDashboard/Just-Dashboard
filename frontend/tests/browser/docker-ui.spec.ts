@@ -1504,7 +1504,7 @@ test("recent events fold a restart loop and name a kill for memory", async ({ pa
   await page.goto("/docker/containers")
 
   const recent = page.getByRole("region", { name: "Recent container events" })
-  const line = recent.locator("[data-slot=reading-line]")
+  const line = recent.locator("[data-slot=bar-reading-line]")
   await expect(line).toContainText("killed for memory")
   await recent.getByRole("button", { name: "Open web" }).hover()
   await expect(line.getByText(/restarted ×4 in \d+ min · exit 1/)).toBeVisible()

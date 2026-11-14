@@ -218,7 +218,7 @@ test("the band names the busiest containers and the last thing each did", async 
   )
 
   const recent = page.getByLabel("Recent changes")
-  const line = recent.locator("[data-slot=reading-line]")
+  const line = recent.locator("[data-slot=bar-reading-line]")
   // An OOM kill and its exit are one line, and the crash before it is counted.
   await expect(line).toContainText("ran out of memory")
   await expect(line).toContainText("· 2 crashes")
@@ -259,7 +259,7 @@ test("reading another part changes the line and nothing else on the page", async
 
   const band = page.locator("[data-slot=container-band]")
   const processor = page.getByLabel("Processor by container")
-  const line = processor.locator("[data-slot=reading-line]")
+  const line = processor.locator("[data-slot=bar-reading-line]")
   await expect(line).toContainText("shop-api")
   await expect(drawn(page)).toBeVisible()
   await risen(page)
@@ -286,7 +286,7 @@ test("a reading that moves draws its trail on the line, and the order holds", as
     processor
       .locator("[data-slot=reading-strip] button")
       .evaluateAll((all) => all.map((mark) => mark.getAttribute("aria-label")))
-  const line = processor.locator("[data-slot=reading-line]")
+  const line = processor.locator("[data-slot=bar-reading-line]")
   await expect(line.locator("svg[viewBox='0 0 56 16']")).toBeVisible()
 
   // A dozen frames that each wobble a figure: nobody swaps places over a wobble.
@@ -316,7 +316,7 @@ test("an event that lands while the page is open joins Recent", async ({ page })
   })
   const mark = recent.getByRole("button", { name: "Open monitoring-grafana" })
   await mark.hover()
-  const line = recent.locator("[data-slot=reading-line]")
+  const line = recent.locator("[data-slot=bar-reading-line]")
   await expect(line).toContainText("restarted")
   await expect(line).toContainText("just now")
 })

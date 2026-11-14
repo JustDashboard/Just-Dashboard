@@ -290,7 +290,7 @@ test.describe("the control center", () => {
     const sessions = band.getByRole("region", { name: "Sessions" })
     expect(await names("Busiest databases")).toEqual(["Open app", "Open shop", "Open cache"])
     await sessions.getByRole("link", { name: "Open cache" }).hover()
-    await expect(sessions.locator("[data-slot=reading-line]")).toContainText(/3\s*clients/)
+    await expect(sessions.locator("[data-slot=bar-reading-line]")).toContainText(/3\s*clients/)
     await expect(sessions).toContainText("1 server not answering")
 
     // Never dumped first, then the oldest; a standing opens the dumps of the
@@ -305,7 +305,7 @@ test.describe("the control center", () => {
     ])
     const never = backups.getByRole("link", { name: "Backups of cache" })
     await expect(never).toHaveAttribute("href", "/databases/4/backups")
-    const reading = backups.locator("[data-slot=reading-line]")
+    const reading = backups.locator("[data-slot=bar-reading-line]")
     await expect(reading).toContainText("cache")
     await expect(reading.getByText("never backed up")).toHaveClass(/text-warning/)
     await backups.getByRole("link", { name: "Backups of blog" }).hover()

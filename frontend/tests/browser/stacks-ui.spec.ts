@@ -226,7 +226,7 @@ test("recent says what Docker did to the stacks, and a line opens its stack", as
   await open(page)
 
   const recent = page.getByRole("region", { name: "Recent changes" })
-  const line = recent.locator("[data-slot=reading-line]")
+  const line = recent.locator("[data-slot=bar-reading-line]")
   await expect(line).toContainText("unhealthy")
   // The oom and the exit it caused are one mark.
   const alertmanager = recent.getByRole("button", { name: /^Open monitoring: alertmanager/ })
