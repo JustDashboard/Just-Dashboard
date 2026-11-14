@@ -896,7 +896,7 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await expect(picture.getByText("every interface")).toBeVisible()
   await expect(picture.getByRole("link", { name: "Open api" })).toHaveAttribute(
     "href",
-    "/processes/pm2?app=api",
+    "/processes/pm2/api",
   )
   await expect(
     picture.getByRole("button", { name: /PM2 v6.0.5: God Daemon \(900\)/ }),
@@ -904,6 +904,50 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await expect(page.getByRole("button", { name: "Terminate", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
+// The ranking and the user were two selects on a toolbar of chips, the one
+// thing Live's table did that Services' does not.
+test("the live table's ranking and its users are chips, as its other filters are", async ({
+  page,
+}) => {
+  await mockHost(page)
+  const asked: URLSearchParams[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (url.pathname.endsWith("/processes/inventory")) asked.push(url.searchParams)
+  })
+  await page.goto("/processes")
+  await expect(page.getByRole("row", { name: /nginx/ })).toBeVisible()
+  await expect(page.getByRole("combobox")).toHaveCount(0)
+
+  const focus = page.locator("[aria-label='Focus']")
+  await expect(focus.getByRole("button")).toHaveText([
+    "Automatic",
+    "CPU",
+    "Memory",
+    "Disk I/O",
+    "Uptime",
+  ])
+  await expect(focus.getByRole("button", { name: "Automatic" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await focus.getByRole("button", { name: "Memory" }).click()
+  await expect.poll(() => asked.at(-1)?.get("sort")).toBe("memory")
+  await expect(page.getByText(/sorted by highest memory/)).toBeVisible()
+  await expect(focus.getByRole("button", { name: "Memory" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+
+  // Each account with its count; a second press lets it go.
+  const users = page.locator("[aria-label='User']")
+  await expect(users.getByRole("button")).toHaveText([/root\s*90/, /deploy\s*53/])
+  await users.getByRole("button", { name: /deploy/ }).click()
+  await expect.poll(() => asked.at(-1)?.get("user")).toBe("deploy")
+  await users.getByRole("button", { name: /deploy/ }).click()
+  await expect.poll(() => asked.at(-1)?.get("user")).toBeNull()
 })
 
 // A kernel thread ignores a signal from user space and a zombie has already
@@ -1323,7 +1367,10 @@ test("PM2's verdict reads the saved list, and saving it again is one press", asy
   await expect.poll(() => saved.length).toBe(1)
 })
 
-test("a PM2 application's sheet reads its process live and scales its cluster", async ({
+// An application was a sheet over this list until 0.8.7; the page it became
+// has a spec of its own (`pm2-application.spec.ts`). What stays here is that
+// the address this section's pages linked to still lands.
+test("a PM2 application has a page of its own, and the sheet's address lands on it", async ({
   page,
 }) => {
   await mockHost(page)
@@ -1333,31 +1380,36 @@ test("a PM2 application's sheet reads its process live and scales its cluster", 
       scaled.push(request.postDataJSON())
     }
   })
-  // A bare name is what the live table's owner link carries; a cluster's
-  // name is every instance, and it opens the first one running.
+  // A bare name is what the live table's owner link carried; a cluster's
+  // name is every worker, and the page is the application's.
   await page.goto("/processes/pm2?app=api")
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByRole("heading", { name: /api/ })).toContainText("#0")
-  // Four readings from the process table's read of its PID, over its history.
-  const tiles = sheet.locator("[data-slot='stat-tile']")
-  await expect(tiles).toHaveCount(4)
-  await expect(tiles.nth(1)).toContainText("of 300 MB")
-  await expect(tiles.nth(3)).toContainText("3")
-  await expect(sheet.locator("[data-slot='stat-tile'] svg").first()).toBeVisible()
-  await expect(sheet.getByText(":3000")).toBeVisible()
-  await expect(sheet.getByText("every interface")).toBeVisible()
-  await expect(sheet.getByText("cluster instance 1 of 2")).toBeVisible()
+  await expect(page).toHaveURL(/\/processes\/pm2\/api$/)
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  const line = page.locator("[data-slot='pm2-app-identity']")
+  await expect(line).toContainText("cluster of 2")
+  // Four readings as sentences, from the process table's read of each PID
+  // it has, over its history; the sheet drew four tiles.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const readings = page.getByTestId("pm2-readings").locator("[data-slot='reading-line']")
+  await expect(readings).toHaveCount(4)
+  await expect(readings.nth(1)).toContainText("of the 300 MB")
+  await expect(readings.nth(3)).toContainText("Restarted 6 times")
+  await expect(readings.first().locator("svg").last()).toBeVisible()
+  const picture = page.getByRole("group", { name: "Where it runs" })
+  await expect(picture.getByText(":3000")).toBeVisible()
+  await expect(picture.getByText(/every interface/)).toBeVisible()
+  await expect(picture.getByText("Worker 1 of 2")).toBeVisible()
 
-  // Its other instance opens in the same sheet.
-  const instances = sheet.locator("section, [data-slot=panel]").filter({
-    has: page.getByRole("heading", { name: "Instances" }),
-  })
-  await instances.getByRole("button", { name: /#2/ }).click()
-  await expect(page).toHaveURL(/app=deploy%3A2|app=deploy:2/)
-  await expect(sheet.getByText("cluster instance 2 of 2")).toBeVisible()
+  // Its other worker is a row under Instances, opening its process.
+  await page.getByRole("tab", { name: /Instances/ }).click()
+  await expect(page).toHaveURL(/tab=instances/)
+  await expect(page.getByRole("link", { name: "Open worker 2, PID 4022" })).toHaveAttribute(
+    "href",
+    "/processes/4022",
+  )
 
   // Scaling is a stepper over the workers, said before it is done.
-  await sheet.getByRole("button", { name: "Scale…" }).first().click()
+  await page.getByRole("button", { name: "Scale…", exact: true }).click()
   const scale = page.getByRole("dialog", { name: /Scale api/ })
   await expect(scale.getByRole("button", { name: "Scale to 2" })).toBeDisabled()
   await scale.getByRole("button", { name: "One worker more" }).click()
@@ -1367,10 +1419,11 @@ test("a PM2 application's sheet reads its process live and scales its cluster", 
 
   // The worker PM2 gave up on says so, and the press reads its log.
   await page.goto("/processes/pm2?app=deploy:1")
-  await expect(sheet.getByText("errored", { exact: true })).toBeVisible()
-  await expect(sheet.locator("[data-slot='stat-tile']")).toHaveCount(0)
-  await sheet.getByRole("tab", { name: "Logs", exact: true }).click()
-  await expect(sheet.getByRole("tab", { name: "Logs", exact: true })).toHaveAttribute(
+  await expect(page).toHaveURL(/\/processes\/pm2\/worker/)
+  await expect(line.getByText("errored", { exact: true })).toBeVisible()
+  await expect(readings.first()).toContainText("Not running")
+  await page.getByRole("tab", { name: "Logs", exact: true }).click()
+  await expect(page.getByRole("tab", { name: "Logs", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",
   )
@@ -1775,24 +1828,24 @@ test("a PM2 application's logs are its own lensed stream, beside PM2's count of 
   const logs = await mockHost(page)
   await page.goto("/processes/pm2")
   await page.getByRole("button", { name: "worker", exact: true }).click()
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Logs", exact: true }).click()
+  await expect(page).toHaveURL(/\/processes\/pm2\/worker/)
+  await page.getByRole("tab", { name: "Logs", exact: true }).click()
+  const view = page.getByRole("tabpanel")
   await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("pm2:deploy/1/worker")
-  await expect(sheet.getByText("Restarted 16 times")).toBeVisible()
-  await expect(sheet.getByText("15 unstable")).toBeVisible()
-  await expect(sheet.getByLabel("Log lines").getByText(/ECONNREFUSED/)).toBeVisible()
+  await expect(view.getByText("Restarted 16 times")).toBeVisible()
+  await expect(view.getByText("15 unstable")).toBeVisible()
+  await expect(view.getByLabel("Log lines").getByText(/ECONNREFUSED/)).toBeVisible()
   // Errored, so there is no last start to read around.
-  await expect(sheet.getByRole("button", { name: "Around the last start" })).toHaveCount(0)
-  await page.keyboard.press("Escape")
+  await expect(view.getByRole("button", { name: "Around the last start" })).toHaveCount(0)
 
-  await page.getByRole("button", { name: "api", exact: true }).first().click()
-  await sheet.getByRole("tab", { name: "Logs", exact: true }).click()
+  // The view goes along to the next application; a cluster reads its first worker.
+  await page.goto("/processes/pm2/api?tab=logs")
   await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("pm2:deploy/0/api")
-  const around = sheet.getByRole("button", { name: "Around the last start" })
+  const around = view.getByRole("button", { name: "Around the last start" })
   const before = logs.searches.length
   await around.click()
   await expect(around).toHaveAttribute("aria-pressed", "true")
-  await expect(sheet.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+  await expect(view.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
@@ -1803,7 +1856,7 @@ test("a PM2 application's logs are its own lensed stream, beside PM2's count of 
   expect(Math.abs(Date.parse(window.get("since")!) - (started - 120_000))).toBeLessThan(30_000)
   expect(Math.abs(Date.parse(window.get("until")!) - (started + 60_000))).toBeLessThan(30_000)
   // Live lets the window go.
-  await sheet.getByRole("button", { name: "Live", exact: true }).click()
+  await view.getByRole("button", { name: "Live", exact: true }).click()
   await expect(around).toHaveAttribute("aria-pressed", "false")
 })
 

@@ -936,7 +936,7 @@ test("a row's owner opens its own page: the deployment, the unit, the PM2 app", 
 
   await page.goto("/proxy/ports")
   await rows.filter({ hasText: "PM2 · node" }).getByRole("button", { name: "Open app" }).click()
-  await expect(page).toHaveURL(/\/processes\/pm2\?app=api$/)
+  await expect(page).toHaveURL(/\/processes\/pm2\/api$/)
 
   await page.goto("/proxy/ports")
   await rows.filter({ hasText: "nginx.service" }).getByRole("button", { name: "Process" }).click()
