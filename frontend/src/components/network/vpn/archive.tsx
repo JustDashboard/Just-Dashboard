@@ -10,6 +10,7 @@ import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
+import { useHubSession } from "@/components/network/hub-session"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { tunnelHref } from "./tunnel-reading"
 
@@ -31,9 +32,14 @@ export function useArchive(enabled = true) {
  * existing configuration connects again; the exit node, the firewall opening
  * and saved client configurations are not in it, and the answer says which it
  * could not bring back.
+ *
+ * Restoring lets the file's peers back onto this server's network, so the
+ * server refuses it to a session opened through Just Hub; `allowed` is false
+ * for one, and nothing offers it.
  */
 export function useRestore(onRestored: () => void) {
   const { confirm, dialog } = useConfirm()
+  const allowed = !useHubSession()
   const restore = (a: WGArchived) =>
     confirm({
       title: `Restore ${a.name}`,
@@ -59,7 +65,7 @@ export function useRestore(onRestored: () => void) {
         onRestored()
       },
     })
-  return { restore, dialog }
+  return { restore, dialog, allowed }
 }
 
 /** An archived tunnel's mono line: what the file holds, or why it cannot come back. */
@@ -77,7 +83,7 @@ export function archivedLine(a: WGArchived) {
  */
 export function ArchivedTunnels({ onRestored }: { onRestored: () => void }) {
   const archive = useArchive()
-  const { restore, dialog } = useRestore(() => {
+  const { restore, dialog, allowed } = useRestore(() => {
     archive.refresh()
     onRestored()
   })
@@ -118,15 +124,17 @@ export function ArchivedTunnels({ onRestored }: { onRestored: () => void }) {
                   <span className="text-hint text-muted-foreground max-sm:hidden">
                     removed {relativeTime(new Date(a.archivedAt * 1000).toISOString())}
                   </span>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={!a.restorable}
-                    onClick={() => restore(a)}
-                    aria-label={`Restore ${a.name}`}
-                  >
-                    Restore
-                  </Button>
+                  {allowed && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!a.restorable}
+                      onClick={() => restore(a)}
+                      aria-label={`Restore ${a.name}`}
+                    >
+                      Restore
+                    </Button>
+                  )}
                 </>
               }
             />

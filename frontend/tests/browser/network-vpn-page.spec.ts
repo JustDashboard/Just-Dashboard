@@ -3,9 +3,10 @@ import { admin, json, mockNetwork, vpn, type Mutation } from "./network-fixture"
 import { history, now, openMaturity } from "./network-vpn-maturity-fixture"
 import { risen } from "./risen"
 
-// The VPN page as the deployment pages read: each VPN on its own identity
-// line, the tunnel's picture under it, machines as cards of one height, the
-// tailnet's offers on one save bar, and a tunnel's record on a page of its own.
+// The VPN page as the deployment pages read: the page's own line, one kind of
+// VPN at a time as a view in the address, each on its own identity line, the
+// tunnel's picture under it, machines as cards of one height, the tailnet's
+// offers on one save bar, and a tunnel's record on a page of its own.
 
 /** An administrator whose session may not run destructive routes. */
 const careful = {
@@ -27,6 +28,12 @@ const archived = [
 ]
 
 const identity = (page: Page, name: string) => page.getByRole("region", { name: `About ${name}` })
+const kinds = (page: Page) => page.getByRole("tablist", { name: "Kinds of VPN" })
+/** One kind of VPN, by the word on its tab. */
+const kind = (page: Page, name: string) =>
+  kinds(page)
+    .getByRole("tab", { name: new RegExp(`^${name}`) })
+    .click()
 
 /** Where a list's cards stand under its first one, and their heights, at rest. */
 async function boxes(page: Page, list: string) {
@@ -47,9 +54,31 @@ for (const width of [1280, 390]) {
   test.describe(`at ${width}`, () => {
     test.use({ viewport: { width, height: 900 } })
 
-    test("the page opens on a tunnel's line, with no row of figures over it", async ({ page }) => {
+    test("the page opens on its own line, then one kind of VPN at a time", async ({ page }) => {
       await openMaturity(page, [])
       await page.goto("/network/vpn")
+      // The VPNs as one thing: what is up, and each kind in a few words.
+      const own = identity(page, "the VPNs")
+      await expect(own).toContainText("1 tunnel up, on the tailnet")
+      await expect(own).toContainText("1 tunnel · 2 of 5 peers online")
+      await expect(own).toContainText("4 of 6 online")
+      // Nothing stands between the top of the page and that line, and the
+      // kinds are the strip straight under it.
+      await risen(page)
+      const frame = await page.locator("[data-slot=page]").boundingBox()
+      const top = await own.boundingBox()
+      expect(top!.y - frame!.y).toBeLessThanOrEqual(40)
+      await expect(kinds(page).getByRole("tab")).toHaveText([
+        /^WireGuard/,
+        /^Tailscale/,
+        /^Headscale/,
+        "Log",
+      ])
+      await expect(kinds(page).getByRole("tab", { name: /^WireGuard/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      )
+
       const line = identity(page, "wg0")
       await expect(line).toContainText("2 of 5 online")
       await expect(line).toContainText("3 need a look")
@@ -59,13 +88,14 @@ for (const width of [1280, 390]) {
       await expect(line.getByRole("button", { name: "Add a device", exact: true })).toBeVisible()
       await expect(line.getByRole("button", { name: "wg0 actions" })).toBeVisible()
       await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
-      // Nothing stands between the top of the page and the line.
-      await risen(page)
-      const frame = await page.locator("[data-slot=page]").boundingBox()
-      const box = await line.boundingBox()
-      expect(box!.y - frame!.y).toBeLessThanOrEqual(40)
-
+      // One kind at a time: the tailnet is not under the tunnel any more.
       const tailnet = page.getByRole("region", { name: "About this server on the tailnet" })
+      await expect(tailnet).toHaveCount(0)
+      await expect(page.getByLabel("Headscale nodes")).toHaveCount(0)
+
+      await kind(page, "Tailscale")
+      await expect(page).toHaveURL(/\/network\/vpn\?tab=tailscale$/)
+      await expect(line).toHaveCount(0)
       await expect(tailnet).toContainText("vps-edge-01.tail1234.ts.net")
       await expect(tailnet).toContainText("4 of 6 online")
       await expect(tailnet).toContainText("ana@example.com")
@@ -85,16 +115,22 @@ for (const width of [1280, 390]) {
         await json(route, vpn)
       })
       await page.goto("/network/vpn")
-      const line = page.locator("[data-layout=project]").first()
+      // The page's own line, then the tunnel's under the strip.
+      const own = identity(page, "the VPNs")
+      const line = page.locator("[data-layout=project]").nth(1)
       await expect(line).toBeVisible()
       await expect(page.locator("[data-slot=wire-flow][data-loading]")).toBeVisible()
       await risen(page)
+      const ownBefore = await own.boundingBox()
+      const strip = await kinds(page).boundingBox()
       const before = await line.boundingBox()
       const picture = await page.locator("[data-slot=wire-flow]").first().boundingBox()
 
       answer()
       await expect(identity(page, "wg0")).toContainText("online")
       await risen(page)
+      expect(await own.boundingBox()).toEqual(ownBefore)
+      expect((await kinds(page).boundingBox())!.y).toBe(strip!.y)
       const after = await identity(page, "wg0").boundingBox()
       expect(after!.y).toBe(before!.y)
       expect(after!.x).toBe(before!.x)
@@ -104,7 +140,7 @@ for (const width of [1280, 390]) {
 
     test("machines are cards of one height, with and without a reading", async ({ page }) => {
       await openMaturity(page, [])
-      await page.goto("/network/vpn")
+      await page.goto("/network/vpn?tab=tailscale")
       await expect(page.getByRole("list", { name: "Tailnet machines" })).toContainText("old-laptop")
       const rows = await boxes(page, "Tailnet machines")
       expect(rows).toHaveLength(6)
@@ -257,9 +293,11 @@ test("an administrator without the destructive capability sees no control it wou
   ])
   await page.keyboard.press("Escape")
   // Offers can be added; taking one back is the destructive half.
+  await kind(page, "Tailscale")
   await expect(page.getByRole("button", { name: /^Stop offering/ })).toHaveCount(0)
   await expect(page.getByRole("radio", { name: "Off", exact: true })).toBeDisabled()
   await expect(page.getByRole("textbox", { name: "A network to offer" })).toBeEnabled()
+  await kind(page, "WireGuard")
 
   await page.getByRole("button", { name: "Open Office" }).click()
   const sheet = page.getByRole("dialog")
@@ -272,6 +310,64 @@ test("an administrator without the destructive capability sees no control it wou
   await expect(sheet.getByRole("button", { name: "Set budget" })).toBeVisible()
 })
 
+test("a session opened through Just Hub is offered nothing the server refuses it", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  // The account's own list of sessions says how the one in use was made.
+  await openMaturity(page, mutations, {
+    "/network/vpn/archive": archived,
+    "/account/sessions": [
+      {
+        id: "fixture-hub-session",
+        userId: 1,
+        authMethod: "hub",
+        hubUser: "ana",
+        twoFactorPassed: true,
+        ip: "100.64.0.9",
+        userAgent: "fixture",
+        createdAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        current: true,
+      },
+    ],
+  })
+  await page.goto("/network/vpn")
+  const line = identity(page, "wg0")
+  await expect(line).toContainText("online")
+  // A new peer, a change to one and a peer's configuration are refused such a session.
+  await expect(page.getByRole("button", { name: "Add a device" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Join a site" })).toHaveCount(0)
+  await page.getByRole("button", { name: "wg0 actions" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "History",
+    "Take down",
+    "Create another tunnel",
+    "Remove",
+  ])
+  await page.keyboard.press("Escape")
+
+  // A peer still opens, to be read, budgeted and removed.
+  await page.getByRole("button", { name: "Open Office" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("button", { name: "Remove", exact: true })).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0)
+  await expect(sheet.getByRole("button", { name: "Show QR code" })).toHaveCount(0)
+  await expect(sheet.getByRole("button", { name: "Save Linux kill-switch file" })).toHaveCount(0)
+  await expect(sheet).toContainText("shown to a session signed in on this server itself")
+  await page.keyboard.press("Escape")
+
+  // Restoring a tunnel lets its peers' keys back: it is read, and not offered.
+  const removed = page.getByRole("list", { name: "Archived tunnels" })
+  await expect(removed).toContainText("wg1")
+  await expect(removed.getByRole("button", { name: "Restore wg1" })).toHaveCount(0)
+  await page.goto("/network/vpn/wg1")
+  await expect(identity(page, "wg1")).toContainText("Removed")
+  await expect(page.getByRole("button", { name: "Restore wg1" })).toHaveCount(0)
+  expect(mutations.filter((m) => m.method !== "GET")).toEqual([])
+})
+
 /** The same page for another account: the session route answers before the fixture's. */
 async function mockSession(page: Page, session: typeof admin) {
   await page.route("**/api/v1/auth/session", (route) => json(route, session))
@@ -282,7 +378,7 @@ test("the tailnet's offers are edited, counted on the save bar and written in on
 }) => {
   const mutations: Mutation[] = []
   await openMaturity(page, mutations)
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=tailscale")
   const form = page.getByRole("form", { name: "Tailscale offers" })
   const bar = page.getByRole("region", { name: "Save changes" })
   await expect(bar).toHaveCount(0)
@@ -298,6 +394,16 @@ test("the tailnet's offers are edited, counted on the save bar and written in on
   await expect(bar).toContainText("3 unsaved changes")
   await expect(bar).toContainText("Applies immediately")
   expect(mutations.filter((m) => m.method !== "GET")).toEqual([])
+
+  // A look at the tunnels does not throw the draft away.
+  await kind(page, "WireGuard")
+  await expect(identity(page, "wg0")).toBeVisible()
+  await expect(form).toBeHidden()
+  await expect(bar).toContainText("3 unsaved changes")
+  await kind(page, "Tailscale")
+  await expect(form.getByRole("textbox", { name: "A network to offer" })).toHaveValue(
+    "10.99.0.0/24",
+  )
 
   // A withdrawal marked by mistake is taken back before anything is sent.
   await form.getByRole("button", { name: "Keep offering 10.0.4.0/24" }).click()
@@ -323,7 +429,7 @@ test("a route that is no network holds the save, and Discard puts the offers bac
 }) => {
   const mutations: Mutation[] = []
   await openMaturity(page, mutations)
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=tailscale")
   const form = page.getByRole("form", { name: "Tailscale offers" })
   const bar = page.getByRole("region", { name: "Save changes" })
   const draft = form.getByRole("textbox", { name: "A network to offer" })
@@ -360,7 +466,9 @@ test("a Tailscale waiting to be signed in says so and offers the address it wait
       },
     },
   })
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=tailscale")
+  // The page's own line says it too, whichever view is open.
+  await expect(identity(page, "the VPNs")).toContainText("off the tailnet")
   const line = page.getByRole("region", { name: "About this server on the tailnet" })
   await expect(line).toContainText("Needs sign-in")
   await expect(line).not.toContainText("NeedsLogin")
@@ -377,7 +485,7 @@ test("a tailnet with nobody else on it says so in one designed block", async ({ 
   await mockNetwork(page, [], {
     overrides: { "/network/vpn": { ...vpn, tailscale: { ...vpn.tailscale, peers: [] } } },
   })
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=tailscale")
   const empty = page
     .locator("[data-slot=empty-state]")
     .filter({ hasText: "No other machine on this tailnet" })
@@ -394,7 +502,7 @@ test("a read that fails says the page was not read and offers it again", async (
       : json(route, vpn),
   )
   await page.goto("/network/vpn")
-  await expect(page.getByText("Not read", { exact: true })).toBeVisible()
+  await expect(identity(page, "the VPNs").getByText("Not read", { exact: true })).toBeVisible()
   await expect(page.getByText("VPN state unavailable")).toBeVisible()
   fail = false
   await page.getByRole("button", { name: "Try again" }).click()
