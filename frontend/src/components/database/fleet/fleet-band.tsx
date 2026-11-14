@@ -65,7 +65,7 @@ export function FleetBand({
     >
       <StorageBlock entries={entries} hueOf={hueOf} engineOf={engineOf} storedOf={storedOf} />
       <SessionsBlock entries={entries} hueOf={hueOf} engineOf={engineOf} feeds={feeds} />
-      <BackupsBlock entries={entries} newestOf={newestOf} dumps={dumps} />
+      <BackupsBlock entries={entries} engineOf={engineOf} newestOf={newestOf} dumps={dumps} />
     </div>
   )
 }
@@ -246,14 +246,17 @@ const STANDINGS: { standing: BackupStanding; color: string; word: string }[] = [
 /**
  * Every database that can be dumped from here: how many were backed up today,
  * this week, longer ago or never, as one bar, each standing read by the worst
- * database in it. A press opens that database's dumps.
+ * database in it and marked with that database's engine, as the other two
+ * blocks mark theirs. A press opens that database's dumps.
  */
 function BackupsBlock({
   entries,
+  engineOf,
   newestOf,
   dumps,
 }: {
   entries: DbFleetEntry[]
+  engineOf: (entry: DbFleetEntry) => Engine
   newestOf: (entry: DbFleetEntry) => string | undefined
   dumps: (entry: DbFleetEntry) => boolean
 }) {
@@ -290,7 +293,9 @@ function BackupsBlock({
             key: standing,
             value: count,
             color,
-            mark: <span className="numeric text-hint font-medium">{count}</span>,
+            // The count is the part's name; a bare digit in the strip of
+            // marks read as a stray figure beside two rows of logos.
+            mark: <EngineGlyph engine={engineOf(entry)} />,
             name: `${count} ${word}`,
             detail: entry.name,
             figure: <span className={cn("text-hint font-normal", AGE_TONE[standing])}>{age}</span>,

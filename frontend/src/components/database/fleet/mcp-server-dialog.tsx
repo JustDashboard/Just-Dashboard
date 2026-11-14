@@ -20,7 +20,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/deploy/settings/segments"
 import { useNow } from "@/components/deploy/vocabulary"
 import { Field, FormNote, FormSection } from "@/components/form"
-import { Check, Copy, Key, Pencil, Plus, Slash, Sparkles } from "@/components/icons"
+import { Check, Copy, Key, Pencil, Plus, Slash } from "@/components/icons"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
@@ -39,7 +39,7 @@ import { calendarDate, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { ApiToken, ApiTokenDeployments, DbConnection } from "@/lib/types"
-import { useRef, useState } from "react"
+import { useState } from "react"
 
 /**
  * Where an AI client reaches the databases and the deployments: the MCP
@@ -48,27 +48,25 @@ import { useRef, useState } from "react"
  * each database to read or to change, and the deployments to read or to
  * deploy. The server holds every call to that and to its owner's role,
  * refuses protected databases outright, and audits each call. It opens from
- * the control center beside Metrics export, because a key spans databases.
+ * the control center's menu, under Metrics export, because a key spans
+ * databases.
  */
-export function McpServer() {
-  const [open, setOpen] = useState(false)
-  const opener = useRef<HTMLButtonElement>(null)
+export function McpServer({
+  onClose,
+  opener,
+}: {
+  onClose: () => void
+  /** What opened it: the dialog is opened by state, so Radix has no trigger to return to. */
+  opener: React.RefObject<HTMLElement | null>
+}) {
   return (
-    <>
-      <Button ref={opener} size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <Sparkles className="size-4" />
-        MCP server
-      </Button>
-      {open && (
-        <McpServerDialog
-          onClose={() => setOpen(false)}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            opener.current?.focus()
-          }}
-        />
-      )}
-    </>
+    <McpServerDialog
+      onClose={onClose}
+      onCloseAutoFocus={(event) => {
+        event.preventDefault()
+        opener.current?.focus()
+      }}
+    />
   )
 }
 

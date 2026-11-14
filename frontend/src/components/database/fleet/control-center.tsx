@@ -8,13 +8,7 @@ import {
 } from "@/components/database/connect/inventory"
 import { useFound } from "@/components/database/connect/use-found"
 import { type Engine } from "@/components/database/engine"
-import {
-  fleetHues,
-  fleetMarks,
-  fleetVerdict,
-  readerCount,
-  shares,
-} from "@/components/database/fleet/band"
+import { fleetHues, fleetMarks, fleetVerdict, readerCount } from "@/components/database/fleet/band"
 import {
   fleetReadings,
   groupFleet,
@@ -36,8 +30,15 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
 import { Segments } from "@/components/deploy/settings/segments"
 import { IconAction } from "@/components/icon-action"
-import { Database, Plus, RefreshClockwise } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import {
+  Database,
+  LineChart,
+  MoreHorizontal,
+  Plus,
+  RefreshClockwise,
+  Sparkles,
+} from "@/components/icons"
+import { HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, SearchInput, Section } from "@/components/page"
 import { ProductLogos } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
@@ -45,12 +46,13 @@ import { EmptyState } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { useMetrics } from "@/hooks/use-metrics"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 
 const GROUPINGS: { value: FleetGrouping; label: string }[] = [
   { value: "place", label: "Where it runs" },
@@ -64,10 +66,16 @@ const OFFERED = ["postgres", "redis", "mongodb"]
 /**
  * The control center: every database on this server, drawn as what it is.
  *
- * A reading page (§15) that opens on the server's databases as one line —
- * their engines as their own marks, how many there are, what they store,
+ * A reading page (§15) that opens on the server's databases as one line, laid
+ * out as a project's header is: their engines as their own marks, the server's
+ * name with the verdict after it, then how many there are, what they store,
  * how many sessions are open, what reads them and how many were dumped in the
- * last day — with the verdict at its right end beside the commands. Under it
+ * last day. At its end stands the one command, Add a database, and a menu
+ * with the rest: where the recorded activity is exported, the MCP server's
+ * keys, and scanning the server again. They were three grey controls beside
+ * the command, and the line is drawn in every state of the page — loading,
+ * failed and with no database yet — so it is where it will be from the first
+ * paint. Under it
  * the band (`fleet-band.tsx`) reads the fleet three ways the cards cannot:
  * who holds the bytes, who is connected, and how old every newest dump is,
  * each database in its own hue (`fleetHues`) from the bar to its card's
@@ -131,7 +139,6 @@ export function ControlCenter() {
     (entry: DbFleetEntry) => hues.get(entry.id) ?? "var(--tag-blue)",
     [hues],
   )
-  const largest = useMemo(() => shares(entries, storedOf).largest, [entries, storedOf])
   const newestOf = useCallback((entry: DbFleetEntry) => backups.get(entry.id)?.newest, [backups])
 
   const engines = useMemo(() => {
@@ -175,14 +182,63 @@ export function ControlCenter() {
       </Link>
     </Button>
   )
-  const scan = admin && (
-    <IconAction
-      label="Scan this server again"
-      pending={inventory.scanning}
-      onClick={() => void inventory.scan()}
-    >
-      <RefreshClockwise />
-    </IconAction>
+  // The dialogs are opened by state from a menu that closes on a choice, so
+  // the keyboard goes back to the menu's own button when one is closed.
+  const [opened, setOpened] = useState<"metrics" | "mcp" | null>(null)
+  const more = useRef<HTMLButtonElement>(null)
+  const verbs: Verb[] = [
+    { key: "metrics", label: "Metrics export", icon: LineChart, run: () => setOpened("metrics") },
+    { key: "mcp", label: "MCP server", icon: Sparkles, run: () => setOpened("mcp") },
+    ...(admin
+      ? [
+          {
+            key: "scan",
+            label: "Scan this server again",
+            icon: RefreshClockwise,
+            disabled: inventory.scanning,
+            run: () => void inventory.scan(),
+          },
+        ]
+      : []),
+  ]
+  const menu = (
+    <VerbMenu
+      verbs={verbs}
+      label="More about the databases"
+      trigger={
+        <Button
+          ref={more}
+          size="icon-sm"
+          variant="ghost"
+          aria-label="More about the databases"
+          className="[&_svg:not([class*='size-'])]:size-3.5"
+        >
+          <MoreHorizontal />
+        </Button>
+      }
+    />
+  )
+  const dialogs = (
+    <>
+      {opened === "metrics" && (
+        <MetricsExport admin={admin} opener={more} onClose={() => setOpened(null)} />
+      )}
+      {opened === "mcp" && <McpServer opener={more} onClose={() => setOpened(null)} />}
+    </>
+  )
+  // The line the page opens on, before the fleet has answered and when it
+  // holds nothing: the server by its name, in the place and at the height the
+  // full line takes, with the command and the menu already where they will be.
+  const opening = (facts: React.ReactNode, command: React.ReactNode = add) => (
+    <HostIdentity
+      label="About the databases on this server"
+      fallback={Database}
+      title={host?.hostname ?? "This server"}
+      state={null}
+      facts={facts}
+      command={command || undefined}
+      menu={menu}
+    />
   )
 
   if (!fleet.data) {
@@ -190,19 +246,8 @@ export function ControlCenter() {
       <Page className="animate-rise">
         {/* The page's commands stay through a failed read: adding a database
             does not need the fleet to have answered. */}
-        <PageContext
-          eyebrow="Apps"
-          title="Databases"
-          className="justify-end"
-          actions={
-            admin && (
-              <>
-                {scan}
-                {add}
-              </>
-            )
-          }
-        />
+        <PageContext eyebrow="Apps" title="Databases" />
+        {opening(fleet.error ? "The databases could not be read" : "Reading the databases…")}
         {fleet.error ? (
           <ReadFailed error={fleet.error} onRetry={fleet.refresh} every="30 seconds" />
         ) : (
@@ -214,6 +259,7 @@ export function ControlCenter() {
             </div>
           </div>
         )}
+        {dialogs}
       </Page>
     )
   }
@@ -247,7 +293,9 @@ export function ControlCenter() {
   if (entries.length === 0) {
     return (
       <Page className="animate-rise">
-        <PageContext eyebrow="Apps" title="Databases" actions={scan} className="justify-end" />
+        <PageContext eyebrow="Apps" title="Databases" />
+        {/* The empty state under it holds the page's one command. */}
+        {opening("No database is connected yet", null)}
         <EmptyState
           mark={<ProductLogos ids={OFFERED} size="md" />}
           title="No databases yet"
@@ -260,6 +308,7 @@ export function ControlCenter() {
         />
         {foundSection}
         {found.dialog}
+        {dialogs}
       </Page>
     )
   }
@@ -320,8 +369,9 @@ export function ControlCenter() {
       </span>
     ),
   ]
+    // The line's own gap separates them: a dot between two was left hanging
+    // at the end of a line wherever the facts wrapped.
     .filter(Boolean)
-    .flatMap((fact, index) => (index === 0 ? [fact] : [<FactDot key={`dot-${index}`} />, fact]))
 
   return (
     <Page className="animate-rise">
@@ -329,32 +379,20 @@ export function ControlCenter() {
       <PageContext eyebrow="Apps" title="Databases" />
 
       <HostIdentity
-        className="animate-rise"
+        label="About the databases on this server"
         logo={
           marks.length > 0 ? (
-            <span className="flex h-12 shrink-0 items-center">
+            <span className="flex h-10 shrink-0 items-center">
               <ProductLogos ids={marks} size="md" />
             </span>
           ) : undefined
         }
         fallback={Database}
         title={host?.hostname ?? "This server"}
+        state={verdict ? <Status tone={verdict.tone} label={verdict.label} /> : null}
         facts={facts}
-        aside={
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-            {verdict && <Status tone={verdict.tone} label={verdict.label} />}
-            <span className="flex flex-wrap items-center gap-2">
-              <MetricsExport admin={admin} />
-              <McpServer />
-              {admin && (
-                <>
-                  {scan}
-                  {add}
-                </>
-              )}
-            </span>
-          </div>
-        }
+        command={add || undefined}
+        menu={menu}
       />
 
       <FleetBand
@@ -458,7 +496,7 @@ export function ControlCenter() {
                 feeds={feeds.get(entry.id)}
                 stored={storedOf(entry)}
                 hue={hueOf(entry)}
-                largest={largest}
+                dumps={dumps(entry)}
                 control={control}
                 index={position.get(entry.id) ?? 0}
               />
@@ -471,6 +509,7 @@ export function ControlCenter() {
 
       {dialog}
       {found.dialog}
+      {dialogs}
     </Page>
   )
 }
