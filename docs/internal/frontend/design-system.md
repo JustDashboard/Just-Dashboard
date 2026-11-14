@@ -649,7 +649,7 @@ centred there its title stood 180px in from every title above it. Configuration'
 exception from 0.7.1, two columns of `FormSection aside`s (`max-w-none`) with the certificate across
 both, so that five short sections did not leave two thirds of a wide screen empty; SSH's four
 directive groups took the same two columns then. In 0.8.7 Configuration went back to the one centred
-column (`components/settings-column.tsx`:
+column, with the account's Profile, Security and Workspace (`components/settings-column.tsx`:
 `SettingsColumn` around `SettingSection`s, the settings pages' floating bar under them): two
 unrelated heads on one line read as a pair, and the operator named a project's settings as the shape
 every settings page should have. What made the single column too tall was the sentence under every

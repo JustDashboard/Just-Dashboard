@@ -343,24 +343,34 @@ test("keys are drawn as what holds them, wired through their role", async ({ pag
   const chips = page.getByRole("group", { name: "Show" })
   await expect(chips.getByRole("button", { name: /Never used\s*1/ })).toBeVisible()
   await chips.getByRole("button", { name: /Expiring soon\s*1/ }).click()
-  const rows = page.locator("[data-slot=panel]", { hasText: "In use" }).locator("[data-slot=row]")
+  const rows = page
+    .locator("[data-slot=panel]", { hasText: "In use" })
+    .locator("[data-slot=choice-row]")
   await expect(rows).toHaveCount(1)
   await expect(rows.first()).toContainText("github-actions")
   await chips.getByRole("button", { name: /^All/ }).click()
   await expect(rows).toHaveCount(3)
 
-  const github = page.locator("[data-slot=row]", { hasText: "github-actions" })
+  const github = page.locator("[data-slot=choice-row]", { hasText: "github-actions" })
   await expect(github.locator('img[src="/logos/github.svg"]')).toBeVisible()
   await expect(github).toContainText("expires")
   // An administrator reads everyone's keys, each with its owner's face.
-  await expect(page.locator("[data-slot=row]", { hasText: "grafana" })).toContainText("Maria Rusu")
+  await expect(page.locator("[data-slot=choice-row]", { hasText: "grafana" })).toContainText(
+    "Maria Rusu",
+  )
   await expect(page.getByRole("heading", { name: "Revoked or expired" })).toBeVisible()
   await expect(page.getByText(/Authorization: Bearer vpsd_…/)).toBeVisible()
-  await expect(
-    page
-      .locator("[data-slot=panel]", { hasText: "In use" })
-      .getByRole("button", { name: "New key" }),
-  ).toBeVisible()
+  // The page opens on the line that counts the keys, with its one command.
+  const line = page.locator("[data-slot=host-identity]")
+  await expect(line).toHaveAttribute("data-layout", "project")
+  await expect(line).toContainText("3 keys")
+  await expect(line).toContainText("1 limited")
+  await expect(line).toContainText("2 read-only")
+  await expect(line).toContainText("1 expiring in 4 days")
+  await expect(line).toContainText("1 revoked or expired")
+  await expect(line.getByRole("button", { name: "New key" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "New key" })).toHaveCount(1)
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
 
   await page.getByRole("button", { name: "New key" }).click()
   await page.getByLabel("Name").fill("uptime-kuma")

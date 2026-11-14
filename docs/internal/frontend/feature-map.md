@@ -391,44 +391,52 @@ dashed where it has never carried anything. The reads behind every wire, chip an
 `components/account/access.ts` (unit-tested). Profile: the display name in the account's identity
 line (`HostIdentity` with the picture as its mark — the sign-in name and role, member since, last
 sign-in, the browser and network this session came in through drawn as themselves, for
-`system.admin` the accounts as their faces linking to Users, and the two-factor verdict); *Signed in
-as you* (`access-picture.tsx`): every session on the left as its browser or program with its system
+`system.admin` the accounts as their faces linking to Users, and the two-factor verdict beside the
+name); *Signed in as you* (`access-picture.tsx`): every session on the left as its browser or program with its system
 in the corner, what it is doing over its name and its network and address under it, the account in
 the middle as its face in the brand's ring with a green or amber shield for what guards it, and the
 account's own usable keys on the right as the products that hold them with their role over their
-name, every node at Configuration's scale, each side counted and linking to its page; the identity
-block (picture cropped and shrunk in the browser before upload, display name and sign-in name as a
-draft on the floating Save bar with *Edited* in the section head, and the rail's own account card
-drawn from the draft beside them); and what the role can do as a ladder (`role-ladder.tsx`) —
-read-only, limited, administrator, each rung's bar lit in its hue up to the account's role, each
-listing the powers it adds with their glyph on the rung's tint and the products they reach (Docker,
-systemd and PM2 for Start and stop), powers past the role dimmed. Security: what a sign-in passes as
+name, every node at Configuration's scale, each side counted and linking to its page; then one
+centred column of two sections: the profile (picture cropped and shrunk in the browser before
+upload, display name and sign-in name as a draft on the floating Save bar with *Edited* in the
+section head, whose line of facts is the rail's own account card drawn from the draft, and what each
+field is for behind its ⓘ); and what the role can do as a ladder (`role-ladder.tsx`) — read-only,
+limited, administrator, each rung's bar lit in its hue up to the account's role, each listing the
+powers it adds as a glyph on the rung's tint, a name and the products it reaches (Docker, systemd
+and PM2 for Start and stop), powers past the role dimmed, and the sentence each rung and power had
+as its name's tooltip. Security: what a sign-in passes as
 a picture (`sign-in-path.tsx`: the account, its password, the second factor and the server with the
 sessions' browsers; without a second factor the factor is a dashed ring; an optional factor has an
 amber bypass from password to server (dashed wires carry the amber on a phone), while a required
-factor says enrollment is needed before completing sign-in and has no bypass), then the sections two
-to a row from `xl` as Configuration's are — two-factor across the width (its state under its head;
-enrol with the grouped secret, copy and open-in-authenticator, recovery codes shown once with
-copy-all, regenerate after the current password, turn off), then passkeys across the width
-(`passkeys.tsx`: each a row with when it was added and last signed in, whether it is synced, and the
-name it signs in at when that is not the one open; Add a passkey asks for the password and, with an
+factor says enrollment is needed before completing sign-in and has no bypass), then one centred
+column of four sections, each a title, one line of facts and its verbs — two-factor (*on · asked at
+every sign-in · optional on this install*; enrol with the grouped secret, copy and
+open-in-authenticator, recovery codes shown once with copy-all, regenerate after the current
+password, turn off, why behind the ⓘ beside the verbs), then passkeys (`passkeys.tsx`: each a row
+with when it was added and last signed in, whether it is synced, and the name it signs in at when
+that is not the one open; Add a passkey on the title line asks for the password and, with an
 authenticator, its code before the browser's prompt; rename and remove from each row's menu; at an
 IP address, or where the page's Permissions-Policy forbids passkeys, the reason instead of the
-button), then password (the server's rule lit as it is met, `lib/password.ts`) beside where the
-account is signed in, each session a row drawn as its client with its network and what let it in,
-with a link to Sessions. Sessions: this device as an identity line; every session as the path it
+button), then password (three empty fields, the server's rule lit as it is met, `lib/password.ts`;
+typing a new one raises the floating bar, whose command is *Change password* and whose line says
+what is still missing; the current password alone does not raise it), then where the account is
+signed in, each session a row drawn as its client with its network and what let it in, with the
+way to Sessions on its title line. Sessions: this device as an identity line; every session as the path it
 takes (`session-map.tsx`: the browsers, the networks they came in on — Tailscale by its mark, a
 local network, this server, the internet — and the server, a network's wire as busy as its busiest
 session, a session owing its code dashed and one on a password alone amber; every node drawn at
 Configuration's scale, a session with what it is doing over its name and its address and what let it
 in under it, a network with what it is to the server); every other session as a row drawn as its
 browser with its system in the tile's corner, the network its address is on (`lib/clients.ts`),
-whether it passed a code and when it was last seen; sign out one or every other. API keys: *Where
-the keys reach* (`key-map.tsx`: every usable key as the product its name names — `keyProduct` — with
+whether it passed a code and when it was last seen; sign out one or every other. API keys: one
+identity line that counts the usable keys, by role in the role's hue and by how soon the first
+stops, with New key at its end; *Where the keys reach* (`key-map.tsx`: every usable key as the product its name names — `keyProduct` — with
 its role over its name, wired through the role it carries into this server's API, a role with no key
-dashed, every node at Configuration's scale), then the usable keys under chips that count and narrow
-(All, Used this week, Never used and Expiring soon in amber, each while it has a match or is
-selected) and the revoked or expired ones as rows behind a folded history, with the owner's face on
+dashed, every node at Configuration's scale), then the usable keys as cards of one height, as Users
+draws an account (a key opens nothing, so a card carries no arrow and its verbs are behind its `⋯`),
+under chips that count and narrow (All, Used this week, Never used and Expiring soon in amber, each
+while it has a match or is selected) and the revoked or expired ones as the same cards behind a
+folded history, with the owner's face on
 a key an administrator reads that is not theirs and the role in its rung's hue, the request that
 uses a key coloured as a command, and a create dialog whose roles are cards and whose name field
 shows the mark the key will carry. The list has search over name, prefix, role and owner, an
