@@ -1083,6 +1083,42 @@ test("the picture wires each network to what listens there, a database the inter
   await expect(page).toHaveURL(/\/proxy\/ports\/tcp-6379$/)
 })
 
+test("a port pressed straight after a filter still opens its page", async ({ page }) => {
+  await mockHost(page)
+  // The port's page as a busy server gives it: nothing fetched ahead, and the
+  // navigation most of a second on its way.
+  await page.route(/\/proxy\/ports\/tcp-6379/, async (route) => {
+    if (route.request().headers()["next-router-prefetch"]) return route.abort()
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await route.continue()
+  })
+  await page.goto("/proxy/ports")
+  const picture = page.locator("[data-slot='ports-picture']")
+  await picture.getByRole("button", { name: "The tailnet" }).click()
+  await expect(rowsOf(page)).toHaveCount(2)
+  await expect(page).toHaveURL(/reach=private/)
+
+  // The filter let go and the port pressed inside the quarter-second the page
+  // waits before it writes its view to the address. That write, landing while
+  // the navigation was on its way, used to cancel it.
+  await expect(picture.getByRole("link", { name: ":6379" })).toBeVisible()
+  await page.evaluate(async () => {
+    const picture = document.querySelector("[data-slot='ports-picture']")!
+    const press = (selector: string, text: string) =>
+      [...picture.querySelectorAll<HTMLElement>(selector)]
+        .find((el) => el.textContent?.includes(text))!
+        .click()
+    press("button", "The tailnet")
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    press("a", ":6379")
+  })
+  await expect(page).toHaveURL(/\/proxy\/ports\/tcp-6379$/)
+  // The view was written before the page was left, so Back finds it let go.
+  await page.goBack()
+  await expect(page).toHaveURL(/\/proxy\/ports$/)
+  await expect(rowsOf(page)).toHaveCount(7)
+})
+
 test("the old sheet addresses, the page's and the host diagnostic's, open the port's page", async ({
   page,
 }) => {

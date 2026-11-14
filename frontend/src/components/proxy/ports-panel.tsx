@@ -247,16 +247,30 @@ function PortsView() {
 
   useEffect(() => {
     if (legacy !== null) return
-    // Written a moment after the last keystroke: Safari refuses a page more
-    // than a hundred history writes in thirty seconds.
-    const timer = setTimeout(() => {
+    const write = () => {
       const url = new URL(window.location.href)
       const next = withView(url.search, { q: query, reach, proto, sort })
       if (next !== url.search) {
         window.history.replaceState(null, "", `${url.pathname}${next}${url.hash}`)
       }
-    }, 250)
-    return () => clearTimeout(timer)
+    }
+    // Written a moment after the last keystroke: Safari refuses a page more
+    // than a hundred history writes in thirty seconds.
+    const timer = setTimeout(write, 250)
+    // A press writes it first. The router takes a history write for a
+    // navigation of its own and drops the one it had under way, so a port
+    // pressed inside that moment, on a server slow to answer, was written
+    // over and never opened; ahead of the press, the write is the entry Back
+    // returns to.
+    const early = () => {
+      clearTimeout(timer)
+      write()
+    }
+    window.addEventListener("click", early, { capture: true, once: true })
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener("click", early, { capture: true })
+    }
   }, [query, reach, proto, sort, legacy])
 
   const listeners = useMemo(() => data?.value ?? [], [data])
