@@ -20,6 +20,12 @@ const MOST = 5
 
 type MarkSize = "lg" | "md" | "sm"
 
+/**
+ * Room over and under the firewall's mark for the words that hang under it:
+ * with no rule made the picture is one row, and they ran into the rules' frame.
+ */
+const HUB_ROOM = "lg:py-16"
+
 /** What the firewall's log adds up to over its window, for the picture's nodes. */
 export type FirewallCounts = {
   /** Packets no rule let in. */
@@ -200,6 +206,7 @@ export function FirewallPicture({
         }}
         end={{ title: "Answered by", nodes: end }}
         hub={{
+          className: HUB_ROOM,
           mark: (size) => (
             <WireMark tone={enforcing ? "logo" : "danger"} shape="square" size={size}>
               {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Shield aria-hidden />}
@@ -228,6 +235,7 @@ export function FirewallPictureLoading() {
         start={{ title: "Arrives", nodes: [], loadingRows: 1 }}
         end={{ title: "Answered by", nodes: [], loadingRows: 4 }}
         hub={{
+          className: HUB_ROOM,
           mark: (size) => (
             <WireMark tone="logo" shape="square" size={size}>
               <Shield aria-hidden />

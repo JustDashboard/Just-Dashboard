@@ -84,6 +84,7 @@ export function Topology({
       start={{ title: "Outside", nodes: lane("outside") }}
       end={{ title: "Inside", nodes: lane("inside") }}
       hub={{
+        className: HUB_ROOM,
         mark: <WireHost />,
         eyebrow: "This server",
         title: <span className="block truncate">{overview.hostname || "This server"}</span>,
@@ -128,6 +129,13 @@ export function Topology({
   )
 }
 
+/**
+ * Room over and under this server's mark for the lines that hang under it:
+ * on a server with one device a side the picture is no taller than the mark,
+ * and its words ran into the section below.
+ */
+const HUB_ROOM = "lg:py-28"
+
 /** What did the refusing, for the figure's hover: the lists and limits in force. */
 function refusedBy(overview: NetworkOverview) {
   const { blocklists, limits } = overview.gateway
@@ -153,7 +161,7 @@ export function TopologyLoading({
       hubShare={0.9}
       start={{ title: "Outside", nodes: [], loadingRows: outside }}
       end={{ title: "Inside", nodes: [], loadingRows: inside }}
-      hub={{ mark: <WireHost />, eyebrow: "This server" }}
+      hub={{ className: HUB_ROOM, mark: <WireHost />, eyebrow: "This server" }}
     />
   )
 }
