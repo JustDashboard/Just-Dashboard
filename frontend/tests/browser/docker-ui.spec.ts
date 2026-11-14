@@ -717,7 +717,7 @@ test("the network list reads down the row on a phone", async ({ page }) => {
   await page.goto("/docker/networks")
   await expect(page.getByRole("columnheader")).toHaveCount(0)
   const networkList = page.getByRole("list").filter({ hasText: "172.17.0.0/16" })
-  await expect(networkList.getByRole("button", { name: "bridge" })).toBeVisible()
+  await expect(networkList.getByRole("link", { name: "bridge" })).toBeVisible()
   await expect(networkList.getByText("172.17.0.0/16")).toBeVisible()
   await expect(networkList.getByText("2 containers")).toBeVisible()
   await expect(networkList.getByText(/Docker's own/)).toBeVisible()
@@ -1544,17 +1544,19 @@ test("the inspect tab does not undo the masking the environment tab applies", as
  * "Browse files" closed this panel, changed page, and asked the operator to
  * recognise the volume again as a path under /var/lib/docker — for an answer
  * ("did the backup land", "what did it write") that is four lines long. The
- * contents are in the panel now, and the button survives inside the browser
- * pointed at whichever directory was reached.
+ * contents are on the volume's own page now, the view it opens on, and the
+ * button survives inside the browser pointed at whichever directory was
+ * reached.
  */
 test("a volume's contents are in the volume, not a page away", async ({ page }) => {
   await mockDocker(page)
   await mockVolumeFiles(page)
   await page.route("**/api/v1/docker/volumes/app-data", (route) => json(route, volumes[0]))
   await page.goto("/docker/volumes")
-  await page.getByRole("button", { name: "app-data", exact: true }).first().click()
+  await page.getByRole("link", { name: "app-data", exact: true }).first().click()
+  await expect(page).toHaveURL(/\/docker\/volumes\/app-data$/)
 
-  const panel = page.getByRole("dialog")
+  const panel = page.locator("[data-slot=pane]")
   await expect(panel.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
   await expect(panel.getByRole("button", { name: "base" })).toBeVisible()
 
@@ -1566,21 +1568,18 @@ test("a volume's contents are in the volume, not a page away", async ({ page }) 
 
   // Postgres' own files, under a running container: reading is safe, and the
   // editor one click below this line is not.
-  await expect(panel.getByText(/corrupts it in ways that only show up later/)).toBeVisible()
+  await expect(page.getByText(/corrupts it in ways that only show up later/)).toBeVisible()
 
-  // And a file opens in the editor, with its contents, over the panel rather
-  // than instead of it. Both are Radix dialogs, and a nested one that
-  // dismissed its parent would drop the operator back on the volumes table
-  // with no idea what they had been reading. While the editor is open the
-  // panel is deliberately aria-hidden behind it; closing has to land back on
-  // the volume, still showing its contents.
+  // And a file opens in the editor, with its contents, over the page rather
+  // than instead of it; closing it lands back on the volume, still showing
+  // its contents.
   await page.getByRole("button", { name: "postgresql.conf" }).click()
   await expect(page.getByRole("heading", { name: "postgresql.conf" })).toBeVisible()
   await expect(page.getByText("shared_buffers")).toBeVisible()
 
   await page.keyboard.press("Escape")
   await expect(page.getByRole("heading", { name: "postgresql.conf" })).toHaveCount(0)
-  await expect(page.getByRole("heading", { name: "app-data" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "About app-data" })).toBeVisible()
   await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
 })
 
@@ -1596,11 +1595,10 @@ test("the storage browser draws a directory the way the file manager does", asyn
   await mockDocker(page)
   await mockVolumeFiles(page)
   await page.route("**/api/v1/docker/volumes/app-data", (route) => json(route, volumes[0]))
-  await page.goto("/docker/volumes")
-  await page.getByRole("button", { name: "app-data", exact: true }).first().click()
+  await page.goto("/docker/volumes/app-data")
 
-  // The sheet has a table of its own, of the containers mounting the volume.
-  const panel = page.getByRole("dialog").locator("[data-slot=pane]")
+  // The volume's page opens on its files.
+  const panel = page.locator("[data-slot=pane]")
   await expect(panel.getByRole("columnheader", { name: "Name" })).toBeVisible()
   await expect(panel.getByRole("columnheader", { name: "Size" })).toBeVisible()
   await expect(panel.getByText("1 folder, 1 file · 28.0 KB")).toBeVisible()

@@ -47,6 +47,11 @@ export function signsIn(role: Pick<DbRole, "login" | "locked">): boolean {
   return role.login && !role.locked
 }
 
+/** How many sessions an account holds now, as its line says it. */
+export function sessionWords(count: number): string {
+  return count > 0 ? `${plural(count, "session")} now` : "no session now"
+}
+
 export type AccountShow = "" | "admins" | "sessions" | "blocked"
 
 export function accountCounts(roles: readonly DbRole[]) {
@@ -671,6 +676,19 @@ export function accountDsn(
 // ---------------------------------------------------------------------------
 // A key–value server's ACL users
 // ---------------------------------------------------------------------------
+
+export type AclShow = "" | "enabled" | "unrestricted" | "open"
+
+/** The users one of the list's chips selects: all, switched on, held to nothing, open to any password. */
+export function filterAclUsers(users: readonly RedisACLUser[], show: AclShow): RedisACLUser[] {
+  return users.filter(
+    (user) =>
+      show === "" ||
+      (show === "enabled" && user.enabled) ||
+      (show === "unrestricted" && user.unrestricted) ||
+      (show === "open" && user.noPassword && user.enabled),
+  )
+}
 
 /** What a user may do, in a line: the rule without its on/off and its flags. */
 export function aclSummary(user: RedisACLUser): string {

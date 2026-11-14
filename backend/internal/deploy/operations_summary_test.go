@@ -225,7 +225,7 @@ func TestOperationsSummaryReadsEveryOwnerOnceAndDiagnosesNothing(t *testing.T) {
 		t.Fatalf("storage = %#v", operations.Storage)
 	}
 	if operations.Storage.Mounts[0].Kind != "volume" || operations.Storage.Mounts[0].Status != "present" ||
-		operations.Storage.Mounts[0].DeepLink != "/docker/volumes?volume=app-data" {
+		operations.Storage.Mounts[0].DeepLink != "/docker/volumes/app-data" {
 		t.Fatalf("volume mount = %#v", operations.Storage.Mounts[0])
 	}
 	if operations.Storage.Mounts[1].Kind != "bind" || operations.Storage.Mounts[1].Status != "present" {

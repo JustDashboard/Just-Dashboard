@@ -104,7 +104,8 @@ export function TrafficReadings({ projectId }: { projectId: number }) {
   )
 }
 
-function failingWords(rate: number) {
+/** The failing share as the sentence both a project's Overview and its Logs say. */
+export function failingWords(rate: number) {
   if (rate <= 0) return "No requests failed"
   const share = rate * 100
   return share < 0.1 ? "Under 0.1% of requests failed" : `${percent(share, 1)} of requests failed`

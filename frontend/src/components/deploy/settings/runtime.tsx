@@ -53,6 +53,7 @@ import {
   type ContainerPeaks,
 } from "@/components/deploy/settings/limit-field"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { StrategyPicture } from "@/components/deploy/settings/strategy-picture"
 import { RollbackWatchForm } from "@/components/deploy/settings/rollback-watch"
 import {
   REPLAY_DRAFT_FIELD_IDS,
@@ -769,7 +770,7 @@ function RuntimeForm({
               rather than a sentence with a clause hung off it. */}
           <OptionRow
             title="Publish on a fixed host port"
-            hint="One release at a time can hold the port, so blue / green is unavailable."
+            hint="One release at a time holds it, so no blue / green"
             tone={exposed ? "warning" : "default"}
             checked={fixedPort}
             onCheckedChange={(on) => {
@@ -954,8 +955,7 @@ function RuntimeForm({
                       nothing else would tell a screen reader it is the one
                       saved. */}
                   {failsNext && <span className="sr-only">Current strategy, unavailable. </span>}
-                  Starts the new release beside the live one and moves traffic once its checks pass
-                  — no downtime.
+                  Beside the live one until its checks pass — no downtime.
                 </>
               }
               selected={blueGreen}
@@ -972,8 +972,7 @@ function RuntimeForm({
                   {canary && failsNext && (
                     <span className="sr-only">Current strategy, unavailable. </span>
                   )}
-                  Gives the new release a share of the requests beside the live one first, and
-                  removes it if it does worse.
+                  A share of the requests first, removed if it does worse.
                 </>
               }
               selected={canary}
@@ -985,7 +984,7 @@ function RuntimeForm({
               title="Stop first"
               mark={Pause}
               index={2}
-              description="Stops the live release, then starts the new one — a moment of downtime."
+              description="The live one stops, then the new one starts."
               selected={runtime.strategy === "stop_first"}
               disabled={!canEdit}
               onClick={() => draft.set((prev) => withStrategy(prev, "stop_first"))}
@@ -1005,6 +1004,13 @@ function RuntimeForm({
             </FormNote>
           )}
         </Field>
+        <StrategyPicture
+          key={runtime.strategy}
+          strategy={canary ? "canary" : blueGreen ? "blue_green" : "stop_first"}
+          share={terms.percent}
+          window={windowWords(terms.durationSeconds)}
+          hostname={configuration.domains[0]?.hostname}
+        />
         {canary && (
           <div className="animate-rise space-y-4">
             <FieldRow columns={2}>
@@ -1067,7 +1073,7 @@ function RuntimeForm({
             <OptionList>
               <OptionRow
                 title="Promote on its own"
-                hint="At the end of a window it got through without doing worse, the new release goes live. Off, it keeps its share until you promote or abort it from the run."
+                hint="Goes live after a window it got through; off, it waits for you"
                 checked={terms.autoPromote ?? false}
                 onCheckedChange={(autoPromote) =>
                   patch({ canary: { ...terms, autoPromote: autoPromote || undefined } })
@@ -1330,7 +1336,7 @@ function RuntimeForm({
             <OptionList>
               <OptionRow
                 title="Read-only root filesystem"
-                hint="The application can write only to its volumes and to the paths kept writable below; a write anywhere else fails."
+                hint="Writes land only in its volumes and the paths kept writable below"
                 checked={flags.readOnlyRootfs}
                 onCheckedChange={(on) =>
                   patchFlags({
@@ -1452,7 +1458,7 @@ function RuntimeForm({
               left the switch alone. */}
           <OptionRow
             title="Privileged container"
-            hint="Removes almost every restriction separating the container from the server — anything that gets into it has the machine."
+            hint="Anything that gets into it has the machine"
             tone={runtime.privileged ? "danger" : "default"}
             checked={runtime.privileged ?? false}
             onCheckedChange={(privileged) => patch({ privileged: privileged || undefined })}
@@ -1460,7 +1466,7 @@ function RuntimeForm({
           />
           <OptionRow
             title="Use the host network"
-            hint="Every port it listens on is immediately open on the server, and it can reach anything bound to 127.0.0.1."
+            hint="Its ports open on the server, and 127.0.0.1 is in its reach"
             tone={runtime.hostNetwork ? "warning" : "default"}
             checked={runtime.hostNetwork ?? false}
             onCheckedChange={(hostNetwork) => patch({ hostNetwork: hostNetwork || undefined })}
@@ -1578,7 +1584,7 @@ function RuntimeForm({
                 <OptionList>
                   <OptionRow
                     title="Pull request previews get them too"
-                    hint="Off, a preview of this environment runs without GPUs: it runs a branch nobody has deployed yet."
+                    hint="A preview runs a branch nobody has deployed yet"
                     checked={flags.gpuPreviews}
                     onCheckedChange={(gpuPreviews) => patchFlags({ gpuPreviews })}
                     disabled={!canEdit}

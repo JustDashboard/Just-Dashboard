@@ -2,17 +2,23 @@
 
 import { useId } from "react"
 import { CloudDownload, Warning } from "@/components/icons"
-import { bytes, plural } from "@/lib/format"
+import { plural } from "@/lib/format"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Disclosure, Field, FormNote, OptionList, OptionRow, Statement } from "@/components/form"
 import { Notice } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { hasProductLogo, ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { Engine } from "@/components/database/engine"
+import { EngineMark } from "@/components/database/kit"
 import { newDatabaseProblem } from "@/components/database/ops/backups-model"
-import { importNameProblem, sourceTotals } from "@/components/database/import/model"
+import {
+  importNameProblem,
+  sourceProduct,
+  sourceTotals,
+  sourceWords,
+} from "@/components/database/import/model"
 import type { DbImportInspection, DbImportMode } from "@/components/database/import/types"
 
 /** What the plan step asks, kept by the page so a step back loses none of it. */
@@ -65,45 +71,44 @@ export function PlanStep({
   const databaseProblem = newDatabaseProblem(plan.database, { numbered, current })
   const nameProblem = replication ? importNameProblem(plan.name) : undefined
   const ready = blockers.length === 0 && !databaseProblem && !nameProblem
-  const totals = report ? sourceTotals(report.tables) : undefined
-  const sourceLine = [
-    inspection.source.flavorLabel ?? inspection.source.flavor,
-    inspection.source.version,
-  ]
-    .filter(Boolean)
-    .join(" ")
+  const holds =
+    replication && report
+      ? sourceWords(sourceTotals(report.tables), report.sequences ?? 0)
+      : undefined
+  const sourceLine = sourceProduct(inspection.source)
 
   return (
     <FlowPanel aria-label="Plan" aria-busy={starting} className="min-w-0">
       <FlowPanelHeader
         title={
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate">
-              {inspection.source.database
-                ? `${inspection.source.database} on ${inspection.source.address}`
-                : inspection.source.address}
-            </span>
-            {sourceLine && (
-              <span className="truncate text-hint font-normal text-muted-foreground">
-                {sourceLine}
-                {inspection.source.user ? ` · as ${inspection.source.user}` : ""}
-              </span>
+          // The source as the product that answered, its name, and what it
+          // holds as one line: four tiles said the same as figures to add up.
+          <span className="flex min-w-0 items-center gap-3">
+            {hasProductLogo(inspection.source.flavor) ? (
+              <ProductLogo id={inspection.source.flavor} size="sm" />
+            ) : (
+              <EngineMark engine={engine} size="sm" />
             )}
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate">
+                {inspection.source.database
+                  ? `${inspection.source.database} on ${inspection.source.address}`
+                  : inspection.source.address}
+              </span>
+              {(sourceLine || holds) && (
+                <span
+                  data-slot="import-source"
+                  className="text-hint font-normal tracking-normal text-pretty whitespace-normal text-muted-foreground"
+                >
+                  {[sourceLine, inspection.source.user && `as ${inspection.source.user}`, holds]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              )}
+            </span>
           </span>
         }
       />
-      {replication && totals && (
-        <StatGrid columns={4} dense className="border-b border-hairline">
-          <StatTile label="Tables" value={totals.tables.toLocaleString()} />
-          <StatTile
-            label="Rows"
-            value={`${totals.uncounted ? "≥ " : "≈ "}${totals.rows.toLocaleString()}`}
-            hint={totals.uncounted ? "Some tables were never counted" : undefined}
-          />
-          <StatTile label="Size" value={bytes(totals.size)} />
-          <StatTile label="Sequences" value={(report?.sequences ?? 0).toLocaleString()} />
-        </StatGrid>
-      )}
       <FlowPanelBody className="space-y-4">
         {refusal && (
           <Notice tone="danger" title="It was not started">

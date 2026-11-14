@@ -1636,6 +1636,15 @@ func (s *Server) describeLogSource(ctx context.Context, t logTarget) (logsx.Sour
 				if u, _, err := s.modules.systemd.Show(ctx, t.id); err == nil {
 					src.Status = u.ActiveState
 				}
+			} else if s.modules.systemd.Available() {
+				// What the whole journal is: its size on disk and how far
+				// back it goes. Asked only here, where one source is
+				// described, and never by the index every page reads.
+				facts := procs.ReadJournalFacts(ctx)
+				src.Size = facts.Size
+				if !facts.Oldest.IsZero() {
+					src.Oldest = &facts.Oldest
+				}
 			}
 		case logsx.KindJournalID:
 			src.Detail = "The journal's lines from " + t.label

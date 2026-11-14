@@ -250,9 +250,12 @@ test("Key Vault asks for a vault, a tenant, a cloud and an application", async (
   await expect(
     kvRow.getByText(/tenant 0a1b2c3d-0000-4000-8000-000000000001 · client secret/),
   ).toBeVisible()
+  await expect(kvRow.getByText("Refused 3m ago")).toBeVisible()
+  await kvRow.getByRole("button", { name: /^Refused 3m ago/ }).click()
   await expect(
-    kvRow.getByText(/Test failed .*: Entra sign-in refused: invalid_client: AADSTS7000215/),
+    page.getByText(/Test failed .*: Entra sign-in refused: invalid_client: AADSTS7000215/),
   ).toBeVisible()
+  await page.keyboard.press("Escape")
 
   await page.getByRole("button", { name: "Add store" }).click()
   const sheet = page.getByRole("dialog", { name: "Add store" })
@@ -297,20 +300,37 @@ test("a store whose last read failed says so in its own words, and Test reaches 
   const writes = await withStores(page, [bao, infisical])
   await page.goto("/deploy/secret-stores")
   const row = storeRow(page, "bao-prod")
-  await expect(
-    row.getByText(
-      /A run's read failed .*: AppRole sign-in refused: invalid role or secret ID \(400\)/,
-    ),
-  ).toBeVisible()
-  await expect(row.locator(".text-warning")).toHaveCount(1)
-  await expect(row.getByText("Read by api-production (production) as DATABASE_URL")).toBeVisible()
+  // On the row: a dot and a word. The store's own words, and the variables
+  // that read it, are a press away.
+  await expect(row.getByText("Refused 2m ago")).toBeVisible()
+  await row.getByRole("button", { name: /^Refused 2m ago/ }).click()
+  const refusal = page.getByText(
+    /A run's read failed .*: AppRole sign-in refused: invalid role or secret ID \(400\)/,
+  )
+  await expect(refusal).toBeVisible()
+  await expect(refusal).toHaveClass(/text-warning/)
+  await page.keyboard.press("Escape")
+  await row.getByRole("button", { name: "Read by 1" }).click()
+  const readers = page.getByRole("list", { name: "Variables reading bao-prod" })
+  await expect(readers.getByRole("link", { name: "api-production" })).toHaveAttribute(
+    "href",
+    "/deploy/7/settings/variables",
+  )
+  await expect(readers.getByText("production as DATABASE_URL")).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(row.getByText(/mount secret · AppRole/)).toBeVisible()
   const other = storeRow(page, "infisical")
-  await expect(other.getByText(/Tested .*: Signed in; 12 secrets at \/ in prod/)).toBeVisible()
+  await expect(other.getByText("Answering")).toBeVisible()
+  await other.getByRole("button", { name: /^Answering/ }).click()
+  await expect(page.getByText(/Tested .*: Signed in; 12 secrets at \/ in prod/)).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(other.getByText(/previews too/)).toBeVisible()
-  await expect(other.getByText("No variable reads it yet")).toBeVisible()
+  await expect(other.getByText("Not read")).toBeVisible()
+  await expect(
+    page.locator("[data-slot=panel-header]").filter({ hasText: "Stores" }),
+  ).toContainText("2 stores · 1 refused")
 
-  await row.getByRole("button", { name: "Test" }).click()
+  await row.getByRole("button", { name: "Test", exact: true }).click()
   await expect(page.getByText("bao-prod answered")).toBeVisible()
   await expect
     .poll(() => writes.map((write) => `${write.method} ${write.path}`))

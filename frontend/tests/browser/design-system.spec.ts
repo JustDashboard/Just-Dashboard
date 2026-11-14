@@ -123,6 +123,7 @@ const SURFACES = [
   "/system-users/user/postgres",
   "/system-users/new",
   "/system-users/groups",
+  "/system-users/groups/docker",
   "/system-users/defaults",
   "/packages",
   "/security",

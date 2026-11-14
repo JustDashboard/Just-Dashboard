@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import Link from "next/link"
+import { useEffect, useMemo, useState } from "react"
 import { get } from "@/lib/api"
 import { bytes, dateFormatter, rate } from "@/lib/format"
 import type { NetworkHistory, NetworkLink, NetworkLivePoint } from "@/lib/types"
@@ -16,49 +17,26 @@ import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/components/deploy/vocabulary"
 import { useAuth } from "@/hooks/use-auth"
 import { ChartPanel } from "@/components/metrics/chart-panel"
-import { ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { ChartActivity } from "@/components/icons"
 import { Field } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { LinkGlyph, ROLE_LABEL } from "@/components/network/marks"
 import { RX, TX } from "@/components/network/rate-pair"
-
-export type TrafficWindow = "live" | "1h" | "6h" | "24h" | "7d"
-/** An explicit recorded range, in unix seconds: typed, or dragged on a chart. */
-export type TrafficRange = { from: number; to: number }
-export type TrafficSpan = TrafficWindow | TrafficRange
-
-export const WINDOWS: { key: TrafficWindow; label: string }[] = [
-  { key: "live", label: "Live" },
-  { key: "1h", label: "1h" },
-  { key: "6h", label: "6h" },
-  { key: "24h", label: "24h" },
-  { key: "7d", label: "7d" },
-]
-
-const WINDOW_SECONDS: Record<Exclude<TrafficWindow, "live">, number> = {
-  "1h": 3600,
-  "6h": 6 * 3600,
-  "24h": 86400,
-  "7d": 7 * 86400,
-}
-
-export const isRange = (span: TrafficSpan): span is TrafficRange => typeof span === "object"
-
-/** The span as an explicit window ending now (or at its own end), in unix seconds. */
-export function spanBounds(span: TrafficSpan, now: number): TrafficRange {
-  if (isRange(span)) return span
-  if (span === "live") return { from: now - 15 * 60, to: now }
-  return { from: now - WINDOW_SECONDS[span], to: now }
-}
-
-/** The named window that covers a span back from now, for readings that only take one. */
-export function coveringWindow(span: TrafficSpan, now: number): Exclude<TrafficWindow, "live"> {
-  if (!isRange(span)) return span === "live" ? "1h" : span
-  const back = now - span.from
-  return (["1h", "6h", "24h", "7d"] as const).find((w) => WINDOW_SECONDS[w] >= back) ?? "7d"
-}
+import { Skeleton } from "@/components/ui/skeleton"
+import { useViewState } from "@/lib/view-state"
+import { cn } from "@/lib/utils"
+import {
+  WINDOWS,
+  isRange,
+  spanBounds,
+  type TrafficRange,
+  type TrafficSpan,
+  type TrafficWindow,
+} from "./span"
+import { thresholdWords, throughputWords } from "./words"
 
 const rangeEnd = dateFormatter({ dateStyle: "short", timeStyle: "short" })
 const rangeLabel = (r: TrafficRange) => `${rangeEnd(r.from * 1000)} – ${rangeEnd(r.to * 1000)}`
@@ -203,13 +181,19 @@ function RangeForm({
  * cards two to a row. Live is the two-second ring the page already holds,
  * with each device's packets a second and the faults of the last fifteen
  * minutes under it; the recorded windows are the recorded samples, each
- * bucket its mean with its busiest two seconds behind it, the window's 95th
- * percentile as a line across the chart, and — for an administrator — the
- * network changes and saved incidents of the window as marks on the time
- * axis. Dragging across a recorded chart narrows every chart to that span.
- * Docker's veths and the kernel's own devices are left out — every
- * container's traffic is the Containers block's, and loopback's is this
- * machine talking to itself.
+ * bucket its mean with its busiest two seconds behind it, the rate each
+ * direction stayed under nineteen times in twenty as a line across the chart,
+ * and — for an administrator — the network changes and saved incidents of the
+ * window as marks on the time axis. Dragging across a recorded chart narrows
+ * every chart to that span. Docker's veths and the kernel's own devices are
+ * left out — every container's traffic is the Containers block's, and
+ * loopback's is this machine talking to itself.
+ *
+ * It holds still (§11 of the rubric: D11). Before the devices are known it
+ * draws as many blocks as it drew last time, and a block is one height
+ * whether it is waiting, collecting or drawn: the page was a grey panel that
+ * became nine charts, and each chart grew by its legend when its first
+ * reading landed.
  */
 export function InterfaceCharts({
   links,
@@ -217,14 +201,19 @@ export function InterfaceCharts({
   span,
   onSpan,
 }: {
-  links: NetworkLink[]
+  /** Undefined until the first inventory lands. */
+  links: NetworkLink[] | undefined
   live: Record<string, NetworkLivePoint[]>
   span: TrafficSpan
   onSpan: (next: TrafficSpan) => void
 }) {
   const { can } = useAuth()
   const admin = can("system.admin")
-  const devices = links.filter((l) => l.role !== "container" && l.owner !== "kernel" && l.adminUp)
+  const devices = links?.filter((l) => l.role !== "container" && l.owner !== "kernel" && l.adminUp)
+  const [remembered, remember] = useViewState("network.traffic.devices", 5)
+  useEffect(() => {
+    if (devices && devices.length !== remembered) remember(devices.length)
+  }, [devices, remembered, remember])
   const recorded = span !== "live"
   const query = isRange(span)
     ? { from: span.from, to: span.to, points: 240 }
@@ -281,46 +270,66 @@ export function InterfaceCharts({
   }, [recorded, history.data])
   const rowsFor = (name: string) => (recorded ? recordedRows : liveRows).get(name) ?? NO_ROWS
 
-  if (recorded && !history.data) {
-    return history.error ? (
-      <ErrorState error={history.error} onRetry={history.refresh} />
-    ) : (
-      <LoadingPanel />
+  if (!devices) {
+    return (
+      <ChartGrid>
+        {Array.from({ length: Math.max(1, remembered) }, (_, i) => (
+          <ChartGhost key={i} lead={i === 0} recorded={recorded} />
+        ))}
+      </ChartGrid>
     )
   }
-
+  if (recorded && !history.data && history.error) {
+    return <ErrorState error={history.error} onRetry={history.refresh} retryable />
+  }
   if (recorded && history.data && !history.data.recording) {
     return (
-      <Notice title="Nothing is recorded">
-        The metrics retention is zero (JD_METRICS_RETENTION), so the server keeps no history of any
-        device. Live still shows the last fifteen minutes.
-      </Notice>
+      <EmptyState
+        icon={ChartActivity}
+        title="Nothing is recorded"
+        description={
+          <>
+            The metrics retention is zero (<span className="font-mono">JD_METRICS_RETENTION</span>),
+            so the server keeps no history of any device. Live still shows the last fifteen minutes.
+          </>
+        }
+        action={
+          <Button size="sm" onClick={() => onSpan("live")}>
+            Show live
+          </Button>
+        }
+      />
     )
   }
-  const [first, ...rest] = devices
-  if (!first) return null
+  if (devices.length === 0) {
+    return (
+      <EmptyState
+        icon={ChartActivity}
+        title="No device is up"
+        description="Every device that carries traffic of its own is down, or belongs to a container."
+        action={
+          <Link
+            href="/network/interfaces"
+            className="text-body font-medium text-brand hover:underline"
+          >
+            Interfaces
+          </Link>
+        }
+      />
+    )
+  }
   const events = annotations.data
   const zoom = recorded
     ? (from: number, to: number) =>
         onSpan({ from: Math.floor(from / 1000), to: Math.ceil(to / 1000) })
     : undefined
   const retained = history.data?.retainedFrom
-  const chartFor = (link: NetworkLink, height?: number) => (
-    <DeviceChart
-      key={link.name}
-      link={link}
-      rows={rowsFor(link.name)}
-      span={span}
-      height={height}
-      livePoints={live[link.name]}
-      percentiles={history.data?.percentiles?.[link.name]}
-      events={events}
-      onZoom={zoom}
-    />
-  )
+  const reading = recorded && !history.data
   return (
     <div className="flex min-w-0 flex-col gap-8">
-      {history.error && <ErrorState error={history.error} onRetry={history.refresh} />}
+      {history.data && history.error && (
+        <ErrorState error={history.error} onRetry={history.refresh} retryable />
+      )}
       {isRange(span) && retained && span.from < retained && (
         <Notice title="The start of this range is no longer kept">
           The metrics retention keeps interface history back to{" "}
@@ -328,12 +337,71 @@ export function InterfaceCharts({
           was pruned, not because nothing moved.
         </Notice>
       )}
-      {chartFor(first, 220)}
-      {rest.length > 0 && (
-        <div className="grid min-w-0 gap-x-10 gap-y-8 lg:grid-cols-2">
-          {rest.map((link) => chartFor(link))}
-        </div>
-      )}
+      <ChartGrid>
+        {devices.map((link, i) => (
+          <DeviceChart
+            key={link.name}
+            link={link}
+            rows={rowsFor(link.name)}
+            span={span}
+            reading={reading}
+            lead={i === 0}
+            livePoints={live[link.name]}
+            percentiles={history.data?.percentiles?.[link.name]}
+            events={events}
+            onZoom={zoom}
+          />
+        ))}
+      </ChartGrid>
+    </div>
+  )
+}
+
+const LEAD_HEIGHT = 220
+const CHART_HEIGHT = 160
+
+/**
+ * What a block stands on besides its plot (`--plot`), and so how tall it is
+ * held in every state: the title line, the legend's three lines and the line
+ * under it, which is one line on the live window and the window's spread on
+ * a recorded one. The spread wraps between its four parts and never inside
+ * one: a phone's column takes one part to a line, half the page two, the
+ * whole page all four, and each is given that room before it has anything to
+ * say, so a first reading fills its block instead of stretching it.
+ */
+function blockHeight(lead: boolean, recorded: boolean) {
+  if (!recorded) return "min-h-[calc(var(--plot)+157px)]"
+  return lead
+    ? "min-h-[calc(var(--plot)+207px)] sm:min-h-[calc(var(--plot)+174px)] xl:min-h-[calc(var(--plot)+157px)]"
+    : "min-h-[calc(var(--plot)+207px)] xl:min-h-[calc(var(--plot)+174px)]"
+}
+const spreadHeight = (lead: boolean) =>
+  lead ? "min-h-[4lh] sm:min-h-[2lh] xl:min-h-[1lh]" : "min-h-[4lh] xl:min-h-[2lh]"
+const plot = (lead: boolean) =>
+  ({ "--plot": `${lead ? LEAD_HEIGHT : CHART_HEIGHT}px` }) as React.CSSProperties
+
+/** The uplink across the page, then two to a row. */
+function ChartGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid min-w-0 gap-x-10 gap-y-8 lg:grid-cols-2 lg:*:first:col-span-2">
+      {children}
+    </div>
+  )
+}
+
+/** A device's block before the devices are known. */
+function ChartGhost({ lead, recorded }: { lead: boolean; recorded: boolean }) {
+  return (
+    <div
+      data-slot="device-chart"
+      aria-hidden
+      className={cn("flex min-w-0 flex-col", blockHeight(lead, recorded))}
+      style={plot(lead)}
+    >
+      <div className="flex items-center justify-between border-b border-hairline pb-3">
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="h-3.5 w-16" />
+      </div>
     </div>
   )
 }
@@ -353,7 +421,8 @@ function DeviceChart({
   link,
   rows,
   span,
-  height = 160,
+  reading,
+  lead,
   livePoints,
   percentiles,
   events,
@@ -362,7 +431,10 @@ function DeviceChart({
   link: NetworkLink
   rows: { ts: number; rx: number; tx: number }[]
   span: TrafficSpan
-  height?: number
+  /** The recorded window has not answered yet. */
+  reading: boolean
+  /** The first device, drawn across the page and taller. */
+  lead: boolean
   livePoints?: NetworkLivePoint[]
   percentiles?: Percentiles
   events?: TrafficAnnotation[]
@@ -374,63 +446,79 @@ function DeviceChart({
     () =>
       !live && percentiles && percentiles.samples > 1
         ? [
-            { value: percentiles.rxP95, label: `p95 in ${rate(percentiles.rxP95)}` },
-            { value: percentiles.txP95, label: `p95 out ${rate(percentiles.txP95)}` },
+            { value: percentiles.rxP95, label: thresholdWords("In", percentiles.rxP95) },
+            { value: percentiles.txP95, label: thresholdWords("Out", percentiles.txP95) },
           ]
         : undefined,
     [live, percentiles],
   )
+  const actions = useMemo(
+    () => (
+      <span className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
+        <LinkGlyph kind={link.kind} className="size-3.5" />
+        {ROLE_LABEL[link.role]}
+      </span>
+    ),
+    [link.kind, link.role],
+  )
   const last = livePoints?.at(-1)
   const faults = faultsOf(livePoints)
   return (
-    <ChartPanel
-      plain
-      title={title}
-      actions={
-        <span className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
-          <LinkGlyph kind={link.kind} className="size-3.5" />
-          {ROLE_LABEL[link.role]}
-        </span>
-      }
-      rows={rows}
-      series={live ? LIVE_SERIES : RECORDED_SERIES}
-      format={formatRate}
-      axisFormat={axisRate}
-      showPeaks={!live}
-      height={height}
-      thresholds={thresholds}
-      events={live ? undefined : events}
-      onZoom={onZoom}
-      note={
-        live
-          ? "Collecting — the first readings arrive within a few seconds."
-          : "Nothing recorded for this device in this window yet."
-      }
-      footer={
-        live ? (
-          last?.rxp !== undefined ? (
+    <div
+      data-slot="device-chart"
+      className={cn("flex min-w-0 flex-col", blockHeight(lead, !live))}
+      style={plot(lead)}
+    >
+      <ChartPanel
+        plain
+        title={title}
+        actions={actions}
+        rows={rows}
+        series={live ? LIVE_SERIES : RECORDED_SERIES}
+        format={formatRate}
+        axisFormat={axisRate}
+        showPeaks={!live}
+        height={lead ? LEAD_HEIGHT : CHART_HEIGHT}
+        thresholds={thresholds}
+        events={live ? undefined : events}
+        onZoom={onZoom}
+        note={
+          live
+            ? "Collecting — the first readings arrive within a few seconds."
+            : reading
+              ? "Reading the recorded samples…"
+              : "Nothing recorded for this device in this window yet."
+        }
+        footer={
+          live ? (
+            last?.rxp !== undefined ? (
+              <span
+                className="numeric text-hint text-muted-foreground"
+                aria-label={`${link.name} packets`}
+              >
+                {packetRate(last.rxp)} packets in · {packetRate(last.txp)} out
+                {faults.errors + faults.drops > 0
+                  ? ` · ${faults.errors} errors, ${faults.drops} drops in 15 min`
+                  : " · no errors or drops in 15 min"}
+              </span>
+            ) : undefined
+          ) : percentiles && percentiles.samples > 0 ? (
             <span
-              className="numeric text-hint text-muted-foreground"
-              aria-label={`${link.name} packets`}
+              className={cn(
+                "numeric flex flex-wrap content-start gap-x-4 text-hint text-muted-foreground",
+                spreadHeight(lead),
+              )}
+              aria-label={`${link.name} throughput spread`}
             >
-              {packetRate(last.rxp)} packets in · {packetRate(last.txp)} out
-              {faults.errors + faults.drops > 0
-                ? ` · ${faults.errors} errors, ${faults.drops} drops in 15 min`
-                : " · no errors or drops in 15 min"}
+              {throughputWords(percentiles).map((part) => (
+                <span key={part} className="whitespace-nowrap">
+                  {part}
+                </span>
+              ))}
             </span>
           ) : undefined
-        ) : percentiles && percentiles.samples > 0 ? (
-          <span
-            className="numeric text-hint text-muted-foreground"
-            aria-label={`${link.name} percentiles`}
-          >
-            p50 ↓ {rate(percentiles.rxP50)} ↑ {rate(percentiles.txP50)} · p95 ↓{" "}
-            {rate(percentiles.rxP95)} ↑ {rate(percentiles.txP95)} · p99 ↓ {rate(percentiles.rxP99)}{" "}
-            ↑ {rate(percentiles.txP99)} — over {percentiles.samples} {percentiles.basisSeconds}s
-            intervals
-          </span>
-        ) : undefined
-      }
-    />
+        }
+      />
+    </div>
   )
 }

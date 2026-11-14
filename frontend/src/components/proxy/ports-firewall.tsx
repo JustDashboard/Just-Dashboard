@@ -77,9 +77,19 @@ export function firewallWords(fw: ListenerFirewall): {
   }
 }
 
+/**
+ * What the firewall column says with no verdict to word: a loopback socket
+ * needs none, and one off the machine had none read — the listing sends a
+ * verdict only where a firewall it can read is installed. It said "Loopback
+ * only" for both, so a database on a public address read as loopback.
+ */
+export function noFirewallWords(socket: Pick<Socket, "exposed">): string {
+  return socket.exposed ? "No firewall read" : "Loopback only"
+}
+
 export function FirewallVerdict({ socket }: { socket: Socket }) {
   const fw = socket.firewall
-  if (!fw) return <span className="text-xs text-muted-foreground">Loopback only</span>
+  if (!fw) return <span className="text-xs text-muted-foreground">{noFirewallWords(socket)}</span>
   const words = firewallWords(fw)
   return (
     <div className="min-w-0">
@@ -217,9 +227,12 @@ export function OrphanRules({
   if (rules.length === 0) return null
   const writable = admin && firewall?.editable
   return (
-    <Panel>
-      <PanelHeader title="Rules with nothing behind them" />
-      <PanelBody>
+    <Panel plain>
+      <PanelHeader
+        title="Rules with nothing behind them"
+        actions={<span className="numeric text-hint text-muted-foreground">{rules.length}</span>}
+      />
+      <PanelBody flush>
         <ul className="divide-y divide-hairline">
           {rules.map((rule) => (
             <li key={rule.number ?? rule.raw} className="flex min-w-0 items-center gap-3 py-2.5">
@@ -274,7 +287,7 @@ export function OrphanRules({
           ))}
         </ul>
       </PanelBody>
-      <PanelFooter className="text-hint text-muted-foreground">
+      <PanelFooter className="mt-3 text-hint text-muted-foreground">
         No socket listens on these ports and Docker publishes none of them, so each rule holds a
         port open for whatever binds it next.
       </PanelFooter>

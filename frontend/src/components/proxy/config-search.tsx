@@ -94,28 +94,12 @@ export function EffectiveConfigView({
       </Toolbar>
 
       {refusal ? (
-        // nginx prints what it loads only for a configuration that passes its
-        // test, so a refusal is the test: each line where it points.
-        <div className="space-y-3">
-          <Notice tone="danger" icon={Warning} title="nginx refuses its configuration">
-            With nothing it would load, there is nothing to show or search. Fix what the test found,
-            then read again.
-          </Notice>
-          {(refusal.validation?.diagnostics ?? []).length > 0 && (
-            <DiagnosticList
-              diagnostics={refusal.validation?.diagnostics ?? []}
-              canOpen={(file) => openableFile(file, [root])}
-              onOpen={(place) => place.file && onOpen(place.file, place.line)}
-            />
-          )}
-          {refusal.validation?.output && (
-            <Disclosure quiet summary="nginx -T output">
-              <Well className="max-h-64 break-words whitespace-pre-wrap">
-                {refusal.validation.output}
-              </Well>
-            </Disclosure>
-          )}
-        </div>
+        <RefusedConfig
+          refusal={refusal}
+          root={root}
+          onOpen={onOpen}
+          what="With nothing it would load, there is nothing to show or search."
+        />
       ) : effective.error ? (
         <ErrorState error={effective.error} onRetry={readAgain} />
       ) : !config ? (
@@ -147,6 +131,46 @@ export function EffectiveConfigView({
             </ChoiceList>
           </div>
         )
+      )}
+    </div>
+  )
+}
+
+/**
+ * nginx prints what it loads only for a configuration that passes its test,
+ * so every view that reads `nginx -T` — what it loads, its settings, the
+ * linter — answers a refusal with the test: each line where it points.
+ */
+export function RefusedConfig({
+  refusal,
+  root,
+  onOpen,
+  what,
+}: {
+  refusal: NonNullable<ReturnType<typeof refusalOf>>
+  root: string
+  onOpen: (path: string, line?: number) => void
+  /** What the refusal leaves the view without, in one sentence. */
+  what: string
+}) {
+  return (
+    <div className="space-y-3">
+      <Notice tone="danger" icon={Warning} title="nginx refuses its configuration">
+        {what} Fix what the test found, then read again.
+      </Notice>
+      {(refusal.validation?.diagnostics ?? []).length > 0 && (
+        <DiagnosticList
+          diagnostics={refusal.validation?.diagnostics ?? []}
+          canOpen={(file) => openableFile(file, [root])}
+          onOpen={(place) => place.file && onOpen(place.file, place.line)}
+        />
+      )}
+      {refusal.validation?.output && (
+        <Disclosure quiet summary="nginx -T output">
+          <Well className="max-h-64 break-words whitespace-pre-wrap">
+            {refusal.validation.output}
+          </Well>
+        </Disclosure>
       )}
     </div>
   )
