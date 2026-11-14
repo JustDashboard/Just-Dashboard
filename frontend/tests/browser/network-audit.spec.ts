@@ -16,7 +16,6 @@ test("read-only accounts see network state and cannot submit mutations", async (
   for (const [path, commands] of [
     ["interfaces", ["New device", "New namespace"]],
     ["gateway", ["Forward a port", "Share a network"]],
-    ["protection", ["New blocklist", "New limit"]],
     ["dns", ["Add record", "Resolve"]],
   ] as const) {
     await page.goto(`/network/${path}`)
@@ -24,6 +23,11 @@ test("read-only accounts see network state and cannot submit mutations", async (
     for (const command of commands)
       await expect(page.getByRole("button", { name: command, exact: true })).toBeDisabled()
   }
+  // Protection draws no command such an account cannot use, rather than a disabled one.
+  await page.goto("/network/protection")
+  await loaded(page)
+  for (const command of ["New blocklist", "New limit"])
+    await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
   // Routing draws no control such an account cannot use, rather than a disabled one.
   await page.goto("/network/routing")
   await loaded(page)
