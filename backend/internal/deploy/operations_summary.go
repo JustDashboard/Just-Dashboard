@@ -490,7 +490,10 @@ func observeDomainRoutes(
 					break
 				}
 				row.CertificateDaysLeft = certificate.DaysLeft
-				row.CertificateLink = "/proxy/certificates"
+				// The certificate's own page, by the address the Certificates
+				// page turns into it: the file, which names one certificate
+				// where two can share a name.
+				row.CertificateLink = "/proxy/certificates?" + url.Values{"cert": {certificate.Path}}.Encode()
 				switch {
 				case certificate.Expired:
 					row.Certificate = "expired"

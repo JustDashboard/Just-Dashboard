@@ -159,12 +159,14 @@ async function mockReachability(page: Page) {
   return checks
 }
 
-test("a published port's sheet says provider policy is unseen, shows the external proof and checks again", async ({
+test("a published port's page says provider policy is unseen, shows the external proof and checks again", async ({
   page,
 }) => {
   const checks = await mockReachability(page)
+  // The side sheet's old address opens the port's page.
   await page.goto("/proxy/ports?socket=tcp:0.0.0.0:5432")
-  const sheet = page.getByRole("dialog")
+  await expect(page).toHaveURL(/\/proxy\/ports\/tcp-5432-0\.0\.0\.0$/)
+  const sheet = page.locator("[data-slot='page']")
   await expect(sheet.getByText(/Not visible — no provider adapter/)).toBeVisible()
   const proof = sheet.getByRole("list", { name: "External measurements" })
   await expect(proof.getByText("Connected to 203.0.113.9, not on this host")).toBeVisible()
@@ -183,8 +185,8 @@ test("a port Docker publishes is traced from outside through its NAT, unknown la
   page,
 }) => {
   await mockReachability(page)
-  await page.goto("/proxy/ports?socket=tcp:0.0.0.0:5432")
-  const sheet = page.getByRole("dialog")
+  await page.goto("/proxy/ports/tcp-5432")
+  const sheet = page.locator("[data-slot='page']")
   await sheet.getByRole("button", { name: "Trace the path", exact: true }).click()
   const report = sheet.getByRole("region", { name: "Connection path report" })
   await expect(report.getByRole("heading", { name: "Outside this host → shop-db" })).toBeVisible()
@@ -201,8 +203,8 @@ test("an unenrolled port says reachability from outside is unproven, and a reade
   await page.route("**/api/v1/ports/external", (route) =>
     json(route, { checkedAt: now, evidence: [], scopes: [] }),
   )
-  await page.goto("/proxy/ports?socket=tcp:0.0.0.0:5432")
-  const sheet = page.getByRole("dialog")
+  await page.goto("/proxy/ports/tcp-5432")
+  const sheet = page.locator("[data-slot='page']")
   await expect(sheet.getByText(/No enrolled source has measured port 5432/)).toBeVisible()
   await expect(sheet.getByText(/No enrolled source may check port 5432/)).toBeVisible()
 
@@ -225,10 +227,9 @@ test("an unenrolled port says reachability from outside is unproven, and a reade
     }),
   )
   await page.reload()
-  await expect(
-    page.getByRole("dialog").getByText(/Not visible — no provider adapter/),
-  ).toBeVisible()
-  await expect(page.getByRole("dialog").getByText("From outside", { exact: true })).toHaveCount(0)
+  await expect(sheet.getByText(/Not visible — no provider adapter/)).toBeVisible()
+  await expect(sheet.getByText("From outside", { exact: true })).toHaveCount(0)
+  await expect(sheet.getByRole("button", { name: "Identify", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Trace the path", exact: true })).toHaveCount(0)
 })
 

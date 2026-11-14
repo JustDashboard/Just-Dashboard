@@ -113,7 +113,7 @@ test("issuing from the local CA makes the CA first when there is none, then sign
   const issues = await serve(page, "**/api/v1/certificates/local-ca/issue", (_, route) =>
     json(route, issued("nas.lan", ["nas.lan", "192.168.1.10"])),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=authority")
   await openMenu(page)
   await page.getByRole("menuitem", { name: "From the local CA" }).click()
   const dialog = page.getByRole("dialog", { name: "Issue from the local CA" })
@@ -226,7 +226,7 @@ test("a signing request keeps its key on the server and hands over only the requ
         )
       : json(route, []),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=requests")
   await openMenu(page)
   await page.getByRole("menuitem", { name: "Signing request for a CA" }).click()
   const dialog = page.getByRole("dialog", { name: "Signing request for a certificate authority" })
@@ -285,7 +285,7 @@ test("a waiting request is completed with the certificate alone, and says first 
     waiting = false
     return json(route, issued("portal", ["portal.example.com"], { replaced: true }))
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=requests")
   const list = page.getByRole("list", { name: "Signing requests" })
   await expect(list).toContainText("portal.example.com")
   await expect(list).toContainText("replaces the certificate kept now")
@@ -329,7 +329,7 @@ test("a certificate that is not the request's is refused with the server's reaso
       "this certificate was not signed for the request shop.example.com: its public key is not the one made for it.",
     ),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=requests")
   await page.getByRole("button", { name: "Add certificate" }).click()
   const dialog = page.getByRole("dialog", { name: "Add the certificate for shop.example.com" })
   await dialog
@@ -351,7 +351,7 @@ test("discarding a request asks once, with no phrase, and deletes it", async ({ 
     waiting = false
     return route.fulfill({ status: 204 })
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=requests")
   await page.getByRole("button", { name: "More actions for the request shop.example.com" }).click()
   await page.getByRole("menuitem", { name: "Discard" }).click()
   const confirm = page.getByRole("alertdialog").or(page.getByRole("dialog"))
@@ -363,7 +363,7 @@ test("discarding a request asks once, with no phrase, and deletes it", async ({ 
 
 test("the local CA panel reads its root, what it issued and its renewal", async ({ page }) => {
   await mockShowcase(page)
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=authority")
   const panel = localCAPanel(page)
   await expect(panel.getByText("Just Dashboard local CA (edge-1)")).toBeVisible()
   await expect(panel.getByText(/^root valid until/)).toBeVisible()
@@ -407,7 +407,7 @@ test("a renewal check that failed says why, and a leaf that cannot renew says so
       }),
     ),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=authority")
   const panel = localCAPanel(page)
   await expect(panel.getByText("The last renewal check did not finish")).toBeVisible()
   await expect(panel.getByText(/wiki.lan keeps serving the previous certificate/)).toBeVisible()
@@ -425,7 +425,7 @@ test("an administrator makes the local CA from its panel; a reader takes the roo
     if (sent.method === "POST") exists = true
     return json(route, exists ? existingLocalCA({ leaves: [] }) : localCA())
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=authority")
   const panel = localCAPanel(page)
   await panel.getByRole("button", { name: "Create the local CA" }).click()
   await expect(page.getByText("Local CA created")).toBeVisible()
@@ -442,7 +442,7 @@ test("an administrator makes the local CA from its panel; a reader takes the roo
 
   exists = false
   await page.reload()
-  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await expect(page.getByText("This server has no local CA")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Local CA", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Create the local CA" })).toHaveCount(0)
 })
@@ -475,24 +475,20 @@ test("a certificate nothing trusts by default says where it is trusted", async (
   const cards = page.getByRole("list", { name: "Installed certificates" })
   // The certificate kept with the imports, and a copy a site names elsewhere.
   await expect(cards.getByText("local CA", { exact: true })).toHaveCount(2)
-  await cards.getByRole("button", { name: "Inspect nas.lan" }).click()
-  const sheet = page.getByRole("dialog")
+  // Each certificate's own page says where it is trusted.
+  await cards.getByRole("link", { name: "Open nas.lan" }).click()
   await expect(
-    sheet.getByText(
+    page.getByText(
       /^Trusted only on devices where the local CA's root is installed\. Renewed here/,
     ),
   ).toBeVisible()
-  await page.keyboard.press("Escape")
-  await cards.getByRole("button", { name: "Inspect nas-copy" }).click()
+  await page.goBack()
+  await cards.getByRole("link", { name: "Open nas-copy" }).click()
+  await expect(page.getByText(/so the daily check does not renew it\.$/)).toBeVisible()
+  await page.goBack()
+  await cards.getByRole("link", { name: "Open printer" }).click()
   await expect(
-    page.getByRole("dialog").getByText(/so the daily check does not renew it\.$/),
-  ).toBeVisible()
-  await page.keyboard.press("Escape")
-  await cards.getByRole("button", { name: "Inspect printer" }).click()
-  await expect(
-    page
-      .getByRole("dialog")
-      .getByText(/^Trusted only on devices told to trust this certificate itself/),
+    page.getByText(/^Trusted only on devices told to trust this certificate itself/),
   ).toBeVisible()
 })
 
@@ -512,6 +508,7 @@ test("the private forms and panels fit a phone", async ({ page }) => {
     await page.keyboard.press("Escape")
     await expect(dialog).toBeHidden()
   }
+  await page.getByRole("tab", { name: "Signing requests" }).click()
   await page.getByRole("button", { name: "Show request" }).first().click()
   const shown = page.getByRole("dialog")
   await expect(shown).toBeInViewport({ ratio: 1 })
