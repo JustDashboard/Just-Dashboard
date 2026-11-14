@@ -603,7 +603,10 @@ test("a failed engine says why, with its journal and a way to clear it", async (
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("failed", { exact: true })).toBeVisible()
   await expect(identity.getByRole("button", { name: "Start nginx" })).toBeVisible()
-  await expect(identity.getByRole("button", { name: "Reload" })).toBeDisabled()
+  // Start has the line's one place; Reload waits in the menu, greyed.
+  await expect(identity.getByRole("button", { name: "Reload" })).toHaveCount(0)
+  await expect(await inMenu(page, "Reload nginx")).toBeDisabled()
+  await page.keyboard.press("Escape")
 
   await expect(page.getByText("nginx exited with an error")).toBeVisible()
   await expect(page.getByText("result exit-code · restarted 3 times by systemd")).toBeVisible()

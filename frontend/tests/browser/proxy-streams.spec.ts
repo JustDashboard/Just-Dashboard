@@ -68,12 +68,21 @@ async function openSettings(page: Page, name: string) {
 /** The settings column's one floating Save. */
 const saveBar = (page: Page) => page.getByRole("region", { name: "Save changes" })
 
-/** The ⓘ beside the UDP sessions label, which holds what the chosen mode means. */
-const udpHelp = (form: Locator) =>
-  form
-    .getByText("UDP sessions", { exact: true })
+/**
+ * What a field takes, read from the ⓘ beside its label and put away again.
+ * By the keyboard: the tip opens on focus and stays while the form under the
+ * pointer moves, and Escape would close the sheet with it.
+ */
+async function fieldHelp(page: Page, form: Locator, label: string) {
+  const tip = form
+    .getByText(label, { exact: true })
     .locator("xpath=..")
     .getByRole("button", { name: "What this setting does" })
+  await tip.focus()
+  const text = (await page.getByRole("tooltip").textContent()) ?? ""
+  await tip.blur()
+  return text
+}
 
 async function fillNew(page: Page) {
   const sheet = page.getByRole("dialog")
@@ -462,9 +471,7 @@ test("UDP asks how a session ends, and the preview warns in full", async ({ page
   await sheet.getByRole("radio", { name: "One reply" }).click()
   // What the choice means is behind the field's label, not a line under it.
   await expect(sheet.getByText(/Each reply ends the session/)).toHaveCount(0)
-  await udpHelp(sheet).hover()
-  await expect(page.getByRole("tooltip")).toContainText("Each reply ends the session")
-  await page.keyboard.press("Escape")
+  expect(await fieldHelp(page, sheet, "UDP sessions")).toContain("Each reply ends the session")
 
   // Every warning, not only the first.
   await expect(sheet.getByText(/no authentication of any kind — anything that can/)).toBeVisible()
@@ -665,9 +672,10 @@ test("a plain listen port reads as every IPv4 address, not as a restriction", as
   await expect(sheet.getByRole("combobox", { name: "Listening address" })).toContainText(
     "Every address",
   )
-  await expect(
-    sheet.getByText("Every address this host has, including any added later."),
-  ).toBeVisible()
+  // What the choice means is behind the field's label.
+  expect(await fieldHelp(page, sheet, "Address")).toBe(
+    "Every address this host has, including any added later.",
+  )
   await expect(sheet.getByRole("switch", { name: "Listen on IPv6 too" })).toHaveAttribute(
     "aria-checked",
     "false",
@@ -745,11 +753,9 @@ test("TCP+UDP is one choice, and asks how its UDP sessions end", async ({ page }
   await sheet.getByRole("radio", { name: "TCP+UDP" }).click()
   await expect(sheet.getByText("UDP sessions")).toBeVisible()
   await sheet.getByRole("radio", { name: "One reply" }).click()
-  await udpHelp(sheet).hover()
-  await expect(page.getByRole("tooltip")).toHaveText(
+  expect(await fieldHelp(page, sheet, "UDP sessions")).toBe(
     "Each reply ends the session: one question, one answer, as DNS works. TCP connections are not affected.",
   )
-  await page.keyboard.press("Escape")
   await sheet.getByRole("button", { name: "Save and reload" }).click()
 
   await expect(page.getByText("replica saved and reloaded")).toBeVisible()

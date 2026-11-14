@@ -197,9 +197,8 @@ for (const width of [1280, 390]) {
     await expect(form.getByLabel("Down for")).toHaveValue("5")
     // The field's help is behind its label, not under it.
     await expect(form.getByText("From 5 minutes to a day; checked every 5 minutes.")).toHaveCount(0)
-    await form.getByRole("button", { name: "What this setting does" }).hover()
+    await form.getByRole("button", { name: "What this setting does" }).focus()
     await expect(page.getByRole("tooltip")).toContainText("From 5 minutes to a day")
-    await page.keyboard.press("Escape")
 
     const overflow = await page
       .locator("[data-slot='page']")

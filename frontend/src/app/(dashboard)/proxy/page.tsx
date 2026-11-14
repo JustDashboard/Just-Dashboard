@@ -551,7 +551,10 @@ export default function ProxyOverviewPage() {
                 title="Routes"
                 actions={
                   hosts.length > 0 && (
-                    <div className="flex items-center gap-3">
+                    // As tall as the button the upstream check brings with it:
+                    // the head grew when the check answered, and the rows
+                    // under it stepped down.
+                    <div className="flex min-h-6 items-center gap-3">
                       {admin && upstreamReport && (
                         <Button
                           size="xs"
