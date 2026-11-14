@@ -194,17 +194,19 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       live: role.connections > 0,
       sessions: role.connections,
     })),
-    loading: roles.loading,
+    loading: roles.loading && !down,
     search: {
       value: filter.search,
       onChange: filter.setSearch,
       placeholder: "Filter by name",
     },
-    caption: roles.data
-      ? show || filter.search
-        ? `${shown.length} of ${accountCounts(all).all}${show ? ` · ${SHOW_WORDS[show]}` : ""}`
-        : `${accountCounts(all).all} ${accountCounts(all).all === 1 ? "account" : "accounts"}`
-      : "Reading the accounts…",
+    caption: down
+      ? "The server is not running"
+      : roles.data
+        ? show || filter.search
+          ? `${shown.length} of ${accountCounts(all).all}${show ? ` · ${SHOW_WORDS[show]}` : ""}`
+          : `${accountCounts(all).all} ${accountCounts(all).all === 1 ? "account" : "accounts"}`
+        : "Reading the accounts…",
     filtered: Boolean(show),
     onClearFilters: () => filter.setShow(""),
     show,

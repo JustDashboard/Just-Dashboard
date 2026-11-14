@@ -120,12 +120,14 @@ export function RedisAccount({ name }: { name: string }) {
             : aclSummary(one),
       tone: one.enabled && one.noPassword ? ("warning" as const) : undefined,
     })),
-    loading: acl.loading,
-    caption: acl.data
-      ? show
-        ? `${shown.length} of ${all.length} · ${SHOW_WORDS[show]}`
-        : plural(all.length, "user")
-      : "Reading the users…",
+    loading: acl.loading && !down,
+    caption: down
+      ? "The server is not running"
+      : acl.data
+        ? show
+          ? `${shown.length} of ${all.length} · ${SHOW_WORDS[show]}`
+          : plural(all.length, "user")
+        : "Reading the users…",
     filtered: Boolean(show),
     onClearFilters: () => filter.setShow(""),
     show,

@@ -120,8 +120,12 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
           .filter(Boolean)
           .join(" · ") || (one.roles.length > 0 ? plural(one.roles.length, "role") : "no role"),
     })),
-    loading: users.loading,
-    caption: users.data ? plural(all.length, "user") : "Reading the users…",
+    loading: users.loading && !down,
+    caption: down
+      ? "The server is not running"
+      : users.data
+        ? plural(all.length, "user")
+        : "Reading the users…",
     filtered: false,
     onClearFilters: () => {},
   }

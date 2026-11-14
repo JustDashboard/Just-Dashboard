@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import Link from "next/link"
+import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { SearchInput } from "@/components/page"
 import { LoadingRows } from "@/components/state"
@@ -188,7 +189,10 @@ function RailRow({
           </span>
         </span>
         {account.sessions !== undefined && account.sessions > 0 && (
-          <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
+          <span
+            className="numeric shrink-0 font-mono text-hint text-muted-foreground"
+            title={plural(account.sessions, "session")}
+          >
             {account.sessions}
           </span>
         )}

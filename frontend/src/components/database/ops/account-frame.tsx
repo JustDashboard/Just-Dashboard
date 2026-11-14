@@ -310,6 +310,10 @@ export function AccountPane({
       forceMount={keep || undefined}
       className={cn(
         "min-h-0 flex-1 pt-6 data-[state=inactive]:hidden xl:overflow-y-auto",
+        // Room at the sides for what reaches past the column's edge — a
+        // switch row's wash, a focus ring — which the scroller would cut,
+        // and then scroll sideways to show.
+        "xl:-mx-3 xl:overflow-x-hidden xl:px-3",
         className,
       )}
     >
