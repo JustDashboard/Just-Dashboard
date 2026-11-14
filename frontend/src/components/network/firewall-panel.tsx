@@ -37,9 +37,9 @@ import { NetworkReadWarning } from "@/components/network/read-warning"
 import {
   FirewallPicture,
   FirewallPictureLoading,
-  firewallProduct,
   type FirewallCounts,
 } from "@/components/network/firewall-picture"
+import { firewallProduct } from "@/components/network/firewall-words"
 import { InstallHandoff, usePackageKnown } from "@/components/network/install"
 import {
   FirewallAccessPanel,

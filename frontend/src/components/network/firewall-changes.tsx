@@ -20,7 +20,8 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ClockRewind, Trash, Warning } from "@/components/icons"
-import { accessLosses, isAnywhere, planOperations, type StagedChange } from "./firewall-reading"
+import { accessLosses, planOperations, type StagedChange } from "./firewall-reading"
+import { ruleWords } from "./firewall-words"
 
 const OUTCOME_TONE: Record<FirewallRuleEvent["outcome"], DotTone> = {
   applied: "running",
@@ -29,21 +30,6 @@ const OUTCOME_TONE: Record<FirewallRuleEvent["outcome"], DotTone> = {
   pending: "notice",
   compensated: "warning",
   skipped: "stopped",
-}
-
-/** A recorded rule as the few words a line has room for: "allow 51820/udp from 10.0.0.0/8". */
-export function ruleWords(rule: Record<string, unknown> | undefined) {
-  if (!rule) return ""
-  const word = (key: string) => (typeof rule[key] === "string" ? (rule[key] as string) : "")
-  const port = word("port")
-  const from = word("from")
-  return [
-    word("action"),
-    port ? `${port}${word("protocol") ? `/${word("protocol")}` : ""}` : word("to"),
-    from && !isAnywhere(from) ? `from ${from}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ")
 }
 
 /** What a change asked for, field by field, as the server recorded it. */

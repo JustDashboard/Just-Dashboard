@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils"
 import { ProductGlyph, hasProductLogo, portProduct } from "@/components/product-logo"
 import { WireMark } from "@/components/deploy/wire"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
+import { firewallProduct, limitedKeys } from "@/components/network/firewall-words"
 import {
   deniedSources,
-  isInbound,
   openings,
   refusesByDefault,
   type Opening,
@@ -19,25 +19,6 @@ import {
 const MOST = 5
 
 type MarkSize = "lg" | "md" | "sm"
-
-/**
- * The firewall as the product it is. firewalld has a mark of its own; ufw,
- * iptables and nftables have none, and each is a front end to netfilter, the
- * kernel's packet filter, so they are drawn as the engine they drive, the way
- * the Drift page draws the nftables files. Nothing is drawn for a backend
- * this does not know.
- */
-export function firewallProduct(backend: string | undefined) {
-  switch (backend) {
-    case "firewalld":
-      return "firewalld"
-    case "ufw":
-    case "iptables":
-    case "nftables":
-      return "netfilter"
-  }
-  return undefined
-}
 
 /** What the firewall's log adds up to over its window, for the picture's nodes. */
 export type FirewallCounts = {
@@ -257,19 +238,6 @@ export function FirewallPictureLoading() {
       />
     </div>
   )
-}
-
-/**
- * The ports a rule rate-limits, under the key `openings` folds them by: ufw's
- * LIMIT is the one action of the three backends that admits and counts.
- */
-function limitedKeys(status: FirewallStatus) {
-  const keys = new Set<string>()
-  for (const rule of status.rules) {
-    if (rule.ipv6 || !isInbound(rule) || rule.action.toUpperCase() !== "LIMIT") continue
-    keys.add(rule.port || rule.service || rule.to || "any")
-  }
-  return keys
 }
 
 /** The product that usually answers on the port, else the kind of thing a port is. */
