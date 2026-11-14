@@ -241,14 +241,15 @@ wide screen: a bar holding them at the foot of the window drew a dark strip the 
 have.
 
 Nothing is saved until *Continue* or *Show me everything*. `/account/workspace` is the answer after
-the fact, in the reading register (`components/account/workspace.tsx`), and nothing on it is framed
-but the rail. *What you use this server for* is the question's purposes in its order as lit cards
+the fact (`components/account/workspace.tsx`), and nothing on it is framed: one line that says
+where the answer stands (*15 of 15 shown · 6 purposes*), then one centred settings column (design
+system §7). *What you use this server for* is the question's purposes in its order as a grid of lit cards
 (`PurposePicker`), each its three products, its name — with the same mark on Route the network —
 and the sections it brings with the ones out of the rail dimmed; *Ask me again* goes back to `/welcome`. Only sections are stored, so a
 purpose is chosen when every section of it the role is offered is shown (`purposeShown`); pressing a
 chosen one takes its sections out and pressing any other brings them back whole (`pressPurpose`).
-Purposes share no section, so a press never moves another card. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked
-from the same registry in its groups and order with a switch on every row the role may hide;
+Purposes share no section, so a press never moves another card. Under it, *Sidebar* is the rail's entries (`SidebarEditor`), walked
+from the same registry in its groups and order as full-width switch rows on hairlines, one for every row the role may hide;
 Overview, Map, Monitoring and Settings say *Always* instead, and Administration heads the three
 sections it holds. A list of sections beside a separate picture of the rail was the same list twice.
 Both edit one draft, and an edit raises the settings pages' floating Save (`SaveBarProvider`,

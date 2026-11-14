@@ -523,7 +523,13 @@ for (const width of [1280, 1720, 390]) {
   test(`the account pages look right at ${width}`, async ({ page }) => {
     await mockAccount(page)
     await page.setViewportSize({ width, height: 1200 })
-    for (const path of ["/account", "/account/sessions", "/account/keys", "/account/users"]) {
+    for (const path of [
+      "/account",
+      "/account/sessions",
+      "/account/keys",
+      "/account/users",
+      "/account/workspace",
+    ]) {
       await page.goto(path)
       await page.waitForLoadState("networkidle")
       expect(

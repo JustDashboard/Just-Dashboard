@@ -380,9 +380,10 @@ Routes: `/account`, `/account/security`, `/account/sessions`, `/account/keys`, `
 `/account/users`
 
 The signed-in account as six pages under one strip. Workspace: the first-run answer after the fact —
-the question's purposes, Route the network marked experimental, as lit cards that throw their
-sections, beside the rail itself with a switch on every row the account may hide, one draft saved
-through the floating Save bar, and *Ask me again* back to `/welcome`. No page opens on tiles: each
+one line that says where it stands (*15 of 15 shown · 6 purposes*) with *Ask me again* back to
+`/welcome` at its end, then one centred column: the question's purposes, Route the network marked
+experimental, as a grid of lit cards that throw their sections, over the rail's entries in their
+groups as full-width switch rows on hairlines, one draft saved through the floating Save bar. No page opens on tiles: each
 figure the old readings rows gave is said by a picture, a chip or a verdict, and every picture
 speaks the deployment pages' and Configuration's wiring vocabulary (`deploy/wire`, `AnimatedBeam`) —
 a wire pulses while what it joins is in use, goes amber where something should be looked at, and is
