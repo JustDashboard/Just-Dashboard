@@ -549,7 +549,7 @@ test("a role that may only read is not offered the catalogue, and reads the supp
   await page.goto("/databases/1")
   // Beside the version it is about, before where the server runs.
   await expect(page.locator("[data-slot=host-identity]")).toContainText(
-    /PostgreSQL 16\.4\s*·\s*supported until Nov 2028/,
+    /PostgreSQL 16\.4\s*supported until Nov 2028/,
   )
   await page.goto("/databases/1/settings")
   await expect(page.locator("section#connection")).toContainText("supported until Nov 2028")

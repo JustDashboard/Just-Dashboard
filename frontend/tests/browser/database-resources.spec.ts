@@ -333,7 +333,7 @@ test("Home's limits lead an administrator to where they are changed", async ({ p
   await visit(page, "/databases/1")
   // The rail lists the page too: the link meant is the one in Runs as.
   await expect(
-    page.getByLabel("Runs as").getByRole("link", { name: "Change", exact: true }),
+    page.getByLabel("Runs as").getByRole("link", { name: "Change limits", exact: true }),
   ).toHaveAttribute("href", "/databases/1/settings/resources")
 })
 

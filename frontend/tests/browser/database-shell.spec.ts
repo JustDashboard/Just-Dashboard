@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { hold, mockDatabases } from "./database-fixture"
+import { risen } from "./risen"
 
 /**
  * The Databases section's shell: the frame every page of a database is drawn
@@ -7,12 +8,15 @@ import { hold, mockDatabases } from "./database-fixture"
  *
  * A database is an address (`/databases/<id>/…`), the rail drills into it a
  * level below Databases with the engine's own pages in the engine's own
- * words, and a strip over each page says which database this is. These are
- * the claims that makes — the ones the areas built inside it rely on and
- * none of them can check for itself: a page is never mounted on an engine
- * that lacks it, a stale or mistyped address never opens another database,
- * the reader's table survives a trip through a page that cannot hold it, and
- * nothing on the strip is drawn over anything else at any width.
+ * words, and every page opens on a line that says which database this is:
+ * the database's header, the frame's own head on a workbench, a one-line
+ * strip over the page of one item. These are the claims that makes — the
+ * ones the areas built inside it rely on and none of them can check for
+ * itself: a page is never mounted on an engine that lacks it, a stale or
+ * mistyped address never opens another database, the reader's table survives
+ * a trip through a page that cannot hold it, the header is in one place at
+ * one height on every page, and nothing on it is drawn over anything else at
+ * any width.
  */
 
 const rail = (page: Page) => page.getByRole("navigation", { name: "Sidebar" })
@@ -479,4 +483,232 @@ test("what the tab remembers of the databases is the tab's, and nothing is left 
   // Connection names are the server's data: they must go with the session.
   expect(stores.local).toEqual([])
   expect(stores.session).toHaveLength(1)
+})
+
+// ---- what a page under a database opens on (`shell/header-rule.ts`) ---------
+
+/** The database's header, drawn by the shell over a page with no line of its own. */
+const header = (page: Page) => page.locator("[data-slot=database-strip][data-head=page]")
+const line = (page: Page) => header(page).locator("[data-slot=host-identity]")
+
+/** Every page that opens on the header: the reading pages, the two held to the window, and no page at all. */
+const UNDER_THE_HEADER = [
+  "/databases/1",
+  "/databases/1/assistant",
+  "/databases/1/search",
+  "/databases/1/generate",
+  "/databases/1/performance",
+  "/databases/1/logs",
+  "/databases/1/access",
+  "/databases/1/backups",
+  "/databases/1/import",
+  "/databases/1/alerts",
+  "/databases/1/settings",
+  "/databases/1/settings/network",
+  "/databases/1/settings/danger",
+  "/databases/1/no-such-page",
+]
+
+const LABELLED = { rows: { 1: { environment: "production", readOnly: true } } }
+
+for (const [width, height] of [
+  [1280, 900],
+  [390, 844],
+] as const) {
+  test(`every page of a database opens on the same header, in one place, at ${width}`, async ({
+    page,
+  }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width, height })
+    await mockDatabases(page, LABELLED)
+
+    let first: { x: number; y: number; width: number; height: number } | undefined
+    for (const path of UNDER_THE_HEADER) {
+      await page.goto(path)
+      await expect(header(page), path).toHaveCount(1)
+      // What it is, whether it answers, what it is for, the command and the menu.
+      await expect(line(page)).toContainText("PostgreSQL 16.4")
+      await expect(line(page).locator("[data-slot=database-status]")).toHaveText("connected")
+      await expect(line(page).getByText("production", { exact: true })).toBeVisible()
+      await expect(line(page).getByText("protected", { exact: true })).toBeVisible()
+      await expect(line(page).getByRole("link", { name: "Open data" })).toHaveAttribute(
+        "href",
+        "/databases/1/data",
+      )
+      await expect(line(page).getByRole("button", { name: "Connect" })).toBeVisible()
+      await expect(line(page).getByRole("button", { name: "Actions for shop" })).toBeVisible()
+      // One line about the database, and it is this one: no strip beside it.
+      await expect(strip(page)).toHaveCount(1)
+      await expect(page.locator("[data-slot=host-identity]")).toHaveCount(1)
+      await page.waitForLoadState("networkidle")
+      await risen(page)
+      const box = (await line(page).boundingBox())!
+      first ??= box
+      expect(box, `${path} at ${width}`).toEqual(first)
+      // Nothing of it is wider than the window.
+      expect(box.x + box.width).toBeLessThanOrEqual(width)
+    }
+  })
+}
+
+test("a workbench heads itself, and the shell draws no header over it", async ({ page }) => {
+  await mockDatabases(page)
+  for (const path of [
+    "/databases/1/data",
+    "/databases/1/query",
+    "/databases/1/schema",
+    "/databases/1/diagram",
+    "/databases/4/data",
+    "/databases/5/query",
+  ]) {
+    await page.goto(path)
+    await expect(strip(page), path).toHaveCount(1)
+    await expect(strip(page)).toHaveAttribute("data-head", "workbench")
+    await expect(header(page)).toHaveCount(0)
+  }
+  // Where the engine has no such page, the statement that it has none is a
+  // reading page, and stands under the header like any other.
+  await page.goto("/databases/4/schema")
+  await expect(page.getByText("Redis has no schema")).toBeVisible()
+  await expect(header(page)).toHaveCount(1)
+  await expect(line(page)).toContainText("Redis 7.4.1")
+  await expect(line(page).getByRole("link", { name: "Browse keys" })).toBeVisible()
+})
+
+test("the page of one item keeps the one-line strip over its own line", async ({ page }) => {
+  await mockDatabases(page, LABELLED)
+  for (const path of [
+    "/databases/1/performance/statements/s2",
+    "/databases/1/performance/tables/public.orders",
+    "/databases/1/performance/sessions/52",
+    "/databases/1/access/app",
+  ]) {
+    await page.goto(path)
+    await expect(strip(page), path).toHaveCount(1)
+    await expect(header(page)).toHaveCount(0)
+    await expect(strip(page)).not.toHaveAttribute("data-head", /.+/)
+    // One row: the name, the labels, whether it answers, Connect and the menu.
+    await expect(strip(page)).toContainText("shop")
+    await expect(strip(page).getByText("production", { exact: true })).toBeVisible()
+    await expect(strip(page).getByRole("button", { name: "Actions for shop" })).toBeVisible()
+    expect((await strip(page).boundingBox())!.height, path).toBeLessThan(60)
+  }
+  // The list an item belongs to is not an item: it opens on the header.
+  await page.goto("/databases/1/access")
+  await expect(header(page)).toHaveCount(1)
+})
+
+test("the header holds its place while the page under it is read, and when another page is opened", async ({
+  page,
+}) => {
+  for (const [width, height] of [
+    [1280, 900],
+    [390, 844],
+  ] as const) {
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await page.setViewportSize({ width, height })
+    await mockDatabases(page, LABELLED)
+    // Every read of the page's own waits; the header has what it needs already.
+    const reads = hold()
+    await page.route(/\/api\/v1\/databases\/1\/.+/, async (route) => {
+      await reads.until
+      await route.fallback()
+    })
+    await page.goto("/databases/1/backups")
+    await expect(line(page)).toContainText("PostgreSQL 16.4")
+    await risen(page)
+    const waiting = (await line(page).boundingBox())!
+
+    reads.release()
+    await page.waitForLoadState("networkidle")
+    await risen(page)
+    expect(await line(page).boundingBox(), `read at ${width}`).toEqual(waiting)
+
+    // Going on to another page of the database moves nothing above the page.
+    await page.goto("/databases/1/settings")
+    await page.waitForLoadState("networkidle")
+    await risen(page)
+    expect(await line(page).boundingBox(), `the next page at ${width}`).toEqual(waiting)
+  }
+})
+
+test("a page opened from one scrolled down starts at the header", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 600 })
+  await mockDatabases(page)
+  await page.goto("/databases/1")
+  const region = page.locator("[data-slot=database-pages]")
+  await expect(line(page)).toBeVisible()
+  await page.waitForLoadState("networkidle")
+  await region.evaluate((el) => el.scrollTo(0, el.scrollHeight))
+  await expect.poll(() => region.evaluate((el) => el.scrollTop)).toBeGreaterThan(100)
+  await expect(line(page)).not.toBeInViewport()
+
+  // A long page, so the region does not come back to its top by running out of page.
+  await rail(page).getByRole("link", { name: "General", exact: true }).click()
+  await expect(page).toHaveURL(/\/databases\/1\/settings$/)
+  await expect(line(page)).toBeInViewport()
+  await expect.poll(() => region.evaluate((el) => el.scrollTop)).toBe(0)
+})
+
+test("the pages held to the window under the header end at its foot", async ({ page }) => {
+  await mockDatabases(page)
+  for (const [width, height] of [
+    [1280, 800],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height })
+    for (const path of ["/databases/1/logs", "/databases/1/assistant"]) {
+      await page.goto(path)
+      await expect(header(page)).toBeVisible()
+      const surface = page.locator("[data-slot=page]").first()
+      await expect(surface).toBeVisible()
+      await risen(page)
+      const box = (await surface.boundingBox())!
+      const head = (await header(page).boundingBox())!
+      // Directly under the header, down to the window's foot, with nothing left to scroll.
+      expect(Math.round(box.y), `${path} at ${width}`).toBe(Math.round(head.y + head.height))
+      expect(Math.round(box.y + box.height), `${path} at ${width}`).toBe(height)
+      expect(
+        await page
+          .locator("[data-slot=database-pages]")
+          .evaluate((el) => el.scrollHeight - el.clientHeight),
+      ).toBeLessThanOrEqual(1)
+      // Its frame's edges are the header's: the page's own gutters, not a workbench's.
+      const gutter = await surface.evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft))
+      const lead = await header(page).evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft))
+      expect(gutter, `${path} at ${width}`).toBe(lead)
+    }
+  }
+})
+
+test("on a narrow line the commands stand under the facts, and a long name is read whole", async ({
+  page,
+}) => {
+  await mockDatabases(page, {
+    rows: {
+      1: { name: "orders-production-primary-eu", environment: "production", readOnly: true },
+    },
+  })
+  for (const width of [390, 768, 900]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/databases/1/backups")
+    const name = line(page).getByRole("button", { name: /^Database: orders-production-primary-eu/ })
+    await expect(name).toBeVisible()
+    expect(
+      await name.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+      `the name is cut at ${width}`,
+    ).toBe(true)
+    const open = (await line(page).getByRole("link", { name: "Open data" }).boundingBox())!
+    const facts = (await line(page).getByText("PostgreSQL 16.4").boundingBox())!
+    expect(open.y, `the command is under the facts at ${width}`).toBeGreaterThan(
+      facts.y + facts.height - 1,
+    )
+    expect(await stripOverlaps(page)).toEqual([])
+  }
+  // With the room, the commands stand at the line's end, level with the name.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/databases/1/backups")
+  const open = (await line(page).getByRole("link", { name: "Open data" }).boundingBox())!
+  const facts = (await line(page).getByText("PostgreSQL 16.4").boundingBox())!
+  expect(open.y).toBeLessThan(facts.y)
 })

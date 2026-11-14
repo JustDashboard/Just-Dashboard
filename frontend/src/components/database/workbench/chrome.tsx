@@ -26,6 +26,7 @@ import { useOperateVerbs } from "@/components/database/ops/verbs"
 import { ConnectPopover } from "@/components/database/shell/connect-popover"
 import { ConnectionSwitcher } from "@/components/database/shell/connection-switcher"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { useOpenVerbs } from "@/components/database/shell/database-verbs"
 import { connectionFacts } from "@/components/database/shell/facts"
 import { DatabaseStatusMark } from "@/components/database/shell/status"
 import type { DatabaseVerbTools } from "@/components/database/shell/types"
@@ -264,6 +265,7 @@ function HeadMenu() {
   const handed = useSyncExternalStore(menu.subscribe, menu.verbs, menu.verbs)
   const page = handed.map((verb) => ({ ...verb, group: verb.group ?? title }))
   const database: Verb[] = [
+    ...useOpenVerbs(),
     { key: "check", label: "Check connection", icon: RefreshClockwise, run: status.refresh },
     ...useLifecycleVerbs(tools),
     ...useOperateVerbs(tools),

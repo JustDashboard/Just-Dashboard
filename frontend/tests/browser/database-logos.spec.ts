@@ -107,13 +107,14 @@ for (const c of DRAWN) {
 
     // Home: the identity tile, and the rail's panel head beside the name.
     await page.goto(`/databases/${c.id}`)
-    expect(await drawn(logo(identity(page), c.file))).toBe(28)
+    expect(await drawn(logo(identity(page), c.file))).toBe(24)
     expect(await drawn(logo(rail(page), c.file))).toBe(16)
     await expect(identity(page).getByText(c.label, { exact: false }).first()).toBeVisible()
 
     // Any other page: the strip's tile.
     await page.goto(`/databases/${c.id}/settings`)
-    expect(await drawn(logo(strip(page), c.file))).toBe(18)
+    // The same header, so the same tile, on every page of the database.
+    expect(await drawn(logo(strip(page), c.file))).toBe(24)
     await expect(strip(page)).toContainText(c.label)
 
     // And nowhere as the product its driver is named after.
@@ -153,11 +154,11 @@ test("SQL Edge, which no collection draws, is the SQL Server engine under its ow
   await mockDatabases(page, mock(edge))
 
   await page.goto("/databases/1")
-  expect(await drawn(logo(identity(page), "sqlserver.svg"))).toBe(28)
+  expect(await drawn(logo(identity(page), "sqlserver.svg"))).toBe(24)
   await expect(identity(page).getByText("Azure SQL Edge", { exact: false }).first()).toBeVisible()
 
   await page.goto("/databases/1/settings")
-  expect(await drawn(logo(strip(page), "sqlserver.svg"))).toBe(18)
+  expect(await drawn(logo(strip(page), "sqlserver.svg"))).toBe(24)
   await expect(strip(page)).toContainText("Azure SQL Edge")
 })
 

@@ -19,20 +19,3 @@ export function Pair({ className, ...props }: React.ComponentProps<"div">) {
     />
   )
 }
-
-/**
- * The reference blocks at a home's foot: short lists of facts, as many across
- * as fit at the width a label and its value need. An engine without one of
- * them — a file has no port to be reachable on — leaves no empty column.
- */
-export function Columns({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn(
-        "grid items-start gap-8 sm:grid-cols-[repeat(auto-fit,minmax(17rem,1fr))] [&>*]:min-w-0",
-        className,
-      )}
-      {...props}
-    />
-  )
-}

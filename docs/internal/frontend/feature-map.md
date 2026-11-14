@@ -584,13 +584,24 @@ Routes: `/databases`, `/databases/map`, `/databases/new`, `/databases/[id]` (+ `
 `/settings/resources`, `/settings/pooling`, `/settings/parameters`, `/settings/extensions`,
 `/settings/version`, `/settings/danger`)
 
+Every page under `/databases/[id]` opens on the database's header, as a project's pages open on the
+project's (`shell/database-header.tsx`, drawn by `shell/database-shell.tsx`): the engine's mark, the
+name as the switcher, whether it answers, one line of facts, *Open data* as its one command, Connect
+and the verb menu. The exceptions are decided in one place (`shell/header-rule.ts`): Data, Query,
+Schema and the Diagram carry that line as their own frame's head, and the page of one item (a
+statement, a table, a session, an account) keeps a one-line strip over the item's own identity line.
+
 The control center draws every saved database as a card, shelved by where it runs, its engine or its
 environment (the table it could be laid across as, and its picture of what the databases feed, went
 in 0.8.6). The map (`/databases/map`) is the server map's canvas with one diagram for each database
 — what reads it, the database, the container it runs in, the volume that keeps it and the backups
 that take it — its rail by engine, its arrangement kept per account under its own name,
 `?database=<id>` opening on one ([server map](../server-map.md#the-databases-map);
-`lib/database-systems.ts`, unit-tested). The control center opens a Metrics export dialog (the
+`lib/database-systems.ts`, unit-tested). On a phone the map is one pane at a time, the databases, the
+canvas and the inspector, picked from a bar at the foot (`MapCanvas panes`; the server map keeps the
+canvas alone). The control center opens on the server's line with *Add a database* as its one
+command; a card reads who is connected with its last hour and its newest dumps as a strip; and the
+`⋯` menu at the line's end opens a Metrics export dialog (the
 Prometheus URL, a metrics-only API key, a scrape config and how long activity is kept) and an MCP
 server dialog (`fleet/mcp-server-dialog.tsx`: the MCP endpoint, the account's MCP keys with what
 each reaches, a key made for chosen databases each to read or change — protected ones and non-SQL
@@ -609,8 +620,12 @@ its rows now and after, its first rows under two-line column heads naming each c
 and the generator filling it (changed there), and the statement a row is inserted with — and inserts
 them behind `SqlReview` for a role that may change data on an unprotected connection; the preview is
 every role's, and what was written, refused or left out is said table by table with a link to each
-table's Data. Home draws how the database is used (readers, what it holds, its dumps), every
-activity view as a chart and its server log followed live. Performance opens on who is connected
+table's Data. Add a database (`/databases/new`) draws what is about to be made beside its catalogue
+until an engine is picked (`connect/picture.tsx`): the engine as a mark not added yet, wired to the
+container or the address and on to this dashboard. Home draws how the database is used (readers, what it holds, its dumps), one line each
+for what it runs as, where it is reachable from and its dumps, every activity view as a line of
+words with the chosen window's shape (the charts are Performance's; a stopped server keeps them),
+and its server log followed live. Performance opens on who is connected
 right now (each client as its program's logo, wired to what its sessions are doing) over the
 recorded activity charts; Redis and MongoDB charts open on the recorder's last hour. Where
 PostgreSQL never loaded pg_stat_statements, *Turn on statement statistics* (Performance →
@@ -701,7 +716,7 @@ engine lacks is not listed, and an address from the one-page Settings (`#danger`
 to the page that holds it, `#databases` to Home. Every connection has an Assistant beside its Home
 (`database/assistant.tsx`, the deployment's page through the shared
 `assistant/agent/subject-page.tsx`), for a role with `service.control`: a chat about this connection
-on `POST /databases/{id}/assistant`, filling the window under the strip with the connection's chats
+on `POST /databases/{id}/assistant`, filling the window under the header with the connection's chats
 and what the open one did in the rail, suggestions in the engine's own words (keys and commands on
 Redis), and saved chats opened by `?chat=`. Query keeps the same chat — the same session — in a
 column beside the editor (`query/query-assistant.tsx`), for a role that may run statements on an
@@ -744,6 +759,16 @@ list of Performance draws a bar per row: a share is a figure in its own column, 
 footnote said is a fact on its title line (`ops/performance-words.tsx`);
 `tests/browser/database-performance.spec.ts`.
 
+
+
+Data, Query, Schema and Diagram are four workbenches under one head
+(`components/database/workbench/chrome.tsx`): the database's identity and the open thing's verbs in
+the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
+a bar at the foot — Tables, Rows and Details on Data, where a row is a card and its full row the
+Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where Run's menu holds the
+row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
+facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
+at the foot of its canvas (no minimap).
 Backups' dumps are one line each in a framed table (a card of two lines on a phone): when, the
 file's name with its tag and note, what it holds, its size, and Download, Restore and Delete. The
 name opens who took it, the tool that wrote it and how long that took. *Back up now* is the one
@@ -768,6 +793,8 @@ Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where R
 row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
 facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
 at the foot of its canvas (no minimap).
+
+
 
 **Implementation:** `components/database/`; backend in
 [`../backend/databases.md`](../backend/databases.md) Adding a database can limit its container from

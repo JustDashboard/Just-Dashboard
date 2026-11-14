@@ -2475,7 +2475,9 @@ the detail of each classifier is below, with the surface it guards.
   test a restore applies, read once per fleet request). The listing alone called a database a nightly
   job protects never backed up. `GET /databases/backups/summary` is every connection's newest dump in
   the directory in one read that dials nothing, polled every few seconds while a dump runs, so the
-  control center takes the later of its answer and the fleet's. What a dump holds — the options it was
+  control center takes the later of its answer and the fleet's. Each row also lists when the
+  connection's newest fourteen dumps were written and how large each is (`recent`, newest first, from
+  the directory entries alone), which a database's card draws as a strip. What a dump holds — the options it was
   taken with, the tool and version that wrote it, how long it took, a note, who asked — is in a small
   file beside it (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed.
   Beside it rather than in a table because the directory is what gets copied off the machine. A file

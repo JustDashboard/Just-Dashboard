@@ -22,6 +22,56 @@ const card = (page: Page, name: string) =>
 const foundRow = (page: Page, name: string) =>
   page.locator("[data-slot=choice-row]").filter({ hasText: name }).first()
 const scroller = (page: Page) => page.locator("[data-slot=page]").first().locator("xpath=..")
+const identity = (page: Page) => page.locator("[data-slot=host-identity]")
+/** The menu at the end of the identity line, which holds every command but the first. */
+const more = (page: Page) => page.getByRole("button", { name: "More about the databases" })
+
+/** A recorded hour of a SQL server whose open sessions move, as the history route answers it. */
+function sqlHour(base: number) {
+  const now = Date.now()
+  return {
+    samples: Array.from({ length: 12 }, (_, index) => ({
+      at: now - (12 - index) * 300_000,
+      gap: false,
+      stats: {
+        at: new Date(now - (12 - index) * 300_000).toISOString(),
+        supported: true,
+        databaseBytes: 23_400_000,
+        connections: {
+          total: base + (index % 4),
+          active: 1,
+          idle: 1,
+          idleInTransaction: 0,
+          waiting: 0,
+          max: 100,
+        },
+        counters: {},
+        gauges: {},
+      },
+    })),
+    everySeconds: 30,
+    retentionHours: 168,
+  }
+}
+
+/** The same for a key-value store, which counts clients. */
+function redisHour(base: number) {
+  const now = Date.now()
+  return {
+    samples: Array.from({ length: 12 }, (_, index) => ({
+      at: now - (12 - index) * 300_000,
+      gap: false,
+      stats: {
+        server: {
+          sampledAtMs: now - (12 - index) * 300_000,
+          counters: { connected_clients: base + (index % 3) },
+        },
+      },
+    })),
+    everySeconds: 30,
+    retentionHours: 168,
+  }
+}
 
 /** A server with many databases, long names and awkward figures among them. */
 function manyDatabases(count: number) {
@@ -101,11 +151,15 @@ test.describe("the control center", () => {
     // MariaDB behind the mysql driver is drawn and named as itself.
     await expect(card(page, "blog")).toContainText("MariaDB 11.8.9")
     await expect(card(page, "blog").locator("img").first()).toHaveAttribute("src", /mariadb/)
-    await expect(card(page, "cache")).toContainText("Keys")
-    await expect(card(page, "cache")).toContainText("Clients")
-    await expect(card(page, "app")).toContainText("Collections")
-    // The figure nobody reported is a dash on the card, and the dump age is said.
-    // The live clock can add seconds while the preceding readings settle.
+    // Each reads in its engine's own words: what it holds and who is connected, as words
+    // on one line, where three figures stood under three labels.
+    await expect(card(page, "cache")).toContainText(/28,600\s*keys/)
+    await expect(card(page, "cache")).toContainText(/3\s*clients open/)
+    await expect(card(page, "app")).toContainText(/4\s*collections/)
+    await expect(card(page, "shop")).toContainText(/4\s*sessions open/)
+    await expect(card(page, "shop")).toContainText("23.4 MB stored")
+    await expect(page.locator("[data-card=database] .eyebrow")).toHaveCount(0)
+    // The dump age is said. The live clock can add seconds while the preceding readings settle.
     await expect(card(page, "shop")).toContainText(/backed up 3h(?: \d+[ms])* ago/)
     await expect(card(page, "cache")).toContainText("never backed up")
     await expect(card(page, "shop")).toContainText("shop-db")
@@ -123,7 +177,7 @@ test.describe("the control center", () => {
     ).toHaveAttribute("href", "/databases/5/query")
 
     // The whole card is the way in; a control on it is its own press.
-    await card(page, "shop").getByText("Stored").click()
+    await card(page, "shop").getByText("23.4 MB stored").click()
     await expect(page).toHaveURL(/\/databases\/1$/)
   })
 
@@ -207,10 +261,12 @@ test.describe("the control center", () => {
   test("the band reads where the bytes are, who is connected and how old each dump is, each database in its card's hue", async ({
     page,
   }) => {
-    await mockFleet(page, {
+    const server = await mockFleet(page, {
       dumps: { 4: null, 5: 200 },
       fleet: { 2: { ok: false, state: "stopped" } },
     })
+    server.answer("GET /databases/1/stats/history", () => ({ body: sqlHour(3) }))
+    server.answer("GET /databases/4/stats/history", () => ({ body: redisHour(2) }))
     await page.goto("/databases")
     const band = page.locator("[data-slot=fleet-band]")
     const names = (list: string) =>
@@ -255,13 +311,31 @@ test.describe("the control center", () => {
     await backups.getByRole("link", { name: "Backups of blog" }).hover()
     await expect(reading).toContainText("3 today")
     await expect(reading).toContainText("blog")
+    // Each standing is marked with the engine of the database its line names, as the
+    // other two blocks mark theirs: a bare count stood there and read as a stray digit.
+    const marks = backups.getByRole("list", { name: "Databases by last backup" })
+    await expect(marks.locator("img")).toHaveCount(3)
+    await expect(marks.locator("img").first()).toHaveAttribute("src", /redis/)
+    expect(await marks.getByRole("link").allTextContents()).toEqual(["", "", ""])
 
-    // One database, one hue: its span in the band is its card's size bar, and
-    // the card's edge carries none. The span holds the colour since the band's
-    // marks were drawn bare, without a rule in their part's colour under each.
+    // One database, one hue: its span in the band is the line of its last hour on
+    // its card, and the card's edge carries none. The span holds the colour since the
+    // band's marks were drawn bare, without a rule in their part's colour under each.
     const hue = (el: Element) => getComputedStyle(el).backgroundColor
     const edge = async (name: string) =>
-      card(page, name).locator("[data-slot=fleet-size]").evaluate(hue)
+      card(page, name)
+        .locator("[data-slot=fleet-trend] path[stroke]")
+        .evaluate((line) => getComputedStyle(line).stroke)
+    await expect(
+      card(page, "shop").getByRole("img", { name: "Sessions open on shop over the last hour" }),
+    ).toBeVisible()
+    await expect(
+      card(page, "cache").getByRole("img", { name: "Clients open on cache over the last hour" }),
+    ).toBeVisible()
+    // A stopped server draws no hour, and one with none recorded keeps the line's place.
+    await expect(card(page, "blog").locator("[data-slot=fleet-trend] svg")).toHaveCount(0)
+    await expect(card(page, "app").locator("[data-slot=fleet-trend] svg")).toHaveCount(0)
+    await expect(page.locator("[data-slot=fleet-size]")).toHaveCount(0)
     const fills = band
       .getByRole("region", { name: "Storage" })
       .locator("[data-slot=reading-span] > i > i")
@@ -313,10 +387,9 @@ test.describe("the control center", () => {
       },
     })
     await page.goto("/databases")
-    const identity = page.locator("[data-slot=host-identity]")
 
     // The server that does not answer is the verdict, and the first card on its shelf.
-    await expect(identity).toContainText("1 database not answering")
+    await expect(identity(page)).toContainText("1 database not answering")
     await expect(
       page.getByRole("list", { name: "Containers" }).locator("[data-card=database]").first(),
     ).toContainText("cache")
@@ -441,9 +514,14 @@ test.describe("the control center", () => {
     })
     await page.goto("/databases")
 
-    // The engine's own noun is read whole at this width.
-    const noun = card(page, "app").getByText("Collections", { exact: true })
-    expect(await noun.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+    // What it holds is read whole at this width, in the engine's own noun.
+    const holds = card(page, "app").locator("[data-slot=fleet-holds]")
+    await expect(holds).toHaveText(/764\.0 KB stored\s*4 collections/)
+    expect(
+      await holds.evaluate((el) =>
+        [el, ...el.children].every((part) => part.scrollWidth <= part.clientWidth),
+      ),
+    ).toBe(true)
 
     // Two whole lines of the server's answer and no part of a third.
     const said = card(page, "shop").locator("[data-slot=fleet-error]")
@@ -474,7 +552,9 @@ test.describe("the control center", () => {
 
     // A dump over a week old weighs the same on the card as none at all.
     const hue = (el: Element) => getComputedStyle(el).color
-    const stale = await facts.getByText(/^backed up/).evaluate(hue)
+    const stale = await card(page, "app")
+      .getByText(/^backed up/)
+      .evaluate(hue)
     const never = await card(page, "cache").getByText("never backed up").evaluate(hue)
     expect(stale).toBe(never)
 
@@ -627,11 +707,16 @@ test.describe("the control center", () => {
 
     await expect(card(page, "shop")).toBeVisible()
     await expect(page.getByRole("link", { name: "Add a database" })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "Scan this server again" })).toHaveCount(0)
+    // The menu holds what any role may open, and no scan.
+    await more(page).click()
+    await expect(page.getByRole("menuitem")).toHaveText(["Metrics export", "MCP server"])
+    await page.keyboard.press("Escape")
     await expect(page.getByRole("heading", { name: "Found on this server" })).toHaveCount(0)
     await expect(card(page, "blog").getByRole("button", { name: "Start blog" })).toHaveCount(0)
     await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-    await expect(card(page, "notes")).toContainText("—")
+    // The size nobody reported to this role is not said, rather than said as nothing.
+    await expect(card(page, "notes")).not.toContainText("stored")
+    await expect(card(page, "notes")).toContainText(/4\s*tables/)
     await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
     await expect(page.getByRole("menuitem")).toHaveText(["Settings"])
     expect(server.asked).not.toContain("GET /databases/inventory")
@@ -654,6 +739,12 @@ test.describe("the control center", () => {
     await page.goto("/databases")
     await expect(page.getByRole("status", { name: "Loading databases" })).toBeVisible()
     await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+    // The line it opens on is drawn before the fleet has answered, with its command
+    // and its menu, where it will be once it has.
+    await expect(identity(page)).toContainText("Reading the databases…")
+    await expect(identity(page).getByRole("link", { name: "Add a database" })).toBeVisible()
+    await risen(page)
+    const waiting = (await identity(page).boundingBox())!
 
     answer = "failing"
     first.release()
@@ -667,6 +758,10 @@ test.describe("the control center", () => {
     await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(1)
     await page.getByRole("button", { name: "Try again" }).click()
     await expect(card(page, "shop")).toBeVisible()
+    await risen(page)
+    const read = (await identity(page).boundingBox())!
+    expect(read.y).toBe(waiting.y)
+    expect(read.height).toBe(waiting.height)
 
     answer = "failing"
     await expect(page.getByText("the last check did not finish").first()).toBeVisible({
@@ -718,6 +813,18 @@ test.describe("the control center", () => {
     await expect(
       page.locator("[data-slot=empty-state]").getByRole("link", { name: "Add a database" }),
     ).toHaveAttribute("href", "/databases/new")
+    // The server keeps its line with nothing connected, and the page its one command.
+    await expect(identity(page)).toContainText("No database is connected yet")
+    await expect(page.getByRole("main").getByRole("link", { name: "Add a database" })).toHaveCount(
+      1,
+    )
+    await more(page).click()
+    await expect(page.getByRole("menuitem")).toHaveText([
+      "Metrics export",
+      "MCP server",
+      "Scan this server again",
+    ])
+    await page.keyboard.press("Escape")
     await expect(page.getByRole("heading", { name: "Found on this server" })).toBeVisible()
     await expect(foundRow(page, "orders-db")).toBeVisible()
   })
@@ -1047,19 +1154,73 @@ test.describe("found on this server", () => {
         ignored: false,
       })
 
-    await page.getByRole("button", { name: "Scan this server again" }).click()
+    await more(page).click()
+    await page.getByRole("menuitem", { name: "Scan this server again" }).click()
     await expect
       .poll(() => server.sent.map((one) => one.call))
       .toContain("POST /databases/inventory/scan")
   })
 
-  test("a Docker that did not answer is a stated silence, not an empty list", async ({ page }) => {
-    await mockFleet(page, { inventory: dockerlessInventory() })
+  test("a Docker that did not answer is a stated silence, drawn as Docker with the step that fixes it", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page, { inventory: dockerlessInventory() })
+    let stopped = true
+    server.answer("GET /docker/ping", () => ({
+      body: stopped
+        ? {
+            available: false,
+            error: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.",
+          }
+        : { available: true },
+    }))
+    server.answer("GET /systemd/docker.service", () => ({
+      body: {
+        unit: {
+          name: "docker.service",
+          loadState: "loaded",
+          activeState: stopped ? "inactive" : "active",
+          subState: stopped ? "dead" : "running",
+          description: "Docker Application Container Engine",
+        },
+      },
+    }))
     await page.goto("/databases")
 
-    await expect(page.getByText("Not looked at: containers and compose services.")).toBeVisible()
-    await expect(page.getByText(/Docker did not answer/)).toBeVisible()
+    const silence = page.locator("[data-slot=found-silence]")
+    await expect(silence).toContainText("Not looked at: containers and compose services")
+    const docker = silence.locator("[data-slot=missing-thing]")
+    await expect(docker).toHaveAttribute("data-thing", "docker")
+    await expect(docker.locator("img").first()).toHaveAttribute("src", /docker/)
+    await expect(docker).toContainText("Docker is stopped")
+    // The daemon's own sentence is folded away, never the headline.
+    await expect(docker.locator("details")).not.toHaveAttribute("open", "")
+    await expect(page.getByText("Cannot connect to the Docker daemon").first()).toBeHidden()
+    // What the other collectors found is still listed, and nothing claims the list is whole.
     await expect(page.getByRole("button", { name: "Connect postgresql@17-main" })).toBeVisible()
+    await expect(page.getByText("Everything found on this server is connected.")).toHaveCount(0)
+
+    // The step is Docker's own: starting it, and the list is read again once it answers.
+    const before = server.asked.filter((call) => call === "GET /databases/inventory").length
+    stopped = false
+    await docker.getByRole("button", { name: "Start Docker" }).click()
+    await expect
+      .poll(() => server.sent.map((one) => one.call))
+      .toContain("POST /systemd/docker.service/start")
+    await expect
+      .poll(() => server.asked.filter((call) => call === "GET /databases/inventory").length)
+      .toBeGreaterThan(before)
+  })
+
+  test("with nothing connected and Docker silent, the page says neither that all is connected", async ({
+    page,
+  }) => {
+    const base = dockerlessInventory()
+    await mockFleet(page, { empty: true, inventory: { ...base, instances: [] } })
+    await page.goto("/databases")
+    await expect(page.locator("[data-slot=found-silence]")).toBeVisible()
+    await expect(page.getByText("Everything found on this server is connected.")).toHaveCount(0)
+    await expect(identity(page)).toContainText("No database is connected yet")
   })
 })
 
@@ -1239,21 +1400,54 @@ test.describe("the map", () => {
   test.describe("on a phone", () => {
     test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
 
-    test("it is the canvas alone, and a tap on a box floats the way to its page", async ({
+    test("it is one pane at a time: the canvas, the databases and the inspector, picked from a bar at the foot", async ({
       page,
     }) => {
       await mockFleet(page)
       await page.goto("/databases/map?database=1")
       await expect(page.locator(".react-flow__node").first()).toBeVisible()
+      const bar = page.locator("[data-slot=pane-bar]")
+      await expect(bar.getByRole("tab")).toHaveText(["Databases", "Map", "Inspector"])
+      await expect(bar.getByRole("tab", { name: "Map" })).toHaveAttribute("aria-selected", "true")
+      // The canvas is the whole width and stands on the bar, which is at the very foot.
       await expect(rail(page)).toHaveCount(0)
       await expect(inspector(page)).toHaveCount(0)
       const canvas = (await page.locator("[data-slot=server-map]").boundingBox())!
+      const foot = (await bar.boundingBox())!
       expect(canvas.width).toBe(390)
+      expect(Math.round(canvas.y + canvas.height)).toBe(Math.round(foot.y))
+      expect(Math.round(foot.y + foot.height)).toBe(844)
       await node(page, "system:db:1/db:1").tap()
       await expect(page.getByRole("link", { name: "Open shop" })).toHaveAttribute(
         "href",
         "/databases/1",
       )
+
+      // The inspector names the links of what was tapped, as it does at a desk.
+      await bar.getByRole("tab", { name: "Inspector" }).tap()
+      await expect(inspector(page)).toBeVisible()
+      await expect(inspector(page)).toContainText("shop")
+      expect((await inspector(page).boundingBox())!.width).toBe(390)
+
+      // The rail lists every database by engine; picking one shows it on the canvas.
+      await bar.getByRole("tab", { name: "Databases" }).tap()
+      await expect(rail(page)).toBeVisible()
+      await expect(inspector(page)).toHaveCount(0)
+      await expect(rail(page).getByRole("button")).toHaveCount(5)
+      await rail(page).locator('[data-system="system:db:4"]').tap()
+      await expect(rail(page)).toHaveCount(0)
+      await expect(bar.getByRole("tab", { name: "Map" })).toHaveAttribute("aria-selected", "true")
+      await expect(frame(page, "system:db:4")).toBeInViewport()
+      // Nothing is wider than the phone in any of the three.
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true)
+
+      // The server map shares the canvas and did not ask for the bar: it is as it was.
+      await page.goto("/map")
+      await expect(page.locator(".react-flow__node").first()).toBeVisible()
+      await expect(page.locator("[data-slot=pane-bar]")).toHaveCount(0)
+      await expect(page.locator("[data-slot=map-pane]")).toHaveCount(0)
     })
   })
 })

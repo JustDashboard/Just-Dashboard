@@ -5,6 +5,7 @@ import { Page, PageContext } from "@/components/page"
 import { ErrorState } from "@/components/state"
 import type { SectionId } from "@/components/database/engine"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { HEADED } from "@/components/database/shell/header-rule"
 
 /**
  * The gutters of a workbench: a grid or a canvas wants the window, so its
@@ -14,14 +15,23 @@ import { useDatabase } from "@/components/database/shell/database-context"
 export const WORKBENCH_FRAME = "gap-2 px-2 py-2 md:px-3 md:py-3"
 
 /**
+ * The gutters of a page held to the window under the database's header (the
+ * assistant, Logs): the page's own at the sides, so its frame's edges are the
+ * header's, as a project's Logs stand under its header.
+ */
+const UNDER_HEADER_FRAME = "gap-2 px-5 pt-3 pb-2 md:px-8 md:pt-4 md:pb-3"
+
+/**
  * The frame one of a database's pages renders into.
  *
  * It is `Page` with the two things every page here would otherwise decide for
  * itself. The name: an `h1` for assistive technology — "shop · Keys", in the
- * engine's own word — while the rail and the strip say it to everybody else.
- * And the shape: the registry knows which pages are workbenches, so a
- * workbench is held to the window (`fill`) with the narrow gutters and a
- * reading page scrolls, and no page picks differently from its neighbours.
+ * engine's own word — while the rail and the header say it to everybody else.
+ * And the shape: the registry knows which pages are held to the window, so
+ * such a page is `fill` and a reading page scrolls, and no page picks
+ * differently from its neighbours. A workbench that heads itself takes the
+ * narrow gutters; one that stands under the database's header takes the
+ * page's.
  */
 export function SectionFrame({
   section,
@@ -47,7 +57,14 @@ export function SectionFrame({
     <Page
       fill={workbench}
       register={register}
-      className={cn(workbench ? WORKBENCH_FRAME : "animate-rise", className)}
+      className={cn(
+        !workbench
+          ? "animate-rise"
+          : HEADED.includes(section)
+            ? WORKBENCH_FRAME
+            : UNDER_HEADER_FRAME,
+        className,
+      )}
     >
       <PageContext
         eyebrow="Databases"

@@ -59,6 +59,23 @@ function partSwatch(parts: readonly Part[] | undefined, key: string) {
  * No row carries a share: the read is the largest few, not every table, so a
  * percentage of what was read would not be a percentage of the database.
  */
+/**
+ * What a ranked block's figures are of, on its title's line: the share's
+ * whole, the window it was counted over. It was a sentence under the list;
+ * the whole of it is still on the pointer.
+ */
+function HeadFact({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <span
+      data-slot="head-fact"
+      title={title}
+      className="numeric text-hint text-muted-foreground max-sm:hidden"
+    >
+      {children}
+    </span>
+  )
+}
+
 export function LargestTablesBlock({
   poll,
   parts,
@@ -104,7 +121,16 @@ export function LargestTablesBlock({
     <Block
       title={`Largest ${nouns.objects}`}
       stale={staleOf(poll)}
-      actions={<BlockLink href={href("data")}>All {nouns.objects}</BlockLink>}
+      actions={
+        <>
+          {items.length > 0 && poll.data && !poll.data.sizesKnown && (
+            <HeadFact title={`This engine reports no sizes, so they are ranked by ${nouns.rows}.`}>
+              by {nouns.rows}
+            </HeadFact>
+          )}
+          <BlockLink href={href("data")}>All {nouns.objects}</BlockLink>
+        </>
+      }
     >
       <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
@@ -116,14 +142,7 @@ export function LargestTablesBlock({
                   : `No ${nouns.objects} yet. Create one in ${engine.section("schema")?.title ?? "Query"}, or import a file in ${place}.`)}
             </Quiet>
           ) : (
-            <>
-              <RankList items={items} />
-              {!data.sizesKnown && (
-                <p className="mt-2 text-hint text-muted-foreground">
-                  This engine reports no sizes, so they are ranked by {nouns.rows}.
-                </p>
-              )}
-            </>
+            <RankList items={items} />
           )
         }
       </Read>
@@ -236,7 +255,24 @@ export function LargestNamespacesBlock({ poll }: { poll: PollState<RedisTree> })
     <Block
       title="Largest namespaces"
       stale={staleOf(poll)}
-      actions={<BlockLink href={href("data")}>All keys</BlockLink>}
+      actions={
+        <>
+          {items.length > 0 && poll.data && (
+            <HeadFact
+              title={
+                poll.data.complete
+                  ? `Keys in database ${poll.data.db}, by the name before the first “${poll.data.delimiter}”.`
+                  : `From the first ${compact(poll.data.scanned)} of ${compact(poll.data.total)} keys in database ${poll.data.db}; the rest are not counted here.`
+              }
+            >
+              {poll.data.complete
+                ? `db ${poll.data.db} · by the name before “${poll.data.delimiter}”`
+                : `the first ${compact(poll.data.scanned)} of ${compact(poll.data.total)} keys`}
+            </HeadFact>
+          )}
+          <BlockLink href={href("data")}>All keys</BlockLink>
+        </>
+      }
     >
       <Read poll={poll} what="the keyspace" skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
@@ -246,11 +282,6 @@ export function LargestNamespacesBlock({ poll }: { poll: PollState<RedisTree> })
             <div className="space-y-3">
               <TypeBar types={data.types ?? {}} />
               <RankList items={items} />
-              <p className="text-hint text-muted-foreground">
-                {data.complete
-                  ? `Keys in database ${data.db}, by the name before the first “${data.delimiter}”.`
-                  : `From the first ${compact(data.scanned)} of ${compact(data.total)} keys in database ${data.db}; the rest are not counted here.`}
-              </p>
             </div>
           )
         }

@@ -164,6 +164,11 @@ export type DbBackupSummary = {
     count: number
     totalSize: number
     newest: DbBackupNewest | null
+    /**
+     * When its newest dumps were written and how large each is, newest first.
+     * Absent from a dashboard a version behind this page.
+     */
+    recent?: { takenAt: string; size: number }[]
     /** A dump, restore or copy running against this connection now. */
     job?: Job
   }[]
