@@ -42,17 +42,20 @@ for (const width of [390, 1280, 1720]) {
       has: page.getByRole("heading", { name: "Delivery", exact: true }),
     })
     await expect(delivery.locator('[data-slot="stat-tile"]')).toHaveCount(0)
-    await expect(delivery.getByText("75%", { exact: true })).toBeVisible()
-    await expect(delivery.getByText("9 of 12 decided releases", { exact: true })).toBeVisible()
-    await expect(delivery.getByText("2.1", { exact: true })).toBeVisible()
-    // The reading, not the release-time chart's scale, which names the same
-    // figure when every day ran at the median.
-    await expect(delivery.locator("dd").getByText("1m 35s", { exact: true })).toBeVisible()
-    await expect(delivery.getByTestId("insights-durations").locator("li")).toHaveCount(31)
-    await expect(delivery.getByText("1.5h", { exact: true })).toBeVisible()
+    // The Overview's sentence leads, and the four figures are a line of
+    // facts under it, each with its basis as its title.
     await expect(
-      delivery.getByText("mean over 2 recovered failures", { exact: true }),
+      delivery.getByText("9 of 12 releases succeeded in the last 30 days", { exact: true }),
     ).toBeVisible()
+    const facts = delivery.locator('[data-slot="delivery-facts"]')
+    await expect(facts.getByTitle("9 of 12 decided releases")).toHaveText("75% succeeded")
+    await expect(facts.getByTitle("9 successful over 30 days")).toHaveText("2.1 a week")
+    await expect(facts.getByTitle("The median release, from claim to finish")).toContainText(
+      "1m 35s usually, 19 in 20 inside",
+    )
+    await expect(delivery.getByTestId("insights-durations").locator("li")).toHaveCount(31)
+    await expect(facts.getByTitle("Mean over 2 recovered failures")).toHaveText("1.5h to recover")
+    await expect(delivery.locator("dl")).toHaveCount(0)
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)

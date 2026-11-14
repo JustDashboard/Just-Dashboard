@@ -120,13 +120,21 @@ test("a passing rehearsal reads as the copy, the tasks and the lock they held", 
   await step.click()
   const record = page.getByRole("region", { name: "Migration rehearsal" })
   const report = record.getByRole("region", { name: "Rehearsal report" })
-  await expect(report.getByText("4.4 s", { exact: true })).toBeVisible()
-  await expect(report.getByText("dump of 02:15", { exact: true })).toBeVisible()
-  await expect(report.getByText("Passed", { exact: true })).toBeVisible()
-  // The longest lock, as a figure, and again in the line that says what it means.
-  await expect(report.getByText("2.0 s", { exact: true })).toHaveCount(2)
-  await expect(report.getByText("ACCESS EXCLUSIVE", { exact: true }).first()).toBeVisible()
-  await expect(report.getByText("Removed", { exact: true })).toBeVisible()
+  // The verdict is one sentence on the step's mark, with the copy's story as
+  // a line of facts: no tile is left in the report.
+  const verdict = report.locator('[data-slot="run-verdict"]')
+  await expect(
+    verdict.getByText("migrate passed against a copy of orders-db", { exact: true }),
+  ).toBeVisible()
+  const restored = verdict.getByText("Restored in 4.4 s from the dump of 02:15", { exact: true })
+  await expect(restored).toBeVisible()
+  await expect(restored).toHaveAttribute("title", /^From the backup of /)
+  // The longest lock, as a fact, and again in the line that says what it means.
+  await expect(
+    verdict.getByText("Longest lock 2.0 s, ACCESS EXCLUSIVE", { exact: true }),
+  ).toBeVisible()
+  await expect(verdict.getByText("Copy removed with its network", { exact: true })).toBeVisible()
+  await expect(report.locator('[data-slot="stat-tile"]')).toHaveCount(0)
   // The weaker lock the ALTER's covered is not read twice.
   const locks = report.getByRole("list", { name: "Locks held against the copy" })
   await expect(locks.getByRole("listitem")).toHaveCount(1)
@@ -171,8 +179,15 @@ test("a failing rehearsal says the release stopped before production", async ({ 
   const record = page.getByRole("region", { name: "Migration rehearsal" })
   await expect(record.getByText("rehearsal_failed", { exact: true })).toBeVisible()
   const report = record.getByRole("region", { name: "Rehearsal report" })
-  await expect(report.getByText("Failed", { exact: true })).toBeVisible()
-  await expect(report.getByText("exit 1", { exact: true })).toHaveCount(2)
+  // The task that failed leads, with its exit code first among the facts and
+  // again on the task's own line.
+  const verdict = report.locator('[data-slot="run-verdict"]')
+  await expect(
+    verdict.getByText("migrate failed against a copy of orders-db", { exact: true }),
+  ).toBeVisible()
+  await expect(verdict.getByText("Exit 1", { exact: true })).toHaveClass(/text-destructive/)
+  await expect(verdict.getByText("No table locked", { exact: true })).toBeVisible()
+  await expect(report.getByText("exit 1", { exact: true })).toHaveCount(1)
   await expect(report.getByRole("list", { name: "Release tasks against the copy" })).toContainText(
     "contains null values",
   )
