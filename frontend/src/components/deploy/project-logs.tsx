@@ -3,13 +3,26 @@
 import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { ArrowRight, Bell } from "@/components/icons"
+import {
+  ArrowDown,
+  ArrowRight,
+  Bell,
+  Box,
+  ChartActivity,
+  CheckCircle,
+  Globe,
+  Lightning,
+  Stopwatch,
+  Terminal,
+  Warning,
+} from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { agentProduct } from "@/lib/clients"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { useIsMobile } from "@/hooks/use-mobile"
 import type {
   DeploymentLifecycle,
   DeploymentRequests,
@@ -23,16 +36,18 @@ import type {
 } from "@/lib/types"
 import { latencyWords } from "@/lib/latency-words"
 import { ALERT_KINDS, latency, latencyTone, perMinute } from "@/lib/requests"
+import { cn } from "@/lib/utils"
 import { TileTrend } from "@/components/metrics/sparkline"
+import { HUE } from "@/components/overview/readings"
 import { Pane } from "@/components/panel"
+import { PaneBack, PaneBar, type PaneStop } from "@/components/phone-panes"
 import { ProductGlyphs } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { LoadingRows } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import { RequestsWorkspace } from "@/components/deploy/requests-workspace"
 import type { ChartMarker } from "@/components/deploy/request-chart"
@@ -58,6 +73,8 @@ import { serviceProduct } from "@/components/deploy/service-product"
 import { AddAlertSheet } from "@/components/deploy/add-alert-sheet"
 import { traceLinkFor } from "@/components/deploy/log-drains"
 import { failingTone } from "@/components/deploy/fleet"
+import { failingWords } from "@/components/deploy/live-readings"
+import { WireMark } from "@/components/deploy/wire"
 import { ChannelNames, toldBy } from "@/components/deploy/settings/traffic-alerts"
 import { WrapDot } from "@/components/deploy/request-marks"
 import { MinuteStrip, isCleanExit } from "@/components/deploy/traffic-strip"
@@ -114,17 +131,23 @@ function isDisruption(event: DockerEvent) {
  * alert's among them — opens on the same question it was taken from.
  *
  * The readings above the pane come from all of it at once, because the first
- * thing a reader wants is not a view, it is whether anything is wrong. Each
- * carries its hour where a meter would be (§15): the request rate, the p95
- * and the bytes as lines, the failures as a strip of minutes — so "0.9%
- * failing" says whether that was one bad minute or the whole hour. On a phone
- * they sit two-up, so the pane and its first request are on the first screen
- * rather than under four stacked figures.
+ * thing a reader wants is not a view, it is whether anything is wrong. They
+ * are the Overview's reading lines, said the same way, each with its hour at
+ * the line's end: the request rate, the slow tail and the bytes as lines, the
+ * failures as a strip of minutes — so "1.0% of requests failed" says whether
+ * that was one bad minute or the whole hour.
  *
  * The alerts line under them says whether anyone will be told, and who: the
  * rules' state, and the channels they tell drawn as the services they are.
  * With no rule at all, adding one is a sheet on this page rather than a trip
  * to Automation settings — this is where the reader decides they want one.
+ *
+ * On a phone the page is one pane, the whole height under the project's
+ * header, and the views are the stops of a bar along its foot
+ * (`components/phone-panes.tsx`). Stacked, the readings took the first screen
+ * and the pane began under it as a box inside a scrolling page. The hour is
+ * one line at the pane's head there, on every view, and pressing it opens the
+ * readings and the alerts as a page of their own with a way back.
  */
 export function ProjectLogs() {
   const project = useProject()
@@ -177,6 +200,11 @@ export function ProjectLogs() {
   )
   const query = useMemo(() => completeQuery(storedQuery), [storedQuery])
   const [adding, setAdding] = useState(false)
+  // Chosen once by width, so each reading is in the document once: above the
+  // pane at a desk, behind the pane's first line on a phone.
+  const phone = useIsMobile()
+  const [hourOpen, setHourOpen] = useState(false)
+  const hourShown = phone && hourOpen
 
   // The view, the moment it is scoped to, the service and the request query
   // are written back to the address. A link to Events at the minute a
@@ -344,27 +372,51 @@ export function ProjectLogs() {
   const disruptions = lifecycle.data?.recent.length ?? 0
   const choose = (next: LogsView) => setAsked(next)
 
+  const readings = <TrafficReadings requests={requests.data} alerts={alerts.data?.alerts} />
+  const alertsLine = !staging && (
+    <AlertsLine
+      projectId={project.projectId}
+      alerts={alerts.data}
+      channels={channels.data}
+      onAdd={canAddAlert ? () => setAdding(true) : undefined}
+    />
+  )
+  const stops: PaneStop<LogsView>[] = LOGS_VIEWS.map((id) => ({
+    key: id,
+    label: VIEW_LABEL[id],
+    icon: VIEW_GLYPH[id],
+    count: id === "events" ? disruptions : undefined,
+    countClassName: "bg-warning",
+  }))
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6">
-      <TrafficReadings requests={requests.data} alerts={alerts.data?.alerts} />
-      {!staging && (
-        <AlertsLine
-          projectId={project.projectId}
-          alerts={alerts.data}
-          channels={channels.data}
-          onAdd={canAddAlert ? () => setAdding(true) : undefined}
-        />
-      )}
+      {!phone && readings}
+      {!phone && alertsLine}
 
       {/* A height of its own, the window's less the page's chrome: the
           project shell's `Page` is a flowing column, so a pane that only said
           `flex-1` sized itself to its rows — four events left it half empty,
           and a live tail of four thousand lines made the page eighty thousand
           pixels long with nothing to follow. Sized, it is the workspace §7
-          says a pane is, and each view scrolls inside it. A floor under it,
-          lower on a phone. */}
+          says a pane is, and each view scrolls inside it. On a phone the
+          shell holds this page to the window and the pane is what is left of
+          it, out to the screen's edges. */}
       <Pane className={PANE_SIZE}>
-        <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
+        {phone &&
+          (hourShown ? (
+            <HourPage onBack={() => setHourOpen(false)}>
+              {readings}
+              {alertsLine}
+            </HourPage>
+          ) : (
+            <HourLine
+              requests={requests.data}
+              alerts={staging ? undefined : alerts.data}
+              onOpen={() => setHourOpen(true)}
+            />
+          ))}
+        <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2 max-md:hidden">
           <nav aria-label="Log view" className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
             {LOGS_VIEWS.map((id) => (
               <ViewTab key={id} active={view === id} onClick={() => choose(id)}>
@@ -387,79 +439,86 @@ export function ProjectLogs() {
           </nav>
         </div>
 
-        {(view === "requests" || view === "insights") && (
-          <RequestsWorkspace
-            base={`/deploy/${project.projectId}`}
-            scope={project.environmentQuery}
-            subject={`deployment ${project.projectId}`}
-            view={view}
-            query={query}
-            onQueryChange={setQuery}
-            markers={markers}
-            alerts={alerts.data?.alerts}
-            routed={routed}
-            emptyAction={
-              <Button size="sm" variant="outline" asChild>
-                <Link href={`/deploy/${project.projectId}/settings/domains`}>Add a domain</Link>
-              </Button>
-            }
-            onEventsAround={(entry) => {
-              setEventsMoment(entry.time)
-              setAsked("events")
-            }}
-            outputFor={(entry) => {
-              const answer = answering(entry)
-              return answer && "container" in answer
-                ? () => openOutput(answer.container, entry.time)
-                : undefined
-            }}
-            traceLink={(traceId) => traceLinkFor(drains.data, project.projectId, traceId)}
-            renderInline={(entry, window) => (
-              <RequestLines entry={entry} window={window} answering={answering(entry)} />
-            )}
-          />
-        )}
-        {view === "output" && (
-          <ProjectOutput
-            projectId={project.projectId}
-            runtime={runtime}
-            kind={kind}
-            product={project.product}
-            lead={lead}
-            proxy={proxy}
-            service={service}
-            onServiceChange={setService}
-            moment={outputMoment}
-            onLeaveMoment={() => setOutputMoment(null)}
-          />
-        )}
-        {view === "builds" && (
-          <ProjectBuilds
-            projectId={project.projectId}
-            runs={project.runs}
-            loading={project.runsLoading}
-            remote={project.detail.deployment.sourceRemote}
-          />
-        )}
-        {view === "events" && (
-          <LifecycleFeed
-            projectId={project.projectId}
-            environmentId={project.environmentQuery?.environment}
-            product={project.product}
-            moment={eventsMoment}
-            onClearMoment={() => setEventsMoment(undefined)}
-            outputFor={(event) => {
-              const container = containerOf(event.id)
-              return container ? () => openOutput(container, event.time) : undefined
-            }}
-            // Whether the container is still there — its output with it — once
-            // the runtime has said which are.
-            exists={
-              runtime?.status === "available"
-                ? (event) => Boolean(containerOf(event.id))
-                : undefined
-            }
-          />
+        {/* Behind the hour's page a view stays as it was: its scroll, its
+            live tail and the row it had open are there on the way back. */}
+        <div className={hourShown ? "hidden" : "contents"}>
+          {(view === "requests" || view === "insights") && (
+            <RequestsWorkspace
+              base={`/deploy/${project.projectId}`}
+              scope={project.environmentQuery}
+              subject={`deployment ${project.projectId}`}
+              view={view}
+              query={query}
+              onQueryChange={setQuery}
+              markers={markers}
+              alerts={alerts.data?.alerts}
+              routed={routed}
+              emptyAction={
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={`/deploy/${project.projectId}/settings/domains`}>Add a domain</Link>
+                </Button>
+              }
+              onEventsAround={(entry) => {
+                setEventsMoment(entry.time)
+                setAsked("events")
+              }}
+              outputFor={(entry) => {
+                const answer = answering(entry)
+                return answer && "container" in answer
+                  ? () => openOutput(answer.container, entry.time)
+                  : undefined
+              }}
+              traceLink={(traceId) => traceLinkFor(drains.data, project.projectId, traceId)}
+              renderInline={(entry, window) => (
+                <RequestLines entry={entry} window={window} answering={answering(entry)} />
+              )}
+            />
+          )}
+          {view === "output" && (
+            <ProjectOutput
+              projectId={project.projectId}
+              runtime={runtime}
+              kind={kind}
+              product={project.product}
+              lead={lead}
+              proxy={proxy}
+              service={service}
+              onServiceChange={setService}
+              moment={outputMoment}
+              onLeaveMoment={() => setOutputMoment(null)}
+            />
+          )}
+          {view === "builds" && (
+            <ProjectBuilds
+              projectId={project.projectId}
+              runs={project.runs}
+              loading={project.runsLoading}
+              remote={project.detail.deployment.sourceRemote}
+            />
+          )}
+          {view === "events" && (
+            <LifecycleFeed
+              projectId={project.projectId}
+              environmentId={project.environmentQuery?.environment}
+              product={project.product}
+              moment={eventsMoment}
+              onClearMoment={() => setEventsMoment(undefined)}
+              outputFor={(event) => {
+                const container = containerOf(event.id)
+                return container ? () => openOutput(container, event.time) : undefined
+              }}
+              // Whether the container is still there — its output with it — once
+              // the runtime has said which are.
+              exists={
+                runtime?.status === "available"
+                  ? (event) => Boolean(containerOf(event.id))
+                  : undefined
+              }
+            />
+          )}
+        </div>
+        {!hourShown && (
+          <PaneBar label="Log view" until="md" stops={stops} active={view} onPick={choose} />
         )}
       </Pane>
 
@@ -477,7 +536,8 @@ export function ProjectLogs() {
   )
 }
 
-const PANE_SIZE = "h-[max(28rem,calc(100dvh-6rem))] sm:h-[max(40rem,calc(100dvh-6rem))]"
+const PANE_SIZE =
+  "max-md:-mx-5 max-md:min-h-0 max-md:flex-1 max-md:rounded-none max-md:border-x-0 max-md:border-b-0 md:h-[max(40rem,calc(100dvh-6rem))]"
 
 const VIEW_LABEL: Record<LogsView, string> = {
   requests: "Requests",
@@ -485,6 +545,15 @@ const VIEW_LABEL: Record<LogsView, string> = {
   output: "Output",
   builds: "Builds",
   events: "Events",
+}
+
+/** Each view's glyph on the phone's bar. */
+const VIEW_GLYPH: Record<LogsView, React.ReactNode> = {
+  requests: <Globe />,
+  insights: <ChartActivity />,
+  output: <Terminal />,
+  builds: <Box />,
+  events: <Lightning />,
 }
 
 /**
@@ -510,26 +579,22 @@ function arrivalOf(search: URLSearchParams, now: number) {
 }
 
 /**
- * The page's shape before it has anything in it — four readings, the alerts
- * line and the pane — so the Suspense fallback gives way to the page rather
- * than a framed block giving way to tiles and a pane.
+ * The page's shape before it has anything in it — the four reading lines, the
+ * alerts line and the pane — so the Suspense fallback gives way to the page
+ * rather than a framed block giving way to lines and a pane. On a phone it is
+ * the pane alone, with its first line and its bar, as the page is there.
  */
 export function LogsSkeleton() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6">
-      <StatGrid columns={4} dense>
-        {Array.from({ length: 4 }, (_, i) => (
-          <div key={i} data-slot="stat-tile" className="flex flex-col gap-2.5 px-5 py-4">
-            <Skeleton className="h-2.5 w-16" />
-            <Skeleton className="h-7 w-24" />
-            <Skeleton className="h-2.5 w-32" />
-          </div>
-        ))}
-      </StatGrid>
-      <Skeleton className="h-4 w-64" />
+      <div className="flex flex-col gap-6 max-md:hidden">
+        <TrafficReadings />
+        <div aria-hidden className={ALERTS_LINE} />
+      </div>
       <Pane className={PANE_SIZE}>
         <div className="h-10 shrink-0 border-b border-hairline" />
-        <LoadingRows rows={8} className="p-3" />
+        <LoadingRows rows={8} className="min-h-0 flex-1 p-3" />
+        <div aria-hidden className="h-14 shrink-0 border-t border-hairline md:hidden" />
       </Pane>
     </div>
   )
@@ -557,7 +622,7 @@ function ViewTab({
 }
 
 /**
- * What is happening right now, in four figures.
+ * What is happening right now, in four lines.
  *
  * Taken over the last hour rather than the view's own window, so they keep
  * meaning the same thing while the reader narrows the rows beneath them. Each
@@ -565,16 +630,19 @@ function ViewTab({
  * nothing without the window it was counted over, and a figure whose meaning
  * depends on a control somewhere else is a figure people learn to ignore.
  *
- * Each carries the hour it was taken over in the tile's trend slot, as the
- * Overview's do. The request rate, the p95 and the bytes are lines — the p95
- * scaled against the latency alert's line when there is one, so its height is
- * read against where somebody would be told. Failing is a strip of the hour's
- * minutes, red where one had a server error, because "0.9%" is either one bad
+ * They are the Overview's `ReadingLine`s, in the Overview's words — Traffic
+ * and Errors say here exactly what they said on the page that sent the reader
+ * — where four `StatTile`s had put "21.4" over "per minute" and left the
+ * sentence to the reader. Each carries the hour it was taken over at its end.
+ * The request rate, the slow tail and the bytes are lines — the tail scaled
+ * against the latency alert's line when there is one, so its height is read
+ * against where somebody would be told. Errors is a strip of the hour's
+ * minutes, red where one had a server error, because "1.0%" is either one bad
  * minute or a whole bad hour and a line of a share cannot say which. What
  * the container did is the Events tab's, which counts its disruptions.
  *
- * The figures count up on arrival (`NumberTicker`), which is the product's
- * way of saying a reading landed — the Overview's live usage does the same.
+ * A line is one height with a reading and without one, so the pane under them
+ * is where it will be before the record is read.
  */
 function TrafficReadings({
   requests,
@@ -585,12 +653,16 @@ function TrafficReadings({
 }) {
   const summary = requests?.summary
   const served = requests?.status === "available"
-  const buckets = served && summary ? summary.buckets : []
+  const ready = served && summary ? summary : undefined
+  const buckets = ready ? ready.buckets : []
+  const waiting = !requests
+    ? "Reading the request record…"
+    : requests.reason
+      ? "No request record"
+      : "No requests recorded yet"
   // What asked, drawn after the reading's name: the browsers, programs and
   // crawlers the hour's agents are, each once (§14 — a reading that counts
-  // products carries them after its words). The name's line is the one with
-  // room for them; beside the figure they pushed its unit onto a line of its
-  // own, and in the hint they cut the page views short.
+  // products carries them after its words).
   const askers = [
     ...new Set(
       (summary?.agents ?? [])
@@ -605,105 +677,219 @@ function TrafficReadings({
   // p95, and drawing it at 0ms invents a fast minute the chart beside it
   // draws as the gap it is.
   const p95s = buckets.flatMap((bucket) => (bucket.p95 === undefined ? [] : [bucket.p95]))
+  const rate = ready ? Number(perMinute(ready.perMinute)) : 0
+  const failing = ready ? failingTone(ready.errorRate) : "default"
+  const slow = latencyTone(summary?.latency?.p95) === "warning"
 
   return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        label={
-          <span className="flex items-center justify-between gap-2">
-            Requests
+    <ReadingLines aria-label="The last hour" role="group" className="md:grid-cols-2">
+      <ReadingLine
+        mark={
+          <WireMark size="md" hue={HUE.net}>
+            <Globe aria-hidden />
+          </WireMark>
+        }
+        name={
+          <>
+            Traffic
             <ProductGlyphs ids={askers} max={3} />
-          </span>
+          </>
         }
-        key={`rate:${summary?.perMinute ?? "none"}`}
-        value={
-          served && summary ? (
-            <NumberTicker
-              value={Number(perMinute(summary.perMinute))}
-              decimalPlaces={summary.perMinute < 10 ? 2 : summary.perMinute < 100 ? 1 : 0}
-            />
-          ) : (
-            "—"
-          )
-        }
-        trailing={served && summary ? "per minute" : undefined}
+        hint={ready ? `${plural(ready.pages, "page view")} in the last hour` : waiting}
         trend={
           <TileTrend
             values={buckets.map((bucket) => bucket.total)}
             label="Requests over the last hour"
+            color={HUE.net}
           />
         }
-        hint={
-          served && summary
-            ? `${plural(summary.pages, "page view")} in the last hour`
-            : requests?.reason
-              ? "No request record"
-              : undefined
-        }
-      />
-      <StatTile
-        label="Failing"
-        key={`err:${summary?.errorRate ?? "none"}`}
-        value={
-          served && summary ? (
-            <span>
-              <NumberTicker
-                value={Number((summary.errorRate * 100).toFixed(1))}
-                decimalPlaces={1}
-              />
-              %
-            </span>
+      >
+        {ready ? (
+          <>
+            <NumberTicker
+              key="requests"
+              value={rate}
+              decimalPlaces={rate < 10 ? 2 : rate < 100 ? 1 : 0}
+            />{" "}
+            {rate === 1 ? "request" : "requests"} a minute
+          </>
+        ) : (
+          <NoReading>No reading yet</NoReading>
+        )}
+      </ReadingLine>
+      <ReadingLine
+        mark={
+          ready ? (
+            <WireMark
+              size="md"
+              tone={failing === "default" ? "success" : failing === "danger" ? "danger" : "warning"}
+            >
+              {failing === "default" ? <CheckCircle aria-hidden /> : <Warning aria-hidden />}
+            </WireMark>
           ) : (
-            "—"
+            <WireMark size="md">
+              <CheckCircle aria-hidden className="text-muted-foreground" />
+            </WireMark>
           )
         }
-        tone={served && summary ? failingTone(summary.errorRate) : "default"}
-        trend={buckets.length > 0 ? <MinuteStrip buckets={buckets} /> : undefined}
+        name="Errors"
         hint={
-          served && summary
-            ? `${(summary.classes["5xx"] ?? 0).toLocaleString()} of ${summary.total.toLocaleString()} answered 5xx`
+          ready
+            ? `${(ready.classes["5xx"] ?? 0).toLocaleString()} of ${ready.total.toLocaleString()} answered 5xx`
             : undefined
         }
-      />
-      <StatTile
-        label="Response time"
-        key={`latency:${summary?.latency?.p95 ?? "none"}`}
-        value={summary?.latency ? latency(summary.latency.p95) : "—"}
-        tone={latencyTone(summary?.latency?.p95)}
+        trend={buckets.length > 0 ? <MinuteStrip buckets={buckets} /> : undefined}
+      >
+        {ready ? failingWords(ready.errorRate) : <NoReading>No reading yet</NoReading>}
+      </ReadingLine>
+      <ReadingLine
+        mark={
+          slow ? (
+            <WireMark size="md" tone="warning">
+              <Stopwatch aria-hidden />
+            </WireMark>
+          ) : (
+            <WireMark size="md" hue={HUE.load}>
+              <Stopwatch aria-hidden />
+            </WireMark>
+          )
+        }
+        name="Response time"
+        hint={
+          summary?.latency
+            ? sentence(latencyWords("p50", latency(summary.latency.p50)))
+            : requests?.latency === false
+              ? "This ingress records no timing"
+              : undefined
+        }
         trend={
           summary?.latency ? (
             <TileTrend
               values={p95s}
               max={line.length > 0 ? Math.max(Math.min(...line), ...p95s) : undefined}
-              color="var(--chart-3)"
+              color={HUE.load}
               label="How long 19 in 20 responses took, over the last hour"
             />
           ) : undefined
         }
-        hint={
-          summary?.latency
-            ? `19 in 20 inside this · ${latencyWords("p50", latency(summary.latency.p50))}`
-            : requests?.latency === false
-              ? "This ingress records no timing"
-              : undefined
+      >
+        {summary?.latency ? (
+          latencyWords("p95", latency(summary.latency.p95))
+        ) : (
+          <NoReading>No reading yet</NoReading>
+        )}
+      </ReadingLine>
+      <ReadingLine
+        mark={
+          <WireMark size="md" hue={HUE.mem}>
+            <ArrowDown aria-hidden />
+          </WireMark>
         }
-      />
-      <StatTile
-        label="Served"
-        key={`bytes:${summary?.bytes ?? "none"}`}
-        value={served && summary ? bytes(summary.bytes) : "—"}
+        name="Served"
+        hint={ready ? "In the last hour" : undefined}
         trend={
           buckets.some((bucket) => bucket.bytes !== undefined) ? (
             <TileTrend
               values={buckets.map((bucket) => bucket.bytes ?? 0)}
-              color="var(--chart-2)"
+              color={HUE.mem}
               label="Bytes sent over the last hour"
             />
           ) : undefined
         }
-        hint={served && summary ? "sent in the last hour" : undefined}
+      >
+        {ready ? `${bytes(ready.bytes)} sent` : <NoReading>No reading yet</NoReading>}
+      </ReadingLine>
+    </ReadingLines>
+  )
+}
+
+/** A reading's words as the line of a sentence they are: "half inside 24ms" leads with a capital. */
+function sentence(words: string) {
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * The hour in one line, at the head of the phone's pane: how much is asking
+ * and how much of it fails, with the firing alerts in front where there are
+ * any. It is on every view, as the readings are over every view at a desk,
+ * and it is a row that opens: the four readings and the alerts are a page
+ * behind it (`HourPage`).
+ */
+function HourLine({
+  requests,
+  alerts,
+  onOpen,
+}: {
+  requests?: DeploymentRequests
+  alerts?: TrafficAlertList
+  onOpen: () => void
+}) {
+  const summary = requests?.status === "available" ? requests.summary : undefined
+  const firing = (alerts?.alerts ?? []).filter((rule) => rule.enabled && rule.state === "firing")
+  const failing = summary ? failingTone(summary.errorRate) : "default"
+  return (
+    <button
+      type="button"
+      data-slot="hour-line"
+      aria-label="The last hour's readings and alerts"
+      onClick={onOpen}
+      className="flex h-10 shrink-0 items-center gap-2 border-b border-hairline px-3 text-left text-xs focus-ring-inset transition-colors hover:bg-row-hover"
+    >
+      <StatusDot
+        tone={
+          firing.length > 0 || failing === "danger"
+            ? "danger"
+            : failing === "warning"
+              ? "warning"
+              : summary
+                ? "running"
+                : "unknown"
+        }
       />
-    </StatGrid>
+      <span className="numeric min-w-0 flex-1 truncate text-muted-foreground">
+        {firing.length > 0 && (
+          <span className="font-medium text-destructive">{firing.length} firing · </span>
+        )}
+        {summary ? (
+          <>
+            <span className="text-foreground">{perMinute(summary.perMinute)}</span> a minute ·{" "}
+            <span
+              className={cn(
+                failing === "danger"
+                  ? "text-destructive"
+                  : failing === "warning"
+                    ? "text-warning"
+                    : "text-foreground",
+              )}
+            >
+              {failingWords(summary.errorRate)}
+            </span>
+          </>
+        ) : requests ? (
+          "No request record"
+        ) : (
+          "Reading the request record…"
+        )}
+      </span>
+      <ArrowRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+    </button>
+  )
+}
+
+/**
+ * The hour's page on a phone: the readings one under another and the alerts
+ * line, in the pane's place, with the way back where a phone's is. The bar is
+ * out of its way while it is open, as it is for any page a row opens.
+ */
+function HourPage({ onBack, children }: { onBack: () => void; children: React.ReactNode }) {
+  return (
+    <section aria-label="The last hour" className="flex min-h-0 flex-1 flex-col">
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-hairline px-3">
+        <PaneBack label="Back to the logs" until="md" onClick={onBack} />
+        <h2 className="text-body font-medium">The last hour</h2>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">{children}</div>
+    </section>
   )
 }
 
@@ -720,6 +906,10 @@ function TrafficReadings({
  * hour, so the window is said: "4.2% failing" under a Failing tile reading
  * 1.0% read as the page contradicting itself.
  */
+// As tall as the Add alert button a line with no rule carries, in every state:
+// the line was 20px waiting and 24px with the button, and the pane moved.
+const ALERTS_LINE = "min-h-6"
+
 function AlertsLine({
   projectId,
   alerts,
@@ -734,7 +924,7 @@ function AlertsLine({
 }) {
   // Nothing until the rules are read: "No alerts" for the second before they
   // land would be the line saying something it does not know.
-  if (!alerts) return <div aria-hidden className="h-5" />
+  if (!alerts) return <div aria-hidden className={ALERTS_LINE} />
   const rules = alerts.alerts
   const watching = rules.filter((rule) => rule.enabled)
   const firing = watching.filter((rule) => rule.state === "firing")
@@ -748,8 +938,10 @@ function AlertsLine({
       <ArrowRight aria-hidden className="size-3" />
     </Link>
   )
-  const line =
-    "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground sm:gap-x-2"
+  const line = cn(
+    ALERTS_LINE,
+    "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground sm:gap-x-2",
+  )
 
   if (rules.length === 0) {
     return (
