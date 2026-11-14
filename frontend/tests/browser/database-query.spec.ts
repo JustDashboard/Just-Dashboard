@@ -1296,7 +1296,7 @@ test("a search is asked once, drawn by table with the value marked, and each row
   expect(new URL(page.url()).searchParams.get("q")).toBe("pro")
 
   await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText(
-    "pro is in 2 tables: 3 rows are shown, at most 5 from each. 4 tables of public read",
+    "pro is in 2 tables: 3 rows are shown. 4 tables of public read",
   )
   // Every cell that holds the value is marked, not only the one the server named.
   const first = groups.first().locator("[data-slot=choice-row]").first()
@@ -1342,9 +1342,19 @@ test("a search is asked once, drawn by table with the value marked, and each row
     { column: "tier", op: "icontains", value: "pro" },
   ])
   expect(every.searchParams.get("match")).toBe("any")
-  // What the search could not say for sure is said.
-  await expect(page.getByText("There may be more than this")).toBeVisible()
-  await expect(page.getByText("secrets")).toBeVisible()
+  // What the search could not say for sure is the tail of the same sentence,
+  // not a notice over the results, and each table's way to all of its rows is a small verb.
+  await expect(page.getByText("There may be more than this")).toHaveCount(0)
+  await expect(page.locator("[data-slot=search-limit]")).toHaveText(
+    "It stops at 60 tables, 5 rows from each and 200 in all: open one for every match, or narrow it.",
+  )
+  await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText("1 not read")
+  await page.getByRole("button", { name: "The tables not read" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("secrets")
+  await page.mouse.move(0, 0)
+  await expect(groups.first().getByRole("link", { name: /^Every row of/ })).toHaveText(
+    "Every match",
+  )
 
   // Narrowing to one table reads nothing again.
   await page
@@ -1996,7 +2006,7 @@ test("a search of ticked tables reads those tables and no others, and says which
     "orders",
   ])
   await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText(
-    "pro is in 1 table: 2 rows are shown, at most 5 from each. 2 tables of public read",
+    "pro is in 1 table: 2 rows are shown. 2 tables of public read",
   )
   // The read said the table holds more than these two, and its key: no second read for it.
   await expect(groups.first()).toContainText("2+")
@@ -2009,8 +2019,11 @@ test("a search of ticked tables reads those tables and no others, and says which
       ) ?? "[]",
     ),
   ).toEqual([{ column: "id", op: "eq", value: "12" }])
-  // A table showing its first rows is not a warning.
-  await expect(page.getByText("There may be more than this")).toHaveCount(0)
+  // A table showing its first rows is not a warning: the limit is said, quietly.
+  await expect(page.locator("[data-slot=search-limit]")).toHaveText(
+    "At most 5 are shown from each: open one for every match.",
+  )
+  await expect(page.locator("[data-slot=search-limit]")).not.toHaveClass(/text-warning/)
 
   // Every schema has no one list of tables to tick.
   await page
