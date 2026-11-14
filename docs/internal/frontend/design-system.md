@@ -701,6 +701,16 @@ than a caption (§5). `actions` sit at the far end of the head's row, and so doe
 section's `settingStatus`, so "Unsaved changes", arriving with the first keystroke, takes no line of
 its own and pushes no field down.
 
+**A strip at the head of a settings column arrives for what is stored, never for what is typed.**
+A database's settings draw `PendingStrip` for the one thing a server holds that is not in force: a
+value it reads only when it starts (`database/ops/settings-pending.tsx`). It names each, links it to
+where it is changed, and carries Restart, because here no header owns that command. Unsaved edits
+are named on it while it is drawn and are otherwise the save bar's and the heads' alone: a strip
+that arrived with the first keystroke would push the field being typed in down a line, which is what
+`settingStatus` at a head's far end exists to avoid. A change that replaces a server's container is
+a field like any other and is saved by the bar, which asks first (`database/ops/settings-ask.tsx`):
+Save waits on the confirmation, and a cancelled or refused change leaves the draft as it was chosen.
+
 **The deployment settings are that shape, and they were the last pages in the product that were
 all containers.** Each of the nine was a stack of framed cards — a title strip, the form, a footer
 holding Save — on the argument that things filled in one at a time read best as bordered boxes,

@@ -3,7 +3,6 @@
 import { useId, useRef, useState } from "react"
 import { Check, Copy, Layers, Plus, Trash } from "@/components/icons"
 import { del, errorMessage, put } from "@/lib/api"
-import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { DbPooler, DbPoolerChange, DbPoolerStats } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -18,8 +17,8 @@ import {
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
-import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
-import { Field, FieldRow, FormFact, FormNote } from "@/components/form"
+import { WireHost, WireLabel, WireMark, WireNode } from "@/components/deploy/wire"
+import { Field, FieldRow, FormFact, FormNote, InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Detail, DetailList } from "@/components/page"
 import { LoadingRows, Notice } from "@/components/state"
@@ -27,14 +26,6 @@ import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
 import { EngineGlyph, EngineMark } from "@/components/database/kit"
@@ -44,23 +35,29 @@ import {
   POOL_MODES,
   draftOfPooling,
   micros,
-  poolTotals,
   poolerAddresses,
-  poolerIsIdle,
+  poolerCaptions,
   poolerReading,
   poolingChanges,
   poolingProblems,
   poolingSettings,
   restartsPooler,
-  statTotals,
   type PoolingDraft,
 } from "@/components/database/ops/settings-pooling-model"
+import { usePendingReport } from "@/components/database/ops/settings-pending"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /**
  * The pooler in front of a PostgreSQL server: PgBouncer, run by the dashboard
- * beside the database. One section turns it on and says how it behaves, one
- * lists where it is reached, and one reads its pools and statistics.
+ * beside the database. One section turns it on and says how it behaves, with
+ * its figures on the picture of the way a connection goes; one lists where it
+ * is reached; and one reads its pools, each on a line.
+ *
+ * The figures are read once for the page (`SHOW POOLS` and `SHOW STATS`, while
+ * it is open) and drawn where they belong: who is connected and who waits on
+ * the line in, the server connections on the line out, how long a client
+ * waits at the pooler itself. They were a list of six facts and two tables
+ * under a heading of their own, and the second table repeated the list.
  *
  * Anyone may read it. Turning it on, changing it and turning it off are an
  * administrator's, because each one runs or replaces a container; turning it
@@ -81,6 +78,19 @@ export function PoolingSections({ confirm }: { confirm: (request: ConfirmRequest
     [id],
   )
   const pooler = poll.data
+  const running = Boolean(pooler?.enabled && pooler.state === "running")
+  const figures = usePoll(
+    (signal) =>
+      read<DbPoolerStats>(
+        `/databases/${id}/pooler/stats`,
+        (answer) => Array.isArray(answer.pools) && Array.isArray(answer.stats),
+        undefined,
+        signal,
+      ),
+    5000,
+    [id],
+    { enabled: running },
+  )
   if (!pooler) {
     return (
       <SettingSection id="pooler" title="Connection pooler">
@@ -92,21 +102,36 @@ export function PoolingSections({ confirm }: { confirm: (request: ConfirmRequest
       </SettingSection>
     )
   }
+  const stats = running ? figures.data : undefined
   return (
     <>
-      <PoolerSection pooler={pooler} refresh={poll.refresh} confirm={confirm} />
+      <PoolerSection
+        pooler={pooler}
+        stats={stats}
+        statsError={running && !stats ? figures.error : undefined}
+        onStatsRetry={figures.refresh}
+        refresh={poll.refresh}
+        confirm={confirm}
+      />
       {pooler.enabled && <AddressesSection pooler={pooler} />}
-      {pooler.enabled && <ActivitySection pooler={pooler} />}
+      {pooler.enabled && stats && <PoolsSection stats={stats} />}
     </>
   )
 }
 
 function PoolerSection({
   pooler,
+  stats,
+  statsError,
+  onStatsRetry,
   refresh,
   confirm,
 }: {
   pooler: DbPooler
+  /** What the running pooler reports; nothing while it is off, stopped or being read. */
+  stats: DbPoolerStats | undefined
+  statsError: Error | undefined
+  onStatsRetry: () => void
   refresh: () => void
   confirm: (request: ConfirmRequest) => void
 }) {
@@ -132,6 +157,9 @@ function PoolerSection({
     setRefusal(undefined)
   }
   const reading = poolerReading(pooler)
+  usePendingReport("pooler", {
+    edits: changes > 0 ? [{ name: "Pooler", state: "changed" }] : [],
+  })
 
   const apply = async () => {
     const settings = poolingSettings(draft, pooler.limits)
@@ -206,6 +234,9 @@ function PoolerSection({
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <Status tone={reading.tone} label={reading.word} />
       <span className="font-mono text-hint text-muted-foreground">{pooler.image}</span>
+      {pooler.state !== "running" && pooler.state !== "missing" && (
+        <span>starts with its database</span>
+      )}
     </span>
   ) : (
     <span className="flex">
@@ -256,10 +287,8 @@ function PoolerSection({
       >
         <PoolerPicture pooler={pooler} changing={saving} />
         <p className="text-body leading-relaxed text-muted-foreground">
-          PgBouncer sits in front of the database and shares a few server connections between many
-          clients, so an application that opens a connection per request does not use up the
-          server&rsquo;s own. It runs in its own container on a private network with the database,
-          and is published on this server only.
+          PgBouncer shares a few server connections between many clients, in a container of its own
+          beside the database.
         </p>
         {fields}
         {refusal && (
@@ -308,7 +337,10 @@ function PoolerSection({
           )
         }
       >
-        <PoolerPicture pooler={pooler} changing={saving} />
+        <PoolerPicture pooler={pooler} stats={stats} changing={saving} />
+        {statsError && (
+          <CouldNotRead what="the pooler's statistics" error={statsError} onRetry={onStatsRetry} />
+        )}
         {pooler.state === "missing" && (
           <Notice tone="warning" title="The pooler's container is gone">
             Something removed {pooler.container}.
@@ -361,11 +393,11 @@ function PoolerSection({
 
 function ProtectedNotice() {
   return (
-    <Notice tone="default" title="This connection is protected">
-      The dashboard refuses every change to a protected connection, and a pooler is one: turning it
-      on, changing it and turning it off wait until the protection is taken off under General. The
-      figures below are still read.
-    </Notice>
+    <FormNote data-slot="pooler-protected">
+      <span className="font-medium text-foreground">This connection is protected.</span> Its pooler
+      is turned on, changed or turned off once the protection is taken off under General; its
+      figures are still read.
+    </FormNote>
   )
 }
 
@@ -401,7 +433,7 @@ function PoolerFields({
   }
   return (
     <>
-      <Field label="Pool mode" hint={mode?.hint}>
+      <Field label="Pool mode" hint={mode?.line} info={mode?.hint}>
         <Segments
           label="Pool mode"
           value={draft.poolMode}
@@ -413,7 +445,14 @@ function PoolerFields({
         <Field
           label="Pool size"
           htmlFor={`${field}-size`}
-          hint="Server connections kept for each database and account."
+          info={
+            <>
+              Server connections kept for each database and account. The server&rsquo;s own limit is
+              shared by every pool, so a pool size larger than{" "}
+              <span className="font-mono">max_connections</span> divided by the number of pools only
+              queues the difference.
+            </>
+          }
           error={problems.poolSize}
         >
           <Input
@@ -428,7 +467,7 @@ function PoolerFields({
         <Field
           label="Max clients"
           htmlFor={`${field}-clients`}
-          hint="Clients that may be connected to the pooler at once."
+          info="Clients that may be connected to the pooler at once."
           error={problems.maxClientConn}
         >
           <Input
@@ -441,7 +480,7 @@ function PoolerFields({
           />
         </Field>
       </FieldRow>
-      <Field label="Authentication" hint={auth?.hint}>
+      <Field label="Authentication" info={auth?.hint}>
         <Segments
           label="Authentication"
           value={draft.authMode}
@@ -453,20 +492,29 @@ function PoolerFields({
           }))}
         />
       </Field>
-      <p className="text-hint text-muted-foreground">
-        The server&rsquo;s own limit is shared by every pool, so a pool size larger than{" "}
-        <span className="font-mono">max_connections</span> divided by the number of pools only
-        queues the difference.
-      </p>
     </>
   )
 }
 
 /**
- * Applications, the pooler and the server, as the way a connection goes. The
- * beam stills while the pooler is not running or a change is being made.
+ * Applications, the pooler and the server, as the way a connection goes, with
+ * the pooler's figures where they are true: the clients connected and the
+ * ones waiting on the line in, the server connections in use and idle on the
+ * line out, the wait for one at the pooler, the work on the applications and
+ * what it costs on the server. On a phone the lines run down the marks and
+ * have no room for words, so the two lines' figures join the captions beside
+ * them. The beam stills while the pooler is not running or a change is being
+ * made.
  */
-function PoolerPicture({ pooler, changing }: { pooler: DbPooler; changing: boolean }) {
+function PoolerPicture({
+  pooler,
+  stats,
+  changing,
+}: {
+  pooler: DbPooler
+  stats?: DbPoolerStats
+  changing: boolean
+}) {
   const { conn, engine, summary } = useDatabase()
   const container = useRef<HTMLDivElement>(null)
   const apps = useRef<HTMLDivElement>(null)
@@ -476,11 +524,15 @@ function PoolerPicture({ pooler, changing }: { pooler: DbPooler; changing: boole
   const bind = pooler.port
     ? `${pooler.exposure === "public" ? "0.0.0.0" : pooler.exposure === "private" ? "one address" : "127.0.0.1"}:${pooler.port}`
     : `:${pooler.linkedPort}`
+  const says = stats ? poolerCaptions(stats) : undefined
+  const unused = running && stats !== undefined && !says
   return (
     <SettingPicture
       label="How a connection goes through the pooler"
       containerRef={container}
-      className="py-4"
+      // Room under the row for a running pooler's caption, which carries its wait as well as its
+      // binding: kept from the first paint, so the figures landing move nothing.
+      className={running ? "py-4 lg:pb-12" : "py-4"}
       lines={
         <>
           <AnimatedBeam
@@ -500,6 +552,38 @@ function PoolerPicture({ pooler, changing }: { pooler: DbPooler; changing: boole
           />
         </>
       }
+      startLabel={
+        says ? (
+          <>
+            <WireLabel lit={running} className="bottom-1/2 mb-2">
+              {says.clients}
+            </WireLabel>
+            {says.waiting && (
+              <WireLabel lit className="top-1/2 mt-2 text-warning">
+                {says.waiting}
+              </WireLabel>
+            )}
+          </>
+        ) : (
+          unused && (
+            <WireLabel lit={false} className="bottom-1/2 mb-2">
+              no client yet
+            </WireLabel>
+          )
+        )
+      }
+      endLabel={
+        says && (
+          <>
+            <WireLabel lit={running} className="bottom-1/2 mb-2">
+              {says.active}
+            </WireLabel>
+            <WireLabel lit={false} className="top-1/2 mt-2">
+              {says.idle}
+            </WireLabel>
+          </>
+        )
+      }
       start={[
         <WireNode
           key="apps"
@@ -508,7 +592,22 @@ function PoolerPicture({ pooler, changing }: { pooler: DbPooler; changing: boole
           mark={<WireHost size="md" />}
           eyebrow="Applications"
           title="Programs and linked deployments"
-          hint="many connections"
+          hint={
+            says ? (
+              <span className="numeric" data-slot="pooler-work">
+                <span className="lg:hidden">
+                  {says.clients}
+                  {says.waiting && <span className="text-warning">, {says.waiting}</span>}
+                  {" · "}
+                </span>
+                {says.work}
+              </span>
+            ) : unused ? (
+              "nothing has gone through it yet"
+            ) : (
+              "many connections"
+            )
+          }
         />,
       ]}
       middle={
@@ -520,13 +619,26 @@ function PoolerPicture({ pooler, changing }: { pooler: DbPooler; changing: boole
               <Layers />
             </WireMark>
           }
-          eyebrow="PgBouncer"
+          eyebrow={stats?.version ? `PgBouncer ${stats.version}` : "PgBouncer"}
           title={
             <span className="font-mono text-xs wrap-anywhere">
               {pooler.container ?? "not running"}
             </span>
           }
-          hint={<span className="font-mono">{pooler.enabled ? bind : "off"}</span>}
+          hint={
+            <>
+              <span className="font-mono">{pooler.enabled ? bind : "off"}</span>
+              {says && (
+                <span
+                  className={cn("numeric block", says.waiting && "text-warning")}
+                  data-slot="pooler-wait"
+                >
+                  {says.wait}
+                  {says.longest && <span className="block">{says.longest}</span>}
+                </span>
+              )}
+            </>
+          }
         />
       }
       end={
@@ -540,7 +652,19 @@ function PoolerPicture({ pooler, changing }: { pooler: DbPooler; changing: boole
           }
           eyebrow={`${engine.label}${summary?.versionNumber ? ` ${summary.versionNumber}` : ""}`}
           title={<span className="font-mono text-xs wrap-anywhere">{conn.name}</span>}
-          hint="few connections"
+          hint={
+            says ? (
+              <span className="numeric" data-slot="pooler-cost">
+                <span className="lg:hidden">
+                  {says.active}, {says.idle}
+                  {" · "}
+                </span>
+                {says.cost}
+              </span>
+            ) : (
+              "few connections"
+            )
+          }
         />
       }
     />
@@ -551,42 +675,54 @@ function PoolerPicture({ pooler, changing }: { pooler: DbPooler; changing: boole
 function AddressesSection({ pooler }: { pooler: DbPooler }) {
   const { conn } = useDatabase()
   const rows = poolerAddresses(pooler, conn.host || "127.0.0.1")
+  const anywhere = pooler.exposure === "public"
   return (
     <SettingSection
       id="addresses"
       title="Where it is reached"
       state={
-        pooler.exposure === "public" ? (
-          <span className="flex">
+        <span className="flex items-center gap-1.5">
+          {anywhere ? (
             <Status verdict="warning" label="Published to anywhere" />
-          </span>
-        ) : undefined
+          ) : (
+            "Published on this server only"
+          )}
+          <InfoTip label="Why it is published there">
+            {anywhere
+              ? "The pooler is published on every interface because the database was opened to anywhere under Network. Restricting it there brings the pooler back to this server."
+              : "Opening the database to anywhere under Network moves the pooler with it; nothing else does."}
+          </InfoTip>
+        </span>
       }
     >
       <div className="divide-y divide-hairline" role="list" aria-label="Pooler addresses">
         {rows.map((row) => (
-          <AddressRow key={row.id} label={row.label} value={row.address} />
+          <AddressRow
+            key={row.id}
+            label={row.label}
+            caption={
+              row.id === "host"
+                ? "the direct string with this address; Connect shows it with the password"
+                : undefined
+            }
+            value={row.address}
+          />
         ))}
         <AddressRow label="Deployment reference" value={pooler.reference} />
       </div>
-      <FormNote>
-        The pooled string is the direct one with this address: the same account, database and
-        options. <span className="font-medium text-foreground">Connect</span> at the top of the page
-        shows either, with the password.{" "}
-        {pooler.exposure === "public"
-          ? "The pooler is published on every interface, because the database was opened to anywhere under Network; restricting it there brings the pooler back to this server."
-          : "The pooler is published on this server only. Opening the database to anywhere under Network moves the pooler with it; nothing else does."}
-      </FormNote>
     </SettingSection>
   )
 }
 
-function AddressRow({ label, value }: { label: string; value: string }) {
+function AddressRow({ label, caption, value }: { label: string; caption?: string; value: string }) {
   const { copy, copied } = useCopy()
   return (
     <div role="listitem" className="flex min-w-0 items-center justify-between gap-3 py-2.5">
       <div className="min-w-0">
-        <p className="text-hint text-muted-foreground">{label}</p>
+        <p className="truncate text-hint text-muted-foreground" title={caption}>
+          {label}
+          {caption && ` · ${caption}`}
+        </p>
         <p className="font-mono text-body wrap-anywhere">{value}</p>
       </div>
       <IconAction label={`Copy ${label.toLowerCase()}`} onClick={() => void copy(value, "Copied")}>
@@ -596,157 +732,88 @@ function AddressRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-/** SHOW POOLS and SHOW STATS, read while the page is open. */
-function ActivitySection({ pooler }: { pooler: DbPooler }) {
-  const { id } = useDatabase()
-  const running = pooler.state === "running"
-  const poll = usePoll(
-    (signal) =>
-      read<DbPoolerStats>(
-        `/databases/${id}/pooler/stats`,
-        (answer) => Array.isArray(answer.pools) && Array.isArray(answer.stats),
-        undefined,
-        signal,
-      ),
-    5000,
-    [id],
-    { enabled: running },
-  )
-  const stats = poll.data
+/** The columns of a pool's line from `sm`, where there is room to read down them. */
+const POOL_COLUMNS = "sm:grid sm:grid-cols-[minmax(0,1fr)_9.5rem_9.5rem_5.5rem] sm:gap-x-4"
+
+/**
+ * The pools, one a line: the database and the account, its clients, its
+ * server connections, the longest a client has waited. Read down their
+ * columns from `sm`; on a phone each line says its three readings in words
+ * under its name, where a table lost two of its columns off the edge.
+ *
+ * A server whose pooler fronts more than one database lists what each has
+ * done under them. With one, those are the figures on the picture above.
+ */
+function PoolsSection({ stats }: { stats: DbPoolerStats }) {
+  if (stats.pools.length === 0) return null
   return (
     <SettingSection
-      id="activity"
-      title="Pools and statistics"
-      state={stats?.version ? `PgBouncer ${stats.version}` : undefined}
+      id="pools"
+      title="Pools"
+      state={
+        <span className="numeric">
+          {stats.pools.length === 1 ? "1 pool" : `${stats.pools.length} pools`}, each a database and
+          an account
+        </span>
+      }
     >
-      {!running ? (
-        <Notice tone="default" title="The pooler is not running">
-          It stops with its database and starts with it. Its figures are read from the running
-          pooler.
-        </Notice>
-      ) : !stats ? (
-        poll.error ? (
-          <CouldNotRead what="the pooler's statistics" error={poll.error} onRetry={poll.refresh} />
-        ) : (
-          <LoadingRows rows={4} />
-        )
-      ) : (
-        <Figures stats={stats} />
+      <div>
+        <div
+          aria-hidden
+          className={cn("eyebrow hidden border-b border-hairline pb-2 text-right", POOL_COLUMNS)}
+        >
+          <span className="text-left">Pool</span>
+          <span>Clients</span>
+          <span>Servers</span>
+          <span>Longest wait</span>
+        </div>
+        <ul aria-label="Pools" className="divide-y divide-hairline">
+          {stats.pools.map((pool) => (
+            <li
+              key={`${pool.database}:${pool.user}`}
+              data-pool={`${pool.database}:${pool.user}`}
+              className={cn("flex min-w-0 flex-wrap items-baseline gap-x-2 py-2.5", POOL_COLUMNS)}
+            >
+              <span className="w-full min-w-0 truncate font-mono text-body sm:w-auto">
+                {pool.database}
+                <span className="text-muted-foreground"> · {pool.user}</span>
+              </span>
+              <span className="numeric text-hint text-muted-foreground sm:text-right sm:text-body sm:text-foreground">
+                {pool.clActive} active
+                {pool.clWaiting > 0 && (
+                  <span className="text-warning">, {pool.clWaiting} waiting</span>
+                )}
+                <span className="sm:hidden"> clients ·</span>
+              </span>
+              <span className="numeric text-hint text-muted-foreground sm:text-right sm:text-body sm:text-foreground">
+                {pool.svActive} active, {pool.svIdle + pool.svUsed} idle
+                <span className="sm:hidden"> servers ·</span>
+              </span>
+              <span className="numeric text-hint text-muted-foreground sm:text-right sm:text-body sm:text-foreground">
+                <span className="sm:hidden">waited </span>
+                {pool.maxWaitSec} s
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {stats.stats.length > 1 && (
+        <ul aria-label="Databases through the pooler" className="divide-y divide-hairline">
+          {stats.stats.map((stat) => (
+            <li
+              key={stat.database}
+              className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2.5"
+            >
+              <span className="min-w-0 truncate font-mono text-body">{stat.database}</span>
+              <span className="numeric text-hint text-muted-foreground">
+                {stat.avgQueryCount} queries a second · {micros(stat.avgQueryTime)} a query · waits{" "}
+                {micros(stat.avgWaitTime)} · {stat.totalQueryCount.toLocaleString("en-US")} queries
+                so far
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </SettingSection>
-  )
-}
-
-function Figures({ stats }: { stats: DbPoolerStats }) {
-  if (poolerIsIdle(stats)) {
-    return (
-      <p className="animate-rise text-body leading-relaxed text-muted-foreground">
-        <span className="font-medium text-foreground">Nothing has gone through it yet.</span> Point
-        an application at the pooled string and its pools appear here as clients connect.
-      </p>
-    )
-  }
-  const pools = poolTotals(stats.pools)
-  const rates = statTotals(stats.stats)
-  return (
-    <div className="animate-rise space-y-6">
-      <DetailList className="gap-y-2.5">
-        <Detail label="Clients" className="numeric">
-          {pools.clientsActive} active
-          {pools.clientsWaiting > 0 ? `, ${pools.clientsWaiting} waiting` : ""}
-        </Detail>
-        <Detail label="Server connections" className="numeric">
-          {pools.serversActive} active, {pools.serversIdle} idle
-        </Detail>
-        <Detail label="Queries" className="numeric">
-          {rates.queriesPerSecond} a second · {plural(rates.queries, "query", "queries")} since it
-          started
-        </Detail>
-        <Detail label="Transactions" className="numeric">
-          {rates.transactionsPerSecond} a second
-        </Detail>
-        <Detail label="Query time" className="numeric">
-          {micros(rates.queryTime)} on average
-        </Detail>
-        <Detail
-          label="Wait for a connection"
-          className={cn("numeric", pools.clientsWaiting > 0 && "text-warning")}
-        >
-          {micros(rates.waitTime)} on average
-          {pools.maxWaitSec > 0 ? `, the longest now ${pools.maxWaitSec} s` : ""}
-        </Detail>
-      </DetailList>
-
-      <div className="space-y-2">
-        <h3 className="text-body font-medium">Pools</h3>
-        {stats.pools.length === 0 ? (
-          <p className="text-hint text-muted-foreground">No client is connected right now.</p>
-        ) : (
-          <Table aria-label="Pools">
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Database</TableHead>
-                <TableHead className="px-2">Account</TableHead>
-                <TableHead className="px-2 text-right">Clients</TableHead>
-                <TableHead className="px-2 text-right">Servers</TableHead>
-                <TableHead className="px-2 text-right max-sm:hidden">Longest wait</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {stats.pools.map((pool) => (
-                <TableRow key={`${pool.database}:${pool.user}`}>
-                  <TableCell className="py-2 font-mono">{pool.database}</TableCell>
-                  <TableCell className="px-2 py-2 font-mono">{pool.user}</TableCell>
-                  <TableCell className="numeric px-2 py-2 text-right max-sm:whitespace-normal">
-                    {pool.clActive} active
-                    {pool.clWaiting > 0 && (
-                      <span className="text-warning">, {pool.clWaiting} waiting</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="numeric px-2 py-2 text-right max-sm:whitespace-normal">
-                    {pool.svActive} active, {pool.svIdle + pool.svUsed} idle
-                  </TableCell>
-                  <TableCell className="numeric px-2 py-2 text-right max-sm:hidden">
-                    {pool.maxWaitSec} s
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <h3 className="text-body font-medium">Statistics</h3>
-        <Table aria-label="Statistics">
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>Database</TableHead>
-              <TableHead className="px-2 text-right">Queries a second</TableHead>
-              <TableHead className="px-2 text-right max-sm:hidden">Query time</TableHead>
-              <TableHead className="px-2 text-right">Wait</TableHead>
-              <TableHead className="px-2 text-right max-sm:hidden">Total queries</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {stats.stats.map((stat) => (
-              <TableRow key={stat.database}>
-                <TableCell className="py-2 font-mono">{stat.database}</TableCell>
-                <TableCell className="numeric px-2 py-2 text-right">{stat.avgQueryCount}</TableCell>
-                <TableCell className="numeric px-2 py-2 text-right max-sm:hidden">
-                  {micros(stat.avgQueryTime)}
-                </TableCell>
-                <TableCell className="numeric px-2 py-2 text-right">
-                  {micros(stat.avgWaitTime)}
-                </TableCell>
-                <TableCell className="numeric px-2 py-2 text-right max-sm:hidden">
-                  {stat.totalQueryCount}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
   )
 }

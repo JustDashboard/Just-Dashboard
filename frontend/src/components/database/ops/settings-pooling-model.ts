@@ -84,16 +84,21 @@ export function restartsPooler(saved: DbPoolerSettings, draft: PoolingDraft): bo
 export const POOL_MODES: {
   value: DbPoolerSettings["poolMode"]
   label: string
+  /** The one line under the choice. */
+  line: string
+  /** The whole of it, behind the label's ⓘ. */
   hint: string
 }[] = [
   {
     value: "transaction",
     label: "Transaction",
+    line: "A server connection for one transaction; session state does not carry over.",
     hint: "A client holds a server connection for one transaction. Many clients share few connections; session state such as SET and advisory locks does not carry over.",
   },
   {
     value: "session",
     label: "Session",
+    line: "A server connection until the client disconnects.",
     hint: "A client holds a server connection until it disconnects. Everything a session can do works; the pool only saves reconnecting.",
   },
 ]
@@ -203,4 +208,44 @@ export function statTotals(stats: readonly DbPoolerStat[]) {
 /** Whether the pooler has served anything yet: a fresh one lists no pool and no statistics. */
 export function poolerIsIdle(stats: Pick<DbPoolerStats, "pools" | "stats">): boolean {
   return stats.pools.length === 0 && stats.stats.every((stat) => stat.totalQueryCount === 0)
+}
+
+/**
+ * The pooler's figures as the picture's captions: who is connected and who
+ * waits on the way in, the server connections on the way out, how long a
+ * client waits for one at the pooler, and the work that goes through.
+ * `undefined` where nothing has gone through it yet: there is nothing to say.
+ */
+export function poolerCaptions(stats: Pick<DbPoolerStats, "pools" | "stats">):
+  | {
+      clients: string
+      /** Clients queued for a server connection, or nothing when none is. */
+      waiting?: string
+      active: string
+      idle: string
+      /** How long a client waits for a connection, in words. */
+      wait: string
+      /** The longest wait right now, said only while somebody waits. */
+      longest?: string
+      /** What goes in: queries and transactions a second. */
+      work: string
+      /** What it costs: the time a query takes, and how many there have been. */
+      cost: string
+    }
+  | undefined {
+  if (poolerIsIdle(stats)) return undefined
+  const pools = poolTotals(stats.pools)
+  const rates = statTotals(stats.stats)
+  const count = (n: number, one: string, many = `${one}s`) =>
+    `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`
+  return {
+    clients: count(pools.clientsActive, "client"),
+    waiting: pools.clientsWaiting > 0 ? `${pools.clientsWaiting} waiting` : undefined,
+    active: `${pools.serversActive} active`,
+    idle: `${pools.serversIdle} idle`,
+    wait: `waits ${micros(rates.waitTime)} for a connection`,
+    longest: pools.maxWaitSec > 0 ? `the longest now ${pools.maxWaitSec} s` : undefined,
+    work: `${count(rates.queriesPerSecond, "query", "queries")} · ${count(rates.transactionsPerSecond, "transaction")} a second`,
+    cost: `${micros(rates.queryTime)} a query · ${count(rates.queries, "query", "queries")} so far`,
+  }
 }

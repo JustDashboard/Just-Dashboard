@@ -1,16 +1,21 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import {
+  Archive,
   ArrowCircleUp,
+  ArrowLeftRight,
   Check,
   CheckCircle,
+  Copy,
   CrossCircle,
   RotateCounterClockwise,
   Warning,
+  type Icon,
 } from "@/components/icons"
 import { ApiError, errorMessage, post } from "@/lib/api"
+import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { Job } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -18,15 +23,14 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { Segments } from "@/components/deploy/settings/segments"
 import { FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
 import { Notice } from "@/components/state"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
-import { CouldNotRead, FactsSkeleton } from "@/components/database/home/blocks"
+import { Skeleton } from "@/components/ui/skeleton"
+import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineGlyph, EngineMark } from "@/components/database/kit"
 import { transferPrefix } from "@/components/database/ops/backups-model"
@@ -45,8 +49,10 @@ import {
   lastWords,
   reportOf,
   reportWords,
+  stepStates,
   upgradeJobKind,
   upgradeSteps,
+  type UpgradeStepState,
   type DbUpgrade,
   type DbUpgradeCheck,
   type DbUpgradeRecord,
@@ -70,9 +76,14 @@ import { useDatabase } from "@/components/database/shell/database-context"
  * Each of the three is a job on the server, like a dump or a restore of this
  * connection and one at a time with them: the page begins one and follows it
  * by its id, and one found running is shown on arrival.
+ *
+ * What an upgrade does is on the picture: the four steps between the release
+ * that runs and the one it becomes, and while one runs the line moves through
+ * the step it is at. They were a numbered list of four sentences on the page;
+ * the sentences are the confirmation's, which is where they are acted on.
  */
 export function VersionSections({ confirm }: { confirm: (request: ConfirmRequest) => void }) {
-  const { id, conn, engine, summary, status, readOnly } = useDatabase()
+  const { id, conn, engine, status, readOnly } = useDatabase()
   const { can } = useAuth()
   const upgrade = usePoll(
     (signal) => read<DbUpgrade>(`/databases/${id}/upgrade`, isUpgradeReading, undefined, signal),
@@ -119,6 +130,12 @@ export function VersionSections({ confirm }: { confirm: (request: ConfirmRequest
   // A check moves nothing; an upgrade and a revert carry the server across.
   const runningKind = busy && transfer.current ? upgradeJobKind(transfer.current.job) : undefined
   const moving = runningKind === "upgrade" || runningKind === "revert"
+  // The step an upgrade is at is the record's to say, and it moves while the job runs.
+  useEffect(() => {
+    if (runningKind !== "upgrade") return
+    const timer = window.setInterval(refreshUpgrade, 3000)
+    return () => window.clearInterval(timer)
+  }, [runningKind, refreshUpgrade])
 
   const begin = async (path: string, body: object) => {
     try {
@@ -263,6 +280,8 @@ export function VersionSections({ confirm }: { confirm: (request: ConfirmRequest
         onRetry={refreshUpgrade}
         to={kept ? undefined : to}
         moving={moving}
+        upgrading={runningKind === "upgrade"}
+        report={report}
       />
       {view && kept ? (
         <KeptSection
@@ -293,7 +312,6 @@ export function VersionSections({ confirm }: { confirm: (request: ConfirmRequest
             )
           }}
           onUpgrade={upgradeNow}
-          serverVersion={summary?.versionNumber}
         />
       ) : null}
       {reverting && kept && (
@@ -309,9 +327,10 @@ export function VersionSections({ confirm }: { confirm: (request: ConfirmRequest
 }
 
 /**
- * What the server runs: the release, the image it was started from, its
- * container and the volume that holds its data — or, where it is not a
- * server this page can move, why.
+ * What the server runs, as a picture: the server as its product at the
+ * release it runs, with the image it was started from, its container and the
+ * volume that holds its data as its captions, and the way to the newer
+ * release beside it. Where it is not a server this page can move, why.
  */
 function VersionSection({
   upgrade,
@@ -319,14 +338,20 @@ function VersionSection({
   onRetry,
   to,
   moving,
+  upgrading,
+  report,
 }: {
   upgrade: DbUpgrade | undefined
   error: Error | undefined
   onRetry: () => void
   /** The release a check or an upgrade is about. */
   to: string | undefined
-  /** An upgrade, a check or a revert is running. */
+  /** An upgrade or a revert is running. */
   moving: boolean
+  /** An upgrade is running: the line moves through its steps. */
+  upgrading: boolean
+  /** What the last check of `to` found, for the size of the copy. */
+  report: DbUpgradeReport | undefined
 }) {
   const { engine, summary } = useDatabase()
   const version = summary?.versionNumber
@@ -340,33 +365,24 @@ function VersionSection({
         error ? (
           <CouldNotRead what="which release it runs" error={error} onRetry={onRetry} />
         ) : (
-          <FactsSkeleton rows={3} />
+          // The picture's own height, so the read landing moves nothing under it.
+          <div className="flex items-center gap-3.5 py-4 lg:justify-center" aria-hidden>
+            <Skeleton className="size-11 rounded-xl" />
+            <div className="space-y-1.5">
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-3 w-40" />
+            </div>
+          </div>
         )
       ) : (
         <div className="animate-rise space-y-4">
-          <VersionPicture upgrade={upgrade} to={to} moving={moving} />
-          {upgrade.image && (
-            <DetailList className="gap-y-2.5">
-              <Detail label="Image" className="font-mono wrap-anywhere">
-                {upgrade.image}
-              </Detail>
-              {upgrade.container && (
-                <Detail label="Container" className="font-mono wrap-anywhere">
-                  <Link
-                    href={`/docker/containers/${encodeURIComponent(upgrade.container)}`}
-                    className="rounded-sm underline focus-ring"
-                  >
-                    {upgrade.container}
-                  </Link>
-                </Detail>
-              )}
-              {upgrade.volume && (
-                <Detail label="Data volume" className="font-mono wrap-anywhere">
-                  {upgrade.volume}
-                </Detail>
-              )}
-            </DetailList>
-          )}
+          <VersionPicture
+            upgrade={upgrade}
+            to={to}
+            moving={moving}
+            upgrading={upgrading}
+            report={report}
+          />
           {!upgrade.window && upgrade.targets.length === 0 && upgrade.reason && (
             <FormNote data-slot="upgrade-reason">{upgrade.reason}</FormNote>
           )}
@@ -376,31 +392,76 @@ function VersionSection({
   )
 }
 
+/** A container by name, as the way to its page. */
+function ContainerLink({ name }: { name: string }) {
+  return (
+    <Link
+      href={`/docker/containers/${encodeURIComponent(name)}`}
+      className="rounded-sm font-mono wrap-anywhere underline focus-ring"
+    >
+      {name}
+    </Link>
+  )
+}
+
+/** A node's caption line: a word, and the literal it names. */
+function Named({ word, children }: { word: string; children: React.ReactNode }) {
+  return (
+    <span className="block">
+      {word} <span className="font-mono wrap-anywhere">{children}</span>
+    </span>
+  )
+}
+
+/** The four things an upgrade does, as the marks on the way from one release to the next. */
+const STEPS: { key: string; icon: Icon; title: string }[] = [
+  { key: "dump", icon: Archive, title: "Dump" },
+  { key: "start", icon: ArrowCircleUp, title: "New server" },
+  { key: "copy", icon: Copy, title: "Copy" },
+  { key: "switch", icon: ArrowLeftRight, title: "Switch" },
+]
+
 /**
  * The server and the release it would become, drawn as the way it goes: the
- * server as its product, at the release it runs, and the newer one as a ring
- * not there yet, the line between them dashed until an upgrade carries it.
+ * server as its product, at the release it runs; the four steps an upgrade
+ * takes, each a mark with what it does in a few words; and the newer release
+ * as a ring not there yet. The line between them is dashed until an upgrade
+ * carries it, and then it moves through the step the upgrade is at, with the
+ * steps behind it ticked.
+ *
  * After an upgrade the kept server is the ring: still there, and no longer
- * what answers. A server with no newer release and no kept one has no
- * picture, since there is nowhere for it to go.
+ * what answers. A server with no newer release and no kept one is drawn
+ * alone, with its captions, since there is nowhere for it to go.
+ *
+ * Wide, the marks stand in one row with the two servers' words beside them
+ * and each step's under it; narrow, in one column with the words to the right
+ * and the line running down the marks.
  */
 function VersionPicture({
   upgrade,
   to,
   moving,
+  upgrading,
+  report,
 }: {
   upgrade: DbUpgrade
   to: string | undefined
   moving: boolean
+  upgrading: boolean
+  report: DbUpgradeReport | undefined
 }) {
   const { engine, summary } = useDatabase()
   const container = useRef<HTMLDivElement>(null)
   const fromMark = useRef<HTMLDivElement>(null)
   const toMark = useRef<HTMLDivElement>(null)
+  const dump = useRef<HTMLDivElement>(null)
+  const start = useRef<HTMLDivElement>(null)
+  const copy = useRef<HTMLDivElement>(null)
+  const swap = useRef<HTMLDivElement>(null)
   const kept = upgrade.window?.state === "upgraded" ? upgrade.window : undefined
   const label = upgrade.label ?? engine.label
   const target = upgrade.targets.find((one) => one.version === to)
-  if (!upgrade.container || (!kept && !target)) return null
+  if (!upgrade.container && !upgrade.image) return null
   const now = `${label} ${summary?.versionNumber ?? upgrade.version ?? ""}`.trim()
   const live = (
     <WireMark size="md" tone="logo">
@@ -408,65 +469,204 @@ function VersionPicture({
     </WireMark>
   )
   const ring = <WirePlaceholder size="md" product={engine.logo} />
+  const runs = (align: "start" | "end", volume: string | undefined) => (
+    <WireNode
+      nodeRef={align === "end" ? fromMark : toMark}
+      align={align}
+      className="lg:items-start"
+      mark={live}
+      eyebrow="Runs now"
+      title={now}
+      hint={
+        <>
+          {upgrade.container && (
+            <span className="block">
+              <ContainerLink name={upgrade.container} />
+            </span>
+          )}
+          {upgrade.image && <Named word="image">{upgrade.image}</Named>}
+          {volume && <Named word="data">{volume}</Named>}
+        </>
+      }
+    />
+  )
+
+  if (kept) {
+    const gone = kept.previousState === "missing"
+    return (
+      <div className="relative animate-rise py-4">
+        <div ref={container} className="relative">
+          <AnimatedBeam
+            containerRef={container}
+            fromRef={fromMark}
+            toRef={toMark}
+            still={!moving}
+            dashed={!moving}
+          />
+          <ol
+            aria-label="The server and the one kept"
+            className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(4rem,0.6fr)_minmax(0,1fr)] lg:gap-0"
+          >
+            <li className="min-w-0 lg:flex lg:justify-end">
+              <WireNode
+                nodeRef={fromMark}
+                align="end"
+                className="lg:items-start"
+                mark={ring}
+                eyebrow="Kept, stopped"
+                title={`${label} ${kept.fromVersion}`}
+                hint={
+                  <span data-slot="kept-server">
+                    {kept.previous && (
+                      <span className="block">
+                        {gone ? (
+                          <span className="font-mono wrap-anywhere">{kept.previous}</span>
+                        ) : (
+                          <ContainerLink name={kept.previous} />
+                        )}
+                        {kept.previousState && !gone ? ` · ${kept.previousState}` : ""}
+                      </span>
+                    )}
+                    {kept.previousVolume && <Named word="data">{kept.previousVolume}</Named>}
+                  </span>
+                }
+              />
+            </li>
+            <li aria-hidden className="hidden lg:block" />
+            <li className="min-w-0">{runs("start", kept.volume ?? upgrade.volume)}</li>
+          </ol>
+        </div>
+      </div>
+    )
+  }
+
+  if (!target) {
+    return (
+      <div className="animate-rise py-4">
+        <ol aria-label="The server" className="flex lg:justify-center">
+          <li className="min-w-0">{runs("start", upgrade.volume)}</li>
+        </ol>
+      </div>
+    )
+  }
+
+  const states = stepStates(upgrading ? upgrade.window?.phase : undefined, upgrading)
+  const hints = [
+    "kept with its dumps",
+    `${label} ${target.version} starts beside it`,
+    report ? `${bytes(report.bytes)}, reads only meanwhile` : "reads only meanwhile",
+    "takes its name, port and password",
+  ]
+  // A line carries the step it leads into: it moves while that step is being
+  // taken, is drawn once it is behind, and is dashed while it is still ahead.
+  const line = (state: UpgradeStepState) => ({
+    still: state !== "running",
+    dashed: state === "ahead",
+  })
+  const step = (index: number, nodeRef: React.RefObject<HTMLDivElement | null>) => (
+    <UpgradeStep step={STEPS[index]} state={states[index]} hint={hints[index]} nodeRef={nodeRef} />
+  )
   return (
-    <SettingPicture
-      label={kept ? "The server and the one kept" : "The server and its newer release"}
-      containerRef={container}
-      className="py-4"
-      lines={
+    <div className="relative animate-rise py-4">
+      <div ref={container} className="relative">
         <AnimatedBeam
           containerRef={container}
           fromRef={fromMark}
-          toRef={toMark}
-          still={!moving}
-          dashed={!moving}
+          toRef={dump}
+          {...line(states[0])}
         />
-      }
-      start={[
-        kept ? (
-          <WireNode
-            key="kept"
-            nodeRef={fromMark}
-            align="end"
-            mark={ring}
-            eyebrow="Kept, stopped"
-            title={`${label} ${kept.fromVersion}`}
-            hint={<span className="font-mono wrap-anywhere">{kept.previous}</span>}
-          />
-        ) : (
-          <WireNode
-            key="now"
-            nodeRef={fromMark}
-            align="end"
-            mark={live}
-            eyebrow="Runs now"
-            title={now}
-            hint={<span className="font-mono wrap-anywhere">{upgrade.container}</span>}
-          />
-        ),
-      ]}
-      end={
-        kept ? (
-          <WireNode
-            nodeRef={toMark}
-            align="start"
-            mark={live}
-            eyebrow="Runs now"
-            title={now}
-            hint={<span className="font-mono wrap-anywhere">{upgrade.container}</span>}
-          />
-        ) : (
-          <WireNode
-            nodeRef={toMark}
-            align="start"
-            mark={ring}
-            eyebrow={moving ? "Being copied into" : "Newer release"}
-            title={`${label} ${target?.version}`}
-            hint={<span className="font-mono wrap-anywhere">{target?.image}</span>}
-          />
-        )
-      }
-    />
+        <AnimatedBeam
+          containerRef={container}
+          fromRef={dump}
+          toRef={start}
+          delay={0.3}
+          {...line(states[1])}
+        />
+        <AnimatedBeam
+          containerRef={container}
+          fromRef={start}
+          toRef={copy}
+          delay={0.6}
+          {...line(states[2])}
+        />
+        <AnimatedBeam
+          containerRef={container}
+          fromRef={copy}
+          toRef={swap}
+          delay={0.9}
+          {...line(states[3])}
+        />
+        <AnimatedBeam
+          containerRef={container}
+          fromRef={swap}
+          toRef={toMark}
+          delay={1.2}
+          {...line(states[3])}
+        />
+        <ol
+          aria-label="The server and its newer release"
+          className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_repeat(4,5.75rem)_minmax(0,1fr)] lg:gap-0"
+        >
+          <li className="min-w-0 lg:flex lg:justify-end">{runs("end", upgrade.volume)}</li>
+          {step(0, dump)}
+          {step(1, start)}
+          {step(2, copy)}
+          {step(3, swap)}
+          <li className="min-w-0">
+            <WireNode
+              nodeRef={toMark}
+              align="start"
+              className="lg:items-start"
+              mark={ring}
+              eyebrow={upgrading ? "Being copied into" : "Newer release"}
+              title={`${label} ${target.version}`}
+              hint={<span className="font-mono wrap-anywhere">{target.image}</span>}
+            />
+          </li>
+        </ol>
+      </div>
+    </div>
+  )
+}
+
+/** One step of an upgrade: its mark on the line, ticked once it is behind, and what it does. */
+function UpgradeStep({
+  step,
+  state,
+  hint,
+  nodeRef,
+}: {
+  step: (typeof STEPS)[number]
+  state: UpgradeStepState
+  hint: string
+  nodeRef: React.RefObject<HTMLDivElement | null>
+}) {
+  const Glyph = state === "done" ? Check : step.icon
+  return (
+    <li
+      data-step={step.key}
+      data-state={state}
+      // The step marks are a size under the servers': set down by the difference, the line runs level.
+      className="flex min-w-0 items-center gap-3.5 pl-1 lg:flex-col lg:gap-2 lg:pt-1 lg:pl-0"
+    >
+      <div ref={nodeRef} className="relative z-10 flex shrink-0">
+        <WireMark
+          size="sm"
+          tone={state === "done" ? "success" : state === "running" ? "brand" : "neutral"}
+        >
+          <Glyph />
+        </WireMark>
+      </div>
+      <div className="min-w-0 lg:px-1 lg:text-center">
+        <p className="text-body leading-snug font-medium">
+          {step.title}
+          <span className="sr-only">
+            {state === "done" ? ", done" : state === "running" ? ", running" : ""}
+          </span>
+        </p>
+        <p className="text-hint leading-snug text-muted-foreground">{hint}</p>
+      </div>
+    </li>
   )
 }
 
@@ -487,7 +687,6 @@ function UpgradeSection({
   protectedNote,
   onCheck,
   onUpgrade,
-  serverVersion,
 }: {
   upgrade: DbUpgrade
   label: string
@@ -500,63 +699,17 @@ function UpgradeSection({
   protectedNote: boolean
   onCheck: () => void
   onUpgrade: () => void
-  serverVersion: string | undefined
 }) {
-  const { conn } = useDatabase()
   const last = lastWords(upgrade.last, label)
   const stopping = report ? blockers(report) : []
-  const steps = to
-    ? upgradeSteps(
-        {
-          label,
-          from: serverVersion ?? upgrade.version ?? "",
-          to,
-          name: conn.name,
-          database: conn.database || conn.name,
-        },
-        report,
-      )
-    : []
   return (
     <SettingSection
       id="upgrade"
       title="Upgrade to a newer release"
       state={to ? reportWords(report) : undefined}
-    >
-      {progress}
-      {last && (
-        <Notice
-          tone={last.tone}
-          icon={last.tone === "danger" ? Warning : undefined}
-          title={last.title}
-        >
-          {last.body}
-        </Notice>
-      )}
-      {to && (
-        <div className="space-y-4">
-          {upgrade.targets.length > 1 && (
-            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="text-body text-muted-foreground">To</span>
-              <Segments
-                label="The release to upgrade to"
-                value={to}
-                options={upgrade.targets.map((target) => ({
-                  value: target.version,
-                  label: `${label} ${target.version}`,
-                }))}
-                onChange={onTo}
-                disabled={busy}
-              />
-            </div>
-          )}
-          <ol className="max-w-prose list-decimal space-y-1.5 pl-5 text-body leading-relaxed text-muted-foreground marker:text-hint">
-            {steps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-          {report && <CheckReport report={report} />}
-          <div className="flex flex-wrap items-center gap-2">
+      actions={
+        to && (
+          <>
             <Button
               size="sm"
               variant="outline"
@@ -572,24 +725,51 @@ function UpgradeSection({
                 Upgrade to {label} {to}
               </Button>
             )}
-          </div>
-          {report && stopping.length > 0 && (
-            <FormNote>
-              {stopping.length === 1
-                ? "One check stops the upgrade. Fix it on the server and check again."
-                : `${stopping.length} checks stop the upgrade. Fix them on the server and check again.`}
-            </FormNote>
-          )}
-          {protectedNote && (
-            <FormNote>
-              This connection is protected, so its server is not replaced from here. Turn Protection
-              off on General to upgrade it; the checks can run either way.
-            </FormNote>
-          )}
-          {!protectedNote && !mayChange && (
-            <FormNote>The upgrade replaces the server, which your role may not do.</FormNote>
-          )}
+          </>
+        )
+      }
+    >
+      {progress}
+      {last && (
+        <Notice
+          tone={last.tone}
+          icon={last.tone === "danger" ? Warning : undefined}
+          title={last.title}
+        >
+          {last.body}
+        </Notice>
+      )}
+      {to && upgrade.targets.length > 1 && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="text-body text-muted-foreground">To</span>
+          <Segments
+            label="The release to upgrade to"
+            value={to}
+            options={upgrade.targets.map((target) => ({
+              value: target.version,
+              label: `${label} ${target.version}`,
+            }))}
+            onChange={onTo}
+            disabled={busy}
+          />
         </div>
+      )}
+      {to && report && <CheckReport report={report} />}
+      {to && report && stopping.length > 0 && (
+        <FormNote>
+          {stopping.length === 1
+            ? "One check stops the upgrade. Fix it on the server and check again."
+            : `${stopping.length} checks stop the upgrade. Fix them on the server and check again.`}
+        </FormNote>
+      )}
+      {to && protectedNote && (
+        <FormNote>
+          This connection is protected, so its server is not replaced from here. Turn Protection off
+          on General to upgrade it; the checks can run either way.
+        </FormNote>
+      )}
+      {to && !protectedNote && !mayChange && (
+        <FormNote>The upgrade replaces the server, which your role may not do.</FormNote>
       )}
     </SettingSection>
   )
@@ -684,47 +864,24 @@ function KeptSection({
           </>
         ) : (
           <>
-            <span className="font-mono text-foreground">{record.previous}</span> is stopped and
-            holds the data as it was at the upgrade. Revert to go back to it: what was written to{" "}
-            {label} {record.toVersion} since then is discarded. Finish the upgrade to remove it and
-            its data volume.
+            It holds the data as it was at the upgrade. Revert goes back to it and discards what was
+            written since; Finish removes it and its data.
+          </>
+        )}
+        {record.safetyDump && (
+          <>
+            {" "}
+            The safety dump is{" "}
+            <Link
+              href={href("backups")}
+              className="rounded-sm font-mono wrap-anywhere underline focus-ring"
+            >
+              {record.safetyDump}
+            </Link>
+            .
           </>
         )}
       </p>
-      <DetailList className="gap-y-2.5">
-        {record.previous && (
-          <Detail label="Kept as" className="font-mono wrap-anywhere">
-            {gone ? (
-              record.previous
-            ) : (
-              <Link
-                href={`/docker/containers/${encodeURIComponent(record.previous)}`}
-                className="rounded-sm underline focus-ring"
-              >
-                {record.previous}
-              </Link>
-            )}
-            {record.previousState && !gone ? ` · ${record.previousState}` : ""}
-          </Detail>
-        )}
-        {record.previousVolume && (
-          <Detail label="Its data" className="font-mono wrap-anywhere">
-            {record.previousVolume}
-          </Detail>
-        )}
-        {record.volume && (
-          <Detail label="New data" className="font-mono wrap-anywhere">
-            {record.volume}
-          </Detail>
-        )}
-        {record.safetyDump && (
-          <Detail label="Safety dump" className="font-mono wrap-anywhere">
-            <Link href={href("backups")} className="rounded-sm underline focus-ring">
-              {record.safetyDump}
-            </Link>
-          </Detail>
-        )}
-      </DetailList>
       {problem && (
         <Notice tone="warning" icon={Warning} title={problem}>
           {gone

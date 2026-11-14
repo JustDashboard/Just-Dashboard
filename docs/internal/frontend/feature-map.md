@@ -629,23 +629,39 @@ told lately; an administrator adds a rule for this database or every database fr
 kinds its engine can be watched for (server down, disk, connections, replication, a backup failed or
 missed), with its line, how long it must hold, a cooldown and whether its recovery is told, and
 sends a test from the rule's menu. Settings is a group of pages in the rail, as a project's are
-(`shell/settings-pages.ts`): General (the address as the way the dashboard reaches it, the labels
-and protection, saved through the page's one save bar), Network (who can reach the port, through its
-container, and the four answers a container the dashboard owns takes — this server only, one of this
-machine's tailnet, VPN or local-network addresses, a list of allowed addresses the gateway table
-keeps it to, anywhere — the two that take a value confirmed with what the server says it will run,
+(`shell/settings-pages.ts`), each one centred column under the page's one save bar, headed by a
+strip of what the server has stored and not yet read (a parameter or a library waiting for a
+restart, each named as the way to where it is changed, with Restart beside them for the role that
+may interrupt the server; `ops/settings-pending.tsx`; unsaved edits join the strip while it is drawn
+and never make it arrive): General (the address as the way the dashboard reaches it, then its
+fields in place — host, port, account, password, database, or the whole string — the sealed string
+read only once a field changes, every option it carries kept, and Save dialling the new string
+before it writes it, `ops/settings-address.tsx`; the labels and protection), Network (who can reach
+the port, through its container, drawn with what the firewall and the gateway do about it and amber
+for a port only a password guards, and the four answers a container the dashboard owns takes — this
+server, one of this machine's tailnet, VPN or local-network addresses, a list of allowed addresses
+the gateway table keeps it to, anywhere — as segments with the chosen one's value under them, saved
+by the bar and asked for first, the two that take a value with what the server says it will run,
 the gateway's rules among it; whether the server speaks TLS with a certificate from the dashboard's
-own authority, with the CA download, a client connection string and the renewal;
-`tests/browser/database-reach.spec.ts`), Resources (its container's memory and processor limits
-beside their peaks, the machine and the engine's own buffer, changed in place or — to lift one — by
-replacing the container after asking), Pooling (PostgreSQL's PgBouncer: its settings, where it is
-reached, and its pools and statistics read from its console; Connect shows the pooled string beside
-the direct one), Parameters, Extensions or Modules (each drawn as the product it belongs to; a SQL
-engine's extensions by category with what each needs, searched and filtered, and on PostgreSQL
-enabled with a version, a schema and CASCADE, updated along a shipped path, disabled after listing
-what depends on it, and — for one whose library has to be loaded at start — load, restart and create
-in one dialog, `ops/extension-preload.tsx`), Version (an administrator's, for a PostgreSQL server
-Databases started: the release it runs, a check of a newer one listed line by line, the upgrade
+own authority, drawn as the connection with its lock, plain text allowed or refused as a field of
+the same bar, with the CA download, a client connection string and the renewal;
+`tests/browser/database-reach.spec.ts`, `database-tls.spec.ts`), Resources (its container's memory
+and processor limits beside their peaks, the machine and the engine's own buffer, changed in place
+or — to lift one — by replacing the container after asking), Pooling (PostgreSQL's PgBouncer: its
+settings, its figures on the picture of the way a connection goes — clients and the ones waiting on
+the line in, server connections on the line out, the wait for one at the pooler — where it is
+reached, and its pools one a line; Connect shows the pooled string beside the direct one),
+Parameters (every one under the engine's headings, changed in its row — a yes/no and a closed set
+as their words, the rest a field — several at once by the one Save, one request each, with what ran
+shown afterwards; `ops/settings-parameters-edit.ts`), Extensions or Modules (each drawn as the
+product it belongs to, on one line of one height with Update as its button and Disable behind its
+menu; a SQL engine's extensions by category with what each needs, searched and filtered, and on
+PostgreSQL enabled with a version, a schema and CASCADE, updated along a shipped path, disabled
+after listing what depends on it, and — for one whose library has to be loaded at start — load,
+restart and create in one dialog, `ops/extension-preload.tsx`), Version (an administrator's, for a
+PostgreSQL server Databases started: the release it runs with its image, container and volume as
+its captions, the four steps of an upgrade as marks on the way to the newer release with the line
+moving through the one being taken, a check of the newer one listed line by line, the upgrade
 followed as a job, and the old server kept until it is finished or reverted) and Danger zone; what
 else the server holds is Home's *Databases on this server* block, not a Settings page. A page the
 engine lacks is not listed, and an address from the one-page Settings (`#danger`, `?q=`) is sent on
