@@ -190,6 +190,7 @@ test("the routing page lights the rule that answers this browser", async ({ page
   await expect(page.getByText("5270 · your replies (inferred)")).toBeVisible()
   await expect(page.getByText("table 52 · answers you (inferred)")).toBeVisible()
   // Forwarding needed by something cannot be switched off from here.
+  await page.getByRole("tab", { name: "Forwarding" }).click()
   await expect(page.getByRole("switch", { name: "IPv4 forwarding" })).toBeDisabled()
 })
 

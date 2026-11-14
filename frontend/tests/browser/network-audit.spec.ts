@@ -20,20 +20,34 @@ test("read-only accounts see network state and cannot submit mutations", async (
   for (const command of ["New device", "New namespace"])
     await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
   for (const [path, commands] of [
-    ["routing", ["Add route", "Add rule"]],
     ["gateway", ["Forward a port", "Share a network"]],
-    ["protection", ["New blocklist", "New limit"]],
-    ["dns", ["Add record", "Resolve"]],
+    ["dns?tab=lookups", ["Resolve"]],
   ] as const) {
     await page.goto(`/network/${path}`)
     await loaded(page)
     for (const command of commands)
       await expect(page.getByRole("button", { name: command, exact: true })).toBeDisabled()
   }
+  // Protection draws no command such an account cannot use, rather than a disabled one.
+  await page.goto("/network/protection")
+  await loaded(page)
+  for (const command of ["New blocklist", "New limit"])
+    await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
+  // Routing draws no control such an account cannot use, rather than a disabled one.
   await page.goto("/network/routing")
-  await expect(page.getByRole("switch", { name: "IPv4 forwarding", exact: true })).toBeDisabled()
-  await page.goto("/network/traffic")
+  await loaded(page)
+  for (const command of ["Add route", "Add rule"])
+    await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
+  await page.getByRole("tab", { name: "Forwarding" }).click()
+  await expect(page.getByText("IPv4 forwarding", { exact: true })).toBeVisible()
+  await expect(page.getByRole("switch")).toHaveCount(0)
+  await page.goto("/network/traffic?tab=shaping")
   await expect(page.getByRole("switch", { name: /BBR/ })).toBeDisabled()
+  // The DNS settings draw a reader's records without the commands that change them.
+  await page.goto("/network/dns?tab=settings")
+  await loaded(page)
+  await expect(page.getByRole("textbox", { name: "Address of record 1" })).toBeDisabled()
+  await expect(page.getByRole("button", { name: "Add record", exact: true })).toHaveCount(0)
   expect(mutations).toEqual([])
 })
 
@@ -141,9 +155,9 @@ test("DNS lookup uses effective policy until named comparison is selected", asyn
   const mutations: Mutation[] = []
   await mockNetwork(page, mutations, { overrides })
   await mockNetworkWrites(page, mutations)
-  await page.goto("/network/dns")
+  await page.goto("/network/dns?tab=lookups")
   await expect(page.getByRole("switch", { name: "Compare named resolvers" })).not.toBeChecked()
-  await page.getByLabel("Name", { exact: true }).fill("nas.home.arpa")
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("nas.home.arpa")
   await page.getByRole("button", { name: "Resolve", exact: true }).click()
   await expect
     .poll(() => mutations.find((entry) => entry.path === "/network/dns/lookup")?.body)
@@ -321,10 +335,13 @@ test("private DNS verification names accompany upstream changes", async ({ page 
   const mutations: Mutation[] = []
   await mockNetwork(page, mutations, { overrides })
   await mockNetworkWrites(page, mutations)
-  await page.goto("/network/dns")
+  await page.goto("/network/dns?tab=settings")
   await page.getByLabel("Verification names", { exact: true }).fill("nas.home.arpa")
   await page.getByRole("button", { name: /^Quad9/ }).click()
-  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  await page
+    .getByRole("region", { name: "Save changes" })
+    .getByRole("button", { name: /^Save/ })
+    .click()
   // The plan the dialog shows is asked for the same names the change will be held to.
   await expect(
     page.getByRole("dialog").getByRole("list", { name: "Verification plan" }),
@@ -344,16 +361,24 @@ test("DNS fallback endpoints and cache policy reach the confirmed resolver apply
   const mutations: Mutation[] = []
   await mockNetwork(page, mutations, { overrides })
   await mockNetworkWrites(page, mutations)
-  await page.goto("/network/dns")
+  await page.goto("/network/dns?tab=settings")
+  const save = page
+    .getByRole("region", { name: "Save changes" })
+    .getByRole("button", { name: /^Save/ })
   await page.getByLabel("Fallback servers", { exact: true }).fill("192.0.2.53")
-  await page.getByRole("button", { name: "DNS over TLS required", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeDisabled()
+  await page
+    .getByRole("radiogroup", { name: "DNS over TLS" })
+    .getByRole("radio", { name: "Required" })
+    .click()
+  await expect(save).toBeDisabled()
   await page
     .getByLabel("Fallback servers", { exact: true })
     .fill("[fe80::53%ens3]:5353#resolver.home.arpa\n192.0.2.53#resolver.home.arpa")
-  await page.getByLabel("Cache mode", { exact: true }).click()
-  await page.getByRole("option", { name: "Positive answers only", exact: true }).click()
-  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  await page
+    .getByRole("radiogroup", { name: "Cache mode" })
+    .getByRole("radio", { name: "Positive only" })
+    .click()
+  await save.click()
   await expect(page.getByRole("dialog")).toBeVisible()
   // Only the verification plan has been asked for; nothing is applied before the confirmation.
   expect(mutations.map((entry) => entry.path)).toEqual(["/network/dns/verification-plan"])
@@ -381,11 +406,16 @@ test("unrelated resolver changes preserve managed fallback and cache choices", a
     },
   })
   await mockNetworkWrites(page, mutations)
-  await page.goto("/network/dns")
+  await page.goto("/network/dns?tab=settings")
   await expect(page.getByLabel("Fallback servers", { exact: true })).toHaveValue(fallback[0])
-  await expect(page.getByLabel("Cache mode", { exact: true })).toHaveText("Disabled")
+  await expect(
+    page.getByRole("radiogroup", { name: "Cache mode" }).getByRole("radio", { name: "Off" }),
+  ).toBeChecked()
   await page.getByLabel("Domains", { exact: true }).fill("~home.arpa")
-  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  await page
+    .getByRole("region", { name: "Save changes" })
+    .getByRole("button", { name: /^Save/ })
+    .click()
   await page.getByRole("dialog").getByRole("button", { name: "Apply", exact: true }).click()
   await expect.poll(() => mutations.at(-1)?.body).toMatchObject({ fallback, cache: "no" })
 })

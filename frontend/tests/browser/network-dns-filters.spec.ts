@@ -170,7 +170,9 @@ test("malformed private filter origins fail without displaying returned secrets"
 
 test("reader accounts never request native filter metadata", async ({ page }) => {
   const control = await mockDNSServicePage(page, { reader: true })
-  await expect(page.getByRole("heading", { name: "Resolver chain", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "About the resolver" })).toContainText(
+    "systemd-resolved",
+  )
   expect(control.reads).toEqual([])
   expect(control.mutations).toEqual([])
 })

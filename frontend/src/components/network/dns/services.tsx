@@ -24,16 +24,28 @@ import {
 } from "@/lib/network-dns-services"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { useConfirm } from "@/components/confirm-dialog"
+import { IconAction } from "@/components/icon-action"
+import { Globe, RefreshClockwise } from "@/components/icons"
 import { Section } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { GhostRows } from "./ghost"
 import { DNSServiceConnectionForm } from "./service-connection"
 import type { DNSConnectionSeed } from "./service-form"
 import { DNSServiceInventory } from "./service-inventory"
 import { DNSServiceProvisionForm } from "./service-provision"
 import { DNSReviewStatus, DNSServiceReview } from "./service-review"
+
+/** The product an engine is drawn as; Technitium has no mark in the tree and takes the globe. */
+const ENGINE_PRODUCT: Record<DNSConnection["engine"], string | undefined> = {
+  adguard: "adguard",
+  pihole: "pihole",
+  technitium: undefined,
+}
 
 type Screen =
   | { kind: "connect"; seed?: DNSConnectionSeed }
@@ -44,12 +56,16 @@ type Screen =
   | { kind: "setup"; id: string; initial?: DNSServiceProvision }
 
 /**
- * A request from elsewhere on the page — the detected-server handoff — to open
- * a new connection's form for a server, or an existing connection. The nonce
- * makes pressing the same button twice open it twice.
+ * A request from elsewhere on the page to open one of the manager's sheets:
+ * the detected-server handoff asks for a new connection's form seeded for a
+ * server, or for an existing connection; the page's menu asks for a blank
+ * connection form or an owned setup's review. The nonce makes pressing the
+ * same button twice open it twice.
  */
 export type DNSServiceAsk =
-  { kind: "connect"; seed: DNSConnectionSeed } | { kind: "connection"; id: string; name: string }
+  | { kind: "connect"; seed?: DNSConnectionSeed }
+  | { kind: "connection"; id: string; name: string }
+  | { kind: "provision" }
 export type DNSServiceRequest = { nonce: number } & DNSServiceAsk
 
 export function DNSServiceManager({ request }: { request?: DNSServiceRequest }) {
@@ -68,7 +84,9 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
     setScreen(
       request.kind === "connect"
         ? { kind: "connect", seed: request.seed }
-        : { kind: "connection", id: request.id, name: request.name },
+        : request.kind === "provision"
+          ? { kind: "provision" }
+          : { kind: "connection", id: request.id, name: request.name },
     )
   }
   const connections = usePoll(
@@ -104,80 +122,138 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
               ? "Retained native DNS change"
               : "Retained owned DNS setup"
 
+  const setups = provisions.data ?? []
   return (
     <>
-      <Section
-        title={
-          connections.data
-            ? `Native DNS engines · ${connections.data.length}`
-            : "Native DNS engines"
-        }
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={refresh}>
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={() => setScreen({ kind: "provision" })}>
-              Review owned setup
-            </Button>
-            <Button onClick={() => setScreen({ kind: "connect" })}>Connect engine</Button>
-          </div>
-        }
-      >
-        {connections.error && (
-          <ErrorState error={connections.error} onRetry={connections.refresh} />
-        )}
-        {!connections.data ? (
-          !connections.error && <LoadingPanel plain rows={2} />
-        ) : connections.data.length === 0 ? (
-          <EmptyNote>No native DNS engine is connected.</EmptyNote>
-        ) : (
-          <ChoiceList>
-            {connections.data.map((connection) => (
-              <ChoiceRow
-                key={connection.id}
-                title={connection.name}
-                verb={`Inspect ${connection.name}`}
-                description={`${dnsEngineName(connection.engine)} · ${connection.endpoint}`}
-                trailing={
-                  <Status
-                    tone={connection.management ? "notice" : "stopped"}
-                    label={connection.management ? "Reviewed changes enabled" : "Read-only"}
-                  />
-                }
-                onSelect={() =>
-                  setScreen({ kind: "connection", id: connection.id, name: connection.name })
-                }
-              />
-            ))}
-          </ChoiceList>
-        )}
-      </Section>
-      <Section
-        title={
-          provisions.data ? `Owned DNS setups · ${provisions.data.length}` : "Owned DNS setups"
-        }
-      >
-        {provisions.error && <ErrorState error={provisions.error} onRetry={provisions.refresh} />}
-        {!provisions.data ? (
-          !provisions.error && <LoadingPanel plain rows={1} />
-        ) : provisions.data.length === 0 ? (
-          <EmptyNote>No owned DNS setup has been reviewed.</EmptyNote>
-        ) : (
-          <ChoiceList>
-            {provisions.data.map((setup) => (
-              <ChoiceRow
-                key={setup.id}
-                title={setup.request.name}
-                verb={`Review owned DNS setup ${setup.request.name}`}
-                description={`${dnsEngineName(setup.request.engine)} · 127.0.0.1:${setup.request.dnsPort}`}
-                trailing={<DNSReviewStatus state={setup.state} />}
-                onSelect={() => setScreen({ kind: "setup", id: setup.id })}
-              />
-            ))}
-          </ChoiceList>
-        )}
-      </Section>
+      <Panel plain>
+        <PanelHeader
+          title="Connected engines"
+          actions={
+            <>
+              {connections.data && connections.data.length > 0 && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {connections.data.length}
+                </span>
+              )}
+              <IconAction label="Refresh" onClick={refresh}>
+                <RefreshClockwise />
+              </IconAction>
+              {/* With no engine the list's place holds the one Connect. */}
+              {connections.data && connections.data.length > 0 && (
+                <Button size="xs" variant="outline" onClick={() => setScreen({ kind: "connect" })}>
+                  Connect engine
+                </Button>
+              )}
+            </>
+          }
+        />
+        <PanelBody className="flex min-w-0 flex-col gap-3">
+          {connections.error && (
+            <ErrorState error={connections.error} onRetry={connections.refresh} />
+          )}
+          {!connections.data ? (
+            !connections.error && <GhostRows rows={1} />
+          ) : connections.data.length === 0 ? (
+            <EmptyState
+              mark={<ProductLogos ids={["adguard", "pihole"]} size="md" />}
+              title="No DNS engine is connected"
+              description="AdGuard Home, Pi-hole or Technitium, read through its own API: queries, filters, clients, DHCP and records."
+              action={
+                <Button onClick={() => setScreen({ kind: "connect" })}>Connect engine</Button>
+              }
+            />
+          ) : (
+            <ChoiceList>
+              {connections.data.map((connection) => (
+                <ChoiceRow
+                  key={connection.id}
+                  leading={
+                    <ProductLogo
+                      id={ENGINE_PRODUCT[connection.engine]}
+                      size="sm"
+                      fallback={Globe}
+                    />
+                  }
+                  title={connection.name}
+                  verb={`Inspect ${connection.name}`}
+                  description={
+                    <>
+                      {dnsEngineName(connection.engine)} ·{" "}
+                      <span className="align-top font-mono">{connection.endpoint}</span>
+                    </>
+                  }
+                  trailing={
+                    <span className="w-44 max-sm:hidden">
+                      <Status
+                        tone={connection.management ? "notice" : "stopped"}
+                        label={connection.management ? "Reviewed changes enabled" : "Read-only"}
+                      />
+                    </span>
+                  }
+                  onSelect={() =>
+                    setScreen({ kind: "connection", id: connection.id, name: connection.name })
+                  }
+                />
+              ))}
+            </ChoiceList>
+          )}
+        </PanelBody>
+      </Panel>
+      {/* A setup the dashboard owns is rare: its section is drawn once there
+          is one (or its read failed), and reviewing a first one is in the
+          page's menu rather than a second empty list under the first. */}
+      {(setups.length > 0 || provisions.error) && (
+        <Panel plain>
+          <PanelHeader
+            title="Owned setups"
+            actions={
+              <>
+                <span className="numeric text-hint text-muted-foreground">{setups.length}</span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setScreen({ kind: "provision" })}
+                >
+                  Review owned setup
+                </Button>
+              </>
+            }
+          />
+          <PanelBody className="flex min-w-0 flex-col gap-3">
+            {provisions.error && (
+              <ErrorState error={provisions.error} onRetry={provisions.refresh} />
+            )}
+            <ChoiceList>
+              {setups.map((setup) => (
+                <ChoiceRow
+                  key={setup.id}
+                  leading={
+                    <ProductLogo
+                      id={ENGINE_PRODUCT[setup.request.engine]}
+                      size="sm"
+                      fallback={Globe}
+                    />
+                  }
+                  title={setup.request.name}
+                  verb={`Review owned DNS setup ${setup.request.name}`}
+                  description={
+                    <>
+                      {dnsEngineName(setup.request.engine)} ·{" "}
+                      <span className="align-top font-mono">127.0.0.1:{setup.request.dnsPort}</span>
+                    </>
+                  }
+                  trailing={
+                    <span className="w-44 max-sm:hidden">
+                      <DNSReviewStatus state={setup.state} />
+                    </span>
+                  }
+                  onSelect={() => setScreen({ kind: "setup", id: setup.id })}
+                />
+              ))}
+            </ChoiceList>
+          </PanelBody>
+        </Panel>
+      )}
       <SidePanel
         open={Boolean(screen)}
         onOpenChange={(open) => !open && close()}
