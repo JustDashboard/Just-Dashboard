@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { readTip } from "./read-tip"
 import { risen } from "./risen"
 
 /**
@@ -15,6 +16,13 @@ import { risen } from "./risen"
  * both of those are asserted too. The one frame Configuration has since 0.7.1
  * is the danger rule around Uninstall, which the design system gives every
  * page's acts that end something.
+ *
+ * The 0.8.7 pass brought both to the deployment pages' shape. Each opens on
+ * the identity line laid out as a project's header; Configuration's settings
+ * are one centred column with the sentences behind each name's ⓘ and the
+ * settings pages' one floating bar, Restart and Rebuild are the line's `⋯`,
+ * and what `.env` holds that is not running is the strip at the column's
+ * head. The Version page says what an update needs in a line each.
  */
 
 const now = new Date().toISOString()
@@ -260,6 +268,15 @@ async function framedPanels(page: Page) {
   )
 }
 
+/** Where something stands in the settings column, whatever the page has scrolled to. */
+async function inColumn(page: Page, selector: string) {
+  return page.evaluate((selector) => {
+    const column = document.querySelector("[data-slot=settings-column]")!
+    const target = document.querySelector(selector)!
+    return Math.round(target.getBoundingClientRect().top - column.getBoundingClientRect().top)
+  }, selector)
+}
+
 async function scrollsSideways(page: Page) {
   return page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -499,9 +516,11 @@ test("the configuration page edits in place and says where it lives", async ({ p
   await expect(page.getByText("Read-only")).toHaveCount(0)
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
-  // Restart and Rebuild are the two commands, drawn as the two ways to restart.
-  await expect(page.getByRole("button", { name: "Restart the dashboard" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Rebuild and restart" })).toBeVisible()
+  // Restart and Rebuild are the identity line's menu, each with what it runs.
+  await page.getByRole("button", { name: "Restart or rebuild" }).click()
+  await expect(page.getByRole("menuitem", { name: /Restart the dashboard/ })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /Rebuild and restart/ })).toBeVisible()
+  await page.keyboard.press("Escape")
 
   // The restart record says what happened without a tinted banner, and its
   // transcript is the whole file rather than the tail the report carries.
@@ -543,11 +562,13 @@ test("the stack is the path a request takes, and the allowlist is its networks",
   await expect(path.getByText(":8080")).toBeVisible()
 
   // Each command says what it runs.
+  await page.getByRole("button", { name: "Restart or rebuild" }).click()
   await expect(page.getByText("docker compose up -d --force-recreate")).toBeVisible()
   await expect(page.getByText("docker compose build", { exact: true })).toBeVisible()
+  await page.keyboard.press("Escape")
 
-  // Durations are said as a person says them, beside the field.
-  await expect(page.getByText("12 hours from signing in")).toBeVisible()
+  // Durations are said as a person says them, in the section's head.
+  await expect(page.getByText("a sign-in lasts 12 hours, idle ones end after 1 hour")).toBeVisible()
   await page.getByLabel("Idle timeout").fill("soon")
   await expect(page.getByText("Not a duration — try 60m or 2h.")).toBeVisible()
   await page.getByRole("button", { name: "Discard" }).click()
@@ -573,6 +594,242 @@ test("the stack is the path a request takes, and the allowlist is its networks",
   await page.getByRole("button", { name: "Discard" }).click()
   await expect(networks.getByRole("listitem")).toHaveCount(2)
   await expect(networks.getByText("your tailnet")).toBeVisible()
+})
+
+test("the settings are one column, a switch is one line, and nothing explains itself under a field", async ({
+  page,
+}) => {
+  await mockApi(page)
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/dashboard/configuration")
+    const column = page.locator("[data-slot=settings-column]")
+    await expect(column.getByRole("heading", { name: "Certificate" })).toBeVisible()
+    await risen(page)
+    await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+
+    // One section to a row, each on the column's edges, the column no wider than its fields.
+    const sections = await column.locator("[data-slot=setting]").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return { x: Math.round(box.x), y: box.y, bottom: box.bottom, width: Math.round(box.width) }
+      }),
+    )
+    expect(sections).toHaveLength(7)
+    for (const [index, section] of sections.entries()) {
+      expect(section.x).toBe(sections[0].x)
+      expect(section.width).toBe(sections[0].width)
+      if (index > 0) expect(section.y).toBeGreaterThanOrEqual(sections[index - 1].bottom)
+    }
+    expect(sections[0].width).toBeLessThanOrEqual(768)
+
+    // No sentence under a field or a switch: the reasons are behind each name's ⓘ.
+    await expect(column.locator("p.text-hint")).toHaveCount(0)
+    const rows = column.locator("[data-slot=switch-row]")
+    await expect(rows).toHaveCount(4)
+    const heights = await rows.evaluateAll((nodes) =>
+      nodes.map((node) => Math.round(node.getBoundingClientRect().height)),
+    )
+    expect(new Set(heights).size).toBe(1)
+    await readTip(
+      page,
+      rows
+        .filter({ hasText: "Require two-factor" })
+        .getByRole("button", { name: "What this setting does" }),
+      /Every account must enrol/,
+    )
+
+    expect(await scrollsSideways(page)).toBe(false)
+    await page.screenshot({
+      path: `test-results/dashboard-configuration-column-${width}.png`,
+      fullPage: true,
+    })
+  }
+})
+
+test("an edit raises the floating bar, and Apply asks what it always asked and sends what it always sent", async ({
+  page,
+}) => {
+  await mockApi(page)
+  const sent: unknown[] = []
+  await page.route("**/api/v1/dashboard/config", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    sent.push(route.request().postDataJSON())
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ ...config.run, status: "running", phase: "applying" }),
+    })
+  })
+  await page.goto("/dashboard/configuration")
+  const bar = page.getByRole("region", { name: "Save changes" })
+  await expect(bar).toHaveCount(0)
+
+  // Editing does not move the field being typed in, or anything under it.
+  const port = page.getByLabel("Port", { exact: true })
+  const features = page.locator("[data-slot=setting]", { hasText: "Features" })
+  await risen(page)
+  const placed = {
+    port: await inColumn(page, "#cfg-port"),
+    idle: await inColumn(page, "#cfg-idle"),
+  }
+  await port.fill("9443")
+  await features.getByRole("switch", { name: "Web terminal" }).click()
+  await expect(bar.getByText("2 unsaved changes")).toBeVisible()
+  await expect(bar.getByText("Address and Features · Restarts the dashboard")).toBeVisible()
+  expect(await inColumn(page, "#cfg-port")).toBe(placed.port)
+  expect(await inColumn(page, "#cfg-idle")).toBe(placed.idle)
+  const address = page.locator("[data-slot=setting]", { hasText: "Listening interface" })
+  await expect(address.getByText("Edited")).toBeVisible()
+  await expect(address.getByText("will answer at")).toBeVisible()
+
+  // The bar's command is the question, not the write.
+  await bar.getByRole("button", { name: /^Apply and restart/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Apply and restart" })
+  await expect(dialog.getByText("Dashboard port")).toBeVisible()
+  await expect(dialog.getByText("Web terminal")).toBeVisible()
+  await expect(dialog.getByText("https://atlas.tail1234.ts.net:9443")).toBeVisible()
+  expect(sent).toEqual([])
+  // Declined, the edits are still on the bar.
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(bar.getByText("2 unsaved changes")).toBeVisible()
+
+  await bar.getByRole("button", { name: /^Apply and restart/ }).click()
+  await dialog.getByRole("button", { name: "Apply and restart" }).click()
+  await expect.poll(() => sent.length).toBe(1)
+  expect(sent[0]).toEqual({ ...settings, port: 9443, terminalEnabled: false })
+  await expect(bar).toHaveCount(0)
+})
+
+test("what .env holds that is not running is the strip at the column's head, with the restart that adopts it", async ({
+  page,
+}) => {
+  await mockApi(page)
+  const restarts: unknown[] = []
+  await page.route("**/api/v1/dashboard/restart", async (route) => {
+    restarts.push(route.request().postDataJSON())
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ ...config.run, action: "restart", status: "running" }),
+    })
+  })
+  await page.goto("/dashboard/configuration")
+  const strip = page.getByRole("region", { name: "Settings not running yet" })
+  await expect(strip.getByText(".env differs from what is running")).toBeVisible()
+  await expect(strip).toContainText("Dashboard port")
+  await expect(strip).toContainText("9443")
+  // The strip is the first thing in the settings column.
+  const first = await page
+    .locator("[data-slot=settings-column]")
+    .evaluate((column) => column.firstElementChild?.getAttribute("aria-label"))
+  expect(first).toBe("Settings not running yet")
+
+  await strip.getByRole("button", { name: "Restart" }).click()
+  const dialog = page.getByRole("dialog", { name: "Restart the dashboard" })
+  await expect(dialog.getByText(/Sessions survive/)).toBeVisible()
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+  expect(restarts).toEqual([])
+
+  // The same two questions from the line's menu, and the same two requests.
+  await page.getByRole("button", { name: "Restart or rebuild" }).click()
+  await page.getByRole("menuitem", { name: /Rebuild and restart/ }).click()
+  const rebuild = page.getByRole("dialog", { name: "Rebuild and restart" })
+  await expect(rebuild.getByText(dir)).toBeVisible()
+  await rebuild.getByRole("button", { name: "Rebuild", exact: true }).click()
+  await expect.poll(() => restarts).toEqual([{ rebuild: true }])
+})
+
+test("the configuration page opens where it will stand, and an install nobody can restart offers no control", async ({
+  page,
+}) => {
+  // Held, so the outline is measured before the answer replaces it.
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await mockApi(page)
+  await page.route("**/api/v1/dashboard/config", async (route) => {
+    await held
+    await json(route, {
+      ...config,
+      supported: false,
+      reason: "The dashboard is not running under Docker Compose.",
+      drift: [],
+    })
+  })
+  await page.goto("/dashboard/configuration")
+  const outline = page.locator("[data-slot=skeleton]").first()
+  await expect(outline).toBeVisible()
+  const waiting = await outline.boundingBox()
+  release()
+  const line = page.locator("[data-slot=host-identity]")
+  await expect(line).toBeVisible()
+  await risen(page)
+  expect((await line.boundingBox())!.y).toBe(waiting!.y)
+
+  // Read-only, said once in the line; one line says why, and nothing can be pressed.
+  await expect(line.getByText("Read-only")).toBeVisible()
+  await expect(page.locator("[data-slot=notice-lines]")).toContainText("Configured by hand")
+  await expect(page.locator("[data-slot=notice-lines]")).toContainText(
+    "The dashboard is not running under Docker Compose.",
+  )
+  await expect(page.getByRole("button", { name: "Restart or rebuild" })).toHaveCount(0)
+  await expect(page.getByLabel("Port", { exact: true })).toBeDisabled()
+  await expect(page.getByRole("switch", { name: "Web terminal" })).toBeDisabled()
+  // A card that cannot be taken carries no control at all.
+  await expect(page.getByRole("button", { name: "Use a self-signed certificate" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Add", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0)
+  await page.screenshot({
+    path: "test-results/dashboard-configuration-by-hand.png",
+    fullPage: true,
+  })
+})
+
+test("an account that may not read the settings is told so, with nothing to press", async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, {
+      ...user,
+      capabilities: ["read"],
+      user: { ...user.user, role: "readonly" },
+    }),
+  )
+  await page.route("**/api/v1/dashboard/config", (route) =>
+    route.fulfill({
+      status: 403,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "forbidden", message: "your role does not permit this action" },
+      }),
+    }),
+  )
+  await page.goto("/dashboard/configuration")
+  await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible()
+  await expect(page.locator("[data-slot=error-state]")).toBeVisible()
+  await expect(page.locator("[data-slot=settings-column]")).toHaveCount(0)
+  await expect(page.getByRole("switch")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Restart or rebuild" })).toHaveCount(0)
+
+  // The Version page is every role's to read; installing is not offered.
+  await page.goto("/dashboard")
+  await expect(page.getByText("0.7.0 available")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Check now" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Update to/ })).toHaveCount(0)
+})
+
+test("the version page fits a phone, its two commands on the line's first row", async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/dashboard")
+  await expect(page.getByRole("button", { name: "Update to 0.7.0" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Check now" })).toBeVisible()
+  await expect(page.getByText("Just Dashboard", { exact: true }).first()).toBeVisible()
+  expect(await scrollsSideways(page)).toBe(false)
+  await page.screenshot({ path: "test-results/dashboard-version-390.png", fullPage: true })
 })
 
 test("uninstalling asks what stays, and a wipe asks for the server's name", async ({ page }) => {
@@ -653,7 +910,7 @@ test("an uninstall follows the stack down, then says what is left to do", async 
   // The page stays drawn: losing the API is not an error state here.
   await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible()
   // Nothing is offered that the stack going away has made meaningless.
-  await expect(page.getByRole("button", { name: "Restart the dashboard" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Restart or rebuild" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Uninstall…" })).toHaveCount(0)
 })
 
@@ -666,7 +923,7 @@ for (const path of ["/dashboard", "/dashboard/configuration"] as const) {
       await expect(
         path === "/dashboard"
           ? page.getByRole("heading", { name: "0.7.0" })
-          : page.getByRole("button", { name: "Rebuild and restart" }),
+          : page.getByRole("button", { name: "Restart or rebuild" }),
       ).toBeVisible()
       await expect(page.locator("[data-slot=page]")).toHaveClass(/animate-rise/)
       expect(await scrollsSideways(page)).toBe(false)
@@ -677,7 +934,7 @@ for (const path of ["/dashboard", "/dashboard/configuration"] as const) {
 }
 
 test.describe("the usage count on Configuration", () => {
-  const panel = (page: Page) => page.locator("[data-slot=panel]", { hasText: "Usage count" })
+  const panel = (page: Page) => page.locator("[data-slot=setting]", { hasText: "Usage count" })
   const toggle = (page: Page) => panel(page).getByRole("switch", { name: "Count this server" })
 
   async function withStatus(page: Page, initial: Record<string, unknown>) {
@@ -740,6 +997,13 @@ test.describe("the usage count on Configuration", () => {
   test("the version check says how often it really runs", async ({ page }) => {
     await withStatus(page, usagePing)
     await page.goto("/dashboard/configuration")
-    await expect(page.getByText(/every two hours and at most every five minutes/)).toBeVisible()
+    // Behind the ⓘ beside the switch's name, where a sentence under it was.
+    await readTip(
+      page,
+      page
+        .locator("[data-slot=switch-row]", { hasText: "Check for new versions" })
+        .getByRole("button", { name: "What this setting does" }),
+      /every two hours and at most every five minutes/,
+    )
   })
 })

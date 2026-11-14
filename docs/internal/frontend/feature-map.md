@@ -207,22 +207,29 @@ brand-faced *Update*
 
 ### `/dashboard/configuration`
 
-The panel's own settings. An identity line first: the address it answers at (scheme, host and port
-each in their hue), the checkout with Compose's mark, its compose and `.env` files, the last
-restart, and Running or the restart's state. Then the stack as the path a request takes — this
-browser, the tailnet (or loopback, or the network), Caddy on its port with the certificate's issuer,
-and Next.js and Go on their loopback ports with a state dot — wired with pulsing beams that go still
-and amber during a restart, beside Restart and Rebuild as two cards naming the `docker compose`
-command each runs, and the run record under them with its stages and whole transcript, followed
-across the restart it describes. Then the settings in two columns from `xl`: Certificate across both
-(three cards with their products' logos; picking one carries the address, listening interface and
-allowlist with it, filled from the machine's own tailnet identity), Address beside Access, Sessions
-beside Features. Each head carries what the section currently is and *Edited* while it holds an
-unapplied change. The allowlist is a list of networks drawn as Tailscale, this server, local or
-public, with add and remove (the only loopback entry cannot be removed); session durations are read
-back in words and a value that is not a duration is flagged. Then the [usage
-count](../backend/usage-ping.md) in its own panel, because it applies at once with no Apply or
-restart: its switch, the report as exact bytes, any failure and a link to the totals. Last, a Danger
+The panel's own settings. An identity line first, laid out as a project's header: the address it
+answers at (scheme, host and port each in their hue) with Running or the restart's phase beside it,
+the checkout with Compose's mark, its compose and `.env` files and the last restart as the facts,
+and Restart and Rebuild behind its `⋯`, each with the `docker compose` command it runs and what it
+costs. Then the stack as the path a request takes — this browser, the tailnet (or loopback, or the
+network), Caddy on its port with the certificate's issuer, and Next.js and Go on their loopback
+ports with a state dot — wired with pulsing beams that go still and amber during a restart, and the
+run record under it with its stages and whole transcript, followed across the restart it describes.
+Then the settings as one centred column of sections, the shape a project's settings have
+(`components/settings-column.tsx` around `SettingSection`): Certificate (three cards with their
+products' logos; picking one carries the address, listening interface and allowlist with it, filled
+from the machine's own tailnet identity), Address, Access, Sessions, Features. Each head carries
+what the section currently is and *Edited* while it holds an unapplied change; no sentence stands
+under a field or a switch, the reason is behind the ⓘ beside its name, and a switch is one full-width
+line. What `.env` holds that the running stack does not is the strip at the column's head
+(`PendingStrip`), with the restart that adopts it. The allowlist is a list of networks drawn as
+Tailscale, this server, local or public, with add and remove (the only loopback entry cannot be
+removed); session durations are read back in words in the section's head and a value that is not a
+duration is flagged. An edit raises the settings pages' floating bar, which names the sections the
+edits are in and whose command is *Apply and restart*: it opens the same confirmation, listing every
+change old to new, and sends the same request. Then the [usage count](../backend/usage-ping.md) as a
+section of its own that says it applies at once, with no Apply or restart: its switch, the report as
+exact bytes, any failure, a link to the totals and the pointer to Settings → Connect. Last, a Danger
 zone in the danger rule with Uninstall, whose dialog asks whether the deployments and data are kept
 for a reinstall or wiped — what each removes and leaves is read off the server, a wipe asks for the
 host name and whether the backups go too — and whose run takes the top of the page, hiding the stack
@@ -233,6 +240,7 @@ session_required`
 
 **Implementation:** `components/config/request-path.tsx`, `components/config/allowlist.tsx`,
 `components/config/restart-progress.tsx`, `components/config/uninstall.tsx`,
+`components/config/usage-ping.tsx`, `components/settings-column.tsx`,
 `components/run-transcript.tsx`, `components/run-phases.tsx`, `hooks/use-self-config.tsx`,
 `hooks/use-self-uninstall.tsx`, `lib/uninstall.ts` (`system.admin` only)
 
