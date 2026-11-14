@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
-import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
+import { risen } from "./risen"
 
 /**
  * A database's Network settings, and the section on them that says whether the
@@ -213,6 +214,20 @@ async function settled(page: Page) {
   )
 }
 
+/** The connection drawn with its lock. */
+const picture = (page: Page) =>
+  tls(page).getByRole("list", { name: "How the connection is encrypted" })
+/** Whether plain text is still accepted: the section's one field. */
+const plain = (page: Page) =>
+  tls(page).getByRole("radiogroup", { name: "Whether plain text is accepted" })
+const saveBar = (page: Page) => page.getByRole("region", { name: "Save changes" })
+const save = (page: Page) => saveBar(page).getByRole("button", { name: "Save", exact: true })
+/** An act on the certificate that is not the section's one button. */
+async function more(page: Page, item: string) {
+  await tls(page).getByRole("button", { name: "More for the certificate" }).click()
+  await page.getByRole("menuitem", { name: item }).click()
+}
+
 test("a server with TLS off says so, and turning it on says what it does before it does it", async ({
   page,
 }) => {
@@ -220,9 +235,12 @@ test("a server with TLS off says so, and turning it on says what it does before 
   await visit(page, NETWORK)
   await expect(tls(page).getByRole("heading", { name: "Encryption in transit" })).toBeVisible()
   await expect(tls(page)).toContainText("Off")
-  await expect(tls(page)).toContainText("The server speaks plain text")
+  // The picture says it: no certificate, and a port that speaks plain text.
+  await expect(picture(page)).toContainText("Connects in plain text")
+  await expect(picture(page)).toContainText("speaks plain text")
   // Nothing about a certificate before there is one.
-  await expect(tls(page).getByRole("button", { name: "Renew certificate" })).toHaveCount(0)
+  await expect(tls(page).getByRole("button", { name: "More for the certificate" })).toHaveCount(0)
+  await expect(plain(page)).toHaveCount(0)
 
   await tls(page).getByRole("button", { name: "Turn on TLS" }).click()
   await expect(dialog(page)).toContainText("Turn on TLS for PostgreSQL")
@@ -238,10 +256,12 @@ test("a server with TLS off says so, and turning it on says what it does before 
       require: false,
     })
   await expect(tls(page)).toContainText("TLS allowed")
-  await expect(tls(page)).toContainText("325 days left")
+  // The certificate's life, who checks it and what the port takes are the picture's captions.
+  await expect(picture(page)).toContainText("325 days left")
+  await expect(picture(page)).toContainText("Checks the certificate")
+  await expect(picture(page)).toContainText("takes TLS or plain text")
   await expect(tls(page)).toContainText("db-1.jd.internal")
   await expect(tls(page)).toContainText("Just Dashboard database CA")
-  await expect(tls(page)).toContainText("Checks the certificate")
 })
 
 test("the connection string for another machine carries the mode that verifies the certificate", async ({
@@ -257,18 +277,28 @@ test("the connection string for another machine carries the mode that verifies t
   await expect(tls(page).getByRole("button", { name: "Copy command" })).toBeVisible()
 })
 
-test("requiring TLS warns the deployments that connect by name, and sends the choice", async ({
+test("requiring TLS is saved by the bar, warns the deployments that connect by name, and sends the choice", async ({
   page,
 }) => {
   const server = await mockTLS(page, { state: { 1: TLS_ON } })
   await visit(page, NETWORK)
-  const choice = tls(page).getByRole("group", { name: "Whether plain text is accepted" })
-  await expect(choice.getByRole("button", { name: /TLS allowed/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await choice.getByRole("button", { name: /TLS required/ }).click()
+  await expect(plain(page).getByRole("radio", { name: "Allowed" })).toBeChecked()
+  await plain(page).getByRole("radio", { name: "Refused" }).click()
+  // Choosing is an edit: nothing is asked or sent until the page is saved.
+  await expect(dialog(page)).toHaveCount(0)
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await expect(saveBar(page)).toContainText("Encryption in transit · Applies immediately")
+  expect(server.sent).toEqual([])
+
+  // A confirmation that is cancelled sends nothing and keeps the choice.
+  await save(page).click()
   await expect(dialog(page)).toContainText("Require TLS for PostgreSQL")
+  await dialog(page).getByRole("button", { name: "Cancel" }).click()
+  expect(server.sent).toEqual([])
+  await expect(plain(page).getByRole("radio", { name: "Refused" })).toBeChecked()
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+
+  await save(page).click()
   await expect(dialog(page)).toContainText("1 deployment environment reaches this database")
   await dialog(page).getByRole("button", { name: "Require", exact: true }).click()
   await expect
@@ -278,19 +308,16 @@ test("requiring TLS warns the deployments that connect by name, and sends the ch
       require: true,
     })
   await expect(tls(page)).toContainText("TLS required")
-  await expect(choice.getByRole("button", { name: /TLS required/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await expect(picture(page)).toContainText("refuses a client without TLS")
+  await expect(plain(page).getByRole("radio", { name: "Refused" })).toBeChecked()
+  await expect(save(page)).toHaveCount(0)
 })
 
 test("an engine whose port speaks one protocol is not offered a choice", async ({ page }) => {
   const server = await mockTLS(page)
   await visit(page, "/databases/4/settings/network")
   await expect(tls(page)).toContainText("Off")
-  await expect(
-    tls(page).getByRole("group", { name: "Whether plain text is accepted" }),
-  ).toHaveCount(0)
+  await expect(plain(page)).toHaveCount(0)
   await tls(page).getByRole("button", { name: "Turn on TLS" }).click()
   await expect(dialog(page)).toContainText("plain text stops being accepted")
   await dialog(page).getByRole("button", { name: "Turn on", exact: true }).click()
@@ -301,9 +328,8 @@ test("an engine whose port speaks one protocol is not offered a choice", async (
       require: true,
     })
   await expect(tls(page)).toContainText("TLS only")
-  await expect(
-    tls(page).getByRole("group", { name: "Whether plain text is accepted" }),
-  ).toHaveCount(0)
+  await expect(picture(page)).toContainText("speaks TLS and nothing else")
+  await expect(plain(page)).toHaveCount(0)
   await expect(tls(page)).toContainText("rediss://:<password>@127.0.0.1:6379/0")
   await expect(tls(page).locator("[data-slot=tls-applications]")).toContainText(
     "need the CA certificate",
@@ -315,14 +341,15 @@ test("renewing says that a restart can happen, and is confirmed because of it", 
 }) => {
   const server = await mockTLS(page, { state: { 1: TLS_ON } })
   await visit(page, NETWORK)
-  await tls(page).getByRole("button", { name: "Renew certificate" }).click()
+  await more(page, "Renew certificate")
   await expect(dialog(page)).toContainText("Renew the certificate of PostgreSQL")
   await expect(dialog(page)).toContainText("No session is dropped")
   await expect(dialog(page)).toContainText("If the engine cannot read it while running")
   await expect(dialog(page)).toContainText("the container is restarted")
   await dialog(page).getByRole("button", { name: "Renew", exact: true }).click()
   await expect.poll(() => server.sent.some((one) => one.request === "POST 1/tls/renew")).toBe(true)
-  await expect(tls(page)).toContainText("Last renewed")
+  expect(server.sent.find((one) => one.request === "POST 1/tls/renew")?.body).toBeNull()
+  await expect(picture(page)).toContainText("renewed")
 })
 
 test("linked applications are told what they are given, and that the CA lets them check it", async ({
@@ -333,8 +360,8 @@ test("linked applications are told what they are given, and that the CA lets the
   const note = tls(page).locator("[data-slot=tls-applications]")
   await expect(note).toContainText("still connect without it")
   await expect(note).toContainText("Their traffic stays on this server’s internal network")
-  const choice = tls(page).getByRole("group", { name: "Whether plain text is accepted" })
-  await choice.getByRole("button", { name: /TLS required/ }).click()
+  await plain(page).getByRole("radio", { name: "Refused" }).click()
+  await save(page).click()
   await dialog(page).getByRole("button", { name: "Require", exact: true }).click()
   await expect(note).toContainText("does not check the certificate")
   await expect(note).toContainText("Give them the CA certificate")
@@ -344,14 +371,14 @@ test("the authority's certificate is a download", async ({ page }) => {
   await mockTLS(page, { state: { 1: TLS_ON } })
   await visit(page, NETWORK)
   const download = page.waitForEvent("download")
-  await tls(page).getByRole("button", { name: "Download CA certificate" }).click()
+  await tls(page).getByRole("button", { name: "CA certificate" }).click()
   expect((await download).suggestedFilename()).toBe("just-dashboard-database-ca.pem")
 })
 
 test("turning TLS off is confirmed and sends nothing but the choice", async ({ page }) => {
   const server = await mockTLS(page, { state: { 1: TLS_ON } })
   await visit(page, NETWORK)
-  await tls(page).getByRole("button", { name: "Turn off TLS" }).click()
+  await more(page, "Turn off TLS")
   await expect(dialog(page)).toContainText("Turn off TLS for PostgreSQL")
   await expect(dialog(page)).toContainText("removes the certificate")
   await dialog(page).getByRole("button", { name: "Turn off", exact: true }).click()
@@ -382,6 +409,7 @@ test("a server that is not the dashboard's to change says whose it is, and offer
     "belongs to the compose project stack",
   )
   await expect(tls(page)).toContainText("Not managed here")
+  await expect(picture(page)).toContainText("the dashboard does not hold it")
   await expect(tls(page).getByRole("button", { name: "Turn on TLS" })).toHaveCount(0)
 })
 
@@ -394,9 +422,11 @@ test("a role that may not recreate a container sees the section and cannot press
   })
   await visit(page, NETWORK)
   await expect(tls(page)).toContainText("TLS allowed")
-  await expect(tls(page).getByRole("button", { name: "Renew certificate" })).toBeDisabled()
-  await expect(tls(page).getByRole("button", { name: "Turn off TLS" })).toBeDisabled()
+  await expect(plain(page).getByRole("radio", { name: "Refused" })).toBeDisabled()
   await expect(tls(page)).toContainText("which your role may not do")
+  await tls(page).getByRole("button", { name: "More for the certificate" }).click()
+  await expect(page.getByRole("menuitem", { name: "Renew certificate" })).toBeDisabled()
+  await expect(page.getByRole("menuitem", { name: "Turn off TLS" })).toBeDisabled()
 })
 
 test("a reader who is not an administrator is shown no certificate and asks for none", async ({
@@ -410,11 +440,17 @@ test("a reader who is not an administrator is shown no certificate and asks for 
   expect(server.seen).not.toContain("GET 1/tls")
 })
 
-test("a reading that fails says so and can be tried again", async ({ page }) => {
+test("a reading that fails is the picture with its lock unknown, and can be tried again", async ({
+  page,
+}) => {
   await mockTLS(page, { readFails: 502 })
   await visit(page, NETWORK)
-  await expect(tls(page)).toContainText("Could not read whether it speaks TLS")
-  await expect(tls(page).getByRole("button", { name: /Retry|Try again/ })).toBeVisible()
+  await expect(picture(page).getByRole("status")).toHaveText("Could not be read")
+  await expect(picture(page)).toContainText("the Docker daemon did not answer")
+  await expect(tls(page)).toContainText("Not known")
+  // Not a notice where the section should be.
+  await expect(tls(page).locator("[data-slot=notice]")).toHaveCount(0)
+  await expect(tls(page).getByRole("button", { name: "Try again" })).toBeVisible()
   await expect(tls(page).getByRole("button", { name: "Turn on TLS" })).toHaveCount(0)
 })
 
@@ -441,6 +477,51 @@ test("a change that is refused leaves the section as it was and says why", async
   await expect(tls(page)).toContainText("Off")
 })
 
+test("a refused change of the field keeps what was chosen", async ({ page }) => {
+  await mockTLS(page, { state: { 1: TLS_ON } })
+  await page.route(/\/api\/v1\/databases\/1\/tls$/, (route) =>
+    route.request().method() === "PUT"
+      ? route.fulfill({
+          status: 502,
+          json: { error: { code: "tls_failed", message: "It was put back as it was." } },
+        })
+      : route.fallback(),
+  )
+  await visit(page, NETWORK)
+  await plain(page).getByRole("radio", { name: "Refused" }).click()
+  await save(page).click()
+  await dialog(page).getByRole("button", { name: "Require", exact: true }).click()
+  await expect(page.getByText("It was put back as it was.")).toBeVisible()
+  await expect(tls(page)).toContainText("TLS allowed")
+  await expect(plain(page).getByRole("radio", { name: "Refused" })).toBeChecked()
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+})
+
+test("the section has its shape while it is read: the read landing moves nothing", async ({
+  page,
+}) => {
+  const read = hold()
+  await mockTLS(page, { state: { 1: TLS_ON } })
+  await page.route(/\/api\/v1\/databases\/1\/tls$/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await read.until
+    return route.fallback()
+  })
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  await visit(page, NETWORK)
+  await expect(tls(page)).toContainText("Reading…")
+  await risen(page)
+  // The lock's own caption: under the mark, wherever the words either side of it end.
+  const lock = picture(page).getByText("Certificate", { exact: true })
+  const before = await lock.boundingBox()
+  read.release()
+  await expect(picture(page)).toContainText("325 days left")
+  await risen(page)
+  const after = await lock.boundingBox()
+  expect(after?.x).toBe(before?.x)
+  expect(after?.y).toBe(before?.y)
+})
+
 test("the section fits a phone and can be worked by keyboard", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockTLS(page, { state: { 1: TLS_ON } })
@@ -449,52 +530,58 @@ test("the section fits a phone and can be worked by keyboard", async ({ page }) 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(
     false,
   )
-  await tls(page).getByRole("button", { name: "Renew certificate" }).focus()
-  await expect(tls(page).getByRole("button", { name: "Renew certificate" })).toBeFocused()
+  await tls(page).getByRole("button", { name: "CA certificate" }).focus()
   await page.keyboard.press("Tab")
-  await expect(tls(page).getByRole("button", { name: "Turn off TLS" })).toBeFocused()
+  await expect(tls(page).getByRole("button", { name: "More for the certificate" })).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("menuitem", { name: "Renew certificate" })).toBeVisible()
 })
 
 test("every state of the section @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to write the screenshots to")
+  test.setTimeout(240_000)
   const out = process.env.JD_SHOTS as string
-  await page.setViewportSize({ width: 1440, height: 900 })
-  const server = await mockTLS(page)
-  await visit(page, NETWORK)
-  const section = tls(page)
-  await section.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: `${out}/tls-off-1440.png` })
+  const shot = async (name: string, width: number) => {
+    await risen(page)
+    await tls(page).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: `${out}/after-network-tls-${name}-${width}.png`, fullPage: true })
+  }
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockTLS(page)
+    await visit(page, NETWORK)
+    await expect(picture(page)).toContainText("speaks plain text")
+    await shot("off", width)
 
-  await section.getByRole("button", { name: "Turn on TLS" }).click()
-  await settled(page)
-  await page.screenshot({ path: `${out}/tls-turn-on-dialog-1440.png` })
-  await dialog(page).getByRole("button", { name: "Turn on", exact: true }).click()
-  await expect.poll(() => server.sent.length).toBe(1)
-  await expect(section).toContainText("TLS allowed")
-  await section.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: `${out}/tls-allowed-1440.png`, fullPage: true })
+    await tls(page).getByRole("button", { name: "Turn on TLS" }).click()
+    await settled(page)
+    await page.screenshot({ path: `${out}/after-network-tls-turn-on-dialog-${width}.png` })
+    await dialog(page).getByRole("button", { name: "Turn on", exact: true }).click()
+    await expect(tls(page)).toContainText("TLS allowed")
+    await page.locator("[data-sonner-toast]").first().waitFor({ state: "detached", timeout: 15000 })
+    await shot("allowed", width)
 
-  await section.getByRole("button", { name: /TLS required/ }).click()
-  await settled(page)
-  await page.screenshot({ path: `${out}/tls-require-dialog-1440.png` })
-  await dialog(page).getByRole("button", { name: "Require", exact: true }).click()
-  await expect(section).toContainText("TLS required")
-  await section.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: `${out}/tls-required-1440.png`, fullPage: true })
+    await plain(page).getByRole("radio", { name: "Refused" }).click()
+    await expect(saveBar(page)).toBeVisible()
+    await shot("unsaved", width)
+    await save(page).click()
+    await settled(page)
+    await dialog(page).getByRole("button", { name: "Require", exact: true }).click()
+    await expect(tls(page)).toContainText("TLS required")
+    await page.locator("[data-sonner-toast]").first().waitFor({ state: "detached", timeout: 15000 })
+    await shot("required", width)
 
-  await page.goto("/databases/4/settings/network")
-  await expect(tls(page)).toContainText("Off")
-  await tls(page).getByRole("button", { name: "Turn on TLS" }).click()
-  await settled(page)
-  await page.screenshot({ path: `${out}/tls-redis-dialog-1440.png` })
-  await dialog(page).getByRole("button", { name: "Turn on", exact: true }).click()
-  await expect(tls(page)).toContainText("TLS only")
-  await tls(page).scrollIntoViewIfNeeded()
-  await page.screenshot({ path: `${out}/tls-redis-only-1440.png`, fullPage: true })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockTLS(page, { readFails: 502 })
+    await visit(page, NETWORK)
+    await expect(picture(page)).toContainText("Could not be read")
+    await shot("unreadable", width)
 
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto(NETWORK)
-  await expect(tls(page)).toContainText("TLS required")
-  await tls(page).scrollIntoViewIfNeeded()
-  await page.screenshot({ path: `${out}/tls-required-390.png`, fullPage: true })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockTLS(page, { viewer: true })
+    await visit(page, NETWORK)
+    await expect(tls(page)).toContainText("an administrator")
+    await shot("readonly", width)
+  }
 })
