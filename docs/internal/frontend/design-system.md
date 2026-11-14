@@ -712,6 +712,17 @@ moment it is chosen). Each form keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`): every save writes a new revision of the whole
 configuration, and a draft keyed on the revision was thrown away by a save of the section beside it.
 
+**A setting on a reading page takes the same bar.** Routing's forwarding is two switches on a
+page that otherwise reports, and stood mid-page as two half-width blocks with a sentence and
+footnotes each. It is a view of that page now (`network/routing/forwarding.tsx`): one centred
+`SettingSection` holding a `WireFlow` of what the setting carries and for whom, then a switch row a
+family on hairlines, in a `SettingForm` on a `SaveBarProvider` the page mounts itself, with
+`applies="immediately"`. A switch pressed is a draft; Save turns a family on at once and asks
+before it turns one off, the bar waiting on the answer (`onSave` resolves when the confirmation
+closes). What was a footnote (how Docker was counted, the kernel's forwarded count, why a switch is
+locked) is behind the `ⓘ` beside the row's name, and an account that cannot change the setting
+reads *On* or *Off* in the switch's place.
+
 **A database's Settings are that shape too, as pages.** They were one page of six sections under a
 sticky strip of anchors, and the section a reader most often came for — the danger zone, one
 parameter — was the one at the foot of six screens. Since the 2026-10-16 pass each is a page of its
