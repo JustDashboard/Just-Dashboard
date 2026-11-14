@@ -11,3 +11,11 @@
  */
 export const WIDE_BESIDE_RAIL = "(min-width: 1600px)"
 export const ROOMY_BESIDE_RAIL = "(min-width: 1856px)"
+
+/**
+ * `lg`, for a block inside such a page that goes side by side there: true
+ * from 1024px as before, not between 1280px and 1400px, where the rail has
+ * just taken its width and the column is narrower than it was at 1024px.
+ * Written `lg:max-xl:` with `min-[1400px]:` where a class decides.
+ */
+export const LG_BESIDE_RAIL = "(min-width: 1024px) and (max-width: 1279.98px), (min-width: 1400px)"

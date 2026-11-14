@@ -104,24 +104,23 @@ export function StackChoiceRow({
           />
           <span className="truncate">{stack.name}</span>
           <StackTags stack={stack} />
+          {/* A phone has no room for the columns: what the stack holds in
+              memory ends the name's line there, and the state is under it. */}
+          {figures && stack.running > 0 && line.memory > 0 && (
+            <span className="numeric ml-auto shrink-0 pl-1 font-mono text-hint font-normal text-muted-foreground md:hidden">
+              {bytes(line.memory)}
+            </span>
+          )}
         </span>
       }
       description={
         <>
-          {/* A phone has no room for the columns: the state and the sums are
-              the second line there, and the directory is on the stack's page. */}
           <span className="numeric md:hidden">
             <span className={TONE_TEXT[words.tone]}>
               {deploying ? `${deploying}…` : words.word}
             </span>
             {" · "}
             {words.short}
-            {figures && line.stack.running > 0 && line.measured && (
-              <>
-                {" · "}
-                {percent(line.cpu)} · {bytes(line.memory)}
-              </>
-            )}
           </span>
           <span className="max-md:hidden">
             {matched && matched.length > 0 ? (
@@ -317,7 +316,8 @@ function DeployButton({
       pending={!!deploying}
     >
       <Play className="size-3" />
-      Deploy
+      {/* The word is the button's name at every width, and drawn from `sm`. */}
+      <span className="max-sm:sr-only">Deploy</span>
     </Button>
   )
 }
