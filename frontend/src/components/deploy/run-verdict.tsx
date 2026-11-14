@@ -1,6 +1,5 @@
-import { Fragment } from "react"
 import { cn } from "@/lib/utils"
-import { FactDot } from "@/components/metrics/host-identity"
+import { Fact, FactLine } from "@/components/deploy/fact-line"
 import { WireMark } from "@/components/deploy/wire"
 import type { Verdict } from "@/components/deploy/run-verdicts"
 
@@ -31,23 +30,21 @@ export function RunVerdict({
         <p title={basis} className="text-body leading-snug font-medium">
           {verdict.title}
         </p>
-        <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-hint leading-snug text-muted-foreground">
-          {verdict.facts.map((fact, index) => (
-            <Fragment key={fact.key}>
-              {index > 0 && <FactDot />}
-              <span
-                title={fact.basis}
-                className={cn(
-                  "numeric",
-                  fact.tone === "danger" && "text-destructive",
-                  fact.tone === "warning" && "text-warning",
-                )}
-              >
-                {fact.text}
-              </span>
-            </Fragment>
+        <FactLine className="text-hint leading-snug text-muted-foreground">
+          {verdict.facts.map((fact) => (
+            <Fact
+              key={fact.key}
+              title={fact.basis}
+              className={cn(
+                "numeric",
+                fact.tone === "danger" && "text-destructive",
+                fact.tone === "warning" && "text-warning",
+              )}
+            >
+              {fact.text}
+            </Fact>
           ))}
-        </p>
+        </FactLine>
       </div>
     </div>
   )

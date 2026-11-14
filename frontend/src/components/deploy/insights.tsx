@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useState } from "react"
+import { useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
 import { dayAt, relativeTime, weekdayAt } from "@/lib/format"
@@ -8,7 +8,6 @@ import { latencyWords } from "@/lib/latency-words"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
-import { FactDot } from "@/components/metrics/host-identity"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -19,6 +18,7 @@ import { StatusDot } from "@/components/status-dot"
 import { formatDuration } from "@/components/deploy/vocabulary"
 import { causeTitle } from "@/components/deploy/failure-cause"
 import { deliveryFacts, deliveryLead } from "@/components/deploy/delivery-model"
+import { Fact, FactLine } from "@/components/deploy/fact-line"
 import { WireMark, WireNode } from "@/components/deploy/wire"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -524,31 +524,24 @@ export function Insights({
               title={lead.title}
               hint={
                 history ? (
-                  <span
-                    data-slot="delivery-facts"
-                    className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"
-                  >
-                    {facts.map((fact, index) => (
-                      <Fragment key={fact.key}>
-                        {index > 0 && <FactDot />}
-                        <span title={fact.basis}>
-                          {fact.figure && (
-                            <span
-                              className={cn(
-                                "numeric font-medium",
-                                fact.tone === "warning" ? "text-warning" : "text-foreground",
-                              )}
-                            >
-                              {fact.figure}{" "}
-                            </span>
-                          )}
-                          {fact.words}
-                        </span>
-                      </Fragment>
+                  <FactLine data-slot="delivery-facts">
+                    {facts.map((fact) => (
+                      <Fact key={fact.key} title={fact.basis}>
+                        {fact.figure && (
+                          <span
+                            className={cn(
+                              "numeric font-medium",
+                              fact.tone === "warning" ? "text-warning" : "text-foreground",
+                            )}
+                          >
+                            {fact.figure}{" "}
+                          </span>
+                        )}
+                        {fact.words}
+                      </Fact>
                     ))}
-                    {streak && facts.length > 0 && <FactDot />}
-                    {streak}
-                  </span>
+                    {streak && <Fact>{streak}</Fact>}
+                  </FactLine>
                 ) : (
                   <>
                     {lead.hint}
