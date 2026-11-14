@@ -968,3 +968,68 @@ test("a Railpack prepare step reads as what Railpack decided", async ({ page }, 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath("run-railpack-390.png"), fullPage: true })
 })
+
+for (const width of [1280, 390]) {
+  test(`a run that has written nothing yet shows the step it is at, lit, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProject(page)
+    await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+      socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
+    })
+    await page.goto("/deploy/7/runs/84")
+
+    // The step at work, drawn as the steps rail draws it, with its name lit:
+    // not a grey sentence in the middle of an empty pane.
+    const waiting = page.locator('[data-slot="console-waiting"]')
+    await expect(waiting.getByText("Readiness checks", { exact: true })).toBeVisible()
+    await expect(
+      waiting.getByText("Nothing written yet. Its lines appear here as they are."),
+    ).toBeVisible()
+    await expect(page.getByText("Waiting for build output.", { exact: false })).toHaveCount(0)
+    // The mark stands over its words, in the middle of the console.
+    const [mark, words, pane] = await Promise.all([
+      waiting.locator('[data-slot="console-waiting-mark"]').boundingBox(),
+      waiting.getByText("Readiness checks", { exact: true }).boundingBox(),
+      waiting.boundingBox(),
+    ])
+    expect(Math.abs(mark!.x + mark!.width / 2 - (pane!.x + pane!.width / 2))).toBeLessThan(2)
+    expect(mark!.y + mark!.height).toBeLessThanOrEqual(words!.y)
+  })
+}
+
+test("a queued run with no step yet says once that it is waiting for a slot", async ({ page }) => {
+  await mockProject(page)
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(
+      JSON.stringify({
+        type: "snapshot",
+        data: snapshot({ state: "queued", claimedAt: undefined }, []),
+        ts: Date.now(),
+      }),
+    )
+  })
+  await page.goto("/deploy/7/runs/84")
+  // The page says why nothing has started, once, under the release path; the
+  // console says only that it has nothing yet.
+  await expect(page.getByRole("status")).toHaveText("Waiting for a build slot…")
+  const waiting = page.locator('[data-slot="console-waiting"]')
+  await expect(waiting.getByText("Waiting for the first line", { exact: true })).toBeVisible()
+})
+
+test("a finished run that kept no output says so, without the waiting mark", async ({ page }) => {
+  await mockProject(page)
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(
+      JSON.stringify({
+        type: "snapshot",
+        data: snapshot({ state: "succeeded", endedAt: now }),
+        ts: Date.now(),
+      }),
+    )
+  })
+  await page.goto("/deploy/7/runs/84")
+  await expect(page.getByText("No build output was retained for this run.")).toBeVisible()
+  await expect(page.locator('[data-slot="console-waiting"]')).toHaveCount(0)
+})

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, CornerDownLeft, FolderClosed, Home, Pencil } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -80,6 +80,15 @@ export function PathBar({
     return out
   }, [path])
 
+  // Where you are is the last crumb, so a path longer than its field shows
+  // its end: it used to open on `/` and leave the open folder off the edge,
+  // which on a phone is every path three folders deep.
+  const trail = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = trail.current
+    if (el) el.scrollLeft = el.scrollWidth
+  }, [path, editing])
+
   if (editing) {
     return (
       <PathInput
@@ -118,7 +127,10 @@ export function PathBar({
         <TooltipContent>{home ? `Home — ${home}` : "Root"}</TooltipContent>
       </Tooltip>
 
-      <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
+      <div
+        ref={trail}
+        className="flex min-w-0 flex-1 [scrollbar-width:none] items-center overflow-x-auto"
+      >
         <SiblingMenu dir="/" onNavigate={onNavigate} />
         {crumbs.map((crumb, i) => (
           <div key={crumb.href} className="flex shrink-0 items-center">

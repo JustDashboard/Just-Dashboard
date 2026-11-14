@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
+import { head, headMenu, paneBar, showPane } from "./database-workbench"
 
 /**
  * The SQL editor (`/databases/<id>/query`), find-a-value (`…/search`) and code
@@ -1148,7 +1149,7 @@ test("a statement is saved under a name, saved again, renamed and deleted", asyn
   const { sent } = await mockWork(page)
   await openEditor(page)
   await write(page, "select * from customers where tier = 'pro'")
-  await commands(page).getByRole("button", { name: "Save as" }).click()
+  await headMenu(page, "Save as…")
   await page.locator("#saved-query-name").fill("Pro customers")
   await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
 
@@ -1271,7 +1272,7 @@ test("Format lays the statement out and changes nothing but space and capitals",
   await mockWork(page)
   await openEditor(page)
   await write(page, "select id, email from customers where tier = 'pro' order by id limit 5")
-  await commands(page).getByRole("button", { name: "Format" }).click()
+  await headMenu(page, "Format")
   await expect
     .poll(() => editorText(page))
     .toBe("SELECT id, email\nFROM customers\nWHERE tier = 'pro'\nORDER BY id\nLIMIT 5\n")
@@ -1296,7 +1297,7 @@ test("a search is asked once, drawn by table with the value marked, and each row
   expect(new URL(page.url()).searchParams.get("q")).toBe("pro")
 
   await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText(
-    "pro is in 2 tables: 3 rows are shown, at most 5 from each. 4 tables of public read",
+    "pro is in 2 tables: 3 rows are shown. 4 tables of public read",
   )
   // Every cell that holds the value is marked, not only the one the server named.
   const first = groups.first().locator("[data-slot=choice-row]").first()
@@ -1342,9 +1343,19 @@ test("a search is asked once, drawn by table with the value marked, and each row
     { column: "tier", op: "icontains", value: "pro" },
   ])
   expect(every.searchParams.get("match")).toBe("any")
-  // What the search could not say for sure is said.
-  await expect(page.getByText("There may be more than this")).toBeVisible()
-  await expect(page.getByText("secrets")).toBeVisible()
+  // What the search could not say for sure is the tail of the same sentence,
+  // not a notice over the results, and each table's way to all of its rows is a small verb.
+  await expect(page.getByText("There may be more than this")).toHaveCount(0)
+  await expect(page.locator("[data-slot=search-limit]")).toHaveText(
+    "It stops at 60 tables, 5 rows from each and 200 in all: open one for every match, or narrow it.",
+  )
+  await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText("1 not read")
+  await page.getByRole("button", { name: "The tables not read" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("secrets")
+  await page.mouse.move(0, 0)
+  await expect(groups.first().getByRole("link", { name: /^Every row of/ })).toHaveText(
+    "Every match",
+  )
 
   // Narrowing to one table reads nothing again.
   await page
@@ -1420,11 +1431,28 @@ test("every generator the server lists is reachable, and the request carries wha
     page.getByRole("region", { name: "Types & validation" }).getByRole("button"),
   ).toHaveCount(1)
   await expect(page.getByRole("region", { name: "Schema" }).getByRole("button")).toHaveCount(1)
-  // Nothing is asked of the server until the reader asks.
-  await expect(page.getByText("Nothing written yet")).toBeVisible()
+  // Each is drawn as the project it writes for, or as its language where that has no mark.
+  await expect(page.locator("[data-target=prisma] img")).toHaveAttribute("src", "/logos/prisma.svg")
+  await expect(page.locator("[data-target=typeorm] img")).toHaveAttribute(
+    "src",
+    "/logos/typeorm.svg",
+  )
+  await expect(page.locator("[data-target=zod] img")).toHaveAttribute("src", "/logos/zod.svg")
+  await expect(page.locator("[data-target=diesel] img")).toHaveAttribute(
+    "src",
+    "/logos/diesel.webp",
+  )
+  // Nothing is asked of the server until the reader asks: the generator's
+  // own mark, two words and the command, with what it writes behind an (i).
+  const empty = page.locator("[data-slot=empty-state]")
+  await expect(empty).toHaveText(/^Nothing written yetGenerate$/)
+  await expect(empty.locator("img")).toHaveAttribute("src", "/logos/prisma.svg")
+  await page.getByRole("button", { name: "What Prisma writes" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("nothing in the database is changed")
+  await page.mouse.move(0, 0)
   expect(sent.orm).toHaveLength(0)
 
-  await page.getByRole("button", { name: "Generate" }).click()
+  await empty.getByRole("button", { name: "Generate" }).click()
   const code = page.locator("[data-slot=code-view]")
   await expect(code).toContainText("schema.prisma")
   expect(sent.orm[0]).toEqual({ target: "prisma", schema: "public" })
@@ -1979,7 +2007,7 @@ test("a search of ticked tables reads those tables and no others, and says which
     "orders",
   ])
   await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText(
-    "pro is in 1 table: 2 rows are shown, at most 5 from each. 2 tables of public read",
+    "pro is in 1 table: 2 rows are shown. 2 tables of public read",
   )
   // The read said the table holds more than these two, and its key: no second read for it.
   await expect(groups.first()).toContainText("2+")
@@ -1992,8 +2020,11 @@ test("a search of ticked tables reads those tables and no others, and says which
       ) ?? "[]",
     ),
   ).toEqual([{ column: "id", op: "eq", value: "12" }])
-  // A table showing its first rows is not a warning.
-  await expect(page.getByText("There may be more than this")).toHaveCount(0)
+  // A table showing its first rows is not a warning: the limit is said, quietly.
+  await expect(page.locator("[data-slot=search-limit]")).toHaveText(
+    "At most 5 are shown from each: open one for every match.",
+  )
+  await expect(page.locator("[data-slot=search-limit]")).not.toHaveClass(/text-warning/)
 
   // Every schema has no one list of tables to tick.
   await page
@@ -2018,7 +2049,7 @@ test("a generator remembered from another engine does not open the page on a ref
   await page.goto("/databases/7/generate")
   await expect(page.locator("[data-target=prisma]")).toHaveAttribute("aria-pressed", "true")
   await expect(page.getByText(/is not written for/)).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Generate" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Generate" }).first()).toBeVisible()
   // Picked on this visit, the one it lacks says why, in the server's words.
   await page.getByRole("button", { name: "Zod schemas, not for SQLite" }).click()
   await expect(page.getByText("Zod schemas is not written for SQLite")).toBeVisible()
@@ -2172,7 +2203,7 @@ for (const [label, viewport] of [
     // On a phone the rail lies over the editor, and is put away by choosing from it.
     if (phone) {
       await expect(rail).toHaveCount(0)
-      await page.getByRole("button", { name: "Show the rail" }).click()
+      await showPane(page, "Saved")
     }
     for (const name of ["Saved", "History", "Schema", "Snippets"]) {
       await rail.getByRole("tab", { name: new RegExp(`^${name}`) }).click()
@@ -2489,6 +2520,8 @@ async function explained(page: Page, sql = ADVICE_SQL) {
 /** The Plan view of a tab that has not been explained: its empty state offers the tools that need no plan. */
 async function openPlanTab(page: Page, sql: string) {
   await write(page, sql)
+  // On a phone what a statement returned is a pane of its own, and so are its tabs.
+  if (await paneBar(page).isVisible()) await showPane(page, "Results")
   await results(page).getByRole("tab", { name: /^Plan/ }).click()
   await expect(results(page)).toContainText("No plan yet")
 }
@@ -2915,4 +2948,143 @@ test("missing indexes, state by state @shots", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await settled(dialog)
   await page.screenshot({ path: `${shots}/missing-indexes-390.png` })
+})
+
+/* ------------------------------------------- the frame's head, and a phone */
+
+test("Run is the page's one command: the row limit is in its menu, Format and Save in the head's", async ({
+  page,
+}) => {
+  const { sent } = await mockWork(page)
+  await openEditor(page)
+  await write(page, "select many from customers")
+
+  // The strip is the frame's own head, and there is one of it.
+  await expect(head(page)).toBeVisible()
+  await expect(page.locator("[data-slot=database-strip]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=sql-workbench] [data-slot=database-strip]")).toHaveCount(1)
+  await expect(head(page).getByRole("link", { name: "Back to shop's Home" })).toHaveAttribute(
+    "href",
+    "/databases/1",
+  )
+
+  // Between the statement and its result: Run, and Explain beside it. No
+  // row of limits, no Format, no Save.
+  await expect(commands(page).getByRole("button")).toHaveText(["Run", "", "Explain", ""])
+  await expect(commands(page).getByRole("radio")).toHaveCount(0)
+
+  // How many rows come back is a way of running it.
+  await commands(page).getByRole("button", { name: "More ways to run" }).click()
+  await expect(page.getByRole("menuitemradio")).toHaveText(["100", "500", "1,000", "5,000"])
+  await expect(page.getByRole("menuitemradio", { name: "500", exact: true })).toBeChecked()
+  await page.getByRole("menuitemradio", { name: "1,000" }).click()
+  await page.keyboard.press("Escape")
+  await editor(page).click()
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await expect.poll(() => sent.query.at(-1)?.maxRows).toBe(1000)
+
+  // What is done to the statement besides running it, and the rail, are
+  // words in the head's menu, above the database's own verbs.
+  await head(page)
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  const items = page.getByRole("menuitem")
+  await expect(items.nth(0)).toHaveText("Format")
+  await expect(items.nth(1)).toHaveText("Save as…")
+  await expect(items.nth(2)).toHaveText("Hide the rail")
+  await expect(items.nth(3)).toHaveText("Check connection")
+  await items.nth(2).click()
+  await expect(page.locator("[data-slot=query-rail]")).toHaveCount(0)
+  await headMenu(page, "Show the rail")
+  await expect(page.locator("[data-slot=query-rail]")).toBeVisible()
+})
+
+test("on a phone the query page is one pane at a time: the statement, what it returned, the saved queries", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockWork(page, {
+    saved: [{ id: 3, name: "Pro customers", sql: "select * from customers where tier = 'pro'" }],
+  })
+  await openEditor(page)
+  const selected = (name: string) =>
+    expect(paneBar(page).getByRole("tab", { name, exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+  // The statement has the frame; the bar is at the very foot of the screen.
+  await selected("Editor")
+  await expect(results(page)).toBeHidden()
+  const foot = (await paneBar(page).boundingBox())!
+  expect(Math.round(foot.y + foot.height)).toBe(844)
+
+  // Running shows what it returned, with the commands still over it.
+  await write(page, "select count(*) from orders")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await selected("Results")
+  await expect(results(page).getByRole("gridcell").first()).toBeVisible()
+  await expect(editor(page)).toBeHidden()
+  await expect(runButton(page)).toBeVisible()
+
+  await showPane(page, "Editor")
+  await expect(editor(page)).toBeVisible()
+  await expect(results(page)).toBeHidden()
+
+  // The saved queries are a stop of their own, put away by opening one.
+  await showPane(page, "Saved")
+  const rail = page.locator("[data-slot=query-rail]")
+  await expect(rail.getByRole("tab", { name: /^Saved/ })).toHaveAttribute("aria-selected", "true")
+  await rail.getByText("Pro customers").click()
+  await expect(rail).toHaveCount(0)
+  await selected("Editor")
+  await expect(openTabs(page).last()).toHaveText("Pro customers")
+})
+
+test("the query page, state by state @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  test.setTimeout(240_000)
+  const shots = process.env.JD_SHOTS!
+  for (const width of [1280, 390]) {
+    const phone = width === 390
+    await page.setViewportSize({ width, height: phone ? 844 : 800 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockWork(page, {
+      saved: [{ id: 3, name: "Pro customers", sql: "select * from customers where tier = 'pro'" }],
+    })
+    const shot = async (name: string) => {
+      await page.waitForTimeout(400)
+      await page.screenshot({ path: `${shots}/after-query-${name}-${width}.png` })
+    }
+    await openEditor(page)
+    await shot("empty")
+    await write(page, "select count(*) from orders;\nselect many from customers;")
+    await shot("editor")
+    await commands(page).getByRole("button", { name: "More ways to run" }).click()
+    await shot("run-menu")
+    await page.keyboard.press("Escape")
+    await editor(page).click()
+    await page.keyboard.press("ControlOrMeta+Shift+Enter")
+    await results(page)
+      .getByRole("group", { name: "Statements of this run" })
+      .getByRole("button")
+      .nth(1)
+      .click()
+    await expect(results(page).locator("[data-slot=result-truncated]")).toBeVisible()
+    await shot("full")
+    await head(page)
+      .getByRole("button", { name: /^Actions for / })
+      .click()
+    await shot("menu")
+    await page.keyboard.press("Escape")
+    if (phone) {
+      await showPane(page, "Saved")
+      await shot("saved")
+    }
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockWork(page, { viewer: true })
+    await openEditor(page)
+    await shot("readonly")
+  }
 })

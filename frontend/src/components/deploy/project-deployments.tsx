@@ -63,6 +63,7 @@ import {
   runDurationSeconds,
   runFailed,
   runTitle,
+  sourceProduct,
   useNow,
 } from "@/components/deploy/vocabulary"
 import { Insights } from "@/components/deploy/insights"
@@ -141,26 +142,24 @@ function groupRuns(runs: DeploymentEngineRun[], now: number) {
 }
 
 /**
- * How long each finished run took against the others listed: its share of the
- * longest, and whether it took more than twice the middle one — which is when
- * a build is worth a second look, where "longer than the p95" of a dozen runs
- * would only ever name the longest.
+ * Which of the finished runs took far longer than most: more than twice the
+ * middle one — which is when a build is worth a second look, where "longer
+ * than the p95" of a dozen runs would only ever name the longest. Its time is
+ * drawn in amber. Each row used to carry a bar of its time against the
+ * longest as well, a bar per row that the same list on the Overview does
+ * without; the time is said once, in words.
  */
-function durationScale(runs: DeploymentEngineRun[]) {
+function slowRuns(runs: DeploymentEngineRun[]) {
   const finished = runs
     .filter((run) => run.endedAt)
     .map((run) => runDurationSeconds(run) ?? 0)
     .sort((a, b) => a - b)
-  const longest = finished.at(-1) ?? 0
   const median = finished.length ? finished[Math.floor(finished.length / 2)] : 0
-  return (run: DeploymentEngineRun) => {
-    if (!run.endedAt || longest <= 0) return undefined
-    const seconds = runDurationSeconds(run) ?? 0
-    return {
-      share: (seconds / longest) * 100,
-      slow: finished.length >= 5 && median > 0 && seconds > median * 2,
-    }
-  }
+  return (run: DeploymentEngineRun) =>
+    Boolean(run.endedAt) &&
+    finished.length >= 5 &&
+    median > 0 &&
+    (runDurationSeconds(run) ?? 0) > median * 2
 }
 
 /**
@@ -341,7 +340,7 @@ export function ProjectDeployments() {
   ) as Record<StatusFilter, number>
   const now = useNow(60_000)
   const groups = groupRuns(runs, now)
-  const meter = durationScale(environmentRuns)
+  const slow = slowRuns(environmentRuns)
   // Before the first click the newest page's own cursor says whether older
   // runs exist at all, so a project with one run never offers to load more.
   const exhausted = older ? older.nextBefore === undefined : !project.hasOlderRuns
@@ -542,6 +541,7 @@ export function ProjectDeployments() {
           projectId={project.projectId}
           environmentId={project.environmentQuery?.environment}
           presentation="history"
+          mark={sourceProduct(deployment, project.configuration?.source)}
           onFailureClick={() => {
             changeFilter("failed")
             list.current?.scrollIntoView({ block: "start", behavior: "smooth" })
@@ -670,7 +670,7 @@ export function ProjectDeployments() {
                               deployment={source}
                               release={release}
                               live={isLive}
-                              meter={meter(run)}
+                              slow={slow(run)}
                               tags={
                                 <>
                                   {pending && (

@@ -88,7 +88,12 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   // The assistant's page is a conversation, which is the window under the header
   // rather than a page that scrolls: it fills what is left, down to the foot.
-  const fill = usePathname().endsWith("/assistant")
+  const pathname = usePathname()
+  const fill = pathname.endsWith("/assistant")
+  // Logs is one pane on a phone, the whole height under this header with its
+  // views on a bar along the foot (`components/phone-panes.tsx`), so below
+  // `md` its page is held to the window too. From `md` it flows like the rest.
+  const phonePane = pathname.endsWith("/logs")
   const { confirm, dialog } = useConfirm()
   const [versionOpen, setVersionOpen] = useState(false)
   const [testPullOpen, setTestPullOpen] = useState(false)
@@ -168,7 +173,14 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const domain = project.operations?.domains.domains.find((route) => route.hostname === hostOf(url))
 
   return (
-    <Page fill={fill} className={cn("pt-4 md:pt-5", fill && "gap-0 pb-0 md:gap-0 md:pb-0")}>
+    <Page
+      fill={fill}
+      className={cn(
+        "pt-4 md:pt-5",
+        fill && "gap-0 pb-0 md:gap-0 md:pb-0",
+        phonePane && "max-md:h-full max-md:min-h-0 max-md:gap-4 max-md:overflow-hidden max-md:pb-0",
+      )}
+    >
       <PageContext title={record.name} />
 
       <HostIdentity

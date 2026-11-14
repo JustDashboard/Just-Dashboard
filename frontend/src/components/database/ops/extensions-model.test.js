@@ -5,6 +5,7 @@ import {
   extensionLogo,
   groupExtensions,
   hasUpdate,
+  libraryState,
   listWords,
   memberWords,
   needsLoading,
@@ -152,5 +153,37 @@ describe("words", () => {
     expect(extensionLogo("constructor", "postgresql", false)).toBeUndefined()
     expect(extensionLogo("vector", "postgresql", false)).toBeUndefined()
     expect(extensionLogo("InnoDB", "mysql", true)).toBe("mysql")
+  })
+})
+
+describe("what an extension needs, in the row's few words", () => {
+  const preload = { loaded: ["pg_stat_statements"], configured: ["pg_stat_statements", "pg_cron"] }
+
+  test("one the image does not ship says so, whatever else is true", () => {
+    expect(libraryState(ext("postgis", { unavailable: true }), preload)).toEqual({
+      text: "not in this server's image",
+    })
+  })
+
+  test("one with no library, or a server whose list was not read, says nothing", () => {
+    expect(libraryState(ext("hstore", { installed: true }), preload)).toBeUndefined()
+    expect(libraryState(ext("pg_cron", { library: "pg_cron" }), undefined)).toBeUndefined()
+  })
+
+  test("loaded, waiting on a restart, created and idle, or still to be loaded", () => {
+    const statements = ext("pg_stat_statements", { library: "pg_stat_statements", installed: true })
+    expect(libraryState(statements, preload)).toEqual({ text: "loaded at start" })
+    expect(libraryState(ext("pg_cron", { library: "pg_cron" }), preload)).toEqual({
+      text: "loaded once the server restarts",
+      tone: "warning",
+    })
+    const none = { loaded: [], configured: [] }
+    expect(libraryState(statements, none)).toEqual({
+      text: "idle: the server does not load pg_stat_statements at start",
+      tone: "warning",
+    })
+    expect(libraryState(ext("pg_cron", { library: "pg_cron" }), none)).toEqual({
+      text: "needs pg_cron loaded at start, and a restart",
+    })
   })
 })

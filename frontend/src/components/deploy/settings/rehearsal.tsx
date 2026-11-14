@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { DbConnection, DeploymentEnvironmentConfiguration, RehearsalPolicy } from "@/lib/types"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import { FactsLine } from "@/components/deploy/settings/facts-line"
 import {
   InputGroup,
   InputGroupAddon,
@@ -190,19 +191,22 @@ export function RehearsalForm({
         id="rehearsal"
         title="Migration rehearsal"
         state={
-          <span
-            key={typeof parsed === "string" ? "invalid" : rehearsalPolicyLine(parsed)}
-            className="block animate-rise"
+          <FactsLine
+            line={typeof parsed === "string" ? parsed : rehearsalPolicyLine(parsed)}
+            about="How a rehearsal works"
           >
-            {typeof parsed === "string" ? parsed : rehearsalPolicyLine(parsed)}
-          </span>
+            Before they run against production, the release tasks run against a copy restored from
+            the database&apos;s newest backup — its point-in-time archive where it has one, else the
+            newest dump a backup job made — on a network of its own with nothing published. A task
+            that fails there stops the release, and production is never touched.
+          </FactsLine>
         }
         status={settingStatus({ dirty: draft.dirty, refused: Boolean(error) })}
       >
         <OptionList>
           <OptionRow
             title="Rehearse release tasks on a copy of the database"
-            hint="Before they run against production, the release tasks run against a copy restored from the database's newest backup — its point-in-time archive where it has one, else the newest dump a backup job made — on a network of its own with nothing published. A task that fails there stops the release, and production is never touched."
+            hint="A task that fails on the copy stops the release"
             checked={value.enabled}
             onCheckedChange={(enabled) => patch({ enabled })}
             disabled={!canEdit}
