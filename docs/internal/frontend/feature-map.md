@@ -505,6 +505,13 @@ Routes: `/databases`, `/databases/map`, `/databases/new`, `/databases/[id]` (+ `
 `/settings/resources`, `/settings/pooling`, `/settings/parameters`, `/settings/extensions`,
 `/settings/version`, `/settings/danger`)
 
+Every page under `/databases/[id]` opens on the database's header, as a project's pages open on the
+project's (`shell/database-header.tsx`, drawn by `shell/database-shell.tsx`): the engine's mark, the
+name as the switcher, whether it answers, one line of facts, *Open data* as its one command, Connect
+and the verb menu. The exceptions are decided in one place (`shell/header-rule.ts`): Data, Query,
+Schema and the Diagram carry that line as their own frame's head, and the page of one item (a
+statement, a table, a session, an account) keeps a one-line strip over the item's own identity line.
+
 The control center draws every saved database as a card, shelved by where it runs, its engine or its
 environment (the table it could be laid across as, and its picture of what the databases feed, went
 in 0.8.6). The map (`/databases/map`) is the server map's canvas with one diagram for each database
@@ -622,7 +629,7 @@ engine lacks is not listed, and an address from the one-page Settings (`#danger`
 to the page that holds it, `#databases` to Home. Every connection has an Assistant beside its Home
 (`database/assistant.tsx`, the deployment's page through the shared
 `assistant/agent/subject-page.tsx`), for a role with `service.control`: a chat about this connection
-on `POST /databases/{id}/assistant`, filling the window under the strip with the connection's chats
+on `POST /databases/{id}/assistant`, filling the window under the header with the connection's chats
 and what the open one did in the rail, suggestions in the engine's own words (keys and commands on
 Redis), and saved chats opened by `?chat=`. Query keeps the same chat — the same session — in a
 column beside the editor (`query/query-assistant.tsx`), for a role that may run statements on an

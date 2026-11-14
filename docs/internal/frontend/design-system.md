@@ -3348,9 +3348,26 @@ while the dashboard runs, including when no database page is open. Performance o
 strip, Advisor on its findings with severity and category filters, Access on its accounts and list
 filters, and Backups on its schedule state, next run, action and dump list. These controls stay beside
 the content they affect, without recreating a headline metric section.
-Every page of one database but Home carries the same compact identity
-strip — engine mark, switcher, facts, the environment and protected tags, status, Connect and the
-verb menu — and keeps its own name in the screen-reader-only `h1`. The workbenches carry no tiles
+**Every page of one database opens on the database's header** (0.8.7; `shell/header-rule.ts`,
+unit-tested, drawn by `shell/database-shell.tsx`). A project repeats its full header on every one of
+its pages and a database follows it: the engine's mark, the name as the switcher with whether it
+answers and the environment and *protected* tags after it, one line of facts (engine and version,
+its support window, where it runs, address, database, account), *Open data* as the one brand-faced
+command, *Connect* as the one outline verb and the verb menu (`shell/database-header.tsx`,
+`HostIdentity` in a project's layout). It is the same header at the same height on Home,
+Performance, Access, Alerts, Backups, Import, Logs, Generate, Search, the assistant and every
+Settings page, and over an address that is none of them; it scrolls with a reading page as a
+project's does, and the two pages held to the window under it (the assistant, Logs) take the height
+it leaves and the page's own gutters. Three kinds of page keep a line of their own instead, and the
+rule is where each is named: **a workbench that heads itself** (Data, Query, Schema, the Diagram)
+carries the database's line as its frame's head and the shell draws nothing over it; **the page of
+one item two levels down** (a statement, a table or a session under Performance, an account under
+Access) opens on that item's identity line and keeps the one-line strip above it, so the page is
+not about two things; and nothing else. Until 0.8.7 only Home had the header and every other page
+the strip. Where the line itself is under 42rem wide (a tablet beside the rail, a phone) the
+command, Connect and the menu stand in a row of their own under the facts (`HostIdentity foot`), so
+the name is read whole and the facts keep the line's width. Every page keeps its own name in the
+screen-reader-only `h1`. The workbenches carry no tiles
 over their frame (§2); on Logs the lens's readings are the counts on its quick-view chips
 (`ServiceLogs readings="chips"`), a reading no view asks being a chip of its own. What gives the
 section its colour is the sanctioned five and nothing else: the engine drawn as itself, figures

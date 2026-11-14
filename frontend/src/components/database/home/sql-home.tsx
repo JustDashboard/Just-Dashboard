@@ -4,7 +4,6 @@ import { ActivityLines } from "@/components/database/home/activity-lines"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestStatements, FileFacts } from "@/components/database/home/busiest"
 import { CLICKHOUSE_VIEWS, SQL_VIEWS } from "@/components/database/home/charts"
-import { HomeIdentity } from "@/components/database/home/identity"
 import { LargestTablesBlock, type LargestTables } from "@/components/database/home/largest"
 import { bySchema, schemaDetail } from "@/components/database/home/holdings"
 import { nameHue } from "@/components/database/home/kinds"
@@ -60,7 +59,6 @@ export function SqlHome() {
 
   return (
     <>
-      <HomeIdentity />
       <StateRegion />
       {refused && (
         <Notice title="This server's statistics are not available">

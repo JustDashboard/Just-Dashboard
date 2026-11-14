@@ -4,7 +4,6 @@ import { ActivityLines } from "@/components/database/home/activity-lines"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestCommands } from "@/components/database/home/busiest"
 import { REDIS_VIEWS } from "@/components/database/home/charts"
-import { HomeIdentity } from "@/components/database/home/identity"
 import { LargestNamespacesBlock } from "@/components/database/home/largest"
 import { Pair } from "@/components/database/home/layout"
 import { read, record } from "@/components/database/home/read"
@@ -85,7 +84,6 @@ export function KeyValueHome() {
 
   return (
     <>
-      <HomeIdentity />
       <StateRegion />
       {unread && (
         <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />

@@ -7,7 +7,6 @@ import {
   REDIS_VIEWS,
   SQL_VIEWS,
 } from "@/components/database/home/charts"
-import { HomeIdentity } from "@/components/database/home/identity"
 import { POWER } from "@/components/database/home/power"
 import { ServerLines, useBackups } from "@/components/database/home/reference"
 import { mongoSample, redisSample, sqlSample } from "@/components/database/home/samples"
@@ -48,7 +47,6 @@ export function DownHome() {
   const backups = useBackups(known && engine.can("dump"))
   return (
     <>
-      <HomeIdentity />
       <StateRegion>
         <StateNotice />
       </StateRegion>

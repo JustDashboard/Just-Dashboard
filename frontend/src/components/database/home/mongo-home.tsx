@@ -4,7 +4,6 @@ import { ActivityLines } from "@/components/database/home/activity-lines"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { SlowOperations } from "@/components/database/home/busiest"
 import { MONGO_VIEWS } from "@/components/database/home/charts"
-import { HomeIdentity } from "@/components/database/home/identity"
 import { LargestCollectionsBlock } from "@/components/database/home/largest"
 import { Pair } from "@/components/database/home/layout"
 import { read } from "@/components/database/home/read"
@@ -66,7 +65,6 @@ export function DocumentHome() {
 
   return (
     <>
-      <HomeIdentity />
       <StateRegion />
       {unread && (
         <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
