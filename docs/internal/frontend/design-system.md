@@ -1424,7 +1424,7 @@ log is the counter-example on the next page of the same section: an entry opens 
 trail stays a table. The volumes were cards from 2026-09-23 and became a table again on 2026-10-08
 at the operator's request: a volume's card said "1 container" and not which, so the question every
 volume is opened with took a click, and "which is largest, unmounted or not backed up" is asked of a
-column. A row that opens a sheet but is read down its columns is a table of readings with a
+column. A row that opens a page but is read down its columns is a table of readings with a
 destination on its name, as Processes, Packages and Services are, and it keeps its frame (§2).
 The images were cards from 2026-09-23 and became a table again on 2026-10-08
 at the operator's request, on the Processes, Packages and Services tables' precedent: a row that
@@ -2817,9 +2817,10 @@ The passes, in order. Each one is a diff you can review on its own.
    Docker's Volumes page took the Images page's shape on 2026-10-08, at the operator's request,
    because it had no life: three chips over a column of grey cards, each a name over "1 container".
    It opens on Docker's identity line (the engine's version; how many volumes, the bytes they hold,
-   how many are mounted and how many a backup job covers as facts), with the verdict at its right
-   end — how many volumes a prune would delete, a press of which narrows the table to them — beside
-   Create volume. Under it `components/docker/volume-band.tsx` asks two questions the cards left to be
+   how many are mounted and how many a backup job covers as facts), laid out since 0.8.7 as a
+   project's header: the verdict beside the name — how many volumes a prune would delete, a press of
+   which narrows the table to them — and Create volume as the one command at the far end.
+   Under it `components/docker/volume-band.tsx` asks two questions the cards left to be
    added up, as two bar readings (§10). Held by is the Processes band asked of storage: the stacks and lone containers holding
    the most, as spans of one bar the size of every volume, each in the lane hue (`hueFor(name,
    LANES)`) the Stacks and Containers pages give that name, a stack taken down saying so in amber.
@@ -2827,14 +2828,37 @@ The passes, in order. Each one is a diff you can review on its own.
    `--tag-cyan`, left by a stack in amber, not mounted in `--tag-violet`, anonymous muted — with the
    part a prune would take hatched inside each span, as the Images band hatches what a prune gives
    back, and the Prune command in the block's head naming the bytes; a prune in flight sweeps the bar.
+   Each count in the strip under the Mounts bar stands after its standing's dot (the strip was bare
+   figures until 0.8.7).
    A press in either narrows the table. The table's widest column is the containers that mount each volume, by
    name with their state's dot and the path they see it at, `ro` where they cannot write, each a
    link to its page; then the volume's state in the band's colour over whether a backup covers it,
-   and its size over a bar against the largest in the Volumes span's colour (`--chart-5`, the Docker
-   overview's). The column heads sort. Container state comes from the containers socket, so a dot
-   changes the moment Docker's does. The sheet (`?volume=`) opens on four readings, says what a
-   prune would do when the answer is to delete it, lists the mounting containers as a table of their
-   own, then the contents and what Docker was told.
+   and its size as a figure in a column of figures (the bar under it against the largest went in
+   0.8.7: the Held by band already draws that). The column heads sort. Container state comes from
+   the containers socket, so a dot changes the moment Docker's does. Every row is one height
+   (`h-16`, two lines): a volume more than two containers mount names the first and counts the rest
+   on its second line, and a row with one line centres it. On a phone the row keeps the name over
+   its standing and its backup in two words, the size and the menu, and nothing on it is cut.
+
+   A volume is a page of its own since 0.8.7 (`/docker/volumes/[name]`, `components/docker/
+   volume-page.tsx`), on the service page's shape. It was a sheet over the table (`?volume=`, which
+   now redirects to the page): four readings, the mounting containers, a file browser and what
+   Docker was told, in a drawer. The page opens on the volume's identity line — the product whose
+   data it holds, its name, where it stands beside the name (a press opens Mounts), its size, where
+   it is kept, the stack that holds it, its age and whether a backup covers it, with one command
+   (Back up… where no running job covers it and the reader may write one, else Open in Files) and
+   the rest behind the menu. Under it `volume-picture.tsx` draws the volume between the containers
+   that mount it and the backup jobs that cover it (`WireFlow`): a stopped container's line is
+   dashed, a paused job's dashed, a failed one's red, and a line moves only while its job is
+   running; a volume nothing mounts or no job covers has a dashed ring there, the second the way
+   to the Backups form. The hub's cell holds room for three rows and a column draws at most three,
+   so the picture is one height for every volume and while it is read. Its views are the underlined
+   strip with `?tab=` in the address: Files (the embedded browser, the view it opens on), Mounts
+   (one-line cards, and what a prune would do when nothing mounts it), Backups (the covering jobs
+   as one-line cards with their destination, schedule and last run) and Configuration (what Docker
+   was told, driver options masked, and every label). From `xl` the table stands beside it as a
+   rail (`volume-rail.tsx`) with the table's own search, filters and order; Alt+↑ and Alt+↓ walk it
+   and the open view goes along. On a phone it is one pane, the picture as rows of marks.
 
    The pass corrected what the page said about prunes. The cards called a volume whose only
    container was stopped one "prune would delete", and the prune dialog said a stopped stack's data
@@ -2846,8 +2870,8 @@ The passes, in order. Each one is a diff you can review on its own.
    from the container listing rather than Docker's reference count, which comes from a disk-usage
    walk the server caches for minutes and still says *held* after a `docker compose down` in a
    shell. The list route says what a volume's driver options mount (`mountType`) without carrying
-   them, since a CIFS `o=` holds the share's password; the sheet reads them from inspect with such
-   values masked. The prune confirmation reads the list again before it opens, and afterwards says
+   them, since a CIFS `o=` holds the share's password; the volume's page reads them from inspect
+   with such values masked. The prune confirmation reads the list again before it opens, and afterwards says
    any volume Docker deleted that it did not name, or kept that it did.
 
    The dashboard's own two pages took the same exit in 0.7.0, and the reason generalises: a figure
