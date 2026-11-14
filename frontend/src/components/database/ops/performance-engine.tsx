@@ -35,7 +35,13 @@ import {
   StatementLine,
   ViewRead,
 } from "@/components/database/ops/performance-parts"
-import { Fig, ShareCell, ShareHead, TitleFact } from "@/components/database/ops/performance-words"
+import {
+  Fig,
+  ShareCell,
+  ShareHead,
+  TitleAside,
+  TitleFact,
+} from "@/components/database/ops/performance-words"
 import type { ChPartition } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -71,19 +77,15 @@ export function PartsView() {
 
   return (
     <Panel plain aria-label="Parts">
-      <PanelHeader
-        title="Partitions and parts"
-        actions={
-          <>
-            {parts.data?.truncated && (
-              <TitleFact>
-                the <Fig>500</Fig> largest of more
-              </TitleFact>
-            )}
-            <Stale poll={parts} />
-          </>
-        }
-      />
+      <PanelHeader title="Partitions and parts" actions={<Stale poll={parts} />}>
+        {parts.data?.truncated && (
+          <TitleAside>
+            <TitleFact>
+              the <Fig>500</Fig> largest of more
+            </TitleFact>
+          </TitleAside>
+        )}
+      </PanelHeader>
       <ViewRead poll={parts} what="the parts" skeleton={<LoadingPanel plain rows={5} />}>
         {(data) => {
           const shown = data.partitions.filter((entry) => !table || entry.table === table)

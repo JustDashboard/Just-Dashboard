@@ -68,7 +68,13 @@ import {
   tablesFilterKey,
   tablesOrderKey,
 } from "@/components/database/ops/performance-lists"
-import { Fig, ShareCell, ShareHead, TitleFact } from "@/components/database/ops/performance-words"
+import {
+  Fig,
+  ShareCell,
+  ShareHead,
+  TitleAside,
+  TitleFact,
+} from "@/components/database/ops/performance-words"
 import type { DbTableStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -183,17 +189,6 @@ export function TablesView() {
         title={title}
         actions={
           <>
-            {stats.data?.truncated && (
-              <TitleFact>
-                the <Fig>{STORAGE_LIMIT}</Fig> largest of more
-              </TitleFact>
-            )}
-            {columns?.has("bloat") && (
-              <InfoTip label="What unused space is">
-                Unused space is what a table holds and is not using. Where the engine has to work it
-                out from its statistics it is an estimate, as fresh as the last analyse.
-              </InfoTip>
-            )}
             <Stale poll={stats} />
             <SearchInput
               dense
@@ -216,7 +211,15 @@ export function TablesView() {
             )}
           </>
         }
-      />
+      >
+        {stats.data?.truncated && (
+          <TitleAside>
+            <TitleFact>
+              the <Fig>{STORAGE_LIMIT}</Fig> largest of more
+            </TitleFact>
+          </TitleAside>
+        )}
+      </PanelHeader>
       <ViewRead
         poll={stats}
         what={`the ${objects}`}
@@ -310,7 +313,25 @@ export function TablesView() {
                         {head("Size", "size", "px-2")}
                         <ShareHead />
                         {columns.has("dead") && head("Dead rows", "dead", "px-2")}
-                        {columns.has("bloat") && head("Unused space", "bloat", "px-2")}
+                        {columns.has("bloat") && (
+                          <SortHead
+                            label="Unused space"
+                            active={by === "bloat"}
+                            descending={order.descending}
+                            onSort={() => sort("bloat")}
+                            align="right"
+                            className="px-2"
+                            // What was a paragraph under the table, on the
+                            // column it is about.
+                            after={
+                              <InfoTip label="What unused space is">
+                                Unused space is what a table holds and is not using. Where the
+                                engine has to work it out from its statistics it is an estimate, as
+                                fresh as the last analyse.
+                              </InfoTip>
+                            }
+                          />
+                        )}
                         {columns.has("scans") && head("Sequential scans", "scans", "px-2")}
                         {columns.has("parts") && (
                           <TableHead className="px-2 text-right">Parts</TableHead>

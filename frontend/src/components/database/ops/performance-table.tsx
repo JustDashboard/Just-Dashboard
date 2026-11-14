@@ -193,7 +193,7 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
       rows={rows}
       current={current}
       loading={!stats.data && !stats.error}
-      empty={`No ${engine.nouns.object} matches.`}
+      empty={stats.error && !stats.data ? "" : `No ${engine.nouns.object} matches.`}
     />
   )
 
@@ -210,7 +210,15 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
               state={<TextShimmer className="text-xs">Reading its figures…</TextShimmer>}
               facts={<span>&nbsp;</span>}
             />
-            <LoadingRows />
+            {/* The page's own shape while it is read: the strip is where it will be. */}
+            <DetailTabs
+              label={`Views of ${qualified(named.schema, named.name)}`}
+              views={views}
+              tab={tab}
+              onTab={setTab}
+            >
+              <LoadingRows />
+            </DetailTabs>
           </>
         ) : stats.error && !stats.data ? (
           <CouldNotRead what={`the ${objects}`} error={stats.error} onRetry={stats.refresh} />

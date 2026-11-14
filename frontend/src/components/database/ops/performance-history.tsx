@@ -57,7 +57,7 @@ import {
   ViewRead,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
-import { Fig, FigureLine, TitleFact } from "@/components/database/ops/performance-words"
+import { Fig, FigureLine, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
 import type {
   DbStatementHistory,
   DbStatementHistoryDetail,
@@ -154,22 +154,6 @@ export function StatementHistoryView() {
         title="Statement history"
         actions={
           <>
-            {listed && (
-              <>
-                <TitleFact>
-                  <Fig>{millis(listed.totalMs)}</Fig> recorded over {windowWords(listed.hours)}
-                  {partlyRecorded(listed) && listed.firstAt && (
-                    <span title={timestamp(listed.firstAt)}>
-                      , from {relativeTime(listed.firstAt)}
-                    </span>
-                  )}
-                </TitleFact>
-                <InfoTip label="How these figures are made">
-                  A row&apos;s trend is its time across the window, and its share is of all the
-                  statement time recorded in it. {historyMethod(engine, listed).join(" ")}
-                </InfoTip>
-              </>
-            )}
             <Stale poll={history} />
             {data?.supported && data.statements.length > 0 && (
               <SearchInput
@@ -189,7 +173,22 @@ export function StatementHistoryView() {
             />
           </>
         }
-      />
+      >
+        {listed && (
+          <TitleAside>
+            <TitleFact>
+              <Fig>{millis(listed.totalMs)}</Fig> recorded over {windowWords(listed.hours)}
+              {partlyRecorded(listed) && listed.firstAt && (
+                <span title={timestamp(listed.firstAt)}>, from {relativeTime(listed.firstAt)}</span>
+              )}
+            </TitleFact>
+            <InfoTip label="How these figures are made">
+              A row&apos;s trend is its time across the window, and its share is of all the
+              statement time recorded in it. {historyMethod(engine, listed).join(" ")}
+            </InfoTip>
+          </TitleAside>
+        )}
+      </PanelHeader>
       <ViewRead
         poll={history}
         what="the statement history"
@@ -394,7 +393,7 @@ export function StatementRecorded({
     <div className="space-y-5" data-slot="statement-recorded">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <p className="flex min-w-0 items-center gap-1.5 text-body text-muted-foreground">
-          <span className="truncate">
+          <span className="min-w-0">
             Over {windowWords(hours)}
             {data && `, a point for every ${spanWords(data.bucketSeconds)}`}
             {data && data.resets.length > 0 && ". A mark on the time axis is a reset"}

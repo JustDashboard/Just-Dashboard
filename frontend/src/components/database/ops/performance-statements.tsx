@@ -50,7 +50,7 @@ import {
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { statementsFilterKey } from "@/components/database/ops/performance-lists"
-import { Fig, TitleFact } from "@/components/database/ops/performance-words"
+import { Fig, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
 import { useStatementsSetup } from "@/components/database/ops/statements-setup"
 import { setupStart } from "@/components/database/ops/statements-setup-model"
 import type { DbStatementSort, DbStatements } from "@/components/database/ops/performance-types"
@@ -185,20 +185,6 @@ export function StatementsView() {
         title="Statements"
         actions={
           <>
-            {data?.supported && (
-              <>
-                <TitleFact>
-                  <Fig>{millis(data.totalMs)}</Fig> of statement time counted
-                  {data.since && (
-                    <span title={timestamp(data.since)}> from {relativeTime(data.since)}</span>
-                  )}
-                </TitleFact>
-                <InfoTip label="What a statement's text is">
-                  The text is a shape: every value in it is replaced before it leaves the server,
-                  and a statement&apos;s plan is asked for with values put back in.
-                </InfoTip>
-              </>
-            )}
             <Stale poll={statements} />
             {!narrow && filterBox}
             {mayReset && (
@@ -209,6 +195,20 @@ export function StatementsView() {
           </>
         }
       >
+        {data?.supported && (
+          <TitleAside>
+            <TitleFact>
+              <Fig>{millis(data.totalMs)}</Fig> of statement time counted
+              {data.since && (
+                <span title={timestamp(data.since)}> from {relativeTime(data.since)}</span>
+              )}
+            </TitleFact>
+            <InfoTip label="What a statement's text is">
+              The text is a shape: every value in it is replaced before it leaves the server, and a
+              statement&apos;s plan is asked for with values put back in.
+            </InfoTip>
+          </TitleAside>
+        )}
         {narrow && filterBox}
       </PanelHeader>
       <ViewRead poll={statements} what="the statements" skeleton={<LoadingPanel plain rows={8} />}>

@@ -11,14 +11,35 @@ import { TableCell, TableHead } from "@/components/ui/table"
 
 /**
  * One short fact on a view's title line, where its footnote paragraph was:
- * "1.0 s of statement time counted". It is the first thing in the line's
- * controls, so the filter and the verb after it keep their place.
+ * "1.0 s of statement time counted". It stands in a `TitleAside`, or among
+ * the controls where they are few and it is short.
  */
 export function TitleFact({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       data-slot="title-fact"
       className={cn("min-w-0 truncate text-hint text-muted-foreground", className)}
+      {...props}
+    />
+  )
+}
+
+/**
+ * Where a title line's fact stands: between the title and the line's
+ * controls, taking the room they leave and cut where it runs out. Among the
+ * controls it could not be cut — their box keeps the width of what is in it —
+ * and on a phone the fact pushed the filter beside it off the screen. On a
+ * phone it is a line of its own under the title, whole.
+ */
+export function TitleAside({ className, ...props }: React.ComponentProps<"span">) {
+  return (
+    <span
+      data-slot="title-aside"
+      className={cn(
+        "flex min-w-0 flex-1 items-center justify-end gap-1.5",
+        "max-sm:order-last max-sm:basis-full max-sm:justify-start",
+        className,
+      )}
       {...props}
     />
   )

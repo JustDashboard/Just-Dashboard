@@ -196,7 +196,14 @@ function Statement({ address }: { address: string | null }) {
       current={address}
       pinned={pinned}
       loading={!data && !statements.error}
-      empty={filter.trim() ? `No statement matches ${filter.trim()}.` : "No statement is listed."}
+      empty={
+        // The caption has already said why there is nothing under it.
+        (statements.error && !data) || (data && !data.supported)
+          ? ""
+          : filter.trim()
+            ? `No statement matches ${filter.trim()}.`
+            : "No statement is listed."
+      }
     />
   )
 
@@ -216,7 +223,10 @@ function Statement({ address }: { address: string | null }) {
               menu={<span className="size-8" />}
               facts={<span>&nbsp;</span>}
             />
-            <LoadingRows />
+            {/* The page's own shape while it is read: the strip is where it will be. */}
+            <DetailTabs label="Views of this statement" views={views} tab={tab} onTab={setTab}>
+              <LoadingRows />
+            </DetailTabs>
           </>
         ) : statements.error && !data ? (
           <CouldNotRead

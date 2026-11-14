@@ -16,7 +16,13 @@ import {
 } from "@/components/ui/table"
 import { redisCommandStats } from "@/components/database/redis/api"
 import { micros, perSecond } from "@/components/database/redis/performance/samples"
-import { Fig, ShareCell, ShareHead, TitleFact } from "@/components/database/ops/performance-words"
+import {
+  Fig,
+  ShareCell,
+  ShareHead,
+  TitleAside,
+  TitleFact,
+} from "@/components/database/ops/performance-words"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisCommandStat, RedisCommandStats } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
@@ -78,15 +84,6 @@ export function CommandsView({ redis }: { redis: Redis }) {
           title="Commands"
           actions={
             <>
-              <TitleFact>
-                <Fig>{data.totalCalls.toLocaleString()}</Fig> run since it started, in{" "}
-                <Fig>{micros(data.totalUsec)}</Fig>
-                {data.totalCalls > 0 && (
-                  <>
-                    : <Fig>{micros(data.totalUsec / data.totalCalls)}</Fig> each
-                  </>
-                )}
-              </TitleFact>
               <div role="group" aria-label="Order" className="flex gap-0.5">
                 {ORDERS.map((entry) => (
                   <FilterChip
@@ -100,7 +97,19 @@ export function CommandsView({ redis }: { redis: Redis }) {
               </div>
             </>
           }
-        />
+        >
+          <TitleAside>
+            <TitleFact>
+              <Fig>{data.totalCalls.toLocaleString()}</Fig> run since it started, in{" "}
+              <Fig>{micros(data.totalUsec)}</Fig>
+              {data.totalCalls > 0 && (
+                <>
+                  : <Fig>{micros(data.totalUsec / data.totalCalls)}</Fig> each
+                </>
+              )}
+            </TitleFact>
+          </TitleAside>
+        </PanelHeader>
         <PanelBody flush className="group-data-[plain]/panel:-mx-4">
           {rows.length === 0 ? (
             <EmptyNote>No command has been run yet.</EmptyNote>

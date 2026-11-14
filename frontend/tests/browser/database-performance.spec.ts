@@ -2436,9 +2436,9 @@ test("statement history ranks a window's statements by the column pressed, each 
   expect(heights[0]).toBeLessThan(44)
   await expect(history).toContainText("recorded over the last hour")
   // What the figures are made from, in the engine's own terms, is behind the fact on the title line.
-  const method = await explained(page, history, "How these figures are made")
-  await expect(method).toContainText("pg_stat_statements keeps running totals for each statement")
-  await expect(method).toContainText("so there are no percentiles")
+  await expect(await explained(page, history, "How these figures are made")).toContainText(
+    /pg_stat_statements keeps running totals for each statement[\s\S]*so there are no percentiles/,
+  )
   // PostgreSQL keeps no run times and counts no rows read: neither column is drawn.
   await expect(history.getByRole("columnheader", { name: "19 in 20" })).toHaveCount(0)
   await expect(history.getByRole("columnheader", { name: "Examined" })).toHaveCount(0)
@@ -3270,8 +3270,14 @@ async function topOf(page: Page, selector: string) {
 const rowPitches = (page: Page, selector: string) =>
   page.locator(selector).evaluateAll((rows) => {
     const tops = rows.map((row) => row.getBoundingClientRect().top)
-    return tops.slice(1).map((top, at) => Math.round(top - tops[at]))
+    return tops.slice(1).map((top, at) => top - tops[at])
   })
+
+/** One pitch down the list, to within the half pixel a line box can come to. */
+function expectOnePitch(pitches: number[]) {
+  expect(pitches.length).toBeGreaterThan(1)
+  expect(Math.max(...pitches) - Math.min(...pitches)).toBeLessThan(1)
+}
 
 test("the addresses that opened the sheets land on the pages they named", async ({ page }) => {
   await mockOps(page)
@@ -3515,12 +3521,12 @@ for (const width of [1280, 390]) {
 
     await visit(page, "/databases/1/performance?view=statements")
     await expect(region(page, "Statements").getByRole("row")).toHaveCount(4)
-    expect(new Set(await rowPitches(page, "[data-slot=page] tbody tr")).size).toBe(1)
+    expectOnePitch(await rowPitches(page, "[data-slot=page] tbody tr"))
 
     // A table that is overdue and one that says nothing of itself.
     await visit(page, "/databases/1/performance?view=tables")
     await expect(page.locator("[data-list-row=table]")).toHaveCount(4)
-    expect(new Set(await rowPitches(page, "[data-list-row=table]")).size).toBe(1)
+    expectOnePitch(await rowPitches(page, "[data-list-row=table]"))
     if (width >= 1280) {
       await expect(page.locator("[data-list-row=table] [data-slot=share]")).toHaveText([
         "57%",
@@ -3537,12 +3543,12 @@ for (const width of [1280, 390]) {
     // An index with two things wrong beside one with nothing to say.
     await visit(page, "/databases/1/performance?view=indexes")
     await expect(page.locator("[data-list-row=index]")).toHaveCount(5)
-    expect(new Set(await rowPitches(page, "[data-list-row=index]")).size).toBe(1)
+    expectOnePitch(await rowPitches(page, "[data-list-row=index]"))
 
     // A session that waits on another, one with no statement, one with neither.
     await visit(page, "/databases/1/performance?view=sessions")
     await expect(page.locator("[data-list-row=session]")).toHaveCount(5)
-    expect(new Set(await rowPitches(page, "[data-list-row=session]")).size).toBe(1)
+    expectOnePitch(await rowPitches(page, "[data-list-row=session]"))
   })
 
   test(`a page's opening block is in the same place while it is read and once it has been, at ${width}`, async ({
@@ -3679,7 +3685,9 @@ test("Performance's lists and the pages they open, for the record @shots", async
     })
   }
 
-  for (const width of [1280, 390]) {
+  // JD_SHOTS_WIDTHS narrows the run to one width: "390".
+  const widths = (process.env.JD_SHOTS_WIDTHS ?? "1280,390").split(",").map(Number)
+  for (const width of widths) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     const shot = async (name: string, path: string, ready?: () => Promise<unknown>) => {
       await visit(page, path)
@@ -3750,7 +3758,6 @@ test("Performance's lists and the pages they open, for the record @shots", async
     await visit(page, "/databases/1/performance/sessions/52")
     await expect(about(page, "About session 52")).toContainText("Active")
     now.activity = { ...ACTIVITY, sessions: ACTIVITY.sessions.filter((one) => one.pid !== "52") }
-    await page.getByRole("button", { name: "Previous session" }).focus()
     await expect(about(page, "About session 52")).toContainText("Ended", { timeout: 20_000 })
     await page.screenshot({ path: `${dir}/after-session-ended-${width}.png`, fullPage: true })
     now.activity = ACTIVITY
@@ -3765,7 +3772,7 @@ test("Performance's lists and the pages they open, for the record @shots", async
       expect(page.getByText("This server is not counting its statements")).toBeVisible(),
     )
     await shot("statement-off", statementUrl, () =>
-      expect(page.getByText("This server is not counting its statements").first()).toBeVisible(),
+      expect(page.getByText("This server is not counting its statements").last()).toBeVisible(),
     )
     now.statements = failing("pq: permission denied for view pg_stat_statements")
     await shot("performance-statements-failed", "/databases/1/performance?view=statements", () =>
@@ -3791,7 +3798,9 @@ test("Performance's lists and the pages they open, for the record @shots", async
       expect(page.getByText("Reading its figures…")).toBeVisible(),
     )
     await shot("session-loading", "/databases/1/performance/sessions/52", () =>
-      expect(page.getByText("Reading the sessions…").first()).toBeVisible(),
+      expect(
+        page.locator("[data-slot=host-identity]").getByText("Reading the sessions…"),
+      ).toBeVisible(),
     )
     now.loading = false
 

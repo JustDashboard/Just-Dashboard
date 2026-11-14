@@ -289,7 +289,7 @@ export function DetailRail({
           <RailItem key={row.key} row={row} current={row.key === current} />
         ))}
         {loading && rows.length === 0 && <LoadingRows rows={8} />}
-        {!loading && rows.length === 0 && !apart && (
+        {!loading && rows.length === 0 && !apart && empty && (
           <li className="px-3 py-4 text-hint text-muted-foreground">{empty}</li>
         )}
       </ol>

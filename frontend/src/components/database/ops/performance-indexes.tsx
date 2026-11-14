@@ -46,7 +46,13 @@ import {
   schemasOf,
   type IndexFlag,
 } from "@/components/database/ops/performance-storage"
-import { Fig, ShareCell, ShareHead, TitleFact } from "@/components/database/ops/performance-words"
+import {
+  Fig,
+  ShareCell,
+  ShareHead,
+  TitleAside,
+  TitleFact,
+} from "@/components/database/ops/performance-words"
 import type { DbIndexStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -176,11 +182,6 @@ export function IndexesView() {
         title="Indexes"
         actions={
           <>
-            {stats.data?.truncated && (
-              <TitleFact title="A copy smaller than the cut can go unmarked.">
-                the <Fig>{STORAGE_LIMIT}</Fig> largest of more
-              </TitleFact>
-            )}
             <Stale poll={stats} />
             <SearchInput
               dense
@@ -192,7 +193,15 @@ export function IndexesView() {
             />
           </>
         }
-      />
+      >
+        {stats.data?.truncated && (
+          <TitleAside>
+            <TitleFact title="A copy smaller than the cut can go unmarked.">
+              the <Fig>{STORAGE_LIMIT}</Fig> largest of more
+            </TitleFact>
+          </TitleAside>
+        )}
+      </PanelHeader>
       <ViewRead
         poll={stats}
         what="the indexes"

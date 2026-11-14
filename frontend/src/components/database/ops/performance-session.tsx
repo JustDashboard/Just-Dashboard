@@ -181,7 +181,13 @@ function Session({ pid }: { pid: string | null }) {
       current={pid}
       pinned={pinned}
       loading={!activity.data && !activity.error}
-      empty={filter.trim() ? `No session matches ${filter.trim()}.` : "No session is listed."}
+      empty={
+        activity.error && !activity.data
+          ? ""
+          : filter.trim()
+            ? `No session matches ${filter.trim()}.`
+            : "No session is listed."
+      }
     />
   )
 
@@ -198,7 +204,10 @@ function Session({ pid }: { pid: string | null }) {
               state={<TextShimmer className="text-xs">Reading the sessions…</TextShimmer>}
               facts={<span>&nbsp;</span>}
             />
-            <LoadingRows />
+            {/* The page's own shape while it is read: the strip is where it will be. */}
+            <DetailTabs label={`Views of session ${pid}`} views={views} tab={tab} onTab={setTab}>
+              <LoadingRows />
+            </DetailTabs>
           </>
         ) : activity.error && !activity.data ? (
           <CouldNotRead what="the sessions" error={activity.error} onRetry={activity.refresh} />
@@ -562,7 +571,10 @@ function Others({
                   {other && (
                     <span className="flex shrink-0 items-center gap-3 text-xs">
                       <SessionState status={statusOf(other)} late={Boolean(concernOf(other))} />
-                      <StateFigure session={other} />
+                      {/* On a phone the row keeps who it is: how long is on its own page. */}
+                      <span className="max-sm:hidden">
+                        <StateFigure session={other} />
+                      </span>
                     </span>
                   )}
                 </Link>
