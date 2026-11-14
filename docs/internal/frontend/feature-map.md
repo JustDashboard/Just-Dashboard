@@ -729,6 +729,15 @@ none), and before anything is written its place is that mark, "Nothing written y
 Search says a limit only when one was hit, as the tail of its summary sentence, and each table's
 *Every match* is a small verb on its title line.
 
+Data, Query, Schema and Diagram are four workbenches under one head
+(`components/database/workbench/chrome.tsx`): the database's identity and the open thing's verbs in
+the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
+a bar at the foot — Tables, Rows and Details on Data, where a row is a card and its full row the
+Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where Run's menu holds the
+row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
+facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
+at the foot of its canvas (no minimap).
+
 **Implementation:** `components/database/`; backend in
 [`../backend/databases.md`](../backend/databases.md) Adding a database can limit its container from
 the start.

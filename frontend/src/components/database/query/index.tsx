@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { SidebarLeftClose, SidebarLeftOpen, Sparkles } from "@/components/icons"
+import {
+  CodeBracket,
+  FloppyDisk,
+  GridSquare,
+  Pin,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+  Sparkles,
+  TextFormat,
+} from "@/components/icons"
 import { del, errorMessage, post, put } from "@/lib/api"
 import { usePanelSize } from "@/lib/panel-size"
 import { notify } from "@/lib/toast"
@@ -11,13 +20,15 @@ import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { Field, FormFact, Statement } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
+import { PaneBar } from "@/components/phone-panes"
 import { ResizeHandle } from "@/components/resize-handle"
+import type { Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
 import { AssistantSettingsSheet } from "@/components/assistant/settings-sheet"
 import { useAssistantSettings } from "@/components/assistant/settings"
 import { askAgent, useAgentSession } from "@/components/assistant/agent/sessions"
@@ -78,6 +89,9 @@ import {
 } from "@/components/database/query/use-query-data"
 import { useResultExport } from "@/components/database/query/use-result-export"
 import { useRunner } from "@/components/database/query/use-runner"
+
+/** The panes of the query page where it shows one at a time. */
+type QueryPane = "editor" | "results" | "saved" | "assistant"
 
 const RAIL = { fallback: 272, min: 208, max: 480 }
 const ASSISTANT = { fallback: 380, min: 300, max: 640 }
@@ -246,6 +260,27 @@ export function SqlQuery() {
     Math.min(ASSISTANT.max, frameWidth - (railShown && railBeside ? railColumn : 0) - 420),
   )
   const assistantColumn = clamp(assistantWidth, ASSISTANT.min, assistantMax)
+  // Where the rail lies over the editor the frame shows one pane at a time,
+  // with a bar at its foot: the statement, what it returned, the rail of
+  // saved queries, the assistant. The last two are the states the frame
+  // already had — a column laid over the editor — and the first two are the
+  // editor's own halves, each given the whole frame in turn.
+  const [half, setHalf] = useState<"editor" | "results">("editor")
+  const pane: QueryPane = railBeside
+    ? "editor"
+    : railOver
+      ? "saved"
+      : offersAssistant && assistantOver
+        ? "assistant"
+        : half
+  const pickPane = (next: QueryPane) => {
+    setRailOver(next === "saved")
+    setAssistantOver(next === "assistant")
+    // The stop is named for what it most often opens.
+    if (next === "saved" && !railOver) setRailView("saved")
+    if (next === "editor" || next === "results") setHalf(next)
+  }
+
   const showAssistant = useCallback(
     (shown: boolean) => {
       if (assistantBeside) return setAssistantPinned(shown)
@@ -381,6 +416,8 @@ export function SqlQuery() {
       if (!target || running || runner.checking === tab.id) return
       editor.current?.mark(null)
       setView("results")
+      // One pane at a time: what was asked for is what is shown next.
+      setHalf("results")
       void runner.run(tab.id, target, { limit: rows, transaction: transaction && canTransact })
     },
     [limit, running, runner, tab.id, transaction, canTransact, setView],
@@ -391,6 +428,7 @@ export function SqlQuery() {
       const target = editor.current?.target(false)
       if (!target) return
       setView("plan")
+      setHalf("results")
       void runner.explain(tab.id, target.sql, analyze)
     },
     [runner, tab.id, setView],
@@ -638,20 +676,89 @@ export function SqlQuery() {
   const canAnalyze = canRun && engine.can("explainAnalyze")
   const empty = tab.sql.trim() === ""
 
+  // What is done to the statement besides running it, and the rail's column,
+  // as words in the head's menu: Run stays the one command on the page.
+  const menu: Verb[] = [
+    {
+      key: "format",
+      label: "Format",
+      icon: TextFormat,
+      disabled: empty,
+      run: () => editor.current?.format(),
+    },
+    ...(canWrite
+      ? [
+          {
+            key: "save",
+            label: tab.saved !== undefined ? "Save" : "Save as…",
+            icon: FloppyDisk,
+            disabled: empty || (tab.saved !== undefined && !isChanged(tab)),
+            run: () => void save(),
+          },
+        ]
+      : []),
+    ...(railBeside
+      ? [
+          {
+            key: "rail",
+            label: railShown ? "Hide the rail" : "Show the rail",
+            icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
+            run: () => setRailPinned(!railPinned),
+          },
+        ]
+      : []),
+  ]
+
   return (
-    <SectionFrame section="query">
-      {/* One frame around the whole workbench: the rail and the editor are
-          columns of one working surface, with a hairline between them. */}
-      <div
+    <SectionFrame section="query" className={WORKBENCH_PAGE}>
+      {/* One frame around the whole workbench: the head that says which
+          database, then the rail and the editor as columns of one working
+          surface, with a hairline between them. */}
+      <WorkbenchFrame
         ref={frame}
-        data-slot="sql-workbench"
+        section="query"
+        slot="sql-workbench"
         style={
           {
             "--jd-query-rail": `${railColumn}px`,
             "--jd-query-assistant": `${assistantColumn}px`,
           } as React.CSSProperties
         }
-        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card"
+        verbs={
+          // Beside the editor the assistant is a column to open; where the
+          // frame shows one pane at a time it is a stop of the bar.
+          offersAssistant &&
+          railBeside && (
+            <Button
+              size="sm"
+              variant="outline"
+              aria-pressed={assistantShown}
+              className={cn(assistantShown && "text-brand")}
+              onClick={() => showAssistant(!assistantShown)}
+            >
+              <Sparkles />
+              Assistant
+            </Button>
+          )
+        }
+        menu={menu}
+        bar={
+          !railBeside && (
+            <PaneBar<QueryPane>
+              label="Query"
+              active={pane}
+              onPick={pickPane}
+              stops={[
+                { key: "editor", label: "Editor", icon: <CodeBracket /> },
+                { key: "results", label: "Results", icon: <GridSquare /> },
+                { key: "saved", label: "Saved", icon: <Pin /> },
+                ...(offersAssistant
+                  ? [{ key: "assistant" as const, label: "Assistant", icon: <Sparkles /> }]
+                  : []),
+              ]}
+            />
+          )
+        }
       >
         {railShown && (
           <div
@@ -698,35 +805,12 @@ export function SqlQuery() {
                 onReset={resetRailWidth}
                 className="absolute inset-y-0 -right-1 z-20"
               />
-            ) : (
-              <div className="shrink-0 border-t border-hairline bg-surface-header p-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setRailOver(false)}
-                >
-                  Back to the editor
-                </Button>
-              </div>
-            )}
+            ) : null}
           </div>
         )}
 
         <div ref={main} className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex h-10 shrink-0 items-stretch border-b border-hairline bg-surface-header">
-            <IconAction
-              label={railShown ? "Hide the rail" : "Show the rail"}
-              aria-pressed={railShown}
-              className="mx-1.5 size-7 shrink-0 self-center max-sm:size-8"
-              onClick={() => {
-                if (railBeside) return setRailPinned(!railPinned)
-                setRailOver(!railOver)
-                if (!railOver) setAssistantOver(false)
-              }}
-            >
-              {railShown ? <SidebarLeftClose /> : <SidebarLeftOpen />}
-            </IconAction>
+          <div className="flex h-10 shrink-0 items-stretch border-b border-hairline bg-surface-header pl-1.5">
             <TabStrip
               idBase={ids}
               panelId={panelId}
@@ -752,29 +836,16 @@ export function SqlQuery() {
               }}
               full={tabs.tabs.length >= MAX_TABS}
             />
-            {offersAssistant && (
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-pressed={assistantShown}
-                className={cn(
-                  "mx-1.5 h-7 shrink-0 gap-1.5 self-center px-2 max-sm:size-8 max-sm:px-0",
-                  assistantShown && "text-brand",
-                )}
-                onClick={() => showAssistant(!assistantShown)}
-              >
-                <Sparkles />
-                <span className="max-sm:sr-only">Assistant</span>
-              </Button>
-            )}
           </div>
 
           <div
             role="tabpanel"
             id={panelId}
             aria-labelledby={tabElementId(ids, tab.id)}
-            style={{ flex: `${1 - share} 1 0%` }}
-            className="flex min-h-24 min-w-0 flex-col"
+            // One pane at a time, the statement has the frame to itself and
+            // what it returned has it in turn.
+            style={{ flex: railBeside ? `${1 - share} 1 0%` : "1 1 0%" }}
+            className={cn("flex min-h-24 min-w-0 flex-col", pane === "results" && "hidden")}
           >
             <SqlEditor
               key={tab.id}
@@ -805,7 +876,6 @@ export function SqlQuery() {
           </div>
 
           <CommandStrip
-            compact={compact}
             standing={standing}
             advice={advised}
             verdict={verdict}
@@ -815,9 +885,6 @@ export function SqlQuery() {
             canAnalyze={canAnalyze}
             canCancel={engine.can("queryCancel")}
             canTransact={canTransact}
-            canSave={canWrite}
-            saved={tab.saved !== undefined}
-            changed={isChanged(tab)}
             transaction={transaction}
             onTransaction={setTransaction}
             limit={limit}
@@ -825,14 +892,15 @@ export function SqlQuery() {
             onRun={run}
             onCancel={() => runner.cancel(tab.id)}
             onExplain={explain}
-            onFormat={() => editor.current?.format()}
-            onSave={() => void save()}
             empty={empty}
           />
 
           <div
-            style={{ flex: `${share} 1 0%` }}
-            className="relative flex min-h-32 min-w-0 flex-col"
+            style={{ flex: railBeside ? `${share} 1 0%` : "1 1 0%" }}
+            className={cn(
+              "relative flex min-h-32 min-w-0 flex-col",
+              !railBeside && pane !== "results" && "hidden",
+            )}
           >
             <SplitHandle
               label="Height of the results"
@@ -842,7 +910,7 @@ export function SqlQuery() {
               onChange={setSplit}
               onReset={() => setSplit(SPLIT.fallback)}
               measure={() => main.current?.getBoundingClientRect().height ?? 1}
-              className="absolute inset-x-0 -top-1 z-20"
+              className={cn("absolute inset-x-0 -top-1 z-20", !railBeside && "hidden")}
             />
             <Results
               held={held}
@@ -868,7 +936,11 @@ export function SqlQuery() {
               onOpenStatement={openStatement}
               onExport={(sql, format, rows) => void exporter.run(sql, format, rows)}
               exporting={exporter.running}
-              onShowInEditor={showInEditor}
+              onShowInEditor={(step) => {
+                // One pane at a time: the statement is where the mark is.
+                setHalf("editor")
+                showInEditor(step)
+              }}
               onAskAboutError={
                 assistantReady
                   ? (step) =>
@@ -938,7 +1010,7 @@ export function SqlQuery() {
             />
           </div>
         )}
-      </div>
+      </WorkbenchFrame>
 
       {offersAssistant && (
         <AssistantSettingsSheet

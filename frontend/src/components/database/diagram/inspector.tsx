@@ -27,6 +27,7 @@ import {
   type DiagramColor,
   type DiagramDocument,
 } from "@/components/database/diagram/document"
+import { KeyLegend } from "@/components/database/diagram/chrome"
 import type { DbGraphEdge, DbGraphTable, DbSchemaGraph } from "@/components/database/diagram/types"
 
 /**
@@ -103,7 +104,7 @@ export function Inspector({
   return (
     <aside
       aria-label="Diagram inspector"
-      className="flex min-h-0 min-w-0 flex-col border-t border-hairline lg:border-t-0 lg:border-l"
+      className="flex min-h-0 min-w-0 flex-col lg:border-l lg:border-hairline"
     >
       <PaneHeader className="h-10 justify-between gap-2">
         <span className="min-w-0 truncate text-body font-medium">
@@ -387,6 +388,7 @@ export function Inspector({
           </div>
         )}
       </div>
+      <KeyLegend />
     </aside>
   )
 }

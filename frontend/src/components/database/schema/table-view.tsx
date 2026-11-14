@@ -14,8 +14,6 @@ import {
   Notes,
   Pencil,
   Plus,
-  SidebarLeftClose,
-  SidebarLeftOpen,
   TextFormat,
   Trash,
 } from "@/components/icons"
@@ -27,8 +25,6 @@ import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { FormFact } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
-import { Metric } from "@/components/page"
 import { EmptyNote, EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipCount, tabClasses } from "@/components/tabs"
@@ -67,7 +63,9 @@ import {
   truncateRequest,
   viewQuery,
 } from "@/components/database/schema/changes"
-import { Facts } from "@/components/database/schema/facts"
+import { HeadVerbs } from "@/components/database/workbench/chrome"
+import { FactsLine } from "@/components/database/workbench/facts-line"
+import { tableFacts } from "@/components/database/workbench/table-facts"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
 import { ViewDialog, useViewReplace } from "@/components/database/schema/object-forms"
 import {
@@ -144,8 +142,6 @@ export function TableView({
   detail,
   catalog,
   asked,
-  railOpen,
-  onToggleRail,
   onChanged,
   onRenamed,
   onDropped,
@@ -159,8 +155,6 @@ export function TableView({
   catalog: DbCatalog | undefined
   /** Counts the times the reader asked for the schema to be read again. */
   asked: number
-  railOpen: boolean
-  onToggleRail: () => void
   /** The table's structure changed: what was read of it, and of the schema, is stale. */
   onChanged: () => void
   onRenamed: (to: string) => void
@@ -379,15 +373,25 @@ export function TableView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-header px-1.5">
-        <IconAction
-          label={railOpen ? "Hide the objects" : "Show the objects"}
-          aria-pressed={railOpen}
-          className={cn("size-7 shrink-0", TOUCH, "max-sm:w-8")}
-          onClick={onToggleRail}
-        >
-          {railOpen ? <SidebarLeftClose /> : <SidebarLeftOpen />}
-        </IconAction>
+      {!missing && (
+        <HeadVerbs>
+          {engine.has("data") && (
+            <Button size="sm" variant="outline" asChild>
+              <Link href={href("data", { schema: (data?.schema ?? schema) || null, table: name })}>
+                <GridSquare />
+                Open data
+              </Link>
+            </Button>
+          )}
+          {engine.has("query") && (
+            <Button size="sm" variant="outline" onClick={openQuery}>
+              <Code />
+              Open in Query
+            </Button>
+          )}
+        </HeadVerbs>
+      )}
+      <div className="flex min-h-10 shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-header pr-1.5 pl-3">
         <GroupGlyph group={group} />
         {/* Named whole: read part by part, its two halves are two words. */}
         <h2
@@ -408,22 +412,6 @@ export function TableView({
         {data?.type && data.type !== "table" && <Tag className="shrink-0">{data.type}</Tag>}
         {!missing && (
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
-            {engine.has("data") && (
-              <Button size="xs" variant="outline" className={TOUCH} asChild>
-                <Link
-                  href={href("data", { schema: (data?.schema ?? schema) || null, table: name })}
-                >
-                  <GridSquare />
-                  <span className="max-sm:sr-only">Open data</span>
-                </Link>
-              </Button>
-            )}
-            {engine.has("query") && (
-              <Button size="xs" variant="outline" className={TOUCH} onClick={openQuery}>
-                <Code />
-                <span className="max-sm:sr-only">Open in Query</span>
-              </Button>
-            )}
             <VerbMenu verbs={tableVerbs} label={`Actions for ${name}`} />
           </div>
         )}
@@ -476,35 +464,21 @@ export function TableView({
                 {data.comment ? (
                   <p className="max-w-3xl text-body text-muted-foreground">{data.comment}</p>
                 ) : null}
-                <Facts>
-                  <Metric
-                    label="Rows"
-                    value={
-                      data.estimatedRows >= 0 ? `~${grouped(data.estimatedRows)}` : "not counted"
-                    }
-                  />
-                  {data.size !== undefined && <Metric label="Size" value={bytes(data.size)} />}
+                {/* One line of what the table is, where four captioned
+                    figures stood; the two tones of the bar are its data and
+                    its indexes, as the words after it say. */}
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  <FactsLine facts={tableFacts(data)} />
                   {data.dataSize !== undefined && data.indexSize !== undefined && (
-                    <Metric
-                      label="Data · indexes"
-                      value={`${bytes(data.dataSize)} · ${bytes(data.indexSize)}`}
-                      hint={<Split data={data.dataSize} indexes={data.indexSize} />}
-                    />
+                    <Split data={data.dataSize} indexes={data.indexSize} />
                   )}
-                  {data.owner && <Metric label="Owner" value={data.owner} />}
-                  {data.facts.map((fact) => (
-                    <Metric key={fact.name} label={fact.name} value={fact.value} />
-                  ))}
-                </Facts>
+                </div>
               </div>
             ) : (
-              <div aria-hidden className="flex gap-8">
-                {["w-14", "w-12", "w-24", "w-16"].map((width) => (
-                  <div key={width} className="space-y-2">
-                    <Skeleton className="h-2.5 w-10" />
-                    <Skeleton className={cn("h-3.5", width)} />
-                  </div>
-                ))}
+              // The line's own height, so the readings under it do not move
+              // when it arrives.
+              <div aria-hidden className="flex h-5 items-center">
+                <Skeleton className="h-3 w-72 max-w-full" />
               </div>
             )}
           </div>
@@ -911,7 +885,7 @@ function Split({ data, indexes }: { data: number; indexes: number }) {
     <span
       role="img"
       aria-label={`${Math.round((indexes / total) * 100)}% of it is indexes`}
-      className="mt-1 flex h-1 w-full min-w-24 overflow-hidden rounded-full bg-meter-track"
+      className="flex h-1 w-24 shrink-0 overflow-hidden rounded-full bg-meter-track"
     >
       <span
         className="h-full"
