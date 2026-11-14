@@ -89,14 +89,17 @@ taking a frame:
   Docker holds on disk and what the registries say, over its framed table; the Volumes page's
   band of who holds the data and where each volume stands, over its framed table; the attention
   and storage blocks on a container's page), the
-  Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
+  Security section's exposure facts, findings, probe forms and the Auth log, Firewall
   log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
   facts, route picture, traffic, certificate and error band, attention list, sites and Engine log;
   the sites, certificates and
   streams inventories and the ports table with their toolbars; the Renewals section on
   Certificates; a site's own page, its route picture on the page's ground and its logs one `Pane`
-  under it; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
+  under it; the TLS report's findings, protocol, certificate, chain, HTTP and
+  streams inventories and the ports table with their toolbars; the Renewal view's sections on
+  Certificates and a certificate's own page; a site's own page, its route picture on the page's
+  ground and its logs one `Pane` under it; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
   the runtime-health bar, and every block of the deployment section — the fleet
@@ -251,6 +254,17 @@ the proxy's alerts). The Network overview and the gateway draw through it since 
 this shape uses it, and lays its nodes by hand only when it is not this shape (the routing decision's
 two columns, a project's Runtime lanes).
 
+**A picture whose nodes are not three lines draws its own waiting state.** `loading` draws rows of an
+eyebrow, a name and a hint, each bar on its line's own height. That is the loaded height of a three-line
+node and not of any other: Socket history's nodes are a name and one line, an approved service on
+External checks carries two lines of hint, and each page moved under its picture when the first read
+landed. Those two keep every node to one shape in every state and pass `WireFlow` nodes whose unread
+words are a `LinePlaceholder` (`components/network/identity-facts.tsx`): a
+grey bar after a real space, so the line box is the one the words will have. The same file holds
+`IdentityFacts`, which keeps two lines' room for an identity line's facts on a phone, where four facts
+wrap and a single bar in their place did not. Both pictures are `marks` on a phone, since the lists under
+them name each node again, which is also what stops a stacked column growing with every source.
+
 **And one kind of block came back to the frame: a table.** The 2026-09-21 pass found what sweeping
 tables into the second bullet had cost. A table's container is `overflow-auto`, so at any width where
 its columns stop fitting the grid is *already* clipped — and with nothing drawn at the boundary, a row
@@ -262,8 +276,10 @@ finished. §7 frames a `Pane` for this very property, and the only thing separat
 So **a panel whose body is a table is framed, and every other block on the page stays plain.** That
 is not a retreat from this section's argument — it is the argument: the frame separates *because* the
 readings, findings and lists around it have none. Security's Logins is the shape to check a page
-against — three framed grids read against one unframed `StatGrid`, and the page reads as three tables
-rather than as a stack of containers. A page on which the table is the only block is the easy case;
+against — since 0.8.7 one framed table, the login record, under a picture, a run of cards and a
+ranked list that have no frame, where it was three framed grids under an unframed `StatGrid`; the
+page reads as one table rather than as a stack of containers. A page on which the table is the
+only block is the easy case;
 a page on which everything is a table has a different problem than this rule.
 
 The flip is one word at the call site plus one on the bleed. A table inside a *plain* panel is bled
@@ -409,8 +425,10 @@ other way round, by the share past it ("more than 1 in 20 requests slower than 8
 between two readings is a *slowdown*. The lint rule `design-system/latency-words` refuses the
 notation in JSX text, in a string with other words around it and in a `label`, `title`, `name` or
 `hint`; a bare `"p95"` elsewhere is a key of the server's answer and stays. The interface charts on
-`/network/traffic` are outside it: their percentiles are of throughput, not of how long anything
-took. Sentences the server writes (a rollback watch's verdict, a canary's, a replay's, a traffic
+`/network/traffic` were outside it until 0.8.7, because their percentiles are of throughput, not of
+how long anything took; the notation asked the same learning of the reader either way, so they say
+their shares in the same words ("19 in 20 under ↓ 2.0 MB/s", `network/traffic/words.ts`) and the
+rule covers that file too. Sentences the server writes (a rollback watch's verdict, a canary's, a replay's, a traffic
 alert's notification) still say p95 and are shown as the server wrote them.
 
 ## 5. No descriptions under titles
@@ -697,6 +715,17 @@ and sign-in name are a draft beside the rail's card drawn from it (the picture s
 moment it is chosen). Each form keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`): every save writes a new revision of the whole
 configuration, and a draft keyed on the revision was thrown away by a save of the section beside it.
+
+**A setting on a reading page takes the same bar.** Routing's forwarding is two switches on a
+page that otherwise reports, and stood mid-page as two half-width blocks with a sentence and
+footnotes each. It is a view of that page now (`network/routing/forwarding.tsx`): one centred
+`SettingSection` holding a `WireFlow` of what the setting carries and for whom, then a switch row a
+family on hairlines, in a `SettingForm` on a `SaveBarProvider` the page mounts itself, with
+`applies="immediately"`. A switch pressed is a draft; Save turns a family on at once and asks
+before it turns one off, the bar waiting on the answer (`onSave` resolves when the confirmation
+closes). What was a footnote (how Docker was counted, the kernel's forwarded count, why a switch is
+locked) is behind the `ⓘ` beside the row's name, and an account that cannot change the setting
+reads *On* or *Off* in the switch's place.
 
 **A database's Settings are that shape too, as pages.** They were one page of six sections under a
 sticky strip of anchors, and the section a reader most often came for — the danger zone, one
@@ -1781,6 +1810,14 @@ Intrusion's jail choices carry their watched service's mark, state and comparabl
 are described in the next paragraph). SSH, Firewall and
 Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
 through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
+half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
+second, and an attacker's address is blocked from the line it is on. Repeat offenders therefore take
+Intrusion's row alone. Logins and Network combine related facts into fewer,
+richer columns: an account and its terminal, an
+interface and its kind. Their action columns are always drawn. Connections lists each address as a
+one-line card that opens the address's own page (`network/connections/`).
+Tools is a two-pane working surface,
+
 half row does not have; the last day's counts join Firewall's one `StatGrid` and are `ReadingLine`s
 on SSH and Intrusion, and an attacker's address is blocked from the line it is on. Repeat offenders
 therefore take Intrusion's row alone. Connections, Logins and Network combine related facts into fewer,
@@ -1821,6 +1858,30 @@ findings remain plain. `components/security/marks.tsx` supplies the inline addre
 process and interface marks. A product is named only when it can be identified; no logo is guessed
 for ufw, sshd or an unknown interface. Source choices in the firewall dialog use the same lit
 `ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
+
+**Since 0.8.7 the overview and Logins open on a line and a picture, with no tile row.** The
+overview's five linked tiles stood between its identity line and the picture, and four of them said
+what a node already said. The picture (`perimeter.tsx`) stands directly under the line now and
+carries each reading on its node: the peers and sockets on the internet's, the policy, the rule
+count and the open ports on the firewall's, the jails and bans on fail2ban's, how a login gets in
+(`ssh-reading.ts`) on sshd's, and a fifth node for who is signed in. A node's mark is the way to its
+page (Connections, Firewall, Intrusion, SSH, Logins), so the row of links is the picture. A layer
+whose read is in flight or failed is said to be unread, never drawn as a missing layer. Logins
+(`logins-panels.tsx`) opens on `HostIdentity` in the project's layout — this server, how many are
+signed in and how many addresses are trying as its state, the last login and the failed attempts as
+its facts, the page's keys and Refresh at the far end — then a `WireFlow` picture
+(`logins-picture.tsx`): where sessions are held from and who is attacking on the left, sshd in the
+middle, the accounts on the right. A session's line moves; an attacker is in the danger colour and
+moves while an attempt is under a quarter of an hour old; one the firewall already turns away
+(`refusedBy`, read from the rules the layout polls) is grey and dashed. The picture is four rows in
+every state and while it waits (`drawnFirst` shares the rows between who is in and who is trying,
+the last row counting the rest), so the lists under it do not move. Under it a session is a
+`ChoiceRow` with End session in its `⋯`, offered only with `system.admin` and `destructive` as the
+route requires; attackers are a `RankList` (attempts and their share in columns, no bar per row)
+with Block and the lookups in each row's `⋯` and "blocked" where the firewall already refuses the
+address; the login record is the page's one framed table, a line to a row, and a two-line list
+below `sm`. Empty, each list says so on one line at a row's height; a host without `last` or
+`lastb` says which package is missing and links Packages.
 
 **The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
 register. Sites opens on its identity line and the site band (§15, *The proxy's Sites page*); what
@@ -1887,12 +1948,49 @@ block of two numbered steps above its list — the stream module, then connectin
 with its `Status`, a line of meaning and the button that does it where the page can; the step that
 needs doing carries the page's one brand command, so "Prepare a stream" stays outline, and the
 connect opens a sheet showing the file before anything is written. The install step keeps the recent
-installs beside its button, the list its job console says a run is reopened from. A stream card's Status is nginx's own state for it — live, not listening, shadowed, not read — and a card that is not live says why in a hint line under its route, nginx's logged error in mono beneath; the first tile counts the live streams and chips filter by state.
+installs beside its button, the list its job console says a run is reopened from. A stream's Status is nginx's own state for it — live, not listening, shadowed, not read — on its row and its page, and its page says why one is not live (below).
+
+**Streams took the deploy pages' shape in 0.8.7**, and the grid of cards and the stream half of the
+route bands above went with it. The page opens on an identity line (the forwards as the products
+their ports are, the module's state, the counts and the hour's sessions as facts, the verdict that
+the Live tile was at its end and New stream beside it), then a wiring picture — the host's ports on
+the left drawn as their products, nginx in the middle, the addresses they are handed to on the
+right, a forward open to anyone in the warning colour and a database port open to anyone in the
+danger one, a line moving only while nginx holds the port and bytes crossed it in the hour — and
+then the forwards as one-line `ChoiceRow`s, one height in every state: the name over where it
+listens and where that goes, the protocol, who may connect and the hour's sessions in aligned
+columns, its state, and a menu. A test's outcome takes the hour's place on the row until the next
+test. Why a stream is not live, nginx's bind error and the way to what holds the port are a
+`Notice` on its page, which is a destination like a site's: the identity line, the views as tabs
+in the address, the list as a rail from `xl`. Its traffic is `ReadingLine`s with each window's
+shape at their end, the session lengths in words ("half inside 2.4 s"), the outcomes and the
+clients `RankList`s; its form is a settings column with the one floating save bar.
 Every site card, the overview's route rows and a certificate's links to the sites using it open the
 site's own page (`/proxy/sites/<name>`): the same marks as an identity line, the way a request
 reaches it on the page's ground, and its requests and errors read there in one log `Pane`, so a
 site's Logs verb goes to that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
 ends on the engine's own log, a `Pane` across the page under the two columns.
+
+The TLS page (`/proxy/tls`) opens each of its three views on an identity line, with the views as
+an underlined strip under it in the address (`?view=fleet`, `?tool=request`). A report's line is the
+target — host and port as its heading, the grade as a word in its verdict's colour, the protocol,
+what answered (its nginx site, which opens the site's page) and how old the report is — with the
+scan's summary at the right and a `⋯` of Scan again, Copy as Markdown, the JSON and `chain.pem`,
+Copy link and a request to the same name in the tester. Under the scan form the report draws the way
+the scan reached the name (`tls-chain-picture.tsx`, its verdicts in `lib/tls-chain.ts`): this server
+as the visitor, the domain and the address it reached, what answered, the leaf, the intermediate (or
+the one missing, on a dashed amber line) and the root, each step on a tile in its verdict's colour,
+the leaf's term as a meter under its days. A failed scan is the same row cut short at the name, the
+port and the handshake, the failed step red and the rest not reached. The row is drawn unjudged
+before anything is asked and while the first answer is on its way, at its loaded height, with a
+pulse down its lines while a scan is in flight and once when the answer lands. The four tiles that
+opened the report ("—" before a scan) are gone: each reading stands on its step. Every site is an
+identity line saying the names, how many are below A, expiring or unreachable and how old the newest
+report is, with Scan all sites and an Export CSV menu, over one-line cards (the engine's mark with
+the report's verdict in its corner, the name, its days, protocol, issues and age in aligned columns
+and the grade last) that open the report. The request tester's line is the request: the URL, then
+the answer's status in its colour, protocol, first byte, total and bytes read; its redirect chain
+is cards that pick a hop, and a host with no nginx gets the section's empty card with Install.
 
 Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
 its details — all names, dates, the full path and links to the sites using it — so it takes the lit
@@ -1909,41 +2007,76 @@ details of one nothing trusts by default say where it is trusted in a hint line,
 rail adds Signing requests at its head only while one waits — what the operator owes an answer to —
 and a Local CA panel after DNS providers, which is an administrator's offer to create one and nothing
 to a reader until it exists.
+Certificates (overhauled in 0.8.7) opens on its identity line rather than four figure tiles: the
+issuers' marks, certbot, how many certificates, how many expire inside the renewal window and in how
+many days, how many browsers refuse (expired, test or unreadable, the split in its title) and the
+renewal reading as a link to the Renewal view, with the verdict and the split Issue command at the far
+end and Import and Paste a certificate in its `⋯` menu. Under it the page's jobs are views in the
+address (`?tab=`): Certificates, then what issues and renews them — Renewal, DNS challenge, ACME
+accounts (administrators), Local CA, Signing requests — then Watched domains, with the transparency
+logs. Each certificate is one `ChoiceRow` read down its columns — issuer mark, name over its names in
+mono, where it came from, who names it, the expiry date and its status — with every verb in its row's
+menu and the slot held where there is none, so a Caddy, test, unreadable or busy certificate is the
+height of the rest; the grid/table toggle went with the four-line cards. The line, the strip and the
+list's toolbar are drawn at once and rows of the list's height stand in while it loads, so nothing
+moves when the reads land (the page used to grow as six reads arrived). A certificate opens on its
+own page, `/proxy/certificates/<name>` (`?path=` where two share a name), in the process page's
+shape: the way back with its one command on the brand face (the real issuance for a test
+certificate, a renewal for certbot's, a new pair for an import) and the rest in `⋯`, its identity
+line with its state in the tile's corner, a picture of who signed it, the certificate with its time
+left and the sites and streams that serve it (a line carries only where the certificate is accepted
+and the site is on), its facts and identity, then Key, Chain, Files and Timeline as views, and from
+`xl` the list as a rail walked with Alt+↑ and Alt+↓. The sheet's address, `?cert=<file>`, lands
+there. An unreadable certificate's error and a test certificate's sentence with its verb are Notices
+on its page. What the server makes itself is said where it is read: the local CA's certificates read
+`local CA` where the source is, and the page of one nothing trusts by default says where it is
+trusted in a hint line. The Renewal view opens on the schedule — its recent certbot runs, what the
+timer's last run did (a failed run is a danger Notice naming each certificate and certbot's reason, a
+passing run whose hook failed a warning Notice with the hook's own words, each with Run now and Show
+log; otherwise a Status and the next run), the "Reload nginx after every renewal" OptionRow — then
+certbot's lineages, each run as certbot printed it (Show log brings it into view; it was a sheet),
+and the renewal service's journal as a log `Pane`. A lineage's last failure is a line in its row, its
+webroot folders wrapping mono paths rather than tags, and a certain next failure a warning Notice.
 A watched domain opens a live report and preserves its nonstandard port. Password files, access
 lists and watched-domain setup use the deployment settings' sections, each head over its fields; an
 access list is a row you read (its addresses as mono tags, its sites as links, its include line with
-Copy) with Edit inline and Delete in its menu. Certificate renewal lineages and
-DNS providers remain readings with their own actions, laid out to fit the management column. The
-providers are one list of choices, each a row of one height (mark, name, verbs): a plugin that is not
+Copy) with Edit inline and Delete in its menu. DNS providers remain readings with their own
+actions. The providers are one list of choices, each a row of one height (mark, name, verbs): a plugin that is not
 installed and credentials nobody saved are the expected answer for a provider nobody chose, so only a
 provider with a token saved, or one a lineage renews through, says where it stands (*credentials
 saved*, *plugin missing*, *no credentials*), and those stand first. The name keeps its width before
 anything beside it; the plugin's id, the propagation wait and why a plugin cannot be installed from
-here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing* line. Every
-run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
-page's width, which a log needs and the management column does not have. The
-renewal column opens on its recent certbot runs (in the body, where they wrap, not in the narrow
-column's header), then what the timer's last run did — a failed run is a danger Notice naming each
-certificate and certbot's reason, a passing run whose hook failed a warning Notice with the hook's
-own words, each with Run now and Show log; otherwise a Status and the next run — then the "Reload
-nginx after every renewal" OptionRow; a lineage's last failure is a line in its row, its webroot
-folders wrapping mono paths rather than tags, and a certain next failure a warning Notice. The TLS
+here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing* line. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
 vertical chain; long header values wrap instead of hiding the verdict. Its scan field is one input
 group, the address and its port, with a hint naming what will be scanned and a native datalist of
-known names; a scan in flight is a line with its elapsed time and an outline Cancel. Listening sockets stay a
-table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
-layout chosen once by `useMediaQuery`; the three named columns sort from their headings, which carry
-`aria-sort`, and a phone gets the same orders as one Sort menu. The application cell is the owner
-drawn as its product (a container as its image's), its name with a "This dashboard" `Tag` on the
-dashboard's own, how it runs as one hint line, then the command and the account; the owner's page is
-the row's first inline verb. Grouped by application, one owner's sockets are a line whose name is the
-disclosure button, unfolding its sockets indented beneath it. How old the list is sits in the panel header beside Refresh, Pause and Export; a failed
-poll is a warning `Notice` over the rows it kept. A socket first seen in the last day carries a `New`
-tag beside its protocol, a property of the row rather than a state. Below the table, Changes is a
-plain panel of lines grouped under day headings — the minute, the change as a `Status` word coloured
-as the table colours that socket, the port, its addresses, the program and where it answered — with
-its window as `Segments` in the header and the reach chips under it. Tables retain their scrolling
+known names; a scan in flight is a line with its elapsed time and an outline Cancel. The Ports page (0.8.7) opens on
+its identity line — "9 listening · 7 TCP, 2 UDP · 5 internet-facing · 2 on private networks · 2
+dangerous services exposed", each count's make-up its tooltip, then how old the list is, Refresh,
+Pause, a `⋯` with the two exports and Find a free port at the end — where four tiles stood; then
+`ports-picture.tsx`, who reaches what: the networks a socket answers on (the internet, the tailnet,
+a VPN, a private network, Docker's networks, only this server) wired to the programs listening
+there, a wire red where the posture calls the exposure critical and moving only while somebody is
+connected; a network is a button that narrows the list like its chip, and each program's ports open
+their pages. Below `lg` the networks are not drawn and each program says who reaches it. Listening
+sockets stay a framed table read down its columns, one line per row at one height (`h-12`): the
+port is the link to its page with the protocol, the `New` tag and the addresses after it; the
+application is its product, its name and how it runs (or the command), the account and PIDs its
+tooltip; reach is one coloured word with the interface, a database's firewall default its tooltip;
+the firewall's verdict is one word whose conclusion is its tooltip; clients a count. The three named
+columns sort from their headings with `aria-sort`, and a phone gets the same orders as one Sort menu
+over rows of two lines at one height (`h-16`). Grouped by application, one owner's sockets are a line
+whose name is the disclosure button. A failed poll is a warning `Notice` over the rows it kept. A
+port's page (`/proxy/ports/tcp-443`, the address added where two rows share a protocol and port;
+`port-page.tsx`) is built as a process's: the way back, the socket's verbs, its identity line (the
+owner as its product, the port, addresses, account, PIDs, how it runs, and the reach as its state),
+then Reach (`port-path.tsx`: who can reach it → the firewall → the port → the program, then where it
+answers, from outside, the Docker path and Identify), Owner, Clients and History as an underlined
+strip in `?tab=`, and the list as its rail from `xl` with Alt+↑ and Alt+↓; the side sheet's
+`?socket=` address, in either spelling, opens it. Below the table, Changes is a plain panel of lines
+grouped under day headings — the minute, the change as a `Status` word coloured as the table colours
+that socket, the port, its addresses, the program and where it answered — with its window as
+`Segments` in the header and the reach chips under it; on a port's page it is that port's. Tables retain their scrolling
 boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
@@ -1952,6 +2085,50 @@ including a stopped, failed, masked and boot-disabled unit, a refused start, res
 the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress's routes in it, Recent errors, the nginx counters' switch (pressed on the card as well as the switch) and a phone;
 `proxy-alerts.spec.ts` covers the Alerts page — its picture, what fires, the rule form — and the
 overview bar's firing count.
+
+**Traffic reads the edge's hour as a project's Logs page reads one deployment** (`/proxy/traffic`,
+`site-traffic-view.tsx`, 0.8.7). It opens on its identity line — the engine's mark, "Traffic", the
+hour, the sites (a link to Sites), how many keep no access log, whether the counts are floors and how
+old the read is, then the hour's verdict ("Answering", "3.2% failing") and a `⋯` with Refresh, Open
+Sites and, for administrators, Alert rules — and then four `ReadingLine`s in place of the four bare
+tiles it had: requests a minute, the share that failed in the Logs page's words ("1.0% of requests
+failed", "12 of 1,260 answered 5xx · 30 refused with a 4xx"), the slowest site's time in words ("19
+in 20 inside 412ms") and what was sent, each with its hour as a trend in its own hue. Under them the
+hour minute by minute, every site added up, in the request chart's series with its legend on one
+line. Sites and Errors are tabs in the address (`?tab=errors`; `?view=errors` still opens it): Sites
+is one `SplitBar` shared out by site in `LANES` hues over a `RankList`, busiest first, a site with no
+readable log last saying so, each row opening the site's page; Errors is nginx's error log grouped and
+explained (`ErrorLog`), over a window as `Segments` and narrowed to one site by a select, its tab
+counting what it lists. A host with no site, or none whose log can be read, says so in one
+`OverviewEmpty` card with the press that changes it (New site, the one site's page where its access
+log is turned on, or Sites) rather than four zeros; a host with no reverse proxy draws the section's
+`EngineSetup`. One site's requests were a second, older copy of that site's own page here
+(`?site=`); that address now lands on the site's page, and `?site=…&view=errors` is the Errors view
+narrowed to it. `proxy-traffic.spec.ts` covers every state at 1280 and 390.
+**Configuration and Tunnel open on what they are about.** Configuration (`/proxy/config`) is an
+identity line — nginx's mark, its directory in mono, how many files in how many folders, how many
+nginx reads, how many the dashboard wrote, and for an administrator the last config test as a
+coloured word — with Test config as the line's brand command and a `⋯` of Read again, the main
+file, the last test and the engine overview. Under it the views are an underlined strip in the
+address (`?tab=effective`, `settings`, `lint`, `history`; Files has none), administrators only as
+before. Files opens on the directory as nginx walks it (`config-picture.tsx`, its lanes from
+`includeMap` in `config-tree.ts`): the main file, the folders it includes, the folders their files
+include — sites-enabled's links into sites-available, a site into snippets — and, closing the last
+lane unwired and dashed, the folders nginx reads nothing in; a folder's line is red where a link in
+it points at nothing, and pressing a folder narrows the list under it. Settings is the deploy
+settings' column (`SettingSection`s by what the directives decide, each a field with the file and
+line that sets it at its right, the line a change writes previewed under it, an Applying switch for
+the reload, one save bar); its four tiles are the identity line's facts. A file's history is the
+editor sheet's History view beside its File view (`?view=history`), restore where it was; the old
+`?history=` address lands there. Without nginx the page is the section's install screen. Tunnel
+(`/proxy/tunnel`) is Cloudflare's mark and the tunnel's name, its edge connections as a state, how
+it was made, the connector and how old the reading is, with Check now as the command and Disconnect
+in the `⋯`; then the way a visitor arrives — each hostname into Cloudflare's edge, through the
+connector, to this server's proxy, a line moving only where both ends are up and red and dashed
+where one is not — and the hostnames as one-line cards with their route and record in aligned
+columns, a refused record's reason taking the project's place on the line. Not connected, the same
+line says so, the same picture is drawn dashed, one sentence, `Segments` between pasting a token and
+creating one with the API, and that one form; a reader gets the picture and a Notice, no form.
 
 **A Sites list that could not be read says which read failed, why, and can be asked again.** The list
 is read from nginx, a Caddy on the host and the Caddy container that holds the public ports, and the
@@ -2437,6 +2614,13 @@ The passes, in order. Each one is a diff you can review on its own.
    each signal will do to *this* process, read from the masks of the signals it handles, so a hang-up
    that reloads nginx and a hang-up that ends a script stop looking like the same button.
 
+   A network device took the same exit in 0.8.7 (`network/interfaces/device-page.tsx`): its sheet
+   held a chart, eight blocks of facts and five forms. It is `/network/interfaces/[name]` with the
+   Interfaces list as the rail, its relations (what it rides on, its ports, the namespace it leads
+   into, where it answers) drawn as one `WireFlow` picture rather than listed as facts, and its
+   forms as settings sections under one save bar. The namespace cards beside the list gave up the
+   devices listed under each row for a count on the line; the devices are the namespace's sheet's.
+
    PM2 took the same exit in the same pass, at the operator's request, and for the same reason: four
    grey figures over a table, and nothing that moved. Online and Not running went to state chips in
    the table's head, Errored in its tone and drawn only while there is one; Restarts summed every
@@ -2663,8 +2847,8 @@ The passes, in order. Each one is a diff you can review on its own.
    certificate as a dot on a runway with certbot's renewal stretch marked over the five soonest as the
    expiry `BarList`, each block opening on its figure at the 24px reading size. Each head holds its
    one figure now (requests this hour, days to the next expiry or how many need attention, server
-   errors this hour), and a site opens its traffic, or for an ingress route, its site page, which reads
-   the deployment's record. The
+   errors this hour), and a site opens its own page, where its requests are read (for an ingress
+   route, from the deployment's record). The
    route cards lead with the application's own mark and the engine in the tile's corner
    (`RouteMark`), and are one line: what serves the route and the way a request goes (its names,
    only where they differ from the route's own, then the upstream or folder) under the name, and
@@ -3580,7 +3764,7 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   deployment section's vocabulary: the Overview's topology (`network/topology.tsx`: the outside —
   the internet through the uplink, the tailnet, each tunnel — this server with its firewall and
   gateway as facts, and the inside — each Docker network with its containers' products, each bridge
-  made here), the Connections page's callers and what they reached (`connections-map.tsx`), Routing's
+  made here), the Connections page's callers and what they reached (`connections/picture.tsx`), Routing's
   decision (`routing/decision-map.tsx`: the policy rules in the order they are asked, each wired to
   the table it looks in, the one answering this browser lit), each WireGuard tunnel's devices and
   sites (`vpn/tunnel-picture.tsx`), the gateway's forwards, and DNS's resolver chain. A wire carries
@@ -3596,8 +3780,8 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   cannot be read as a state), an address's prefix the port hue (`network/address.tsx`), in and out
   their chart colours everywhere they are drawn.
 - **The lit edge on what is taken.** Devices, peers, forwards and lists open their sheets and are lit
-  rows; route tables, rule lists, peers on the tailnet and shaping are readings and stay framed
-  tables.
+  rows; route tables, rule lists and shaping are readings and stay framed tables. (The tailnet's
+  machines were a framed table until 0.8.7; they are cards now, below.)
 
 What the guard refuses is drawn, not hidden: a control the server would refuse stays, disabled,
 with the guard's sentence beside it (a device's *Set down* on the uplink, forwarding that Docker
@@ -3610,11 +3794,38 @@ the same, without the after-install phases the server keeps only for the network
 (`usePackageKnown`, one `GET /packages/tailscale`), since Debian and Ubuntu do not until its own
 repository is added, and is pointed at otherwise. PM2 is an npm package for a host account, not
 something the package manager installs, so its page names the command and opens the terminal
-(`procs/pm2-missing.tsx`). Docker is never missing on an install that runs in it; what its pages say
-when the daemon cannot be asked is which fault it is (`docker/unreachable.ts`): a socket that refused
-the dashboard, a `docker.service` systemd says is not running (with **Start Docker** for
-`service.control`), a daemon that runs but not at the address asked, or no answer where systemd cannot
-be asked. The client's own sentence is behind *What the server said*.
+(`procs/pm2-missing.tsx`). What the Docker pages say when the daemon cannot be asked is which fault
+it is (`docker/unreachable.ts`): a socket that refused the dashboard, a `docker.service` systemd says
+is not running (with **Start Docker** for `service.control`), a daemon that runs but not at the
+address asked, no `docker.service` at all (not installed: **Install Docker** for `system.admin` where
+the package manager carries `docker.io` or `docker`, Docker's own instructions otherwise), or no
+answer where systemd cannot be asked. The client's own sentence is behind *What the server said*.
+
+**A thing that is not there has one screen** (`components/missing-thing.tsx`, since 0.8.7).
+`MissingThing` is the proxy's `EngineSetup` made general, for any page whose subject is absent
+rather than empty or broken: the thing drawn as itself (`thing`, a `ProductLogo` id, at the 48px
+tile; `icon` on the same tile for a module with no mark), a headline at the 24px rung that says
+what is missing in plain words, one or two sentences on why and where it is fixed, the next step
+as one brand-faced button with further steps after it, the subsystem's own words folded behind
+*What the server said* (`raw`, never the headline), and optionally a rail of what the page draws
+once the thing is there (`gains`). `size="block"` is the same words inside a section of a page
+that has other things on it (Timers on Scheduled): the mark beside the words, no frame.
+`MissingLine` is the same fact as one line with the thing's glyph and a link, for a rail's group
+or an inspector. The words live in `missing-thing-model.ts` so they are the same everywhere:
+`noSystemd(reader)` for a server systemd does not run (a container, or the dashboard's own
+container started without `/run/systemd`; the steps are **Open Processes** and the mount to
+copy), `moduleOff(module, canConfigure)` for a part switched off in Configuration (**Open
+Configuration** for an administrator, a sentence naming who can for anybody else), and
+`missingFromError(error)` for a failed read whose answer names an absence (`docker_unavailable`,
+`systemd_not_running`, `not_installed` for systemd, `terminal_disabled`). `MissingScreen` draws a
+model's `Missing` whole, and `MissingOrError` draws it where a read's error is one and
+`ErrorState` where it is not, so a page writes one line for both. The Docker section draws its
+faults through it (`docker/unreachable-state.tsx`; `DockerMissing` is the same screen for a page
+outside the section, asking the daemon itself), and the Services list, a service's page and
+Scheduled's Timers share `procs/no-systemd.tsx`. The step is always real: a route that already
+exists (`POST /systemd/docker.service/start`, `POST /packages/install`), a link to the page that
+helps, or a line to copy. An empty list is still `EmptyState` and a failed read still
+`ErrorState`; a tool the package manager installs in place keeps `InstallHandoff`.
 
 **Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
 four grey figures (known differences, incomplete readings, matching observations, owned repair
@@ -3651,6 +3862,113 @@ what took their place (`components/network/drift/`):
   read without guessing. **Each blocklist** is its publisher with its cache, render and kernel set
   as a chain, a link amber where the later one has fallen behind. **The repair plan** is cards you
   pick, lit (§16), and the review shows each change as a diff of its before and after.
+
+**Egress groups became a list and a page in 0.8.7** (2026-11-13), in the run that brought the older
+pages to the deploy pages' look. The page had never had a design pass: four grey tiles (groups,
+carrying traffic, automated, members proven) over every group laid out in full, about a thousand
+pixels each, under a row of six equal buttons and a switch. Where each went
+(`components/network/egress/`):
+
+- **The list** (`egress-list.tsx`) opens on `HostIdentity` laid out as a project's header: the four
+  figures are its facts, whether any member is down is its state, **New group** its one command. A
+  group is a `ChoiceRow`: its mark with the carrying state in the corner, its name over
+  "sticky · 2 members", the carrying member in that state's colour, how it switches, and its verbs
+  in the `⋯`. One height whatever the group holds; a running simulation replaces the automation
+  word and lights the card's edge.
+- **A group's page** (`egress-page.tsx`, `/network/egress/[name]`) is the process page's shape: the
+  way back, the identity line with the carrying member as the state, **Run simulation** as the
+  command and fail over, fail back, enable or disable, automation, edit and remove in the menu
+  (`egress-verbs.tsx`, shared with the list's cards, each confirmation as it was), then the views
+  as an underlined strip with `?tab=` in the address, and from `xl` the list as a rail with Alt+↑
+  and Alt+↓. An account sees only the verbs it can use.
+- **The picture** (`egress-picture.tsx`) is a `WireFlow`: the selected traffic, the group, its
+  members by tier, each drawn as what carries it (a tunnel's product, else a router). Only the
+  carrying member's wire moves, and only while the group is on; a member that is down is dashed,
+  red where it is the one carrying. Every node says the same number of lines, and the loading
+  picture is drawn from the same nodes in grey, so the views under it do not move when a group of
+  two members lands.
+- **Members** stays a framed table, because its rows are read down their columns (state, round
+  trip, loss, the strip of recent samples), one line a member. The second line of each row and the
+  sixth column (path, tier, mark, table, probe source) were a member's fixed identity rather than
+  readings: they are the **Bound to** list under it, with **How it decides** (probes, thresholds,
+  holds, connections, protected addresses), which only the form showed before. What the rules would
+  do now (`advice`) is a notice above the table when they would act.
+**The VPN page lost its tiles on 2026-11-13**, in the run that brought the older pages to the deploy
+pages' look. It opened on four figures (WireGuard 2/5, Tailnet 4/6, Exit, Moved), each said again a
+screen lower, over a tunnel whose head was a row of small grey buttons, a box of alerts, a list of
+family facts and a paragraph. Where each went (`components/network/vpn/`):
+
+- **Each VPN opens on its own line** (`HostIdentity` in the project's layout, `tunnel-identity.tsx`):
+  WireGuard's mark, the tunnel's name with who is online and how many things need a look, then its
+  network, its port and what it has moved; **Add a device** is the one command and Join a site,
+  History, Take down or Bring up, Create another tunnel and Remove are its menu. The tailnet's line is
+  Tailscale's mark, this server's name there, the daemon's state in words (`tailnetState`: "Needs
+  sign-in", never `NeedsLogin`) and its facts; while it waits to be signed in, the address it waits
+  at is the line's command. A Headscale this server runs opens on a third. The "Moved" and "Exit"
+  tiles are a fact on the tunnel's line and the hub of its picture.
+- **The picture is straight under the line, on `WireFlow`** (`tunnel-picture.tsx`, 250 hand-laid
+  lines before): devices, the tunnel with where its clients dial, sites. What the alert box listed is
+  a mark on the peer it is about (an amber corner on its tile and the finding in a few words,
+  `findingWords`), with the sentence in that peer's sheet. The VPN page draws six peers a side and
+  sends the rest to the tunnel's page, the ones that need a look first (`drawnPeers`).
+- **Internet exit is a row per address family** (`tunnel-exit.tsx`): the family's network, where
+  its exit leaves, the connections it translated, whether its rules were verified, and the switch
+  that turns that family's exit on or off. Two lines in every state. What the readings do not prove
+  is behind the title's ⓘ.
+- **A tunnel is a page** (`tunnel-page.tsx`, `/network/vpn/<name>`), on the process page's shape:
+  the way back, the same line, Overview, Traffic and History as the underlined strip (`?tab=`), the
+  other tunnels in a rail from `xl`, Alt+↑ and Alt+↓ carrying the view. It replaced a sheet opened
+  by a "History" button. A removed tunnel keeps its page: its record outlives it, and **Restore** is
+  that page's command while its file is in the archive.
+- **Machines are cards of one height** (`tailnet-machines.tsx`): the system's mark, the name over
+  its address in mono, how it is reached, what it moved and its state in columns that line up; under
+  1180px the readings take a second line on every card alike. The list's count and its All, Online
+  and Offline chips say what the "4 / 6" tile said. Headscale's nodes are the same card.
+- **What this server offers the tailnet is a settings form** (`tailscale-offers.tsx`):
+  `SettingSection`s in the fields' column, the exit node as `Segments`, the subnet routes as a list
+  with a field under it, the helper sentences behind an ⓘ, and the page's one floating save bar. A
+  save is worked out against the preferences read at that moment (`offerRequest`), so a retry after
+  a lost answer sends only what still differs.
+- **A verb the session would be refused is not drawn**: taking a tunnel down, removing it, removing a
+  peer, forgetting its saved copy, clearing a budget and withdrawing an offer are destructive routes,
+  and are shown to an account that holds `destructive`.
+**Protection took the exit in 0.8.7** (2026-11-13). It opened on four tiles with no header over
+five sections, the last of them fifteen kernel settings in two columns, and a `LoadingPanel` stood
+where all of it would land. Where each figure went (`components/network/protection/`):
+
+- **The identity line** (`HostIdentity` as a project's header): in force, not loaded or nothing in
+  force as its state, a list whose fetch failed beside it in red, then how many lists and limits
+  and what they dropped and refused since the table was loaded. New blocklist is its command; New
+  limit, New exception and Refresh are its menu. The bytes and the totals since a date are each
+  section's own fact on its title line.
+- **A picture of what is refused and what gets through** (`picture.tsx`, on `WireFlow`): each
+  blocklist as its flag or its kind with its networks and what it dropped, this server with whether
+  its filter is loaded and how full the connection table is (the old tile's meter, in its level's
+  colour), then each limited port as the product that listens there, the exceptions and the
+  addresses never refused. A wire pulses when its counter grew since the last read and is dashed
+  while its entry is off. It keeps one height: three lists and "N more", one or two limits, in a
+  frame with room for four rows, so the lists under it never move. Its grey state is nodes of its
+  own on the drawn nodes' lines, because `WireFlow`'s `loading` draws a phone's hub without the
+  lines under its name.
+- **Rows at one height.** A blocklist's coverage is on the line under its name; when it was fetched
+  and when it next is, its networks and drops, and its one state (`listState`: a failed fetch in
+  red before a stale copy before a verified set) are columns; the error's words, the enforcement
+  evidence and the rest are the head of its editor (`ListStanding`). An exception's or a trusted
+  address's standing is a state word in a column, and a row with no second line is as tall as one
+  with. A row's other verbs are its `⋯`.
+- **Views in the address.** `?tab=table` is the connection table for an administrator: a
+  `BarReading` of what it tracks against its size, by state, drawn from the page's own reading
+  before the breakdown lands, then the charts, the shares as `RankList`s and what they point at;
+  its closing paragraph became the line under the band and an `InfoTip`. `?tab=kernel` is the
+  kernel's protections as §7's settings column: `SettingSection`s of full-width rows (a switch for
+  an off/on setting, `Segments`, a number field), a line under each control that says one thing at
+  a time (the range, what is running under a staged value, kept for boot) so no state changes a
+  row's height, and the product's one save bar, which asks for the confirmation that lists each
+  change. The draft is the page's, so it outlives a look at another view and the tab counts it.
+- **Its shape before its read.** The line, the tabs, the picture and each section's head stand
+  where they will, with as many grey rows as each list held at the last visit (`useViewState`).
+- **A reader is shown no control**: no command, switch, menu or field; a row says in force or off
+  in words and still opens, to be read.
 
 **A container's page took the Overview's line in 0.7.1** (2026-10-08), at the operator's request,
 because it was the page with no life: a strip of four grey label-and-value pairs (container, image,
@@ -3752,6 +4070,17 @@ strip's figures went, and what took their place (`docker/stack-detail.tsx`):
   - *Logs* (`docker/stack-logs.tsx`) keeps the log page's workspace and puts the services that write
     into it over it, the way that page's rail lists its sources: lines and errors in the last hour,
     their shape in the service's lane, a press narrowing the log to one.
+
+**Packet captures and Saved runs took the exit on 2026-11-13.** Both opened on four grey tiles over a
+list beside a key-and-value inspector. The tiles went where each figure is said better: on the
+identity line (what is capturing or running as its state; how many are kept, the packet data in
+bytes, the retention as its facts) and on the list's filter chips, which count the run states the
+tiles counted. The inspector became a page for one item on the process page's shape
+(`components/network/capture-page.tsx`, `run-page.tsx`, the rail in `item-rail.tsx`): a capture is
+drawn as the interface it listens on, with its interface, filter and file as a `WireFlow` picture
+and its seventeen facts on a second view; a run's result is drawn by the tool's own renderer, with
+Compare, History and Details as views. A row's verbs are words behind its menu, its state stands in
+one column wide and leads its second line on a phone, and every row is one height.
 
 ## 16. Two registers
 

@@ -5,7 +5,6 @@ import { useState } from "react"
 import { Plus, Trash } from "@/components/icons"
 import { ApiError, get, post, put, refusedIndex } from "@/lib/api"
 import { plural } from "@/lib/format"
-import { notify } from "@/lib/toast"
 import type {
   HostNameResolution,
   HostRecordIssue,
@@ -13,8 +12,13 @@ import type {
   HostRecordsPreview,
   HostResolutionEvidence,
 } from "@/lib/types"
-import { Section } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { cn } from "@/lib/utils"
+import { Panel, PanelBody } from "@/components/panel"
+import {
+  SettingForm,
+  SettingSection,
+  settingStatus,
+} from "@/components/deploy/settings/setting-card"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -44,15 +48,17 @@ const same = (a: Row[], b: Row[]) =>
 
 /**
  * The host's own records: the block of `/etc/hosts` the dashboard owns, as a
- * list of address and names that Save writes back whole, and everything else
- * in the file under it as a table that is only read. The server edits the
- * file as bytes around its marker comments, so what is not here is carried
- * across untouched; a file whose markers cannot be trusted is shown read-only
- * with the reason.
+ * list of address and names written back whole, and everything else in the
+ * file under it as a table that is only read. The server edits the file as
+ * bytes around its marker comments, so what is not here is carried across
+ * untouched; a file whose markers cannot be trusted is shown read-only with
+ * the reason.
  *
- * A row with nothing in it is dropped on save rather than refused — it is the
- * one just added and not used — while a row with half of itself is the
- * mistake to catch: the field that is missing says so beside it.
+ * It is one form of the settings column and draws no Save of its own: it
+ * stands on the page's save bar beside the resolver. A row with nothing in it
+ * is dropped on save rather than refused — it is the one just added and not
+ * used — while a row with half of itself is the mistake to catch: the field
+ * that is missing says so beside it.
  */
 export function HostRecordsEditor({
   records,
@@ -122,29 +128,33 @@ export function HostRecordsEditor({
   }
   const reviewed = preview && preview.keys.join(",") === used.map((r) => r.key).join(",")
 
-  const save = async () => {
+  // The bar's Save. A preview that finds an overlap which changes the address
+  // a program gets stops the first press; the next one, with the overlaps
+  // on the page, writes them as they are.
+  const save = async (): Promise<boolean> => {
     if (firstBad) {
       setRefusal({
         row: firstBad.key,
         message: firstBad.address.trim() ? "Give it a name." : "Give it an address.",
       })
-      return
+      return false
     }
     setBusy(true)
     setRefusal(undefined)
     try {
       if (!reviewed) {
         const value = await previewRecords()
-        if (value.issues.some(issueMatters)) return
+        if (value.issues.some(issueMatters)) return false
       }
       await put("/network/dns/hosts", { records: payload })
-      notify.success("Host records saved")
       setEdits(undefined)
       setPreview(undefined)
       onSaved()
       if (payload.length > 0) void checkResolution()
+      return true
     } catch (err) {
       refuseAt(err)
+      return false
     } finally {
       setBusy(false)
     }
@@ -159,131 +169,37 @@ export function HostRecordsEditor({
   const blocking = preview?.value.issues.some(issueMatters) ?? false
 
   return (
-    <Section
-      title="Host records"
-      actions={
-        <span className="flex flex-wrap items-center gap-3">
-          <span className="numeric text-hint text-muted-foreground">
+    <SettingForm
+      name="Host records"
+      onSave={save}
+      dirty={dirty}
+      changes={dirty ? 1 : 0}
+      saving={busy}
+      canEdit={!locked}
+      onDiscard={() => {
+        setEdits(undefined)
+        setPreview(undefined)
+        setRefusal(undefined)
+      }}
+      applies="immediately"
+      error={refusal && refusal.row === undefined ? refusal.message : undefined}
+    >
+      <SettingSection
+        id="dns-hosts"
+        title="Host records"
+        state={
+          <span className="numeric">
             {plural(records.managed.length, "record")} made here in{" "}
             <span className="font-mono">{records.path}</span>
           </span>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={locked || busy}
-            onClick={() => update([...rows, { key: next, address: "", names: "" }], next + 1)}
-          >
-            <Plus aria-hidden />
-            Add record
-          </Button>
-        </span>
-      }
-    >
-      <div className="flex min-w-0 flex-col gap-6">
-        <div className="flex min-w-0 flex-col gap-4">
-          {records.problem && (
-            <Notice title="This file cannot be edited from here" tone="warning">
-              {records.problem}
-            </Notice>
-          )}
-          {rows.length === 0 ? (
-            <p className="py-1 text-body text-muted-foreground">
-              No records made here. A record sends a name to an address for this server alone, ahead
-              of any DNS server.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {rows.map((row, index) => {
-                const bad = refusal?.row === row.key
-                const missingAddress = bad && !row.address.trim()
-                const missingNames = bad && !missingAddress && words(row.names).length === 0
-                return (
-                  <li
-                    key={row.key}
-                    className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto] sm:items-start"
-                  >
-                    <Input
-                      aria-label={`Address of record ${index + 1}`}
-                      aria-invalid={missingAddress || undefined}
-                      value={row.address}
-                      disabled={locked}
-                      spellCheck={false}
-                      autoComplete="off"
-                      placeholder="192.0.2.10"
-                      className="col-span-2 font-mono sm:col-span-1"
-                      onChange={(event) => change(row.key, { address: event.target.value })}
-                    />
-                    <Input
-                      aria-label={`Names of record ${index + 1}`}
-                      aria-invalid={missingNames || undefined}
-                      value={row.names}
-                      disabled={locked}
-                      spellCheck={false}
-                      autoComplete="off"
-                      placeholder="nas.lan nas"
-                      className="font-mono"
-                      onChange={(event) => change(row.key, { names: event.target.value })}
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`Remove record ${index + 1}`}
-                      disabled={locked}
-                      onClick={() => update(rows.filter((r) => r.key !== row.key))}
-                    >
-                      <Trash aria-hidden />
-                    </Button>
-                    {bad && (
-                      <p
-                        role="alert"
-                        className="animate-rise text-hint text-destructive sm:col-span-3"
-                      >
-                        {refusal.message}
-                      </p>
-                    )}
-                    {rowIssues(row.key).map((issue, at) => (
-                      <p
-                        key={`${issue.kind}:${issue.name}:${at}`}
-                        className={
-                          issueMatters(issue)
-                            ? "col-span-2 text-hint text-warning sm:col-span-3"
-                            : "col-span-2 text-hint text-muted-foreground sm:col-span-3"
-                        }
-                      >
-                        <span className="font-mono">{issue.name}</span>: {issue.detail}
-                      </p>
-                    ))}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          {refusal && refusal.row === undefined && (
-            <p role="alert" className="animate-rise text-body text-destructive">
-              {refusal.message}
-            </p>
-          )}
-          {preview && (
-            <div role="status" className="flex min-w-0 flex-col gap-1">
-              <p className="text-body">
-                {preview.value.issues.length === 0
-                  ? "No overlaps with each other or with the rest of the file."
-                  : `${plural(preview.value.issues.length, "overlap")} with the records or the rest of the file.`}
-                {blocking && " Save again to write them as they are."}
-              </p>
-              <p className="numeric text-hint text-muted-foreground">
-                {plural(preview.value.added.length, "record")} added ·{" "}
-                {plural(preview.value.removed.length, "record")} removed
-              </p>
-            </div>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => void save()} disabled={!dirty || locked} pending={busy}>
-              {blocking && reviewed ? "Save anyway" : "Save"}
-            </Button>
+        }
+        status={settingStatus({ dirty, refused: Boolean(refusal) })}
+        actions={
+          <>
             {dirty && !locked && (
               <Button
+                type="button"
+                size="xs"
                 variant="outline"
                 onClick={() => void previewRecords().catch(refuseAt)}
                 disabled={busy || Boolean(firstBad)}
@@ -291,42 +207,143 @@ export function HostRecordsEditor({
                 Preview overlaps
               </Button>
             )}
-            {dirty && (
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setEdits(undefined)
-                  setPreview(undefined)
-                }}
-                disabled={busy}
-              >
-                Discard
-              </Button>
-            )}
             {records.managed.length > 0 && !dirty && (
-              <Button variant="outline" onClick={() => void checkResolution()} pending={checking}>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                onClick={() => void checkResolution()}
+                pending={checking}
+              >
                 Check local resolution
               </Button>
             )}
-          </div>
-          {evidenceError && (
-            <p role="alert" className="text-body text-destructive">
-              {evidenceError}
+            {!locked && (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={busy}
+                onClick={() => update([...rows, { key: next, address: "", names: "" }], next + 1)}
+              >
+                <Plus aria-hidden />
+                Add record
+              </Button>
+            )}
+          </>
+        }
+      >
+        {records.problem && (
+          <Notice title="This file cannot be edited from here" tone="warning">
+            {records.problem}
+          </Notice>
+        )}
+        {rows.length === 0 ? (
+          <p className="py-1 text-body text-muted-foreground">
+            No records made here. A record sends a name to an address for this server alone, ahead
+            of any DNS server.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {rows.map((row, index) => {
+              const bad = refusal?.row === row.key
+              const missingAddress = bad && !row.address.trim()
+              const missingNames = bad && !missingAddress && words(row.names).length === 0
+              return (
+                <li
+                  key={row.key}
+                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto] sm:items-start"
+                >
+                  <Input
+                    aria-label={`Address of record ${index + 1}`}
+                    aria-invalid={missingAddress || undefined}
+                    value={row.address}
+                    disabled={locked}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder="192.0.2.10"
+                    className="col-span-2 font-mono sm:col-span-1"
+                    onChange={(event) => change(row.key, { address: event.target.value })}
+                  />
+                  <Input
+                    aria-label={`Names of record ${index + 1}`}
+                    aria-invalid={missingNames || undefined}
+                    value={row.names}
+                    disabled={locked}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder="nas.lan nas"
+                    className={cn("font-mono", locked && "col-span-2")}
+                    onChange={(event) => change(row.key, { names: event.target.value })}
+                  />
+                  {!locked && (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Remove record ${index + 1}`}
+                      onClick={() => update(rows.filter((r) => r.key !== row.key))}
+                    >
+                      <Trash aria-hidden />
+                    </Button>
+                  )}
+                  {bad && (
+                    <p
+                      role="alert"
+                      className="animate-rise text-hint text-destructive sm:col-span-3"
+                    >
+                      {refusal.message}
+                    </p>
+                  )}
+                  {rowIssues(row.key).map((issue, at) => (
+                    <p
+                      key={`${issue.kind}:${issue.name}:${at}`}
+                      className={
+                        issueMatters(issue)
+                          ? "col-span-2 text-hint text-warning sm:col-span-3"
+                          : "col-span-2 text-hint text-muted-foreground sm:col-span-3"
+                      }
+                    >
+                      <span className="font-mono">{issue.name}</span>: {issue.detail}
+                    </p>
+                  ))}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        {preview && (
+          <div role="status" className="flex min-w-0 flex-col gap-1">
+            <p className="text-body">
+              {preview.value.issues.length === 0
+                ? "No overlaps with each other or with the rest of the file."
+                : `${plural(preview.value.issues.length, "overlap")} with the records or the rest of the file.`}
+              {blocking && " Save again to write them as they are."}
             </p>
-          )}
-          {evidence && <ResolutionEvidence evidence={evidence} />}
-        </div>
+            <p className="numeric text-hint text-muted-foreground">
+              {plural(preview.value.added.length, "record")} added ·{" "}
+              {plural(preview.value.removed.length, "record")} removed
+            </p>
+          </div>
+        )}
+        {evidenceError && (
+          <p role="alert" className="text-body text-destructive">
+            {evidenceError}
+          </p>
+        )}
+        {evidence && <ResolutionEvidence evidence={evidence} />}
+      </SettingSection>
 
-        {records.other.length > 0 && (
+      {records.other.length > 0 && (
+        <SettingSection
+          title="Everything else in the file"
+          state={
+            <span className="numeric">
+              {plural(records.other.length, "entry", "entries")} · read only
+            </span>
+          }
+        >
           <Panel>
-            <PanelHeader
-              title="Everything else in the file"
-              actions={
-                <span className="numeric text-hint text-muted-foreground">
-                  {plural(records.other.length, "entry", "entries")} · read only
-                </span>
-              }
-            />
             <PanelBody flush>
               <Table containerClassName="max-h-80">
                 <TableHeader>
@@ -352,9 +369,9 @@ export function HostRecordsEditor({
               </Table>
             </PanelBody>
           </Panel>
-        )}
-      </div>
-    </Section>
+        </SettingSection>
+      )}
+    </SettingForm>
   )
 }
 
