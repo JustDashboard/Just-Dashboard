@@ -38,7 +38,7 @@ import { JobCard } from "@/components/backups/job-card"
 import { destinationProduct } from "@/components/backups/marks"
 import { scheduleLabel } from "@/components/backups/shared"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { Field, OptionList, OptionRow } from "@/components/form"
+import { Field, InfoTip, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
@@ -576,6 +576,26 @@ function DatabasesBody({
       <span className="shrink-0">no variable names it</span>
     )
 
+  const unprotected = backupRows.length === 0 && databaseDependencies.length > 0
+  // What the newest deployment's backup gate did, while there is nothing of
+  // it to list: with evidence, the cards under the page say it themselves.
+  const lastGate = !latestRunId ? (
+    "No deployment has run the gate yet"
+  ) : latestRun.loading ? (
+    "Reading the last gate…"
+  ) : latestRun.data && backupGateEvidence.length === 0 ? (
+    <span>
+      Last gate:{" "}
+      <Link
+        href={`/deploy/${projectId}/runs/${latestRun.data.run.id}`}
+        className="rounded-sm focus-ring transition-colors hover:text-foreground hover:underline"
+      >
+        deployment #{latestRun.data.run.runNumber}
+      </Link>{" "}
+      ran no backup policy
+    </span>
+  ) : undefined
+
   return (
     <>
       <SettingSection
@@ -863,10 +883,16 @@ function DatabasesBody({
           title="Backup before a release"
           state={
             // Whether the release waits is the policy's own switch to say; the
-            // head keeps only the warning the switch does not give.
-            backupRows.length === 0 && databaseDependencies.length > 0
-              ? "Persistent storage is not a backup"
-              : undefined
+            // head keeps the warning the switch does not give, and what the
+            // last deployment's gate did when it has no evidence to list — a
+            // section of its own under the page said only that it was empty.
+            (unprotected || lastGate) && (
+              <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+                {unprotected && <span>Persistent storage is not a backup</span>}
+                {unprotected && lastGate && <span aria-hidden>·</span>}
+                {lastGate}
+              </span>
+            )
           }
           status={settingStatus({ dirty: draft.dirty, refused: Boolean(dependencyError) })}
           actions={
@@ -1001,10 +1027,10 @@ function DatabasesBody({
         </SettingSection>
       </SettingForm>
 
-      <SettingSection
-        title="Latest backup gate evidence"
-        state={
-          latestRun.data && (
+      {backupGateEvidence.length > 0 && latestRun.data && (
+        <SettingSection
+          title="Latest backup gate evidence"
+          state={
             <Link
               href={`/deploy/${projectId}/runs/${latestRun.data.run.id}`}
               className="inline-flex items-center gap-1 rounded-sm focus-ring transition-colors hover:text-foreground hover:underline"
@@ -1012,23 +1038,8 @@ function DatabasesBody({
               From deployment #{latestRun.data.run.runNumber}
               <ArrowUpRight aria-hidden className="size-3" />
             </Link>
-          )
-        }
-      >
-        {/* Flush, as the other sections' empty lines are: this one alone kept
-            the note's 24px of padding, so the page's last head sat further
-            from its line than every other head from its own. */}
-        {!latestRunId ? (
-          <EmptyNote className="px-0 py-0 text-left">
-            No deployment run has produced backup evidence yet.
-          </EmptyNote>
-        ) : latestRun.loading ? (
-          <EmptyNote className="px-0 py-0 text-left">Reading the latest run…</EmptyNote>
-        ) : backupGateEvidence.length === 0 ? (
-          <EmptyNote className="px-0 py-0 text-left">
-            The latest run did not execute a backup policy.
-          </EmptyNote>
-        ) : (
+          }
+        >
           <ChoiceList aria-label="Latest backup gate evidence">
             {backupGateEvidence.map((item, index) => {
               const job = jobFor(String(item.jobId))
@@ -1103,8 +1114,8 @@ function DatabasesBody({
               )
             })}
           </ChoiceList>
-        )}
-      </SettingSection>
+        </SettingSection>
+      )}
       {dialog}
     </>
   )
@@ -1413,20 +1424,29 @@ function BackupPolicy({
               key={`uncovered-${database.resourceId}`}
               tone="warning"
               icon={Warning}
-              title={`${job.name} takes no native dump of ${name}`}
+              title={
+                // The title is the fact and the button its remedy; why a dump
+                // matters is one press away rather than three lines between
+                // the two.
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0">
+                    {job.name} takes no native dump of {name}
+                  </span>
+                  <InfoTip label="Why a native dump matters">
+                    The release falls back to this database&rsquo;s data directory and refuses if
+                    the job does not cover it. A dump is a transaction boundary the engine chose; a
+                    copy of its files while it runs is not.
+                  </InfoTip>
+                </span>
+              }
               className="animate-rise"
             >
-              <p>
-                The release falls back to this database&rsquo;s data directory and refuses if the
-                job does not cover it. A dump is a transaction boundary the engine chose; a copy of
-                its files while it runs is not.
-              </p>
               {canAdmin && (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="mt-2"
+                  className="mt-1"
                   pending={busy === `dump-${job.id}-${database.resourceId}`}
                   onClick={() => onAddDump(job, Number(database.resourceId))}
                 >

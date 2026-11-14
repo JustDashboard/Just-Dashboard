@@ -1741,7 +1741,15 @@ for every non-game deployment, using automatic shell detection and the image's u
 `cmd` or `user` overrides (`console-session.ts`). Its toolbar contains only Terminal actions and
 fullscreen; shell, user, container, search, snippet and terminal settings controls are absent.
 Runtime's Console action still selects a service through `?service=`. The
-`docker.container.exec.open` audit entry records the exec command and user. The shared vocabulary
+`docker.container.exec.open` audit entry records the exec command and user. A console with nothing
+to open (no capability, no answer from Docker, no running container; a game server that is not
+running, on its Console, Players and Server settings alike) is `ProjectEmpty`
+(`components/deploy/project-empty.tsx`): the project's mark, one sentence, the backend's reason
+under it and the next page as a button, in the height the pane takes. A game's Players
+(`game/players.tsx`) draws each player as `PlayerFace` (`game/player-face.tsx`, the game's
+eight-pixel head drawn from the name, since the image policy admits no skin server) and says since
+when the page has seen them on (`game/players-model.ts`: the game reports who is online and not
+when they joined, so "joined 3m ago" is only for a player the page saw arrive). The shared vocabulary
 (`components/deploy/vocabulary.tsx`) is the one place a run state, a project state, a source line or a
 release path is put into words, and the one
 place a project is resolved to the product it is drawn as (`projectProduct`, `sourceProduct`); a

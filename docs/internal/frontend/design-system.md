@@ -744,6 +744,29 @@ closes). What was a footnote (how Docker was counted, the kernel's forwarded cou
 locked) is behind the `ⓘ` beside the row's name, and an account that cannot change the setting
 reads *On* or *Off* in the switch's place.
 
+**A switch says one clause; the reasoning is behind a mark on the section's facts line.** The
+switches on Runtime, Build and Domains each carried three or four lines under their name (what
+traffic replay sends and withholds, what sleeping keeps, how a rehearsal restores its copy), read
+again on every visit. An `OptionRow`'s hint is one clause now, the section's facts line still says
+what the section currently is, and the paragraph a reader wants once is an `InfoTip` at the end of
+that line (`settings/facts-line.tsx`, `FactsLine`): there rather than on a field the switch reveals,
+because those fields are not on the page while the switch is off, which is when the question is
+asked. **A list inside a settings form is one line per thing, and the line opens its small form.**
+Health checks and release tasks were framed boxes of fields, open all the time, so two of either
+made the foot of the page a stack of forms. Each is a `ChoiceRow` now (`settings/health-checks.tsx`,
+`settings/release-tasks.tsx`): what it is drawn as, its name over what it does in mono, its
+readings in columns (how long a check keeps trying and whether it is required; how a task last
+went and its timeout), and the row opens a `SidePanel` holding the same labelled fields. The sheet
+edits the page's draft and has no Save of its own — its foot is Remove, *Saved with the page* and
+Done — so what is saved, and when, is still the page's one bar. A refusal that names the row takes
+the line its summary was on, so a refused row is the height of every other. **A game server's
+settings file is the same page** (`game/settings.tsx`): `SettingsPage` with its pending strip, the
+blueprint's declared keys under World, Players and Network (`game/settings-model.ts` sorts them and
+writes each head's facts; a key it does not know lands in a last section), `Segments` for a closed
+choice, the file's own key on the label's hover and in the folded file view, what a changed field
+was at the far end of its own label line so an edit moves nothing, and *Applies when the server
+restarts* on the save bar (`SettingApplies` `"restart"`).
+
 **A database's Settings are that shape too, as pages.** They were one page of six sections under a
 sticky strip of anchors, and the section a reader most often came for — the danger zone, one
 parameter — was the one at the foot of six screens. Since the 2026-10-16 pass each is a page of its
