@@ -51,7 +51,7 @@ export function EventFeed({
       {groups.map((group) => (
         <div key={group.key} className="min-w-0">
           <GroupRule label={group.label} count={group.entries.length} />
-          <ul className="mt-1">
+          <ul className="mt-1 divide-y divide-hairline">
             {group.entries.map((entry) => (
               <FeedRow
                 key={entry.key}
@@ -96,7 +96,7 @@ function FeedRow({
 
   return (
     <li className={cn("min-w-0", arrived && "animate-rise")}>
-      <div className={cn(ROW, "py-1.5 transition-colors hover:bg-row-hover", ROW_BLEED)}>
+      <div className={cn(ROW, "py-2 transition-colors hover:bg-row-hover", ROW_BLEED)}>
         <span
           className="numeric hidden font-mono text-hint text-muted-foreground md:block"
           title={timestamp(time)}

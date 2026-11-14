@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { ChartActivity, CheckCircle, ClockRewind, Cross, Warning } from "@/components/icons"
-import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
 import { clock, duration, plural, relativeTime, timestamp } from "@/lib/format"
 import {
@@ -25,12 +24,11 @@ import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useNow } from "@/components/deploy/vocabulary"
 import { socketReading } from "@/components/deploy/request-marks"
 import { InfoTip } from "@/components/form"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot } from "@/components/metrics/host-identity"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { SeriesKey } from "@/components/overview/readings"
 import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { platformProduct } from "@/components/product-logo"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -38,7 +36,8 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { Workspace } from "@/components/workspace/workspace"
+import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
 import { ActivityTable, OUTCOME, OutcomeKey, type Span } from "@/components/docker/event-activity"
 import { EventFeed } from "@/components/docker/event-feed"
 
@@ -98,11 +97,11 @@ function isFailure(event: DockerEvent) {
  * was thirty rows pushing everything else off the screen, and no row said
  * which container it was beyond its name.
  *
- * It opens now on Docker's identity line, as Containers does — the engine as
- * its mark and version, the host, how long the dashboard has been listening
- * and how much it has kept — with the verdict at its right end (a restart
- * loop, the containers that failed, or that nothing did), the socket's state
- * and the window the page reads over.
+ * It opens now on the line every Docker page opens on (`DockerIdentity`): the
+ * engine as its mark and version, the verdict beside its name (a restart
+ * loop, the containers that failed, or that nothing did) with the socket's
+ * state, the host, how long the dashboard has been listening and how much it
+ * has kept, and at the far end the window the page reads over.
  *
  * Then four readings over that window, each counting up as it lands with its
  * shape across the window as its trend, each a press that narrows the page to
@@ -116,8 +115,9 @@ function isFailure(event: DockerEvent) {
  * red band, its failures and comebacks, and who last acted on it. A row
  * narrows the feed to that container.
  *
- * Last, the feed itself — restart loops folded, every row as the thing it
- * happened to and who did it, a new one rising as the socket delivers it.
+ * Last, the feed itself, under a title and a hairline — restart loops
+ * folded, every row on a hairline as the thing it happened to and who did
+ * it, a new one rising as the socket delivers it.
  *
  * The buffer is read whole once, and its newest hundred again every fifteen
  * seconds: the polled copy is the one the server laid against the audit log,
@@ -302,36 +302,11 @@ export function EventsPage() {
       <Page className="animate-rise">
         {header}
 
-        <HostIdentity
-          mark="docker"
-          title={version ? `Docker Engine ${version}` : "Docker Engine"}
-          facts={
+        <DockerIdentity
+          version={version}
+          host={host ?? undefined}
+          state={
             <>
-              {host && (
-                <>
-                  <HostFact product={platformProduct(host.platform)}>{host.hostname}</HostFact>
-                  <FactDot />
-                </>
-              )}
-              {since && listening && (
-                <>
-                  <span className="numeric" title={`Listening since ${timestamp(meta?.since)}`}>
-                    listening for {duration((to - since) / 1000)}
-                  </span>
-                  <FactDot />
-                </>
-              )}
-              <span className="numeric" title="The dashboard keeps the newest 2,000 in memory">
-                {plural(meta?.buffered ?? all.length, "event")} kept
-              </span>
-              <FactDot />
-              <span className="numeric">
-                {plural(activity.length, "container")} in {win.words}
-              </span>
-            </>
-          }
-          aside={
-            <div className="flex flex-wrap items-center gap-3">
               <Verdict
                 listening={listening}
                 looping={tally.looping.map((row) => row.name)}
@@ -343,22 +318,44 @@ export function EventsPage() {
                 }}
               />
               <Status {...socketReading(socket.state)} className="text-xs" />
-              <ToggleGroup
-                type="single"
-                size="sm"
-                variant="outline"
-                value={win.value}
-                onValueChange={(value) => value && setRange(value)}
-                aria-label="Window"
-              >
-                {WINDOWS.map((w) => (
-                  <ToggleGroupItem key={w.value} value={w.value} className="px-2.5 text-hint">
-                    {w.label}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-              <WorkspaceHelp compact />
-            </div>
+            </>
+          }
+          facts={
+            <>
+              {since && listening && (
+                <>
+                  <span className="numeric" title={`Listening since ${timestamp(meta?.since)}`}>
+                    listening for {duration((to - since) / 1000)}
+                  </span>
+                  <FactDot />
+                </>
+              )}
+              <span className="numeric" title="The dashboard keeps the newest 2,000 in memory">
+                {plural(meta?.buffered ?? all.length, "event")} kept
+              </span>
+              <span className="contents max-sm:hidden">
+                <FactDot />
+                <span className="numeric">
+                  {plural(activity.length, "container")} in {win.words}
+                </span>
+              </span>
+            </>
+          }
+          controls={
+            <ToggleGroup
+              type="single"
+              size="sm"
+              variant="outline"
+              value={win.value}
+              onValueChange={(value) => value && setRange(value)}
+              aria-label="Window"
+            >
+              {WINDOWS.map((w) => (
+                <ToggleGroupItem key={w.value} value={w.value} className="px-2.5 text-hint">
+                  {w.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           }
         />
 
@@ -529,7 +526,10 @@ export function EventsPage() {
               </PanelFooter>
             </Panel>
 
-            <Panel aria-label="Events">
+            {/* Plain: the feed is sentences, not a table, so it is a title
+                and a hairline with its rows on hairlines, and it scrolls with
+                the page (§2). It was a framed panel with a scroll of its own. */}
+            <Panel plain aria-label="Events">
               <PanelHeader
                 title={
                   <>
@@ -591,23 +591,16 @@ export function EventsPage() {
                   )}
                 </div>
               </PanelToolbar>
-              <PanelBody>
+              <PanelBody flush>
                 {entries.length === 0 ? (
                   <EmptyState
                     icon={ChartActivity}
                     title="Nothing matches"
                     description={`Nothing in ${win.words} matches these filters. Clear one, or widen the window.`}
-                    className="my-2"
+                    className="my-4"
                   />
                 ) : (
-                  <div
-                    className={cn(
-                      "-mx-3 overflow-auto px-3",
-                      // Its own scroll once it is longer than a screen, so the
-                      // containers above stay a scroll away rather than pages.
-                      "max-h-[calc(100svh-14rem)]",
-                    )}
-                  >
+                  <div className="pt-3">
                     <EventFeed key={filterKey} entries={shown} onContainer={selectContainer} />
                     {entries.length > shown.length && (
                       <Button
@@ -690,12 +683,7 @@ function Verdict({
     )
   }
   return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onPress}
-      className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
-    >
+    <VerdictButton pressed={pressed} onPress={onPress}>
       <Status
         tone="danger"
         live={looping.length > 0}
@@ -707,7 +695,7 @@ function Verdict({
               : `${plural(failed, "container")} failed`
         }
       />
-    </button>
+    </VerdictButton>
   )
 }
 

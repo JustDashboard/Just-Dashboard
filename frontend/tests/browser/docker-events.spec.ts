@@ -115,6 +115,60 @@ test("the window narrows everything, and an arriving event is drawn", async ({ p
   await expect(feed.getByText("worker started")).toBeVisible()
 })
 
+test("the page opens on Docker's line, with the window at its end", async ({ page }) => {
+  await mockEvents(page)
+  await page.goto("/docker/events")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toHaveAttribute("data-layout", "project")
+  await expect(identity).toContainText("Docker 28.5.1")
+  await expect(identity).not.toContainText("Docker Engine")
+  await expect(
+    identity.getByRole("button", { name: "shop-db-1 is in a restart loop" }),
+  ).toBeVisible()
+  await expect(identity.getByText("Live", { exact: true })).toBeVisible()
+  await expect(identity.getByLabel("Window")).toBeVisible()
+  await expect(identity.getByText(/^\d+ events kept$/)).toBeVisible()
+})
+
+test("the feed is a section under a hairline with its rows on hairlines, and scrolls with the page", async ({
+  page,
+}) => {
+  await mockEvents(page)
+  await page.goto("/docker/events")
+
+  const events = page.getByRole("region", { name: "Events", exact: true })
+  await expect(events).toHaveAttribute("data-plain", "")
+  // The containers are a table, and keep the frame a table has.
+  await expect(page.getByRole("region", { name: "Containers", exact: true })).not.toHaveAttribute(
+    "data-plain",
+  )
+  const feed = page.getByRole("region", { name: "Event feed" })
+  await expect(feed.getByText("worker ran out of memory")).toBeVisible()
+  // A hairline between every two rows of an hour, whichever of the two draws it.
+  const rules = await feed
+    .locator("ul")
+    .first()
+    .locator("> li")
+    .evaluateAll((rows) =>
+      rows.slice(1).map((row, index) => {
+        const above = getComputedStyle(rows[index]).borderBottomWidth
+        return above === "1px" || getComputedStyle(row).borderTopWidth === "1px"
+      }),
+    )
+  expect(rules.length).toBeGreaterThan(0)
+  expect(rules.every(Boolean)).toBe(true)
+  // No scroll region of its own: a frame's privilege, and the feed has none.
+  const boxed = await feed.evaluate((el) => {
+    for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+      if (node.matches("[data-slot=panel]")) return false
+      if (/auto|scroll/.test(getComputedStyle(node).overflowY)) return true
+    }
+    return false
+  })
+  expect(boxed).toBe(false)
+})
+
 test("an empty record says why rather than claiming a quiet host", async ({ page }) => {
   await mockEvents(page, { events: [] })
   await page.goto("/docker/events")
