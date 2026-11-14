@@ -165,7 +165,9 @@ export function DumpsPicture({
           ? files.length > 0
             ? `${plural(files.length, "dump")} · ${bytes(kept)}`
             : "empty"
-          : undefined
+          : // Its line is held while the list is read: narrow, the picture is a
+            // column, and a node that grew a line moved everything under it.
+            "\u00a0"
       }
     />
   )

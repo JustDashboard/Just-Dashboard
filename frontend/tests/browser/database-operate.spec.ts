@@ -642,7 +642,27 @@ const LIMITED = ["read", "service.control"]
 const dialog = (page: Page) => page.getByRole("dialog")
 const dumps = (page: Page) => page.getByRole("region", { name: "Dumps" })
 const dumpRow = (page: Page, file: string) => dumps(page).getByRole("row").filter({ hasText: file })
+/** A dump at any width: a row of the table, or its card where the table has no room. */
+const dumpEntry = (page: Page, file: string) =>
+  dumps(page).locator("tbody tr, [data-slot=dump-card]").filter({ hasText: file })
 const progress = (page: Page) => page.locator("[data-slot=transfer-progress]")
+/** The Dumps panel's menu: the commands beside Back up now that are not pressed daily. */
+const moreMenu = (page: Page) => page.getByRole("button", { name: "More backup actions" })
+async function more(page: Page, item: string) {
+  await moreMenu(page).click()
+  await page.getByRole("menuitem", { name: item }).click()
+}
+/** The menu's words; none where the role or the engine leaves nothing to put in one. */
+async function moreItems(page: Page): Promise<string[]> {
+  if ((await moreMenu(page).count()) === 0) return []
+  await moreMenu(page).click()
+  const items = await page.getByRole("menuitem").allTextContents()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("menu")).toHaveCount(0)
+  return items.map((item) => item.trim())
+}
+/** What a dump's name opens: the rest of what is known about it. */
+const about = (page: Page) => page.locator("[data-slot=popover-content]")
 const section = (page: Page, id: string) => page.locator(`section#${id}`)
 const saveBar = (page: Page) => page.getByRole("region", { name: "Save changes" })
 const where = (page: Page) => new URL(page.url()).pathname + new URL(page.url()).search
@@ -662,14 +682,91 @@ test("backups show their schedule action and every dump without metric cards", a
 
   await expect(dumpRow(page, "shop_main-new.dump")).toContainText("before the migration")
   await expect(dumpRow(page, "shop_main-new.dump")).toContainText("Everything")
-  await expect(dumpRow(page, "shop_main-new.dump")).toContainText("pg_dump")
+  // Who took it, the tool that wrote it and how long it took are behind its name.
+  await expect(dumpRow(page, "shop_main-new.dump")).not.toContainText("pg_dump")
+  await dumpRow(page, "shop_main-new.dump")
+    .getByRole("button", { name: "About shop_main-new.dump" })
+    .click()
+  await expect(about(page)).toContainText("by operator")
+  await expect(about(page)).toContainText(/pg_dump 16\.12, in under a second/)
+  await expect(about(page)).toContainText("before the migration")
+  await page.keyboard.press("Escape")
   await expect(dumpRow(page, "shop_main-safety.dump")).toContainText("safety dump")
   await expect(dumpRow(page, "categories.sql")).toContainText("uploaded")
   await expect(dumpRow(page, "shop_main-tables.dump")).toContainText("2 tables")
   // An uploaded file says what it is, not that it holds everything.
   await expect(dumpRow(page, "categories.sql")).not.toContainText("Everything")
-  await expect(dumps(page)).toContainText("/var/backups/jd/databases/shop")
+  // Where they are kept is said once, on the picture.
+  await expect(page.getByRole("list", { name: "Where the dumps of shop go" })).toContainText(
+    "/var/backups/jd/databases/shop",
+  )
+  await expect(dumps(page)).not.toContainText("/var/backups/jd/databases/shop")
 })
+
+for (const width of [1280, 390]) {
+  test(`at ${width} px every dump is one line of one height, with one command on the title line`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockOperate(page)
+    await visit(page, "/databases/1/backups")
+    await expect(dumpEntry(page, "shop_main-new.dump")).toBeVisible()
+    await risen(page)
+    // A dump with a note, a tag, neither, and one that is not described.
+    const boxes = await dumps(page)
+      .locator("tbody tr, [data-slot=dump-card]")
+      .evaluateAll((rows) =>
+        rows.map((row) => {
+          const box = row.getBoundingClientRect()
+          return { top: box.top, height: box.height }
+        }),
+      )
+    expect(boxes).toHaveLength(4)
+    const spread = (values: number[]) => Math.max(...values) - Math.min(...values)
+    expect(spread(boxes.map((box) => box.height))).toBeLessThan(0.5)
+    // Nothing hangs between two dumps: each starts where the last ended, plus the same gap.
+    expect(spread(boxes.slice(1).map((box, at) => box.top - boxes[at].top))).toBeLessThan(0.5)
+    // One brand-faced command beside the title, and the rest as words in a menu.
+    const head = dumps(page).locator("[data-slot=panel-header]").first()
+    await expect(head.getByRole("button")).toHaveCount(2)
+    await expect(head.getByRole("button", { name: "Back up now" })).toBeVisible()
+    expect(await moreItems(page)).toEqual(["Upload a dump", "Copy database"])
+    await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  })
+}
+
+for (const width of [1280, 390]) {
+  test(`at ${width} px the dumps and what is under them hold their place from loading to loaded`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await mockOperate(page, {
+      answers: {
+        "GET 1/backups": async () => {
+          await held
+          return BACKUPS
+        },
+      },
+    })
+    await visit(page, "/databases/1/backups")
+    const head = dumps(page).locator("[data-slot=panel-header]").first()
+    // The section under the dumps: it is what moved when the list landed at another height.
+    const under = page.getByRole("region", { name: "Point-in-time recovery", exact: true })
+    await expect(dumps(page).getByRole("status", { name: "Reading the dumps" })).toBeVisible()
+    await expect(under).toBeVisible()
+    await risen(page)
+    const before = [await head.boundingBox(), await under.boundingBox()]
+    release()
+    await expect(dumpEntry(page, "shop_main-new.dump")).toBeVisible()
+    await risen(page)
+    const after = [await head.boundingBox(), await under.boundingBox()]
+    expect(Math.round(after[0]!.y)).toBe(Math.round(before[0]!.y))
+    // Four dumps are kept, which is what the silhouette draws.
+    expect(Math.abs(after[1]!.y - before[1]!.y)).toBeLessThanOrEqual(1)
+  })
+}
 
 test("the backup schedule keeps its state and next run beside its action", async ({ page }) => {
   let enabled = false
@@ -780,6 +877,63 @@ test("a transfer already running is shown on arrival, and can be stopped by the 
   await expect.poll(() => server.sent.map((one) => one.request)).toContain("POST /jobs/j7/cancel")
 })
 
+/**
+ * How far past its window's edge the page reaches at any point of the border
+ * light's lap. The light is moved round the frame by one animation, which is
+ * stepped through a lap here rather than waited for: at four seconds a lap, a
+ * check that looked once saw the light on the right edge one time in ten.
+ */
+function widestDuringLap(page: Page, unclipped = false) {
+  return progress(page).evaluate(async (el, bare) => {
+    if (bare) el.querySelector("span.overflow-hidden")?.classList.remove("overflow-hidden")
+    const laps = el
+      .getAnimations({ subtree: true })
+      .filter((animation) =>
+        (animation.effect as KeyframeEffect | null)
+          ?.getKeyframes()
+          .some((frame) => String(frame.transform ?? "").includes("translate(")),
+      )
+    const scrolls = [
+      document.documentElement,
+      ...document.querySelectorAll("[data-slot=page]"),
+    ].map((node) => node.parentElement ?? node)
+    let most = 0
+    for (const lap of laps) {
+      const duration = Number(lap.effect?.getComputedTiming().duration ?? 0)
+      lap.pause()
+      for (let at = 0; at < 1; at += 0.02) {
+        lap.currentTime = at * duration
+        await new Promise(requestAnimationFrame)
+        most = Math.max(most, ...scrolls.map((node) => node.scrollWidth - node.clientWidth))
+      }
+      lap.play()
+    }
+    return { laps: laps.length, most }
+  }, unclipped)
+}
+
+test("a running transfer's border light never reaches past the page on a phone", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOperate(page, {
+    answers: {
+      "GET 1/backups": { ...BACKUPS, job: job("j7", "backup", "running") },
+      "GET /jobs/j7": {
+        job: job("j7", "backup", "running"),
+        lines: [line(1, "status", "Dumping shop")],
+      },
+    },
+  })
+  await visit(page, "/databases/1/backups")
+  await expect(progress(page)).toHaveAttribute("aria-label", "Dump shop, running")
+  const clipped = await widestDuringLap(page)
+  expect(clipped.laps).toBe(1)
+  expect(clipped.most).toBeLessThanOrEqual(1)
+  // The check sees what it is for: without the clip the light's box widens the page.
+  expect((await widestDuringLap(page, true)).most).toBeGreaterThan(20)
+})
+
 test("a restore says where it goes, takes a safety dump first, and is confirmed with the database named", async ({
   page,
 }) => {
@@ -888,7 +1042,7 @@ test("a copy is a new database beside this one, and a transfer already running i
     },
   })
   await visit(page, "/databases/1/backups")
-  await page.getByRole("button", { name: "Copy database" }).click()
+  await more(page, "Copy database")
   const run = dialog(page).getByRole("button", { name: "Copy", exact: true })
   await expect(run).toBeDisabled()
   await dialog(page).getByLabel("Name of the copy").fill("shop_main")
@@ -904,7 +1058,7 @@ test("a copy is a new database beside this one, and a transfer already running i
   await expect(progress(page)).toHaveAttribute("aria-label", "Dump shop, succeeded")
   await progress(page).getByRole("button", { name: "Dismiss" }).click()
 
-  await page.getByRole("button", { name: "Copy database" }).click()
+  await more(page, "Copy database")
   await dialog(page).getByLabel("Name of the copy").fill("shop2")
   await dialog(page).getByRole("button", { name: "Copy", exact: true }).click()
   await expect(progress(page)).toHaveAttribute("aria-label", "Copy shop to shop2, succeeded")
@@ -926,7 +1080,7 @@ test("an uploaded dump is named before it is sent, and a refusal stays in the di
     },
   })
   await visit(page, "/databases/1/backups")
-  await page.getByRole("button", { name: "Upload a dump" }).click()
+  await more(page, "Upload a dump")
 
   const send = dialog(page).getByRole("button", { name: "Upload", exact: true })
   await expect(send).toBeDisabled()
@@ -975,8 +1129,7 @@ test("each role is offered what its capabilities allow on the dumps, and no more
   await mockOperate(page, { capabilities: LIMITED })
   await visit(page, "/databases/1/backups")
   await expect(page.getByRole("button", { name: "Back up now" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Upload a dump" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Copy database" })).toHaveCount(0)
+  expect(await moreItems(page)).toEqual(["Upload a dump"])
   const row = dumpRow(page, "shop_main-new.dump")
   await expect(row.getByRole("button", { name: /^Download/ })).toBeVisible()
   await expect(row.getByRole("button", { name: /^Restore/ })).toHaveCount(0)
@@ -990,8 +1143,14 @@ test("a viewer reads the dumps and is offered nothing that takes, moves or remov
   await visit(page, "/databases/1/backups")
   await expect(dumpRow(page, "shop_main-new.dump")).toBeVisible()
   await expect(page.getByRole("button", { name: "Back up now" })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Upload a dump" })).toHaveCount(0)
-  await expect(dumps(page).getByRole("row").getByRole("button")).toHaveCount(0)
+  await expect(moreMenu(page)).toHaveCount(0)
+  // A dump's name still opens what is known about it: reading is the viewer's.
+  await expect(dumps(page).getByRole("row").getByRole("button")).toHaveCount(4)
+  await expect(
+    dumps(page)
+      .getByRole("row")
+      .getByRole("button", { name: /^(Download|Restore|Delete) / }),
+  ).toHaveCount(0)
 })
 
 test("a protected connection keeps its dumps and offers no restore and no copy", async ({
@@ -1000,7 +1159,7 @@ test("a protected connection keeps its dumps and offers no restore and no copy",
   await mockOperate(page, { rows: { 1: { readOnly: true } } })
   await visit(page, "/databases/1/backups")
   await expect(page.getByRole("button", { name: "Back up now" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Copy database" })).toHaveCount(0)
+  expect(await moreItems(page)).toEqual(["Upload a dump"])
   const row = dumpRow(page, "shop_main-new.dump")
   await expect(row.getByRole("button", { name: /^Download/ })).toBeVisible()
   await expect(row.getByRole("button", { name: /^Restore/ })).toHaveCount(0)
@@ -1041,7 +1200,7 @@ test("an engine that keeps one database per connection offers no copy and no new
   await mockOperate(page)
   await visit(page, "/databases/7/backups")
   await expect(page.getByRole("button", { name: "Back up now" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Copy database" })).toHaveCount(0)
+  expect(await moreItems(page)).not.toContain("Copy database")
   await dumpRow(page, "notes.sqlite")
     .getByRole("button", { name: /^Restore/ })
     .click()
