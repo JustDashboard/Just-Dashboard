@@ -1,21 +1,25 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Copy, Eye, Key, Plus, Sparkles, Trash, UserMinus } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
+import { plural } from "@/lib/format"
 import type { AuthFile } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Field, FormSection, FormSections } from "@/components/form"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Field, FormFact, FormFacts, FormSection } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { ROW_BLEED } from "@/components/row-list"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
-import { VerbActions } from "@/components/verbs"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
+import { SidePanel } from "@/components/side-panel"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -25,6 +29,7 @@ import {
   InputGroupInput,
   InputGroupToggle,
 } from "@/components/ui/input-group"
+import { siteSettingsHref } from "@/components/proxy/site-tabs"
 
 /** Who the login dialog is for: a new login, or a password change for one already there. */
 type LoginTarget = { file: string; user: string; change: boolean }
@@ -37,14 +42,23 @@ type LoginTarget = { file: string; user: string; change: boolean }
  * has already been to a terminal and run htpasswd — the thing this page exists
  * to avoid. Putting a staging site behind a password is one of the two or
  * three commonest reasons to reach for a reverse proxy at all.
+ *
+ * A file is one line: its name over where it is, how many logins it holds
+ * and which sites name it. Its logins — each with a new password or a removal
+ * a press away — are in the sheet the row opens, where a block of them under
+ * every file made a list of three files a screen tall.
  */
 export function AuthFilesPanel() {
   const { confirm, dialog } = useConfirm()
   const [target, setTarget] = useState<LoginTarget | null>(null)
+  // The file whose sheet is open, by name, so the sheet follows the list as
+  // logins come and go.
+  const [opened, setOpened] = useState<string | null>(null)
   const { data, error, loading, refresh } = usePoll<AuthFile[]>(
     (signal) => get("/proxy/auth-files/", undefined, signal),
     0,
   )
+  const open = data?.find((file) => file.name === opened)
 
   const removeUser = (file: AuthFile, user: string) =>
     confirm({
@@ -83,29 +97,33 @@ export function AuthFilesPanel() {
       ),
       action: async () => {
         await del(`/proxy/auth-files/${encodeURIComponent(file.name)}${inUse ? "?force=1" : ""}`)
+        setOpened(null)
         refresh()
       },
     })
   }
+  const addLogin = (file = "") => setTarget({ file, user: "", change: false })
 
   return (
     <>
-      <FormSections>
-        <FormSection
-          aside
+      <Panel plain aria-label="Password files">
+        <PanelHeader
           title="Password files"
-          hint={`${data?.length ?? 0} files for HTTP basic authentication`}
           actions={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setTarget({ file: "", user: "", change: false })}
-            >
-              <Plus className="size-4" />
-              Add login
-            </Button>
+            <>
+              {data && data.length > 0 && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {plural(data.length, "file")}
+                </span>
+              )}
+              <Button size="xs" variant="outline" onClick={() => addLogin()}>
+                <Plus className="size-3.5" />
+                Add login
+              </Button>
+            </>
           }
-        >
+        />
+        <PanelBody flush className="pt-3">
           {loading ? (
             <LoadingRows rows={2} />
           ) : error ? (
@@ -114,91 +132,70 @@ export function AuthFilesPanel() {
             <EmptyState
               icon={Key}
               title="No password files yet"
-              description="Add a login, then choose the file in a site's password field to put that site behind it."
-              className="mt-2"
+              description="Add a login, then choose the file in a site's password field."
             />
           ) : (
-            <ul className="animate-rise divide-y divide-hairline">
+            <ChoiceList aria-label="Password files" className="animate-rise">
               {data.map((file) => (
-                <li
+                <ChoiceRow
                   key={file.name}
-                  className={cn(
-                    "group flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
-                    ROW_BLEED,
-                  )}
-                >
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                      <span className="text-body font-medium">{file.name}</span>
-                      <span className="truncate font-mono text-hint text-muted-foreground">
-                        {file.path}
+                  onSelect={() => setOpened(file.name)}
+                  verb={`Open ${file.name}`}
+                  leading={<ProductLogo id={undefined} size="sm" fallback={Key} />}
+                  title={file.name}
+                  description={<span className="font-mono">{file.path}</span>}
+                  trailing={
+                    <>
+                      <span
+                        className={cn(
+                          "numeric w-20 text-hint max-sm:hidden",
+                          file.users.length === 0 ? "text-warning" : "text-muted-foreground",
+                        )}
+                      >
+                        {file.users.length === 0 ? "no logins" : plural(file.users.length, "login")}
                       </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {file.users.length === 0 ? (
-                        <span className="text-hint text-muted-foreground">
-                          Empty — this file admits nobody.
-                        </span>
-                      ) : (
-                        file.users.map((user) => (
-                          <Tag key={user} mono className="gap-1 pr-0.5">
-                            {user}
-                            <IconAction
-                              label={`Change the password of ${user}`}
-                              size="icon-xs"
-                              className="size-4 text-muted-foreground hover:text-foreground [&_svg:not([class*='size-'])]:size-2.5"
-                              onClick={() => setTarget({ file: file.name, user, change: true })}
-                            >
-                              <Key />
-                            </IconAction>
-                            <IconAction
-                              label={`Remove ${user}`}
-                              size="icon-xs"
-                              className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                              onClick={() => removeUser(file, user)}
-                            >
-                              <UserMinus />
-                            </IconAction>
-                          </Tag>
-                        ))
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {file.usedBy.length === 0 ? (
-                        <span className="text-hint text-muted-foreground">
-                          No site names this file.
-                        </span>
-                      ) : (
-                        <>
-                          <span className="text-hint text-muted-foreground">Used by</span>
-                          {file.usedBy.map((site) => (
-                            <Tag key={site} mono>
-                              {site}
-                            </Tag>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <VerbActions
-                    dim
-                    className="shrink-0"
-                    verbs={[
-                      {
-                        key: "delete",
-                        label: "Delete file",
-                        icon: Trash,
-                        danger: true,
-                        run: () => removeFile(file),
-                      },
-                    ]}
-                  />
-                </li>
+                      <span
+                        className="w-40 truncate text-right text-hint text-muted-foreground max-md:hidden"
+                        title={file.usedBy.join(", ")}
+                      >
+                        {usedByWords(file.usedBy)}
+                      </span>
+                    </>
+                  }
+                  actions={
+                    <VerbMenu
+                      label={`More actions for ${file.name}`}
+                      verbs={[
+                        {
+                          key: "add",
+                          label: "Add login",
+                          icon: Plus,
+                          run: () => addLogin(file.name),
+                        },
+                        {
+                          key: "delete",
+                          label: "Delete file",
+                          icon: Trash,
+                          danger: true,
+                          run: () => removeFile(file),
+                        },
+                      ]}
+                    />
+                  }
+                />
               ))}
-            </ul>
+            </ChoiceList>
           )}
-        </FormSection>
-      </FormSections>
+        </PanelBody>
+      </Panel>
+      <AuthFileSheet
+        file={open}
+        onClose={() => setOpened(null)}
+        onAdd={(file) => addLogin(file.name)}
+        onChange={(file, user) => setTarget({ file: file.name, user, change: true })}
+        onRemove={removeUser}
+        onDelete={removeFile}
+      />
       {target && (
         <AuthUserDialog
           key={`${target.file}:${target.user}`}
@@ -210,6 +207,122 @@ export function AuthFilesPanel() {
       )}
       {dialog}
     </>
+  )
+}
+
+/** Which sites name a file, as the row has room to say it. */
+function usedByWords(sites: string[]) {
+  if (sites.length === 0) return "no site names it"
+  if (sites.length === 1) return sites[0]
+  return plural(sites.length, "site")
+}
+
+/**
+ * One password file: where it is, the logins in it — each with a new
+ * password or a removal — and the sites that name it, each a way to that
+ * site's access settings.
+ */
+function AuthFileSheet({
+  file,
+  onClose,
+  onAdd,
+  onChange,
+  onRemove,
+  onDelete,
+}: {
+  file: AuthFile | undefined
+  onClose: () => void
+  onAdd: (file: AuthFile) => void
+  onChange: (file: AuthFile, user: string) => void
+  onRemove: (file: AuthFile, user: string) => void
+  onDelete: (file: AuthFile) => void
+}) {
+  return (
+    <SidePanel
+      open={file !== undefined}
+      onOpenChange={(open) => !open && onClose()}
+      width="sm"
+      initialFocus="body"
+      title={
+        <>
+          <ProductLogo id={undefined} size="sm" fallback={Key} />
+          {file?.name}
+        </>
+      }
+      description="The logins in this password file and the sites that name it"
+      footer={
+        file && (
+          <>
+            <Button
+              variant="outline"
+              className="mr-auto text-destructive"
+              onClick={() => onDelete(file)}
+            >
+              <Trash className="size-4" />
+              Delete file
+            </Button>
+            <Button onClick={() => onAdd(file)}>
+              <Plus className="size-4" />
+              Add login
+            </Button>
+          </>
+        )
+      }
+    >
+      {file && (
+        <div className="space-y-6">
+          <FormFacts>
+            <FormFact label="File" mono>
+              {file.path}
+            </FormFact>
+          </FormFacts>
+          <FormSection title="Logins">
+            {file.users.length === 0 ? (
+              <p className="text-body text-muted-foreground">Empty: this file admits nobody.</p>
+            ) : (
+              <ul aria-label={`Logins in ${file.name}`} className="divide-y divide-hairline">
+                {file.users.map((user) => (
+                  <li key={user} className="flex min-h-11 min-w-0 items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-mono text-body">{user}</span>
+                    <IconAction
+                      label={`Change the password of ${user}`}
+                      onClick={() => onChange(file, user)}
+                    >
+                      <Key />
+                    </IconAction>
+                    <IconAction
+                      label={`Remove ${user}`}
+                      className="hover:text-destructive"
+                      onClick={() => onRemove(file, user)}
+                    >
+                      <UserMinus />
+                    </IconAction>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </FormSection>
+          <FormSection title="Used by">
+            {file.usedBy.length === 0 ? (
+              <p className="text-body text-muted-foreground">No site names this file.</p>
+            ) : (
+              <ul aria-label={`Sites using ${file.name}`} className="divide-y divide-hairline">
+                {file.usedBy.map((site) => (
+                  <li key={site} className="flex min-h-11 min-w-0 items-center">
+                    <Link
+                      href={siteSettingsHref(site, "access")}
+                      className="min-w-0 truncate rounded-sm font-mono text-body focus-ring hover:underline"
+                    >
+                      {site}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </FormSection>
+        </div>
+      )}
+    </SidePanel>
   )
 }
 
@@ -317,7 +430,8 @@ function AuthUserDialog({
         <Field
           label={target.change ? "New password" : "Password"}
           htmlFor="auth-password"
-          hint="At least 8 characters, at most 72 — bcrypt truncates anything longer, which would quietly make it a different password from the one you typed."
+          hint="8 to 72 characters."
+          info="bcrypt truncates anything longer than 72, which would quietly make it a different password from the one you typed."
         >
           <InputGroup>
             <InputGroupInput
