@@ -92,7 +92,19 @@ const subscribe = () => () => {}
 const contentArea = () => document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]')
 const noContentArea = () => null
 
-export function SaveBarProvider({ children }: { children: React.ReactNode }) {
+export function SaveBarProvider({
+  children,
+  inline,
+}: {
+  children: React.ReactNode
+  /**
+   * The bar holds to the foot of the column it is in rather than floating
+   * over the content area: for a settings column that shares the area with
+   * something beside it (a rail of siblings), where the area's centre is not
+   * the column's.
+   */
+  inline?: boolean
+}) {
   const [entries, setEntries] = useState<Record<string, EntryState>>({})
   const actions = useRef(new Map<string, { current: EntryActions }>())
   const latest = useRef(entries)
@@ -164,6 +176,7 @@ export function SaveBarProvider({ children }: { children: React.ReactNode }) {
         entries={entries}
         phase={phase}
         saved={saved}
+        inline={inline}
         onSave={() => void saveAll()}
         onDiscard={() => {
           for (const [id, entry] of Object.entries(entries))
@@ -223,12 +236,14 @@ function SaveBar({
   entries,
   phase,
   saved,
+  inline,
   onSave,
   onDiscard,
 }: {
   entries: Record<string, EntryState>
   phase: Phase
   saved: EntryState[]
+  inline?: boolean
   onSave: () => void
   onDiscard: () => void
 }) {
@@ -252,15 +267,20 @@ function SaveBar({
     return () => window.removeEventListener("keydown", onKey)
   }, [dirty.length, onSave])
 
-  if (!host || !visible) return null
+  if ((!host && !inline) || !visible) return null
 
   // Every write went through. A form can look dirty for a moment longer —
   // until its saved value is read back — and that is not an edit left over.
   const done = phase === "saved"
   const shown = done || dirty.length === 0 ? saved : dirty
 
-  return createPortal(
-    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-3 md:bottom-6">
+  const bar = (
+    <div
+      className={cn(
+        "pointer-events-none z-40 flex justify-center",
+        inline ? "sticky bottom-4" : "absolute inset-x-0 bottom-4 px-3 md:bottom-6",
+      )}
+    >
       <div
         role="region"
         aria-label="Save changes"
@@ -333,7 +353,7 @@ function SaveBar({
           </div>
         )}
       </div>
-    </div>,
-    host,
+    </div>
   )
+  return inline || !host ? bar : createPortal(bar, host)
 }
