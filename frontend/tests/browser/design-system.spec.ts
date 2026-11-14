@@ -10,6 +10,13 @@ import { mockWorkbench } from "./workbench-fixture"
 import { mockProxy } from "./proxy-fixtures"
 import { mockIntrusion } from "./security-intrusion-fixture"
 import { mockNetwork } from "./network-fixture"
+import { mockPM2 } from "./pm2-fixture"
+import { mockVolumes } from "./docker-volumes-fixture"
+import { mockJobs } from "./docker-volume-page-fixture"
+import { IMAGES, mockImages } from "./docker-images-fixture"
+import { mockNetworkPage } from "./docker-network-page-fixture"
+import { mockHost as mockPackages } from "./packages-fixture"
+import { mockDNSServicePage } from "./network-dns-services-fixture"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -510,6 +517,64 @@ test.describe("at a phone's width", () => {
  * broken on, and they are on every page.
  */
 const LABELLED = { rows: { 1: { environment: "production", readOnly: true } } }
+
+/**
+ * The pages of one item that 0.8.7 made where a sheet was: a PM2 application,
+ * a volume, an image, a network, a package, a jail, a DNS engine, a database
+ * account, statement, table and session. Under `mockShell`'s empty lists each
+ * is its "no such thing" screen (a package's page was left out of `SURFACES`
+ * for that), so the rules were never checked on the page itself. Each is
+ * opened here with what its own spec gives it to draw.
+ */
+const ITEM_SURFACES: [path: string, mock: (page: Page) => Promise<unknown>][] = [
+  ["/processes/pm2/api", (page) => mockPM2(page)],
+  [
+    "/docker/volumes/shop_pgdata",
+    async (page) => {
+      await mockVolumes(page)
+      await mockJobs(page)
+    },
+  ],
+  [`/docker/images/${IMAGES[0].id.replace(/^sha256:/, "")}`, (page) => mockImages(page)],
+  ["/docker/networks/shop_backend", (page) => mockNetworkPage(page)],
+  ["/packages/nginx", (page) => mockPackages(page)],
+  ["/security/intrusion/jails/sshd", (page) => mockIntrusion(page)],
+  ["/network/dns/services/dns-fixture", (page) => mockDNSServicePage(page)],
+  ["/databases/1/access/app", (page) => mockDatabases(page, LABELLED)],
+  ["/databases/1/performance/statements/s2", (page) => mockDatabases(page, LABELLED)],
+  ["/databases/1/performance/tables/public.orders", (page) => mockDatabases(page, LABELLED)],
+  ["/databases/1/performance/sessions/52", (page) => mockDatabases(page, LABELLED)],
+]
+
+for (const [label, viewport] of [
+  ["", { width: 1280, height: 800 }],
+  [" at a phone's width", { width: 390, height: 844 }],
+] as const) {
+  for (const [path, mock] of ITEM_SURFACES) {
+    test(`${path}, an item's page, keeps the rules${label}`, async ({ page }) => {
+      await page.setViewportSize(viewport)
+      await mock(page)
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
+      await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+      // A figure that has just landed is four pixels into its rise, and off any line.
+      await risen(page)
+
+      expect(await unnamedControls(page), `unlabelled icon-only controls on ${path}`).toEqual([])
+      expect(await offCentreText(page), `text off its row's centre line on ${path}`).toEqual([])
+      expect(await filledPills(page), `fully rounded filled chips on ${path}`).toEqual([])
+      const seen = await registers(page)
+      expectOneRegister(path, seen)
+      expect(seen.registers, `${path} is a page that reports`).not.toContain("flow")
+      const sideways = await page.evaluate(() =>
+        [document.documentElement, ...document.querySelectorAll("[data-slot=page]")]
+          .map((el) => el.parentElement ?? el)
+          .some((el) => el.scrollWidth > el.clientWidth + 1),
+      )
+      expect(sideways, `${path} scrolls sideways`).toBe(false)
+    })
+  }
+}
 
 for (const [label, viewport] of [
   ["", { width: 1280, height: 800 }],

@@ -51,7 +51,9 @@ const BACK = (
     href={BACK_HREF}
     className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
   >
-    <ArrowLeft aria-hidden className="size-3.5" />
+    {/* The size every item page's way back has: a larger arrow made the
+        line taller than the row centres, and the words stood two pixels low. */}
+    <ArrowLeft aria-hidden className="size-3" />
     Intrusion
   </Link>
 )
