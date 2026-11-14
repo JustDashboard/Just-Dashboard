@@ -67,7 +67,13 @@ Routes: `/excalidraw`, `/excalidraw/[id]`
 
 Workspace Excalidraw drawings (`/boards` redirects here). The list opens on Excalidraw's logo and a
 line of facts over the drawings as lit cards, each drawn from the server's preview of its scene and
-sketched in on arrival, with the server items it links drawn as themselves. The editor embeds
+sketched in on arrival, with the server items it links drawn as themselves. The editor is one
+workbench frame held to the window (rounded and in the page's gutter from `lg`, the screen below
+it) under a head bar: back, Excalidraw's mark, the name edited in place and the save state as a dot
+and its words, then Add server item as the one command (Reload in its place while another tab's
+change stops saving) and a menu holding Save now, Reload and Delete drawing; a failed save offers
+Try again beside its words. A drawing that is not there, or an address that is no drawing's, is an
+empty state with Excalidraw's mark and Back to drawings. The editor embeds
 Excalidraw and autosaves to server SQLite with a revision guard, or by merging once it has joined
 the drawing's live room, where everyone with it open sees the others' changes, pointers and names as
 they happen; images are stored apart from the scene; the insert panel adds live cards for the host,
@@ -84,10 +90,18 @@ the empty canvas are the dashboard's
 Routes: `/remote-desktop`, `/remote-desktop/new`, `/remote-desktop/[id]`
 
 Workspace remote desktop. The overview opens on the computers' systems as their own marks and a line
-of facts (how many, how many ready, open sessions, the tailnet) with the verdict and Add a computer;
+of facts (how many, how many ready, open sessions, the tailnet) with the verdict beside the name, Add
+a computer as the one command and Check every computer again in the menu after it, drawn while the
+page loads;
 then the picture of a session's path — this browser, this server running guacd, each computer wired
-by whether its port answers and pulsing while a session is open; the computers as cards, and the
+by whether its port answers and pulsing while a session is open; the computers as one-line rows (the
+system's mark, the name over the server on it and `account@address:port` in mono, a state dot and
+word, "43 ms direct · used 11m ago" as one line, Stream once paired, Connect and a menu; on a phone
+the mark, the name over its state and reading, and the menu), and the
 tailnet's desktops not added yet. A server without the engine opens on its install, run as a job.
+An engine that is stopped, removed, shadowed by another container or unread is the missing-thing
+screen as a block with its step (Start, Install, Open Containers, Check again), and Docker not
+answering is Docker's own screen there, never the client's sentence.
 The add flow asks which computer (the tailnet's desktops drawn as their systems, or an address),
 says where Remote Desktop or Screen Sharing is switched on for that system and watches the port
 until it answers, then saves the sign-in. A session is the terminal's workspace around the live
@@ -105,7 +119,10 @@ computer's screen's own shape (read off the black padding Sunshine adds round it
 and remembered per computer), with the padding drawn past the frame's edges rather than shown and
 the stream never loaded again for a new shape, with the quality (Light, Smooth, Sharp, Max at
 1440p120 and 80 Mb/s) and unpairing in the tools and the transport on its route (WebRTC on the
-tailnet, else the WebSocket); a paired computer's card has Stream beside Connect. Sessions are held
+tailnet, else the WebSocket); a paired computer's row has Stream beside Connect. Below `lg` a
+session is one pane at a time over the shared bar (Screen, Tools, Computers), the screen keeping
+its connection and its size while another pane is up; from `lg` to `xl` the computers are a rail
+and the tools a sheet; from `xl` all three stand side by side. Sessions are held
 by the shell, so another page and back finds them still connected, with a dock at the corner listing
 them (each as its computer's mark, how it is drawn and its round trip) while elsewhere, and the
 rail's Remote Desktop leading back into the last one; the stream hides this computer's pointer over
@@ -1874,7 +1891,11 @@ open with a floating Save that appears only once edited; the Git tab is the repo
 read file by file, branch switching and checking out an open pull request, with a link to the Git
 page for everything else), the last-open session and window remembered across navigation, side
 tools, replay, a dropped socket reconnecting by itself, clipboard upload, renderer, and keyboard
-customization
+customization. Below `lg` the frame is the screen and shows one pane at a time over the shared bar
+(Sessions, Terminal, Files, Git with the count of changed files), opening on the emulator; an
+emulator that is put away keeps its socket and its grid and is fitted again when shown. Turned off
+in Configuration, the page is the missing-thing screen with the terminal's mark and Open
+Configuration for an administrator
 
 **Implementation:** terminal page, `components/terminal/`, `components/xterm-pane.tsx`; see
 [`features-terminal.md`](features-terminal.md#the-terminal-panel)

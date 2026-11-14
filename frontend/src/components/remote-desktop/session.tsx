@@ -5,10 +5,13 @@ import { useCallback, useEffect, useId, useRef, useState } from "react"
 import type * as Guac from "guacamole-common-js"
 import {
   ArrowLeft,
+  DesktopDevice,
   Fullscreen,
   FullscreenClose,
+  Layers,
   Plus,
   RefreshClockwise,
+  SettingsSliders,
   SidebarLeftClose,
   SidebarLeftOpen,
   SidebarRightClose,
@@ -16,8 +19,9 @@ import {
 } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
 import { Page } from "@/components/page"
-import { ProductGlyph } from "@/components/product-logo"
+import { ProductGlyph, ProductLogos } from "@/components/product-logo"
 import { PaneHeader } from "@/components/panel"
+import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { SidePanel } from "@/components/side-panel"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
@@ -81,6 +85,15 @@ async function loadGuacamole(): Promise<GuacModule> {
   return (mod as unknown as { default?: GuacModule }).default ?? mod
 }
 
+/** What a phone shows one of (`phone-panes.tsx`). */
+type SessionPane = "screen" | "tools" | "computers"
+
+const SESSION_STOPS: PaneStop<SessionPane>[] = [
+  { key: "screen", label: "Screen", icon: <DesktopDevice /> },
+  { key: "tools", label: "Tools", icon: <SettingsSliders /> },
+  { key: "computers", label: "Computers", icon: <Layers /> },
+]
+
 /** Guacamole.Client.State, which the typings leave as an enum the bundle does not export. */
 const CONNECTED = 3
 const DISCONNECTED = 5
@@ -93,7 +106,11 @@ const DISCONNECTED = 5
  * files and the keys a browser keeps for itself — on the right. Unlike the
  * terminal it takes the shell's whole content area, edge to edge: the page's
  * measure and gutter were space taken from the screen, which is the one
- * thing here worth every pixel. The screen is drawn by Guacamole's own
+ * thing here worth every pixel. It is the one workbench that does, and
+ * `design-system.md` says so. On a phone the three are one pane at a time
+ * over a bar that picks it, as the terminal's are; the screen keeps its
+ * connection and its size while another pane is up, because a frame that is
+ * not drawn has no size to follow. The screen is drawn by Guacamole's own
  * browser client from the protocol the backend relays; the backend did the
  * connection's handshake, so the password never reached this page. The
  * remote screen is asked to be the size of the frame and follows it as the
@@ -139,7 +156,12 @@ export function RemoteSession({
   const [phase, setPhase] = useState<Phase>({ kind: "connecting" })
   const [attempt, setAttempt] = useState(0)
   const [immersive, setImmersive] = useState(false)
+  // Three widths: a phone shows one pane and a bar; up to `xl` the computers
+  // are a rail and the tools a sheet, since both beside the screen would
+  // leave it a strip; from `xl` all three stand side by side.
+  const phone = useMediaQuery("(max-width: 1023px)")
   const narrow = useMediaQuery("(max-width: 1279px)")
+  const [pane, setPane] = useState<SessionPane>("screen")
   const [mobileTools, setMobileTools] = useState(false)
   const toolsTrigger = useRef<HTMLButtonElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -407,7 +429,9 @@ export function RemoteSession({
   }
 
   const switchMode = (next: SessionMode) => {
+    // The other way of drawing the screen is picked to be looked at.
     setMobileTools(false)
+    setPane("screen")
     setPlaying(false)
     if (next === mode) return
     // The Control session is closed in Stream and opened afresh on the way back.
@@ -510,6 +534,7 @@ export function RemoteSession({
     return (
       <Page className="animate-rise">
         <EmptyState
+          mark={<ProductLogos ids={["windows", "apple", "linux"]} size="md" />}
           title="This computer is not in Remote Desktop"
           description="It may have been removed. The computers that are still there are on the Remote Desktop page."
           action={
@@ -527,6 +552,9 @@ export function RemoteSession({
     phase.kind === "failed" && computer
       ? sessionProblem(phase.code, phase.message, computer)
       : undefined
+
+  // Fullscreen is the screen and nothing else, whichever pane asked for it.
+  const shown: SessionPane = immersive ? "screen" : pane
 
   // Around a screen whose shape is not the window's: the workspace's own
   // ground in the page, and black in fullscreen, where the window is the monitor.
@@ -582,242 +610,287 @@ export function RemoteSession({
         ref={workspace}
         data-slot="remote-workspace"
         className={cn(
-          "relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-card",
+          "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card",
           immersive && "fixed inset-0 z-50 bg-background",
         )}
       >
-        {!immersive && rail && data && (
-          <Rail computers={data.computers} current={id} hueOf={hueOf} />
-        )}
+        <div className="flex min-h-0 min-w-0 flex-1">
+          {!immersive && data && (rail || phone) && (
+            <Rail
+              computers={data.computers}
+              current={id}
+              hueOf={hueOf}
+              className={cn(paneShown(shown === "computers"), !rail && "lg:hidden")}
+            />
+          )}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <PaneHeader className="min-h-10 shrink-0 flex-wrap gap-1 py-0.5">
-            {!immersive && (
-              <IconAction
-                label={rail ? "Hide the computers" : "Show the computers"}
-                onClick={() => setRail((held) => !held)}
-                className="max-lg:hidden"
-              >
-                {rail ? <SidebarLeftClose /> : <SidebarLeftOpen />}
-              </IconAction>
-            )}
-            <Link
-              href={REMOTE_DESKTOP_HREF}
-              aria-label="Back to the computers"
-              className={cn(
-                "flex size-8 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:bg-accent hover:text-foreground",
-                rail && "lg:hidden",
+          <div
+            data-slot="remote-screen-pane"
+            className={cn("flex min-h-0 min-w-0 flex-1 flex-col", paneShown(shown === "screen"))}
+          >
+            {/* One row at every width: the name gives way first, then the words
+              beside it and the figures, so the commands never fold under. */}
+            <PaneHeader className="@container min-h-10 shrink-0 gap-1 py-0.5">
+              {!immersive && (
+                <IconAction
+                  label={rail ? "Hide the computers" : "Show the computers"}
+                  onClick={() => setRail((held) => !held)}
+                  className="max-lg:hidden"
+                >
+                  {rail ? <SidebarLeftClose /> : <SidebarLeftOpen />}
+                </IconAction>
               )}
-            >
-              <ArrowLeft className="size-4" />
-            </Link>
-            {computer && (
-              <span className="flex min-w-0 items-center gap-2.5 px-1">
-                <ComputerMark os={computer.os} size="sm" className="scale-75" />
-                <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="truncate text-body font-semibold">{computer.name}</span>
-                  <span className="flex shrink-0 items-center gap-1 self-center text-hint text-muted-foreground max-sm:hidden">
-                    {!control && <ProductGlyph id="sunshine" className="size-3" />}
-                    {drawn}
-                  </span>
-                </span>
-              </span>
-            )}
-            <span className="flex-1" />
-            {!control ? (
-              <StreamStatus stream={stream} playing={playing} stats={streamStats} path={path} />
-            ) : phase.kind === "connected" ? (
-              <>
-                <Status
-                  tone="running"
-                  live
-                  label={latency(computer?.reach.latencyMs) ?? "connected"}
-                  className="px-2"
-                />
-                <SessionFigures
-                  fps={
-                    controlStats && controlStats.clientFps > 0 ? controlStats.clientFps : undefined
-                  }
-                  path={path}
-                />
-              </>
-            ) : phase.kind === "connecting" ? (
-              <TextShimmer className="px-2 text-xs font-medium">connecting…</TextShimmer>
-            ) : phase.kind === "sign-in" ? (
-              <Status tone="notice" label="waiting for a sign-in" className="px-2" />
-            ) : (
-              <Status
-                tone={phase.kind === "failed" ? "warning" : "stopped"}
-                label={phase.kind === "failed" ? "not connected" : "ended"}
-                className="px-2"
-              />
-            )}
-            {computer && control && phase.kind === "connected" && (
-              <VerbMenu
-                label="Send keys"
-                trigger={
-                  <Button size="sm" variant="ghost">
-                    Keys
-                  </Button>
-                }
-                verbs={combosFor(computer.os).map((combo) => ({
-                  key: combo.key,
-                  label: combo.label,
-                  icon: Plus,
-                  run: () => send(combo),
-                }))}
-              />
-            )}
-            {!control && stream && streamStage(stream) === "ready" && (
-              <IconAction label="Reload the stream" onClick={() => setStreamAttempt((n) => n + 1)}>
-                <RefreshClockwise />
-              </IconAction>
-            )}
-            <IconAction
-              ref={toolsTrigger}
-              label={toolsOpen ? "Hide the session tools" : "Show the session tools"}
-              onClick={() => (narrow ? setMobileTools((held) => !held) : setTools((held) => !held))}
-            >
-              {toolsOpen ? <SidebarRightClose /> : <SidebarRightOpen />}
-            </IconAction>
-            <IconAction
-              label={
-                immersive
-                  ? "Leave fullscreen"
-                  : `Fullscreen, with every key going to ${computer?.name ?? "the computer"}`
-              }
-              onClick={() => void toggleImmersive()}
-            >
-              {immersive ? <FullscreenClose /> : <Fullscreen />}
-            </IconAction>
-            <Button size="sm" variant="outline" asChild>
-              <Link href={REMOTE_DESKTOP_HREF} onClick={onDisconnect}>
-                Disconnect
-              </Link>
-            </Button>
-          </PaneHeader>
-
-          {!control && computer ? (
-            <div className={cn("relative min-h-0 flex-1", screenGround)}>
-              <StreamPane
-                computer={computer}
-                stream={stream}
-                readyStream={streamPoll.readyStream}
-                error={streamPoll.error}
-                onPlayback={setPlaying}
-                onStats={setStreamStats}
-                quality={quality}
-                shape={screenShape ?? undefined}
-                onShape={setScreenShape}
-                attempt={streamAttempt}
-                pointer={pointer}
-                onFrame={(node) => {
-                  streamFrame.current = node
-                }}
-                onRefresh={streamPoll.refresh}
-                onControl={() => switchMode("control")}
-              />
-            </div>
-          ) : (
-            <div
-              className={cn("relative min-h-0 flex-1", screenGround)}
-              onDragOver={(event) => {
-                if (drive) event.preventDefault()
-              }}
-              onDrop={(event) => {
-                if (!drive) return
-                event.preventDefault()
-                upload(event.dataTransfer.files)
-              }}
-            >
-              <div
-                ref={viewport}
-                tabIndex={0}
-                role="application"
-                aria-label={computer ? `The screen of ${computer.name}` : "The remote screen"}
-                onPointerDown={() => {
-                  wake()
-                  viewport.current?.focus()
-                }}
+              <Link
+                href={REMOTE_DESKTOP_HREF}
+                aria-label="Back to the computers"
                 className={cn(
-                  "absolute inset-0 flex items-center justify-center overflow-hidden outline-none",
-                  phase.kind !== "connected" && "invisible",
+                  "flex size-8 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:bg-accent hover:text-foreground",
+                  rail && "lg:hidden",
                 )}
               >
-                <div ref={stage} data-slot="remote-screen" className="relative" />
-              </div>
-              {computer && pin && (
-                <PinCard computer={computer} pin={pin} onStream={() => switchMode("stream")} />
+                <ArrowLeft className="size-4" />
+              </Link>
+              {/* On a phone the name stands over the state, and the system's
+                  mark is left to the other panes: beside each other they
+                  left the name a letter wide. From `lg` the group is not a
+                  box at all, and its two parts sit in the strip's row. */}
+              <span className="flex min-w-0 flex-1 flex-col justify-center lg:contents">
+                {computer && (
+                  <span className="flex min-w-0 items-center gap-2.5 px-1 lg:flex-1">
+                    <ComputerMark os={computer.os} size="sm" className="scale-75 max-lg:hidden" />
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="truncate text-body font-semibold">{computer.name}</span>
+                      <span className="hidden shrink-0 items-center gap-1 self-center text-hint text-muted-foreground @2xl:flex">
+                        {!control && <ProductGlyph id="sunshine" className="size-3" />}
+                        {drawn}
+                      </span>
+                    </span>
+                  </span>
+                )}
+                {!computer && <span className="flex-1" />}
+                <span className="flex min-w-0 items-center gap-1 max-lg:-ml-1 max-lg:[&>*]:truncate">
+                  {!control ? (
+                    <StreamStatus
+                      stream={stream}
+                      playing={playing}
+                      stats={streamStats}
+                      path={path}
+                    />
+                  ) : phase.kind === "connected" ? (
+                    <>
+                      <Status
+                        tone="running"
+                        live
+                        label={latency(computer?.reach.latencyMs) ?? "connected"}
+                        className="px-2"
+                      />
+                      <SessionFigures
+                        fps={
+                          controlStats && controlStats.clientFps > 0
+                            ? controlStats.clientFps
+                            : undefined
+                        }
+                        path={path}
+                      />
+                    </>
+                  ) : phase.kind === "connecting" ? (
+                    <TextShimmer className="px-2 text-xs font-medium">connecting…</TextShimmer>
+                  ) : phase.kind === "sign-in" ? (
+                    <Status tone="notice" label="waiting for a sign-in" className="px-2" />
+                  ) : (
+                    <Status
+                      tone={phase.kind === "failed" ? "warning" : "stopped"}
+                      label={phase.kind === "failed" ? "not connected" : "ended"}
+                      className="px-2"
+                    />
+                  )}
+                </span>
+              </span>
+              {computer && control && phase.kind === "connected" && (
+                <VerbMenu
+                  label="Send keys"
+                  trigger={
+                    // On a phone the keys are in the Tools pane, and the strip
+                    // keeps its room for the computer's name.
+                    <Button size="sm" variant="ghost" className="max-lg:hidden">
+                      Keys
+                    </Button>
+                  }
+                  verbs={combosFor(computer.os).map((combo) => ({
+                    key: combo.key,
+                    label: combo.label,
+                    icon: Plus,
+                    run: () => send(combo),
+                  }))}
+                />
               )}
-              {computer && phase.kind !== "connected" && (
-                <div className="absolute inset-0 flex items-center justify-center p-6">
-                  <div className="flex max-w-md min-w-0 flex-col items-center gap-4 text-center">
-                    <ComputerMark os={computer.os} size="lg" reach={reach} />
-                    {phase.kind === "sign-in" ? (
-                      <SignIn computer={computer} fields={phase.fields} onSubmit={signIn} />
-                    ) : phase.kind === "connecting" ? (
-                      <>
-                        <TextShimmer className="text-title font-semibold">{`Connecting to ${computer.name}…`}</TextShimmer>
-                        <p className="text-hint text-muted-foreground">
-                          Through guacd on this server, to {computer.host}:{computer.port}
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="space-y-1.5">
-                          <p className="text-title font-semibold">
-                            {problem ? problem.title : "The session ended"}
-                          </p>
-                          <p className="text-body text-muted-foreground">
-                            {problem
-                              ? problem.detail
-                              : `${computer.name} is still there; connect again whenever you need it.`}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setPhase({ kind: "connecting" })
-                              setAttempt((held) => held + 1)
-                              refresh()
-                            }}
-                          >
-                            <RefreshClockwise className="size-3.5" />
-                            Connect again
-                          </Button>
-                          <Button size="sm" variant="outline" asChild>
-                            <Link href={REMOTE_DESKTOP_HREF}>Back to the computers</Link>
-                          </Button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
+              {!control && stream && streamStage(stream) === "ready" && (
+                <IconAction
+                  label="Reload the stream"
+                  onClick={() => setStreamAttempt((n) => n + 1)}
+                >
+                  <RefreshClockwise />
+                </IconAction>
               )}
-            </div>
-          )}
-        </div>
+              {/* A phone's bar has a stop for the tools. */}
+              <IconAction
+                ref={toolsTrigger}
+                label={toolsOpen ? "Hide the session tools" : "Show the session tools"}
+                onClick={() =>
+                  narrow ? setMobileTools((held) => !held) : setTools((held) => !held)
+                }
+                className="max-lg:hidden"
+              >
+                {toolsOpen ? <SidebarRightClose /> : <SidebarRightOpen />}
+              </IconAction>
+              <IconAction
+                label={
+                  immersive
+                    ? "Leave fullscreen"
+                    : `Fullscreen, with every key going to ${computer?.name ?? "the computer"}`
+                }
+                onClick={() => void toggleImmersive()}
+              >
+                {immersive ? <FullscreenClose /> : <Fullscreen />}
+              </IconAction>
+              <Button size="sm" variant="outline" asChild>
+                <Link href={REMOTE_DESKTOP_HREF} onClick={onDisconnect}>
+                  Disconnect
+                </Link>
+              </Button>
+            </PaneHeader>
 
-        {!immersive &&
-          computer &&
-          (narrow ? (
-            <SidePanel
-              open={mobileTools}
-              onOpenChange={setMobileTools}
-              onCloseAutoFocus={(event) => {
-                event.preventDefault()
-                toolsTrigger.current?.focus({ preventScroll: true })
-              }}
-              title="Session tools"
-              width="sm"
-              bodyClassName="p-0"
-            >
-              {sessionPanel}
-            </SidePanel>
-          ) : tools ? (
-            sessionPanel
-          ) : null)}
+            {!control && computer ? (
+              <div className={cn("relative min-h-0 flex-1", screenGround)}>
+                <StreamPane
+                  computer={computer}
+                  stream={stream}
+                  readyStream={streamPoll.readyStream}
+                  error={streamPoll.error}
+                  onPlayback={setPlaying}
+                  onStats={setStreamStats}
+                  quality={quality}
+                  shape={screenShape ?? undefined}
+                  onShape={setScreenShape}
+                  attempt={streamAttempt}
+                  pointer={pointer}
+                  onFrame={(node) => {
+                    streamFrame.current = node
+                  }}
+                  onRefresh={streamPoll.refresh}
+                  onControl={() => switchMode("control")}
+                />
+              </div>
+            ) : (
+              <div
+                className={cn("relative min-h-0 flex-1", screenGround)}
+                onDragOver={(event) => {
+                  if (drive) event.preventDefault()
+                }}
+                onDrop={(event) => {
+                  if (!drive) return
+                  event.preventDefault()
+                  upload(event.dataTransfer.files)
+                }}
+              >
+                <div
+                  ref={viewport}
+                  tabIndex={0}
+                  role="application"
+                  aria-label={computer ? `The screen of ${computer.name}` : "The remote screen"}
+                  onPointerDown={() => {
+                    wake()
+                    viewport.current?.focus()
+                  }}
+                  className={cn(
+                    "absolute inset-0 flex items-center justify-center overflow-hidden outline-none",
+                    phase.kind !== "connected" && "invisible",
+                  )}
+                >
+                  <div ref={stage} data-slot="remote-screen" className="relative" />
+                </div>
+                {computer && pin && (
+                  <PinCard computer={computer} pin={pin} onStream={() => switchMode("stream")} />
+                )}
+                {computer && phase.kind !== "connected" && (
+                  <div className="absolute inset-0 flex items-center justify-center p-6">
+                    <div className="flex max-w-md min-w-0 flex-col items-center gap-4 text-center">
+                      <ComputerMark os={computer.os} size="lg" reach={reach} />
+                      {phase.kind === "sign-in" ? (
+                        <SignIn computer={computer} fields={phase.fields} onSubmit={signIn} />
+                      ) : phase.kind === "connecting" ? (
+                        <>
+                          <TextShimmer className="text-title font-semibold">{`Connecting to ${computer.name}…`}</TextShimmer>
+                          <p className="text-hint text-muted-foreground">
+                            Through guacd on this server, to {computer.host}:{computer.port}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="space-y-1.5">
+                            <p className="text-title font-semibold">
+                              {problem ? problem.title : "The session ended"}
+                            </p>
+                            <p className="text-body text-muted-foreground">
+                              {problem
+                                ? problem.detail
+                                : `${computer.name} is still there; connect again whenever you need it.`}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setPhase({ kind: "connecting" })
+                                setAttempt((held) => held + 1)
+                                refresh()
+                              }}
+                            >
+                              <RefreshClockwise className="size-3.5" />
+                              Connect again
+                            </Button>
+                            <Button size="sm" variant="outline" asChild>
+                              <Link href={REMOTE_DESKTOP_HREF}>Back to the computers</Link>
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {!immersive &&
+            computer &&
+            (phone ? (
+              // Kept drawn while it is put away, so text typed for the
+              // computer's clipboard is still there after a look at the screen.
+              <div className={cn("flex min-h-0 min-w-0 flex-1", paneShown(shown === "tools"))}>
+                {sessionPanel}
+              </div>
+            ) : narrow ? (
+              <SidePanel
+                open={mobileTools}
+                onOpenChange={setMobileTools}
+                onCloseAutoFocus={(event) => {
+                  event.preventDefault()
+                  toolsTrigger.current?.focus({ preventScroll: true })
+                }}
+                title="Session tools"
+                width="sm"
+                bodyClassName="p-0"
+              >
+                {sessionPanel}
+              </SidePanel>
+            ) : tools ? (
+              sessionPanel
+            ) : null)}
+        </div>
+        {!immersive && computer && (
+          <PaneBar label="Remote session" stops={SESSION_STOPS} active={pane} onPick={setPane} />
+        )}
       </div>
     </Page>
   )
@@ -828,15 +901,20 @@ function Rail({
   computers,
   current,
   hueOf,
+  className,
 }: {
   computers: RdComputerView[]
   current: string
   hueOf: (computer: RdComputerView) => string
+  className?: string
 }) {
   return (
     <nav
       aria-label="Computers"
-      className="hidden w-60 shrink-0 flex-col border-r border-hairline lg:flex"
+      className={cn(
+        "flex min-w-0 shrink-0 flex-col border-hairline max-lg:flex-1 lg:w-60 lg:border-r",
+        className,
+      )}
     >
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-hairline pr-1.5 pl-3">
         <Link
@@ -896,7 +974,7 @@ function SessionFigures({ fps, path }: { fps: number | undefined; path: string |
   return (
     <span
       data-slot="session-figures"
-      className="numeric shrink-0 px-1 text-hint text-muted-foreground max-sm:hidden"
+      className="numeric hidden shrink-0 px-1 text-hint text-muted-foreground @xl:inline"
     >
       {parts.join(" · ")}
     </span>

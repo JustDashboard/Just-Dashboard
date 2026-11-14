@@ -1,13 +1,12 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Cross, FloppyDisk, FolderOpen, GitMerge, SidebarRightClose } from "@/components/icons"
+import { Cross, FloppyDisk, FolderOpen, GitMerge } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileContent, GitDetect, GitFileChange, GitStatus } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { CodeEditor } from "@/components/code-editor"
@@ -22,7 +21,8 @@ import { Pane, PaneHeader } from "@/components/panel"
 
 type Overlay = { kind: "file"; path: string } | null
 
-type Tab = "files" | "git"
+/** The column's two halves. */
+export type ToolsTab = "files" | "git"
 
 /**
  * The Files + Git companion for the terminal.
@@ -39,38 +39,40 @@ type Tab = "files" | "git"
  * two moves made from a shell's directory — switching branch and checking out
  * a pull request to try it. Staging, committing and the rest stay on the Git
  * page, one click away from the tab's own link.
+ *
+ * Which half is open is the page's to keep: on a phone the bar at the foot
+ * picks it, and the column's own strip is not drawn.
  */
 export function WorkspaceTools({
   dir,
+  tab,
+  onTab,
+  onChangedCount,
   onOpenInFiles,
-  onClose,
 }: {
   dir?: string
+  tab: ToolsTab
+  onTab: (tab: ToolsTab) => void
+  /** How many files git says have changed, for whoever counts them outside the column. */
+  onChangedCount?: (count: number) => void
   onOpenInFiles: (path: string) => void
-  /** Given when the panel covers the emulator rather than sitting beside it,
-   *  and so covers the strip whose toggle would otherwise put it away. */
-  onClose?: () => void
 }) {
   const { can } = useAuth()
-  // Which half of the companion you had open, kept across a navigation:
-  // somebody working out of git is on that tab all afternoon.
-  const [stored, setTab] = useViewState<Tab | "diff">("terminal.tools.tab", "files")
-  // A browser that last had the Diff tab open comes back to the tab it grew into.
-  const tab: Tab = stored === "diff" ? "git" : stored
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
 
   /**
-   * Switching tab puts the open file or diff away.
+   * Switching tab puts the open file or diff away, whoever switched it.
    *
    * The overlay covers the panel body, so without this a click on "Git" while
    * a file was open changed a tab nobody could see and read as a dead button.
    * Going to the other tab *is* leaving the file — there is one panel here,
    * not two — and the file is one click away in the tree either way.
    */
-  const showTab = (next: Tab) => {
+  const [shownTab, setShownTab] = useState(tab)
+  if (shownTab !== tab) {
+    setShownTab(tab)
     setOverlay(null)
-    setTab(next)
   }
 
   const detect = usePoll(
@@ -111,7 +113,12 @@ export function WorkspaceTools({
     status.refresh()
   }
 
-  const changed = status.data?.files.length ?? 0
+  // Nothing changed once the shell has left the repository, whatever the
+  // last status said.
+  const changed = repoPath ? (status.data?.files.length ?? 0) : 0
+  useEffect(() => {
+    onChangedCount?.(changed)
+  }, [changed, onChangedCount])
 
   return (
     <Pane flush className="relative flex-1">
@@ -121,40 +128,24 @@ export function WorkspaceTools({
           you are in, the way it does under the top bar. No glyph beside the
           word — a folder in front of "Files" is the label twice — and the one
           fact worth carrying across is the count of changed files, which is
-          what decides whether the git half needs a visit. */}
-      <PaneHeader className="h-10 gap-0 p-0">
+          what decides whether the git half needs a visit. A phone's bar
+          carries both stops and that count, so the strip is not drawn there. */}
+      <PaneHeader className="h-10 gap-0 p-0 max-lg:hidden">
         <TabButton
           active={tab === "files"}
-          onClick={() => showTab("files")}
+          onClick={() => onTab("files")}
           hint="The files under the shell's working directory"
         >
           Files
         </TabButton>
         <TabButton
           active={tab === "git"}
-          onClick={() => showTab("git")}
+          onClick={() => onTab("git")}
           hint="The repository the shell is in — what changed, its branches and pull requests"
         >
           Git
           {changed > 0 && <ChipCount>{changed}</ChipCount>}
         </TabButton>
-        {onClose && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                aria-label="Hide this panel"
-                className="mx-1 size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-                onClick={onClose}
-              >
-                <SidebarRightClose />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Hide files &amp; git</TooltipContent>
-          </Tooltip>
-        )}
       </PaneHeader>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
