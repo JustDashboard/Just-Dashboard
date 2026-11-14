@@ -212,7 +212,7 @@ existing session instead (the Overview's shells link with it), remembered as if 
 and leaves the address once read. Audit's settled filters are history entries; Back restores the
 previous question. The audit link is how the Docker event feed hands off a correlated event.
 
-Packages use `?package=` for their inspector, and backup job pages use `?run=` for their selected run.
+A package is its own page (`/packages/[name]`; `?package=`, which opened its sheet, redirects), and backup job pages use `?run=` for their selected run.
 These, the Docker container inventory, Git and the Audit/Security lists participate in the shared
 keyboard/place controller; [`workspace-interactions.md`](workspace-interactions.md) describes their
 shortcuts, held arrivals and focus restoration.
@@ -390,13 +390,18 @@ package, security first, the first five named with their version changes and eac
 advisory coverage in its head and confirmed security/all-upgrade actions at the strip's end. Both are
 bar readings (design-system §10), drawn before the inventory lands. Missing sizes and advisory data are stated;
 a failed update read is an error, never an empty all-clear.
-`package-sheet.tsx` is one scroll: version changes and size, copyable commands coloured as shell words,
-registered services with links to their systemd inspector, configuration and documentation links into
-Files, the manual in a scrollable well, inspectable dependencies, and package metadata. Dependency
-navigation uses `?package=` and browser Back. A usage read that fails reports its reason with Retry,
-instead of leaving a loader. The sheet keeps package protection, install/update/remove/purge actions,
-ordinary confirmations, and the page's resumable jobs. The installed table uses compact columns below 1280 pixels and fixed columns above,
-a size bar per row and a 400-row cap with the count said plainly underneath. The fourth view, **Log**
+A package's detail is its own page, `/packages/[name]` (`package-page.tsx`), on the shape a service's
+page has: the identity line with its state, one command (Install or Update) and Remove and Remove and
+purge behind the menu and their ordinary confirmations, then views in the address. Overview is the
+picture of what it needs and what it gives (`WireFlow`) over About; Files holds the copyable commands
+coloured as shell words, registered services with links to their systemd page, and configuration and
+documentation links into Files; Manual the man page in a well; Depends every dependency one line each,
+opening that package on the same view; Log the manager's logs searched for the package's name. A usage
+read that fails reports its reason with Try again, instead of leaving a loader. The page keeps package
+protection and the resumable job: its console opens under the identity line, and the package is read
+again when the run ends. The installed list is a rail beside it from 1280 pixels, with the list's own
+filter. The installed table is one line a row from 1024 pixels, with the size as a figure in its
+column, and a card a package below; a 400-row cap has the count said plainly underneath. The fourth view, **Log**
 (`components/packages/log-view.tsx`), reads what the package manager did from its own logs — apt's
 history with each transaction's command and who asked, dpkg's record, the unattended runs, dnf's — in
 History and Insights only, opening on everything on disk, since a package log is written a few times

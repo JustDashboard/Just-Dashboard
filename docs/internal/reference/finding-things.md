@@ -181,7 +181,7 @@ segment under `/api/v1`.
 | Security | `security/` | `security/` | `/security`, `/ssh`, `/ssh-sessions`, `/fail2ban`, `/logins` → `handlers_security*.go`, `handlers_netsec.go` | `netsec` | `security-*.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | Backups | `backups/` | `backups/` | `/backups` → `handlers_backups.go`, `backup_*.go` | `backups` | `backups-ui.spec.ts`, `backup-*.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md) |
 | **Advanced** | | | | | | |
-| Packages | `packages/` | `packages/` | `/packages` → `handlers_packages.go` | `updates` | `packages-ui.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
+| Packages | `packages/` | `packages/` | `/packages` → `handlers_packages.go` | `updates` | `packages-ui.spec.ts`, `package-page.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | System users | `system-users/` | `system-users/` | `/system-users`, `/system-accounts` → `handlers_linuxusers.go` | `linuxusers` | `system-users.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md) |
 | Audit log | `audit/` | `audit/` | `/audit` → mounted in `routes.go`, handled in `handlers_auth.go` | `audit` | `system-ui.spec.ts` | [`runtime-boundaries.md`](../architecture/runtime-boundaries.md) |
 | **System** | | | | | | |

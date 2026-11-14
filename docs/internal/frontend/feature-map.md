@@ -912,22 +912,60 @@ and Insights (`log-workspace.tsx`), the same readings and views a service's own 
 
 ### `/packages`
 
-Reading register without summary tiles: the host identity with manager, inventory count and index
-age; a band of two bar readings (`software-band.tsx`, design system §10): the whole inventory's size
-(products or archive sections, largest five and other packages) that filters Installed, beside
-Updates waiting, a span per pending package, security first, the first five named and each opening
-its readout, with confirmed upgrade actions at the strip's end; count-bearing views and
-by-hand/everything/dependencies/security/behind chips; fixed responsive tables with changed version
-fields, origins and size bars; catalogue product choices and lit search-result rows with separate
-install verbs, pending searches hiding obsolete results; **Log** reads the manager's logs through
-its lens and stays available after an inventory failure; one package readout with versions, size,
-copyable commands, service and file links, manual, inspectable dependencies and metadata, URL/Back
-navigation and resumable jobs; unreadable usage or updates report errors, missing sizes/advisory
-coverage say so
+Reading register without summary tiles: the host identity laid out as a project's header, with the
+manager beside the distribution, what is owed as its state, the inventory count and index age as
+facts, **Refresh index** as its one command and Re-read and the upgrades behind its menu; a band of
+two bar readings (`software-band.tsx`, design system §10): the whole inventory's size (products or
+archive sections, largest five and other packages) that filters Installed, beside Updates waiting, a
+span per pending package, security first, the first five named and each opening its package's page,
+with confirmed upgrade actions at the strip's end; count-bearing views, drawn while the inventory is
+still out, and by-hand/everything/dependencies/security/behind chips; from 1024px framed tables of
+one line a row (the package as the software it is and its name as the link to its page, the
+description as the row's title, version, the changed part of a pending one, the size as a figure in
+its column, security/essential at the edge), below it a card a package of one height; catalogue
+product choices and lit search-result rows that open the package's page, with separate install
+verbs, pending searches hiding obsolete results, and `?q=` opening Add software on a search handed
+over from another page; **Log** reads the manager's logs through its lens and stays available after
+an inventory failure; unreadable updates report errors, missing sizes/advisory coverage say so. The
+list's search, scope, software group and order are one filter (`use-package-filter.ts`, the pure
+part in `inventory.ts`) shared with the rail beside a package
 
 **Implementation:** packages page, `components/packages/` (`marks.tsx` and `inventory.ts`
 unit-tested), shared job console; checked by `tests/browser/packages-ui.spec.ts`, mocks in
 `packages-fixture.ts`
+
+### `/packages/[name]`
+
+A package's own page (`package-page.tsx`; the old `?package=` address that opened its sheet
+redirects there, and the name is one encoded path segment, so `g++` and `libc6:amd64` open): a way
+back and two arrows, then the identity line with the package as the software it is, its name, its
+state on one line (installed or not, the version it is at, the one an update lands on with its
+changed part in ink and amber for a security fix, or what the manager is doing to it), its
+description, size and whether it was installed by hand as facts, **Install** or **Update** as the
+one command and Remove and Remove and purge behind the menu and their confirmations (for an account
+with both `system.admin` and `destructive`, and never for a protected package). The job console
+opens under the line, a run started elsewhere for the same package is attached rather than offered
+again, and the package is read again when the run ends. Views in the address (`?tab=`), carried to
+the next package (`package-views.tsx`): **Overview**, the picture of what it needs, the package and
+what it gives the server (`WireFlow`: dependencies as links to their pages, dashed where one is not
+installed; its commands, its service or services, its configuration and its manual as ways into the
+views or the unit's page; every line pulsing while a run is in flight; held to one height for every
+package and while loading), why it cannot be removed where it cannot, and About (description,
+repository, section, architecture, licence, maintainer, homepage); **Files**, what its file list put
+on the server (commands that copy, services opening the unit with `systemctl start` to copy,
+configuration and documentation opening in Files); **Manual**, its man page and its other pages;
+**Depends**, everything it needs one line each with the version on the host or "not installed" and
+what was asked of it; **Log**, the package manager's logs searched for its name, dpkg's per-package
+record first, kept apart from the list's own Log view (`log-view.tsx`'s `about`). No changelog view:
+no manager is asked for one. From `xl` the installed list is a rail beside it (`package-rail.tsx`:
+the list's own search, scope and order, the first 300 drawn, the package on screen filled and drawn
+first when the filter does not hold it, a dot in a logo's corner for one that is behind), walked
+with Alt+↑/↓; on a phone the page is the one pane. Not installed, a library with nothing to run, a
+name nothing knows (with a search for it) and a failed read are each said in place
+
+**Implementation:** `app/(dashboard)/packages/[name]/page.tsx`, `components/packages/package-page.tsx`,
+`package-rail.tsx`, `package-views.tsx`, `use-package-filter.ts`; checked by
+`tests/browser/package-page.spec.ts`
 
 ### `/processes/*`
 
