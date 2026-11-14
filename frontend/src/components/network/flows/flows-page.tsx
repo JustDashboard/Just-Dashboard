@@ -1,6 +1,8 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { Tabs as TabsPrimitive } from "radix-ui"
 import {
   ClockRewind,
   Play,
@@ -12,8 +14,10 @@ import {
 import { Page, PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Status } from "@/components/status-dot"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
+import { Tabs } from "@/components/ui/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { IdentityFacts, IdentityStateLoading } from "@/components/network/identity-facts"
@@ -41,6 +45,14 @@ import { FlowsHours } from "@/components/network/flows/flows-hours"
 import { FlowsBoundaries, FlowsSample } from "@/components/network/flows/flows-sample"
 import { FlowPolicySheet } from "@/components/network/flows/flows-policy"
 import { UTCTime } from "@/components/network/flows/marks"
+import {
+  FLOW_ANCHOR_VIEW,
+  FLOW_VIEWS,
+  FLOW_VIEW_NAME,
+  flowViewOf,
+  type FlowAnchor,
+  type FlowViewKey,
+} from "@/components/network/flows/views"
 
 /**
  * Reading register: the socket recorder, the hours it has kept and what
@@ -56,11 +68,40 @@ import { UTCTime } from "@/components/network/flows/marks"
  * socket hour is one line with the chosen one read out under the table, the
  * totals of the rows shown are the table's foot, and the day's recorded
  * hours are a strip. Nothing a reading did not measure is given a figure.
+ *
+ * Under the picture it is three views named in the address (`?tab=`,
+ * `flows/views.ts`) rather than five blocks down one column: the day's
+ * socket hours, the kernel observer, and the latest sample with what a
+ * reading can say. A node of the picture opens the view it stands for.
  */
+const VIEW = "flex min-w-0 flex-col gap-8 pt-6 focus-ring"
+
 export function SocketHistoryPage() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const destructive = can("destructive")
+  const view = flowViewOf(useSearchParams().get("tab"))
+  // Replaced rather than pushed: a view is not a place Back should step through.
+  const show = useCallback((next: FlowViewKey) => {
+    const url = new URL(window.location.href)
+    if (next === "hours") url.searchParams.delete("tab")
+    else url.searchParams.set("tab", next)
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`)
+  }, [])
+  // A node of the picture opens its view and brings its block up: the block
+  // is in the document a frame or two after its view is chosen.
+  const jump = useCallback(
+    (anchor: FlowAnchor) => {
+      show(FLOW_ANCHOR_VIEW[anchor])
+      const reach = (tries: number) => {
+        const target = document.getElementById(anchor)
+        if (target) target.scrollIntoView({ block: "start", behavior: "smooth" })
+        else if (tries > 0) requestAnimationFrame(() => reach(tries - 1))
+      }
+      requestAnimationFrame(() => reach(10))
+    },
+    [show],
+  )
   const [draft, setDraft] = useState<FlowFilters>({
     day: yesterdayUTC(),
     address: "",
@@ -312,57 +353,95 @@ export function SocketHistoryPage() {
             loading={loading}
             stale={Boolean(read.error)}
             words={untouched}
+            onJump={jump}
           />
-          {untouched ? (
-            <div
-              data-slot="flow-off"
-              className="mx-auto flex max-w-xl flex-col items-center gap-4 pb-2 text-center"
+          <Tabs
+            value={view}
+            onValueChange={(next) => show(next as FlowViewKey)}
+            className="min-w-0 gap-0"
+          >
+            <TabsPrimitive.List
+              aria-label="Views of socket history"
+              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
             >
-              <p className="text-body text-muted-foreground">
-                Recording has not been enabled, so no contact or bandwidth conclusion can be drawn.
-              </p>
-              {recordingVerb}
-            </div>
-          ) : (
-            <>
-              <FlowsTable
-                rows={rows}
-                loading={loading}
-                truncated={Boolean(data?.truncated)}
-                draft={draft}
-                onDraft={setDraft}
-                onRead={() =>
-                  setFilters({
-                    ...draft,
-                    address: draft.address.trim(),
-                    containerId: draft.containerId.trim(),
-                  })
-                }
-                onExport={exportRows}
-                exporting={action === "export"}
-                disabled={disabled}
-                selected={selected}
-                onSelect={setSelectedKey}
-              />
-              {selected && <FlowRowReading row={selected} />}
-              <FlowsHours day={filters.day} hours={data?.coverageHours ?? []} loading={loading} />
-            </>
-          )}
-          {data && (
-            <>
-              <KernelObserverPanel
-                observer={data.kernelObserver}
-                settings={data.settings}
-                disabled={disabled}
-                pending={action === "observer"}
-                stale={Boolean(read.error)}
-                canControl={destructive}
-                onReview={reviewObserver}
-              />
-              {!untouched && <FlowsSample cycle={data.lastCycle} />}
-              <FlowsBoundaries coverage={data.coverage} />
-            </>
-          )}
+              {FLOW_VIEWS.map((key) => (
+                <TabsPrimitive.Trigger
+                  key={key}
+                  value={key}
+                  className={tabClasses(view === key, "h-10")}
+                >
+                  {FLOW_VIEW_NAME[key]}
+                </TabsPrimitive.Trigger>
+              ))}
+            </TabsPrimitive.List>
+            <TabsPrimitive.Content value="hours" className={VIEW}>
+              {untouched ? (
+                <div
+                  data-slot="flow-off"
+                  className="mx-auto flex max-w-xl flex-col items-center gap-4 pb-2 text-center"
+                >
+                  <p className="text-body text-muted-foreground">
+                    Recording has not been enabled, so no contact or bandwidth conclusion can be
+                    drawn.
+                  </p>
+                  {recordingVerb}
+                </div>
+              ) : (
+                <>
+                  <FlowsTable
+                    rows={rows}
+                    loading={loading}
+                    truncated={Boolean(data?.truncated)}
+                    draft={draft}
+                    onDraft={setDraft}
+                    onRead={() =>
+                      setFilters({
+                        ...draft,
+                        address: draft.address.trim(),
+                        containerId: draft.containerId.trim(),
+                      })
+                    }
+                    onExport={exportRows}
+                    exporting={action === "export"}
+                    disabled={disabled}
+                    selected={selected}
+                    onSelect={setSelectedKey}
+                  />
+                  {selected && <FlowRowReading row={selected} />}
+                  <FlowsHours
+                    day={filters.day}
+                    hours={data?.coverageHours ?? []}
+                    loading={loading}
+                  />
+                </>
+              )}
+            </TabsPrimitive.Content>
+            <TabsPrimitive.Content value="observer" className={VIEW}>
+              {data ? (
+                <KernelObserverPanel
+                  observer={data.kernelObserver}
+                  settings={data.settings}
+                  disabled={disabled}
+                  pending={action === "observer"}
+                  stale={Boolean(read.error)}
+                  canControl={destructive}
+                  onReview={reviewObserver}
+                />
+              ) : (
+                <LoadingRows rows={4} />
+              )}
+            </TabsPrimitive.Content>
+            <TabsPrimitive.Content value="sample" className={VIEW}>
+              {data ? (
+                <>
+                  <FlowsSample cycle={data.lastCycle} />
+                  <FlowsBoundaries coverage={data.coverage} />
+                </>
+              ) : (
+                <LoadingRows rows={4} />
+              )}
+            </TabsPrimitive.Content>
+          </Tabs>
         </>
       )}
       {data && (

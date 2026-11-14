@@ -288,10 +288,12 @@ function LiveTunnel({
   const { add: addPeer, open: openSheet, sheets } = usePeerSheets(tunnels, onChanged)
   const [span, setSpan] = useState<HistoryWindow>("24h")
   const history = useHistory(tunnel.name, undefined, span)
-  const add = useCallback(
-    (kind: "device" | "site") => addPeer(tunnel.name, kind),
+  const addTo = useCallback(
+    (kind: "device" | "site") => addPeer?.(tunnel.name, kind),
     [addPeer, tunnel.name],
   )
+  // Undefined for a session that may not add a peer: nothing then offers to.
+  const add = addPeer ? addTo : undefined
   const openPeer = useCallback(
     (peer: WGInterface["peers"][number]) => openSheet(tunnel.name, peer),
     [openSheet, tunnel.name],
@@ -375,7 +377,7 @@ function RemovedTunnel({
 }) {
   const [span, setSpan] = useState<HistoryWindow>("24h")
   const history = useHistory(name, undefined, span)
-  const { restore, dialog } = useRestore(onChanged)
+  const { restore, dialog, allowed } = useRestore(onChanged)
   const views: View[] = [
     { key: "history", label: "History", count: history.data?.events?.length },
     { key: "traffic", label: "Traffic" },
@@ -450,7 +452,7 @@ function RemovedTunnel({
             )
           }
           command={
-            archived?.restorable ? (
+            archived?.restorable && allowed ? (
               <Button size="sm" onClick={() => restore(archived)} aria-label={`Restore ${name}`}>
                 Restore
               </Button>

@@ -425,7 +425,7 @@ test("Tailscale is installed in place where the package manager carries it", asy
       "/packages/tailscale": { name: "tailscale", version: "1.90.4", installed: false },
     },
   })
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=tailscale")
   await expect(tailscaleBlock(page)).toBeVisible()
   await tailscaleBlock(page).getByRole("button", { name: "Install tailscale" }).click()
   await expect
@@ -446,7 +446,7 @@ for (const width of [1280, 390]) {
       await asked
       await json(route, { error: { code: "not_found", message: "not found" } }, 404)
     })
-    await page.goto("/network/vpn")
+    await page.goto("/network/vpn?tab=tailscale")
     const block = tailscaleBlock(page)
     await expect(block).toBeVisible()
     await risen(page)

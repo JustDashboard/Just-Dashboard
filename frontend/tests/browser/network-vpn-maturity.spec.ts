@@ -368,7 +368,7 @@ test("the tailnet says which offers it serves, when this node's key expires and 
   page,
 }) => {
   await open(page, [])
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=tailscale")
   await expect(
     page.getByText("Awaiting approval on the control server", { exact: true }),
   ).toBeVisible()
@@ -383,7 +383,7 @@ test("a Headscale in a container shows its users, expired keys and routes awaiti
   page,
 }) => {
   await open(page, [])
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=headscale")
   await expect(page.getByText("container headscale · 1 node · 1 user")).toBeVisible()
   await expect(page.getByLabel("Headscale users")).toContainText("bob (1)")
   const nodes = page.getByLabel("Headscale nodes")

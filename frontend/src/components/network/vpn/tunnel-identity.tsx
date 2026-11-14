@@ -118,7 +118,8 @@ export type TunnelControl = ReturnType<typeof useTunnelControl>
  * written by hand says so and offers nothing that would change it.
  *
  * Taking a tunnel down and removing it are destructive routes, so an account
- * without that capability is not shown them.
+ * without that capability is not shown them; adding a peer is refused to a
+ * session opened through Just Hub, which is not offered it (`onAdd`).
  */
 export function TunnelIdentity({
   tunnel,
@@ -130,7 +131,8 @@ export function TunnelIdentity({
 }: {
   tunnel: WGInterface
   control: TunnelControl
-  onAdd: (kind: "device" | "site") => void
+  /** Undefined for a session the server refuses a new peer: nothing offers one. */
+  onAdd?: (kind: "device" | "site") => void
   /** Offered in the menu on the VPN page, where another tunnel would appear. */
   onCreate?: () => void
   /** The name leads to the tunnel's own page, and the menu to its history. */
@@ -145,7 +147,7 @@ export function TunnelIdentity({
   const moved = tunnelMoved(tunnel)
 
   const verbs: Verb[] = []
-  if (tunnel.managed)
+  if (tunnel.managed && onAdd)
     verbs.push({ key: "site", label: "Join a site", icon: Location, run: () => onAdd("site") })
   if (linked)
     verbs.push({
@@ -227,7 +229,7 @@ export function TunnelIdentity({
         </>
       }
       command={
-        tunnel.managed ? (
+        tunnel.managed && onAdd ? (
           <Button size="sm" onClick={() => onAdd("device")} disabled={control.busy}>
             <Plus aria-hidden className="size-3.5" />
             Add a device

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
 import { get } from "@/lib/api"
 import type { DNSTLSReport, DNSView, HostRecords } from "@/lib/types"
@@ -19,7 +19,9 @@ import { Tabs } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { NetworkReadWarning } from "@/components/network/read-warning"
+import { useHubSession } from "@/components/network/hub-session"
 import { DNSLog } from "@/components/network/dns/dns-log"
+import { engineHref } from "@/components/network/dns/engine-views"
 import { Bar } from "@/components/network/dns/ghost"
 import { Lookups } from "@/components/network/dns/lookups"
 import {
@@ -68,7 +70,8 @@ const noHash = () => ""
  * - **Settings**, the upstreams, DNS over TLS, DNSSEC, the cache and the
  *   host's own records as one column of sections with one floating Save.
  * - **Services**, the DNS filters found on this server and the engines
- *   connected through their own API.
+ *   connected through their own API; a connected engine opens its own page
+ *   (`engine-page.tsx`, `/network/dns/services/<id>`).
  * - **Log**, what the things that answer have written.
  *
  * It was one 4,800px column under a row of four tiles, and it had no shape
@@ -87,6 +90,8 @@ export function DNSPage() {
   const view = dnsViewOf(search.get("tab"), hash)
   const { can } = useAuth()
   const admin = can("system.admin")
+  const router = useRouter()
+  const hub = useHubSession(admin)
 
   // A view that holds what the reader typed stays mounted once it has been
   // opened: a lookup's answer and a setting's draft outlive a look at the chain.
@@ -190,6 +195,8 @@ export function DNSPage() {
     else caret.current = true
   }
   const requestService = (request: DNSServiceAsk) => {
+    // A connection that exists is a page of its own.
+    if (request.kind === "connection") return router.push(engineHref(request.id))
     setServiceRequest({ ...request, nonce: (serviceRequest?.nonce ?? 0) + 1 })
     show("services")
   }
@@ -204,7 +211,8 @@ export function DNSPage() {
         if (opened.includes("settings")) hosts.refresh()
       },
     },
-    ...(admin
+    // Connecting stores a credential: not offered to a session opened through Just Hub.
+    ...(admin && !hub
       ? [
           {
             key: "connect",
@@ -212,6 +220,10 @@ export function DNSPage() {
             icon: Plus,
             run: () => requestService({ kind: "connect" }),
           },
+        ]
+      : []),
+    ...(admin
+      ? [
           {
             key: "provision",
             label: "Review an owned setup",

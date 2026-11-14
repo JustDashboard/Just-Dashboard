@@ -26,6 +26,9 @@ const top = async (page: Page, locator: Locator) => {
   return (await locator.boundingBox())!
 }
 const reading = (page: Page) => page.getByRole("region", { name: "Selected socket hour" })
+/** One of the page's three views, by the words on its tab. */
+const view = (page: Page, name: string) =>
+  page.getByRole("tablist", { name: "Views of socket history" }).getByRole("tab", { name }).click()
 const fact = (scope: Locator, name: string) =>
   scope.locator("dl > div").filter({ has: scope.page().getByText(name, { exact: true }) })
 
@@ -52,13 +55,16 @@ test("history stays opt-in: off and empty, the page is what recording would keep
   )
   await expect(page.getByRole("region", { name: "Socket hours" })).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Recorded hours" })).toHaveCount(0)
-  // What the record cannot say and the observer's own state stay under it.
+  // What the record cannot say and the observer's own state are a view each.
+  await view(page, "Kernel observer")
   await expect(page.getByRole("region", { name: "Kernel packet observer" })).toContainText(
     "UDP bytes, short-lived flows and dropped-event counts remain unknown.",
   )
+  await view(page, "Latest sample")
   await expect(page.getByRole("region", { name: "Measurement boundaries" })).toContainText(
     "Empty results do not prove no contact or zero bandwidth.",
   )
+  await view(page, "Socket hours")
   expect(mutations).toEqual([])
   await expect(page.getByRole("button", { name: "Start recording" })).toHaveCount(1)
   await off.getByRole("button", { name: "Start recording" }).click()
@@ -194,6 +200,61 @@ test("erasing the record is reviewed first", async ({ page }) => {
   expect(mutations[0]).toMatchObject({ method: "DELETE", path: "/network/flows/history" })
 })
 
+test("the page is three views in the address, and a node of the picture opens its view", async ({
+  page,
+}) => {
+  await install(page, [], recordingReport)
+  await page.goto("/network/flows")
+  await loaded(page)
+  const tabs = page.getByRole("tablist", { name: "Views of socket history" })
+  await expect(tabs.getByRole("tab")).toHaveText([
+    "Socket hours",
+    "Kernel observer",
+    "Latest sample",
+  ])
+  await expect(tabs.getByRole("tab", { name: "Socket hours" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+  // One view at a time: the day's table and strip, and nothing of the other two.
+  await expect(page.getByRole("region", { name: "Socket hours" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Recorded hours" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Kernel packet observer" })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Latest native sample" })).toHaveCount(0)
+
+  await view(page, "Kernel observer")
+  await expect(page).toHaveURL(/\/network\/flows\?tab=observer$/)
+  await expect(page.getByRole("region", { name: "Kernel packet observer" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Socket hours" })).toHaveCount(0)
+
+  await view(page, "Latest sample")
+  await expect(page).toHaveURL(/\/network\/flows\?tab=sample$/)
+  await expect(page.getByRole("region", { name: "Latest native sample" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Measurement boundaries" })).toBeVisible()
+
+  // The picture is the same in every view, and its nodes are the way between them.
+  const picture = page.locator('[data-slot="wire-flow"]')
+  await picture.getByRole("button", { name: "Go to the recorded hours" }).click()
+  await expect(page).toHaveURL(/\/network\/flows$/)
+  await expect(page.getByRole("region", { name: "Recorded hours" })).toBeInViewport()
+  await picture.getByRole("button", { name: "Go to the kernel observer" }).click()
+  await expect(page).toHaveURL(/\/network\/flows\?tab=observer$/)
+  await expect(page.getByRole("region", { name: "Kernel packet observer" })).toBeVisible()
+  await picture
+    .getByRole("button", { name: /^Go to the latest sample of / })
+    .first()
+    .click()
+  await expect(page).toHaveURL(/\/network\/flows\?tab=sample$/)
+
+  // The address opens on the view it names, and a name that is none opens the hours.
+  await page.goto("/network/flows?tab=sample")
+  await loaded(page)
+  await expect(page.getByRole("region", { name: "Latest native sample" })).toBeVisible()
+  await page.goto("/network/flows?tab=coverage")
+  await loaded(page)
+  await expect(page.getByRole("region", { name: "Socket hours" })).toBeVisible()
+})
+
 test("read-only role sees the privacy boundary without requesting flow metadata", async ({
   page,
 }) => {
@@ -255,7 +316,7 @@ test("the day's recorded hours are a strip that reads one hour at a time", async
 
 test("the latest sample reads each source on a line", async ({ page }) => {
   await install(page, [], recordingReport)
-  await page.goto("/network/flows")
+  await page.goto("/network/flows?tab=sample")
   await loaded(page)
   const sample = page.getByRole("region", { name: "Latest native sample" })
   await expect(sample).toContainText("ss utility, iproute2-6.1.0")
@@ -335,6 +396,7 @@ test("kernel activation is separate, reviewed and never triggered by reading or 
   await recorderMenu(page, "Inspect again")
   await page.getByRole("button", { name: "Read period" }).click()
   expect(mutations).toEqual([])
+  await view(page, "Kernel observer")
   await page.getByRole("button", { name: "Review observer activation" }).click()
   await expect(page.getByRole("dialog")).toContainText("bounded event and storage budgets")
   expect(mutations).toEqual([])
@@ -357,7 +419,7 @@ test("observer needs history first and remains unavailable to an admin without d
     ...observerReport,
     settings: { ...observerReport.settings, enabled: false },
   })
-  await page.goto("/network/flows")
+  await page.goto("/network/flows?tab=observer")
   await loaded(page)
   await expect(page.getByRole("button", { name: "Review observer activation" })).toBeDisabled()
   await expect(
@@ -396,7 +458,7 @@ test("retained partial attachments survive a failed stop and offer a truthful re
   await page.route("**/api/v1/network/flows/observer", (route) =>
     json(route, { error: { message: "Detach failed; owned links remain" } }, 503),
   )
-  await page.goto("/network/flows")
+  await page.goto("/network/flows?tab=observer")
   await loaded(page)
   // Ordinary recording cannot stop under an attached observer, and the page says why.
   await expect(page.getByRole("button", { name: "Stop recording" })).toBeDisabled()
@@ -419,7 +481,7 @@ test("failed refresh blocks observer activation and a review already open", asyn
   const mutations: Mutation[] = []
   await install(page, mutations, observerReport)
   await page.clock.install()
-  await page.goto("/network/flows")
+  await page.goto("/network/flows?tab=observer")
   await loaded(page)
   await page.getByRole("button", { name: "Review observer activation" }).click()
   await page.route("**/api/v1/network/flows/?*", (route) =>
@@ -489,6 +551,7 @@ test("kernel subtotals keep TCP channels separate, show UDP bytes and retain dat
     "UTC timestamp uncertain; inspect observer clock evidence",
   )
   await expect(fact(reading(page), "Sent known lengths")).toContainText("2/3 · byte gaps 1")
+  await view(page, "Kernel observer")
   await page.getByRole("button", { name: "Observer bounds and retained quality" }).click()
   await expect(page.getByText("Ring delivery drops", { exact: true })).toBeVisible()
   await expect(page.locator(`time[datetime="${stamp}"]`).first()).toBeVisible()
@@ -511,7 +574,7 @@ test("interrupted restart needs a new explicit opt-in and historical IDs do not 
       reason: "Previous process ended; explicit opt-in required.",
     },
   })
-  await page.goto("/network/flows")
+  await page.goto("/network/flows?tab=observer")
   await loaded(page)
   await expect(page.getByText("Previous observer interrupted", { exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Review observer activation" })).toBeEnabled()
@@ -532,7 +595,7 @@ for (const width of [390, 1280, 1720]) {
         quality: { ...observerReport.kernelObserver.quality!, ringDrops: "9007199254740993" },
       },
     })
-    await page.goto("/network/flows")
+    await page.goto("/network/flows?tab=observer")
     await loaded(page)
     await page.getByRole("button", { name: "Observer bounds and retained quality" }).click()
     expect(

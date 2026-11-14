@@ -147,7 +147,7 @@ function memberNode(group: EgressGroup, m: EgressMemberView, links: NetworkLink[
 
 function GroupMark() {
   return (
-    <WireMark tone="brand" size="lg" shape="square">
+    <WireMark tone="logo" size="lg" shape="square">
       <Lifebuoy aria-hidden />
     </WireMark>
   )
