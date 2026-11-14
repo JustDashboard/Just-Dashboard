@@ -1184,8 +1184,10 @@ tree) and drift names parameters changed in place, CAKE shows its measured per-c
 an upload profile, congestion control is compared on live sockets before and after a switch, eBPF
 programs open into maps, attachments and cost with the dashboard's observer marked, and an install
 is followed by configured/active/verified phases (`components/network/traffic/`, `install.tsx`);
-Connections opens an address into its tuples, closes and layers, reads a past hour from socket
-history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
+Connections opens on its identity line and picture, lists each address as a one-line card, gives an
+address a page of its own (`/network/connections/[address]`: its sockets, closes and layers, a past
+hour from socket history), and blocks with a reason, an end and an incident
+(`components/network/connections/`); VPN
 opts in to IPv6 addressing and separate egress with per-family evidence and translated-connection
 counts; each tunnel calls out stale always-on handshakes, captured transports and passed budgets,
 opens a record (endpoint evidence, trend, lifecycle with outcomes), and each peer's sheet adds its
