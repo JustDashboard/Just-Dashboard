@@ -11,7 +11,7 @@ import {
 
 const now = Date.parse("2026-11-14T12:00:00Z")
 const ago = (seconds) => new Date(now - seconds * 1000).toISOString()
-const use = (projectId, projectName, variable, environmentId = 1) => ({
+const reads = (projectId, projectName, variable, environmentId = 1) => ({
   projectId,
   projectName,
   environmentId,
@@ -26,9 +26,13 @@ const refused = {
   id: 2,
   test: { at: ago(1800), ok: true, message: "Signed in" },
   lastRead: { at: ago(130), ok: false, message: "sign-in refused (400)" },
-  usedBy: [use(7, "api", "DATABASE_URL"), use(7, "api", "REDIS_URL", 2), use(8, "shop", "KEY")],
+  usedBy: [
+    reads(7, "api", "DATABASE_URL"),
+    reads(7, "api", "REDIS_URL", 2),
+    reads(8, "shop", "KEY"),
+  ],
 }
-const untested = { id: 3, usedBy: [use(8, "shop", "TOKEN")] }
+const untested = { id: 3, usedBy: [reads(8, "shop", "TOKEN")] }
 
 describe("storeLatest", () => {
   test("the newer of a run's read and a Test", () => {

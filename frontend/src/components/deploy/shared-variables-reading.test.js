@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { notLiveYet, sharedCount, sharedReaders } from "./shared-variables-reading"
 
-const use = (projectId, projectName, variable, waiting = false) => ({
+const reads = (projectId, projectName, variable, waiting = false) => ({
   projectId,
   projectName,
   environmentId: projectId * 10,
@@ -13,10 +13,10 @@ const use = (projectId, projectName, variable, waiting = false) => ({
 
 const stripe = {
   name: "STRIPE_SECRET_KEY",
-  usedBy: [use(7, "api", "STRIPE_KEY", true), use(8, "shop", "STRIPE_SECRET_KEY")],
+  usedBy: [reads(7, "api", "STRIPE_KEY", true), reads(8, "shop", "STRIPE_SECRET_KEY")],
 }
-const region = { name: "REGION", usedBy: [use(7, "api", "AWS_REGION")] }
-const sentry = { name: "SENTRY_DSN", usedBy: [use(8, "shop", "SENTRY_DSN", true)] }
+const region = { name: "REGION", usedBy: [reads(7, "api", "AWS_REGION")] }
+const sentry = { name: "SENTRY_DSN", usedBy: [reads(8, "shop", "SENTRY_DSN", true)] }
 const unread = { name: "UNUSED", usedBy: [] }
 
 describe("sharedCount", () => {
