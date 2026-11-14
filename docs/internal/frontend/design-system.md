@@ -2793,14 +2793,28 @@ The passes, in order. Each one is a diff you can review on its own.
    asked for sweeps the bar. The images are a framed table again (§12): the image as its product, its
    registry and tag a step back from the repository; the containers running it by name with their
    state's dot, each a link to its page; the registry's answer in the band's colours; its age; and
-   its size over a bar against the largest, in the Images span's colour. Below `xl` the containers
+   its size as a figure at the column's edge (a bar under each one went on 2026-11-14: a bar per row
+   is a chart of rows, and the order already says which is largest). Below `xl` the containers
    and the answer join the name's second line as a dot, a count and the word. A pulled image rises
    into the table (`useArrivals`), and its row says *Pulling…* while its pull runs. The pull dialog
    draws a row per layer from Docker's stream, received bytes in `--chart-2` and written ones in
-   `--chart-4` (§10), with the raw transcript folded. The sheet (`?image=`) opens on four readings,
-   the containers using the image as lit rows, and where the size went: a bar per layer in build
-   order beside the instruction that wrote it, its verb in a `--tag-*` hue and a RUN's command
-   coloured by `ShellWords`, the metadata-only steps folded.
+   `--chart-4` (§10), with the raw transcript folded. Each answer's mark in the Registry strip is its
+   dot in the span's colour and its count; a count alone did not say which answer it was.
+   An image's detail was a sheet (`?image=`) until 2026-11-14 and is a page, `/docker/images/<id>`
+   (`docker/image-page.tsx`), on a container's and a process's shape. Its identity line is the image
+   as its product, its name with the registry and tag a step back, the registry's answer as its
+   state, and its size, age, users and id as facts; the one command is Pull (Tag where no registry
+   can serve it again) and the rest are in the menu. Under it one picture on `wire-flow`: where it
+   comes from (its registry and that registry's answer, this server for a local build, a dashed ring
+   for a layer with no name), the image, and the containers made from it, the line to a running one
+   moving; the block keeps one height whatever the image has. The sheet's four readings went to that
+   line and that picture. Its views are the underlined strip with `?tab=`: Layers is one `SplitBar`
+   of the image by layer in the hue of the instruction that wrote each, over a `RankList` in build
+   order with size and share (the bar per layer is gone); Containers is one-line cards; History is
+   every step as a framed table; Configuration is how it runs, its names, labels and environment as
+   title-and-hairline sections, each kind of reference a word with its meaning on hover rather than
+   a paragraph. An instruction is one line and opens whole in a popover, a RUN's command coloured by
+   `ShellWords`. From `xl` the table's list stands beside it as a rail.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a
