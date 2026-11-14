@@ -1908,7 +1908,8 @@ clients `RankList`s; its form is a settings column with the one floating save ba
 Every site card, the overview's route rows and a certificate's links to the sites using it open the
 site's own page (`/proxy/sites/<name>`): the same marks as an identity line, the way a request
 reaches it on the page's ground, and its requests and errors read there in one log `Pane`, so a
-site's Logs verb goes to that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
+site's Logs verb goes to that page rather than to a file on the Logs page. Editing stayed with the
+card's verbs, as a sheet over the list, until 0.8.7; it is the site page's Settings view now (below). The overview
 ends on the engine's own log, a `Pane` across the page under the two columns.
 
 The TLS page (`/proxy/tls`) opens each of its three views on an identity line, with the views as
@@ -3120,7 +3121,26 @@ The passes, in order. Each one is a diff you can review on its own.
    certificate in its renewal window, still on a site that is off. The logs became the deployment
    Logs page's `Pane` — Requests, Insights, Errors and Log files in one strip, the service logs
    `flush` under the last as Output sits under the deployment's — and Controls three to a row, each
-   setting in its kind's hue with on, off or *no module* beside it. The audit
+   setting in its kind's hue with on, off or *no module* beside it.
+
+   In 0.8.7 the page took the shape of a process's and a stream's. Its line is laid out as a
+   project's header: whether it is serving and its verdict beside its name, one command at the far
+   end (the deployment that writes the route, else Edit, else the file) and the rest behind `⋯`,
+   where the verbs stood on a row of their own above it. Its views are an underlined strip with the
+   view in the address — Overview (the picture, what its link or owner makes of it, Balancing,
+   Controls), Logs (the pane, under one line where the site keeps no log of its own) and Settings —
+   and the Sites list stands beside it from `xl` with the list's own search, chip and order
+   (`site-rail.tsx`), Alt+↑ and Alt+↓ walking it. **Settings is the site form**, which was a sheet
+   4,280 lines long: one centred column of `SettingSection`s split across parts (`?view=`), what a
+   field is for behind its ⓘ rather than under it, the file a save would write with its changes,
+   checks and notes as the last part, a `PendingStrip` naming the parts that hold unsaved changes,
+   and one floating bar. The bar is the form's own (`site-settings.tsx`) rather than the
+   deployments' `SaveBar`, because a site has two saves — and reload, or only save; for a disabled
+   site as it is, or enabled — and drawing one Save would have hidden which. It is up only while
+   there is something to save: an edit, a file the form would write differently, or a disabled site
+   to enable. Leaving Settings with unsaved changes asks what closing the sheet asked; a link inside
+   the form is a trip the draft is kept across. The form's fields are written once and stood in
+   either layout (`SiteFormBody`): a new site is still made in the sheet. The audit
    log, which had no figures at all, gained four readings of
    the last day read from their own query so a filter narrows the trail without narrowing them:
    the changes with their hours as a trend, the failures, the people as their faces and the
@@ -3158,6 +3178,19 @@ The passes, in order. Each one is a diff you can review on its own.
    whose application refuses connections joins Needs attention, since its visitors get a 502.
    Chips that name something wrong carry its tone in their word, and a site new since the last
    read rises (`useArrivals`).
+
+   In 0.8.7 the card became a row. A site was about 190px of card — its route between two rules,
+   its notes, and Edit, Raw config and a menu at its foot — two to a line, each as tall as the
+   tallest thing it held. It is one `ChoiceRow` now, one height in every state: the overview's
+   `RouteMark` (what it fronts, the engine in the corner), its name over its kind and
+   `names → destination` in mono, then its hour, ports, TLS, certificate and state in aligned
+   columns, and every verb in its menu. The state is one word: an upstream that refuses takes the
+   place of *serving*, since that is what its visitors meet. The notes and the feature words are on
+   the site's page; the Cards/Table switch went, since a row read down its columns is the table.
+   The verdict moved beside the host's name, New site is the line's command, and Import and Export
+   all are behind its menu. Password files, Access lists and Deleted & backups are titled sections
+   of one-line rows with no sentence under the title: a file's logins, and a list's addresses,
+   sites and include line, are in the sheet its row opens, which is also where a list is edited.
 
    The Databases control center took it in 0.7.1, at the operator's request, because it had no
    life: a list of what needed attention over shelves of grey cards, every one the same weight, and

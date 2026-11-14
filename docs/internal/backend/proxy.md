@@ -187,7 +187,8 @@
     `SiteFile`: linked into sites-enabled under its own name or any other — a site linked as
     `sites-enabled/010-app` is enabled, and a save neither stages nor makes a second link for it, which
     had nginx read the file twice and report it conflicting with itself — or in conf.d with a name ending
-    in `.conf`) and whether it is in conf.d (`confd`). The form's footer follows them: a disabled site
+    in `.conf`) and whether it is in conf.d (`confd`). The form's saves — the sheet's footer for a new
+    site, the floating bar of a site's Settings — follow them: a disabled site
     offers **Save (stays disabled)** (`keep`, no reload) and **Save and enable** (`enable`, reload)
     instead of a "Save and reload" that did neither, and only the first when its name's link is another
     file's or the site is in conf.d. The listing (`nginxVHosts`) likewise calls a site enabled only when
@@ -484,10 +485,14 @@
   still the version it started from — the server's copy used to replace it on every open — gives way to
   the file when nothing in it was changed, and otherwise the form asks, with **Reload from disk** or
   **Keep my draft**, as it does after a save refused with `site_changed` (saving waits for the answer).
-  Unsaved changes are the draft against the spec it started from, compared as sent: they draw an
-  "unsaved" tag, and closing the sheet with them — Escape, the overlay, the close button, one funnel —
-  asks **Discard changes?**; a trip to another page keeps them instead. Ctrl/Cmd+S runs the footer's own
-  command. The dropped lines are drawn as a diff at their own line numbers, with the reason beneath for
+  Unsaved changes are the draft against the spec it started from, compared as sent. An existing site
+  is edited on its own page since 0.8.7 (`/proxy/sites/<name>?tab=settings`, `SiteSettings`): they draw
+  a strip naming the parts of Settings they are in (`site-sections.ts`) and bring up the floating bar,
+  and leaving Settings with them — another view of the site, the next site in the rail, a link off the
+  page — asks **Discard changes?**; a link inside the form is a trip that keeps them, under
+  `proxy.site.settings.<name>` so the sheet's own drafts cannot take them. A new site is still made in
+  the sheet, where they draw an "unsaved" tag and closing it — Escape, the overlay, the close button,
+  one funnel — asks the same. Ctrl/Cmd+S runs the primary save. The dropped lines are drawn as a diff at their own line numbers, with the reason beneath for
   a line of the server block that cannot move, **Move N lines into Extra configuration** and **Edit the
   raw file** (the config editor over the form, at the first dropped line; saving there reads the file
   again). A hand-written file the form reads whole says so and that it is kept as `<file>.bak`. A
@@ -553,7 +558,7 @@
   repeats the server's security headers (its `add_header` stops them inheriting), and every page
   location turns `auth_basic` off. While maintenance holds 503 the site's own 503 page is not routed,
   but its location stays written, which is how the parser reads `ErrorPages` back. `VHost.maintenance`
-  reports the switch on the Sites card. Routes: `GET /proxy/sites/{name}/pages/{page}` (any signed-in
+  reports the switch on the Sites row. Routes: `GET /proxy/sites/{name}/pages/{page}` (any signed-in
   account; the default when the site has no file), `PUT` the same (`system.admin`, at most 256 KiB,
   no reload, audited `proxy.site.page`), and `POST /proxy/sites/{name}/maintenance`
   `{on, retryAfter?, bypassFrom?}` (destructive gate, like disabling; audited
@@ -587,7 +592,7 @@
   as nginx inherits it. Refused for redirect sites (`return` runs before limits apply) and exemptions or
   log-only with nothing limited. Every limit counts the address nginx sees, so a warning says so unless
   the extra configuration sets `real_ip_header`; the form cannot tell whether a CDN is in front.
-  `VHost.rateLimited` puts "rate limited" on the Sites card. The private-prefix nginx test loads the
+  `VHost.rateLimited` puts "rate limited" among the feature words on the site's page. The private-prefix nginx test loads the
   rendered zones and confirms that a third request over a `1r/m` limit answers 429.
 
   **Caching** (`sites_cache.go`, form section "Caching", verb "Purge cache"). `SiteSpec.StaticCache{MaxAge,
