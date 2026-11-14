@@ -345,7 +345,9 @@ export function Networks() {
             </>
           }
           state={
-            list.data ? (
+            // Not for a host that lists none: "every network in use" over
+            // no networks is true and says nothing.
+            list.data && networks.length > 0 ? (
               <Verdict
                 plan={plan}
                 unused={unused.length}

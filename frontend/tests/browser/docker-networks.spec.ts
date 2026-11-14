@@ -274,9 +274,9 @@ test("on a phone both lists read down the row and nothing scrolls sideways", asy
   await page.goto("/docker/networks")
 
   await expect(page.getByRole("columnheader")).toHaveCount(0)
-  const networks = page.getByRole("list", { name: "Networks" })
+  const networks = page.getByRole("list", { name: "Networks", exact: true })
   await expect(networks.getByRole("link", { name: "shop_backend", exact: true })).toBeVisible()
-  const containers = page.getByRole("list", { name: "Containers" })
+  const containers = page.getByRole("list", { name: "Containers", exact: true })
   await expect(containers.getByRole("button", { name: "shop-db-1" })).toBeVisible()
 
   const overflow = await page.evaluate(
@@ -342,4 +342,16 @@ test("a reader sees every network and is offered no change", async ({ page }) =>
   await expect(page.getByRole("button", { name: "Create network" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Remove unused" })).toHaveCount(0)
   await expect(table.getByRole("button")).toHaveCount(0)
+})
+
+test("a host that lists no networks says so, and gives no verdict on none", async ({ page }) => {
+  await mockNetworks(page, { networks: [], events: [] })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/networks")
+
+  await expect(page.getByText("No networks", { exact: true })).toBeVisible()
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity.getByText("0 networks, 0 made here")).toBeVisible()
+  await expect(identity.getByText(/Every network in use|unused/)).toHaveCount(0)
+  await expect(identity.getByRole("button", { name: "Create network", exact: true })).toBeVisible()
 })
