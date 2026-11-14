@@ -178,7 +178,7 @@ test("a quick result is saved from the server's hold without running the tool ag
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Run name", { exact: true }).fill("Unanswered ping")
   await dialog.getByRole("button", { name: "Save result", exact: true }).click()
-  await expect(page).toHaveURL(/\/network\/runs\?run=saved-run/)
+  await expect(page).toHaveURL(/\/network\/runs\/saved-run/)
   expect(calls.find((call) => call.path === "/network/diagnostics/results")?.body).toEqual({
     resultId: pingUnknown.resultId,
     name: "Unanswered ping",
@@ -636,10 +636,12 @@ test("a saved run shows its structured evidence, metric history and measurement 
   const evidence = page.getByLabel("Structured evidence")
   await expect(evidence.getByText("3 of 4 replies.", { exact: true })).toBeVisible()
   await expect(evidence.getByText("answered with findings", { exact: true })).toBeVisible()
+  await page.getByRole("tab", { name: "History", exact: true }).click()
   const historyPanel = page.getByLabel("Run history")
   await expect(historyPanel.getByRole("columnheader", { name: "Packet loss" })).toBeVisible()
   await expect(historyPanel.getByRole("cell", { name: "0%", exact: true })).toBeVisible()
   await expect(historyPanel.getByRole("cell", { name: "25%", exact: true })).toBeVisible()
+  await page.getByRole("tab", { name: /^Compare/ }).click()
   await page.getByRole("combobox", { name: "Baseline run", exact: true }).click()
   await page.getByRole("option").first().click()
   await page.getByRole("button", { name: "Compare", exact: true }).click()

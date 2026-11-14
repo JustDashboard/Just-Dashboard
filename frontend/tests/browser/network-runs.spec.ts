@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import type { DiagnosticComparison, DiagnosticRun } from "../../src/lib/network-diagnostics"
 import { admin, json, mockNetwork } from "./network-fixture"
+import { risen } from "./risen"
 
 const now = "2026-10-08T12:00:00Z"
 function run(id = "baseline", overrides: Partial<DiagnosticRun> = {}): DiagnosticRun {
@@ -54,10 +55,14 @@ async function fixture(page: Page, records: DiagnosticRun[] = [run()], session =
     failSave: 0,
     failPolicy: 0,
     failRead: "",
+    hold: false,
+    release: () => {},
     next: 0,
     policy: { maxRuns: 100, maxAgeHours: 168 },
   }
+  const held = new Promise<void>((resolve) => (state.release = resolve))
   await page.route("**/api/v1/network/diagnostics/**", async (route) => {
+    if (state.hold) await held
     const request = route.request()
     const url = new URL(request.url())
     const path = url.pathname.replace("/api/v1/network/diagnostics", "")
@@ -215,6 +220,9 @@ async function fixture(page: Page, records: DiagnosticRun[] = [run()], session =
   return state
 }
 
+const detail = (page: Page) => page.getByRole("region", { name: "Saved diagnostic", exact: true })
+const actions = (page: Page) => page.getByRole("button", { name: "Run actions", exact: true })
+
 for (const status of [409, 500]) {
   test(`a ${status} launch keeps the named IPv6 tool draft and runs only on retry`, async ({
     page,
@@ -239,8 +247,10 @@ for (const status of [409, 500]) {
     )
     await expect(page.locator("#tool-port-port")).toHaveValue("8443")
     await dialog.getByRole("button", { name: "Run and save", exact: true }).click()
-    await expect(page).toHaveURL(/\/network\/runs\?run=created-1$/)
-    await expect(page.getByRole("region", { name: "Saved diagnostic" })).toContainText("Queued")
+    // Tools sends the reader to the address that used to select the run
+    // beside the list; it opens the run's own page.
+    await expect(page).toHaveURL(/\/network\/runs\/created-1$/)
+    await expect(detail(page)).toContainText("Queued")
     const creates = state.calls.filter((call) => call.method === "POST")
     expect(creates).toHaveLength(2)
     expect(creates[1].body).toEqual({
@@ -248,9 +258,8 @@ for (const status of [409, 500]) {
       request: { tool: "port", target: "2001:db8::9", port: 8443 },
     })
     await page.reload()
-    await expect(page.getByRole("textbox", { name: "Saved run name" })).toHaveValue(
-      "IPv6 private listener",
-    )
+    await expect(detail(page)).toContainText("IPv6 private listener")
+    await expect(detail(page)).toContainText("2001:db8::9:8443")
     expect(state.calls.filter((call) => call.method === "POST")).toHaveLength(2)
     expect(quick).toBe(0)
   })
@@ -266,23 +275,20 @@ test("a cancellation stays pending until cleanup is observed", async ({ page }) 
   })
   const state = await fixture(page, [record])
   await page.goto("/network/runs?run=running")
-  await expect(page.getByRole("region", { name: "Saved diagnostic" })).toContainText("Running")
-  await expect(
-    page.getByRole("region", { name: "Saved diagnostic" }).locator(".animate-breathe"),
-  ).toHaveCount(0)
+  await expect(page).toHaveURL(/\/network\/runs\/running$/)
+  await expect(detail(page)).toContainText("Running")
+  await expect(detail(page).locator(".animate-breathe")).toHaveCount(0)
   await page.getByRole("button", { name: "Cancel run", exact: true }).click()
   await expect(page.getByRole("button", { name: "Stopping…", exact: true })).toBeDisabled()
   await expect(page.getByText("Waiting for the diagnostic to stop")).toBeVisible()
-  await expect(page.getByRole("region", { name: "Saved diagnostic" })).not.toContainText(
-    "Cancelled",
-  )
+  await expect(detail(page)).not.toContainText("Cancelled")
   Object.assign(state.runs.get("running")!, {
     status: "cancelled",
     outcome: "cancelled",
     outcomeSource: "context",
     endedAt: now,
   })
-  await expect(page.getByRole("region", { name: "Saved diagnostic" })).toContainText("Cancelled")
+  await expect(detail(page)).toContainText("Cancelled")
   await expect(page.getByRole("button", { name: "Rerun", exact: true })).toBeVisible()
   expect(
     state.calls.filter((call) => call.method === "POST" && call.path.endsWith("/cancel")),
@@ -294,16 +300,22 @@ test("saved names survive failed writes, explicit reruns compare and export, and
 }) => {
   const state = await fixture(page)
   state.failSave = 500
-  await page.goto("/network/runs?run=baseline")
-  const name = page.getByRole("textbox", { name: "Saved run name" })
+  await page.goto("/network/runs/baseline")
+  await actions(page).click()
+  await page.getByRole("menuitem", { name: "Rename", exact: true }).click()
+  const rename = page.getByRole("dialog", { name: "Rename saved run" })
+  const name = rename.getByRole("textbox", { name: "Saved run name" })
   await name.fill("DNS after resolver repair")
-  await page.getByRole("button", { name: "Save name", exact: true }).click()
-  await expect(page.getByText(/could not be saved/)).toBeVisible()
+  await rename.getByRole("button", { name: "Save name", exact: true }).click()
+  await expect(rename.getByText(/could not be saved/)).toBeVisible()
   await expect(name).toHaveValue("DNS after resolver repair")
-  await page.getByRole("button", { name: "Save name", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Save name", exact: true })).toBeDisabled()
+  await rename.getByRole("button", { name: "Save name", exact: true }).click()
+  await expect(rename).toHaveCount(0)
+  await expect(detail(page)).toContainText("DNS after resolver repair")
   await page.getByRole("button", { name: "Rerun", exact: true }).click()
-  await expect(page).toHaveURL(/run=rerun-1$/)
+  await expect(page).toHaveURL(/\/network\/runs\/rerun-1$/)
+  await page.getByRole("tab", { name: /^Compare/ }).click()
+  await expect(page).toHaveURL(/\/network\/runs\/rerun-1\?tab=compare$/)
   await page.getByRole("combobox", { name: "Baseline run", exact: true }).click()
   await page.getByRole("option").filter({ hasText: "DNS after resolver repair" }).click()
   await page.getByRole("button", { name: "Compare", exact: true }).click()
@@ -315,12 +327,18 @@ test("saved names survive failed writes, explicit reruns compare and export, and
   expect(compare.query.get("before")).toBe("baseline")
   expect(compare.query.get("after")).toBe("rerun-1")
   const download = page.waitForEvent("download")
-  await page.getByRole("button", { name: "Export JSON", exact: true }).click()
+  await actions(page).click()
+  await page.getByRole("menuitem", { name: "Export JSON", exact: true }).click()
   expect((await download).suggestedFilename()).toBe("network-diagnostic-rerun-1.json")
-  await expect(page.getByText("retained raw tool output", { exact: true })).not.toBeVisible()
-  await page.getByText("Bounded tool evidence", { exact: true }).click()
+  await expect(page.getByText("retained raw tool output", { exact: true })).toHaveCount(0)
+  await page.getByRole("tab", { name: "Details", exact: true }).click()
   await expect(page.getByText("retained raw tool output", { exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Delete", exact: true }).click()
+  await expect(detail(page).getByRole("link", { name: "baseline", exact: true })).toHaveAttribute(
+    "href",
+    "/network/runs/baseline",
+  )
+  await actions(page).click()
+  await page.getByRole("menuitem", { name: "Delete", exact: true }).click()
   expect(state.calls.filter((call) => call.method === "DELETE")).toHaveLength(0)
   await page
     .getByRole("dialog", { name: "Delete saved run" })
@@ -347,10 +365,13 @@ test("restart interruption remains saved across reload and never launches itself
   await page.goto("/network/runs?run=interrupted")
   await expect(page.getByText("Interrupted at backend restart or shutdown")).toBeVisible()
   await expect(page.getByText(/No answer was retained/)).toBeVisible()
+  // With no answer, what the tool said is the result.
+  await expect(page.getByLabel("Probe error")).toContainText("Backend restarted")
   await page.reload()
   await expect(page.getByText("Interrupted at backend restart or shutdown")).toBeVisible()
   expect(state.calls.filter((call) => call.method !== "GET")).toHaveLength(0)
-  await expect(page.getByRole("combobox", { name: "Baseline run" })).toHaveCount(0)
+  await expect(page.getByRole("tab", { name: /^Compare/ })).toHaveCount(0)
+  await expect(page.getByRole("tab", { name: "History", exact: true })).toHaveCount(0)
 })
 
 for (const [outcome, label] of Object.entries({
@@ -362,7 +383,7 @@ for (const [outcome, label] of Object.entries({
   invalid_certificate: "Invalid certificate",
   completed_with_findings: "Completed with findings",
 })) {
-  test(`retained ${outcome} is a typed outcome with expandable evidence`, async ({ page }) => {
+  test(`retained ${outcome} is a typed outcome with its evidence a view away`, async ({ page }) => {
     await fixture(page, [
       run("outcome", {
         status: outcome === "completed_with_findings" ? "completed" : "failed",
@@ -373,11 +394,11 @@ for (const [outcome, label] of Object.entries({
       }),
     ])
     await page.goto("/network/runs?run=outcome")
-    await expect(page.getByRole("region", { name: "Saved diagnostic" })).toContainText(label)
+    await expect(detail(page)).toContainText(label)
     await expect(page.getByText(/category is inferred from the tool/)).toBeVisible()
     await expect(page.getByText("Retained result is truncated")).toBeVisible()
-    await expect(page.getByText("Retained tool error", { exact: true })).not.toBeVisible()
-    await page.getByText("Bounded tool evidence", { exact: true }).click()
+    await expect(page.getByText("Retained tool error", { exact: true })).toHaveCount(0)
+    await page.getByRole("tab", { name: "Details", exact: true }).click()
     await expect(page.getByText("Retained tool error", { exact: true })).toBeVisible()
   })
 }
@@ -390,11 +411,13 @@ test("initial list and result failures offer retry without inventing an empty in
   await page.goto("/network/runs")
   await expect(page.getByText("Recording is unavailable", { exact: true })).toBeVisible()
   await expect(page.getByText(/No saved runs/)).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "About saved runs" })).toContainText("Not read")
   state.failRead = "baseline"
+  await page.getByRole("button", { name: "Try again", exact: true }).click()
   const failedDetail = page.waitForResponse(
     (response) => response.url().endsWith("/diagnostics/baseline") && response.status() === 503,
   )
-  await page.getByRole("button", { name: "Try again", exact: true }).click()
+  await page.getByRole("link", { name: "Open IPv6 DNS baseline" }).click()
   await failedDetail
   await expect(page.getByText("Recording is unavailable", { exact: true })).toBeVisible()
   state.failRead = ""
@@ -404,9 +427,12 @@ test("initial list and result failures offer retry without inventing an empty in
 
 test("a failed later result read retains dated evidence and refresh retries", async ({ page }) => {
   const state = await fixture(page)
-  await page.goto("/network/runs?run=baseline")
+  await page.goto("/network/runs/baseline")
   await expect(page.getByLabel("Structured result")).toContainText("2001:db8::1")
   state.failRead = "baseline"
+  // A finished run is read again only now and then; the page's refresh key
+  // reads it at once.
+  await page.keyboard.press("F5")
   await expect(page.getByText("Showing the last known diagnostic result")).toBeVisible()
   await expect(page.getByText(/Last successful read:/)).toBeVisible()
   await expect(page.getByLabel("Structured result")).toContainText("2001:db8::1")
@@ -423,12 +449,16 @@ test("retention is bounded and confirms deletion, keeping the draft after refusa
   const state = await fixture(page)
   state.failPolicy = 500
   await page.goto("/network/runs")
-  await page.getByText("Retention policy", { exact: true }).click()
-  await page.getByRole("textbox", { name: "Finished runs to retain" }).fill("257")
-  await expect(page.getByRole("button", { name: "Save retention", exact: true })).toBeDisabled()
-  await page.getByRole("textbox", { name: "Finished runs to retain" }).fill("2")
-  await page.getByRole("textbox", { name: "Retention hours" }).fill("24")
-  await page.getByRole("button", { name: "Save retention", exact: true }).click()
+  const line = page.getByRole("region", { name: "About saved runs" })
+  await expect(line).toContainText("keeps 100 finished for 7 days")
+  await page.getByRole("button", { name: "Saved run actions", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Retention policy", exact: true }).click()
+  const editor = page.getByRole("dialog", { name: "Retention policy" })
+  await editor.getByRole("textbox", { name: "Finished runs to retain" }).fill("257")
+  await expect(editor.getByRole("button", { name: "Save retention", exact: true })).toBeDisabled()
+  await editor.getByRole("textbox", { name: "Finished runs to retain" }).fill("2")
+  await editor.getByRole("textbox", { name: "Retention hours" }).fill("24")
+  await editor.getByRole("button", { name: "Save retention", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Change diagnostic retention" })
   expect(state.calls.filter((call) => call.method === "PUT")).toHaveLength(0)
   await dialog.getByRole("button", { name: "Save retention", exact: true }).click()
@@ -438,36 +468,195 @@ test("retention is bounded and confirms deletion, keeping the draft after refusa
   ).toHaveValue("2")
   await dialog.getByRole("button", { name: "Save retention", exact: true }).click()
   await expect(dialog).toHaveCount(0)
+  await expect(editor).toHaveCount(0)
   expect(state.policy).toEqual({ maxRuns: 2, maxAgeHours: 24 })
+  await expect(line).toContainText("keeps 2 finished for 1 day")
 })
 
 test("read access opens local tools without reading or starting retained runs", async ({
   page,
 }) => {
   const reader = { ...admin, capabilities: ["read"], user: { ...admin.user, role: "readonly" } }
-  const state = await fixture(page, [], reader)
-  await page.goto("/network/runs")
-  await expect(page.getByText("Saved diagnostics need the admin capability")).toBeVisible()
+  const state = await fixture(page, [run()], reader)
+  for (const path of ["/network/runs/baseline", "/network/runs?run=baseline", "/network/runs"]) {
+    await page.goto(path)
+    await expect(page.getByText("Saved diagnostics need the admin capability")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Rerun", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /actions/i })).toHaveCount(0)
+  }
   expect(state.calls).toHaveLength(0)
-  await page.getByRole("link", { name: "Quick tools", exact: true }).click()
+  await page.getByRole("link", { name: "Run a tool", exact: true }).click()
+  await expect(page).toHaveURL(/\/network\/tools/)
   await expect(page.getByRole("button", { name: "Run and save", exact: true })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "Saved runs", exact: true })).toHaveCount(0)
   expect(state.calls).toHaveLength(0)
+})
+
+test("an account that may not delete is offered no Delete on a run or its row", async ({
+  page,
+}) => {
+  const keeper = { ...admin, capabilities: ["read", "system.admin"] }
+  await fixture(page, [run()], keeper)
+  await page.goto("/network/runs")
+  await page.getByRole("button", { name: "Actions for IPv6 DNS baseline" }).click()
+  await expect(page.getByRole("menuitem", { name: "Rerun", exact: true })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Delete", exact: true })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await page.goto("/network/runs/baseline")
+  await actions(page).click()
+  await expect(page.getByRole("menuitem", { name: "Export JSON", exact: true })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Delete", exact: true })).toHaveCount(0)
 })
 
 for (const width of [375, 1280, 1720]) {
   test(`saved runs fit a ${width}px reporting page`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
     await fixture(page)
-    await page.goto("/network/runs?run=baseline")
-    await expect(page.getByRole("textbox", { name: "Saved run name" })).toBeVisible()
-    await expect(page.locator('[data-slot="page"]')).toHaveAttribute("data-register", "reading")
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-      width,
+    for (const path of ["/network/runs", "/network/runs?run=baseline"]) {
+      await page.goto(path)
+      // Narrow, the rail's rows are in the page and not drawn: only what is drawn counts.
+      await expect(
+        page.getByText("IPv6 DNS baseline").locator("visible=true").first(),
+      ).toBeVisible()
+      await expect(page.locator('[data-slot="page"]')).toHaveAttribute("data-register", "reading")
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      )
+    }
+    await expect(page).toHaveURL(/\/network\/runs\/baseline$/)
+    // The list beside the run is the wide page's; narrower, the run is the one pane.
+    await expect(page.getByRole("navigation", { name: "Saved runs" })).toHaveCount(
+      width >= 1280 ? 1 : 0,
     )
     await page.screenshot({ path: info.outputPath(`saved-runs-${width}.png`), fullPage: true })
   })
 }
+
+const mixed = () => [
+  run("plain", { name: "Listeners", request: { tool: "listeners", target: "" } }),
+  run("failed", {
+    name: "A long name for a port check that will not fit a phone's row whole",
+    request: { tool: "port", target: "2001:db8:100:200:300:400:500:600", port: 8443 },
+    status: "failed",
+    outcome: "unsupported",
+    hasResult: false,
+    result: undefined,
+  }),
+  run("busy", {
+    name: "Traceroute",
+    request: { tool: "traceroute", target: "mirror.example.test" },
+    status: "running",
+    outcome: undefined,
+    endedAt: undefined,
+    hasResult: false,
+    result: undefined,
+  }),
+]
+
+for (const width of [390, 1280]) {
+  test(`run rows keep one height whatever they hold at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await fixture(page, mixed())
+    await page.goto("/network/runs")
+    const rows = page.getByRole("list", { name: "Saved runs" }).getByRole("listitem")
+    await expect(rows).toHaveCount(3)
+    await risen(page)
+    const boxes = await Promise.all([0, 1, 2].map((index) => rows.nth(index).boundingBox()))
+    expect(new Set(boxes.map((box) => box!.height)).size).toBe(1)
+    // Each row starts where the one before it ends, plus the list's one gap.
+    expect(boxes[2]!.y - boxes[1]!.y).toBe(boxes[1]!.y - boxes[0]!.y)
+    // The state is on the row at either width: a column wide, the second line's lead on a phone.
+    await expect(
+      rows
+        .filter({ hasText: "A long name" })
+        .getByText("Unsupported on this host")
+        .locator("visible=true"),
+    ).toHaveCount(1)
+    // No row of figures opens the page any more.
+    await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+    await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+  })
+}
+
+test("the opening line stands in one place while the runs load and once they have", async ({
+  page,
+}) => {
+  const state = await fixture(page)
+  state.hold = true
+  await page.goto("/network/runs")
+  const line = page.getByRole("region", { name: "About saved runs" })
+  const title = page.getByRole("region", { name: "Runs", exact: true })
+  await expect(line).toBeVisible()
+  await risen(page)
+  const [lineLoading, titleLoading] = [await line.boundingBox(), await title.boundingBox()]
+  state.release()
+  const first = page.getByRole("list", { name: "Saved runs" }).getByRole("listitem").first()
+  await expect(first).toBeVisible()
+  await risen(page)
+  expect(await line.boundingBox()).toEqual(lineLoading)
+  expect((await title.boundingBox())!.y).toBe(titleLoading!.y)
+})
+
+test("the chips narrow the list, and the rail walks what is left with the view kept", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await fixture(page, [
+    run("first", { name: "First DNS" }),
+    run("second", { name: "Second DNS" }),
+    run("refused", { name: "Refused port", status: "failed", outcome: "refused" }),
+  ])
+  await page.goto("/network/runs")
+  const chips = page.getByRole("group", { name: "Run states" })
+  await expect(chips.getByRole("button", { name: /^Completed/ })).toContainText("2")
+  await expect(chips.getByRole("button", { name: /^Failed/ })).toContainText("1")
+  await expect(chips.getByRole("button", { name: /^Interrupted/ })).toHaveCount(0)
+  await chips.getByRole("button", { name: /^Completed/ }).click()
+  const rows = page.getByRole("list", { name: "Saved runs" }).getByRole("listitem")
+  await expect(rows).toHaveCount(2)
+  await page.getByRole("link", { name: "Open Second DNS" }).click()
+  await expect(page).toHaveURL(/\/network\/runs\/second$/)
+  // The rail is the list as it was left: the chip still narrows it.
+  const rail = page.getByRole("navigation", { name: "Saved runs" })
+  await expect(rail.getByRole("link")).toHaveCount(2)
+  await expect(rail.getByRole("link", { name: "Second DNS" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  await page.getByRole("tab", { name: "Details", exact: true }).click()
+  await page.keyboard.press("Alt+ArrowDown")
+  await expect(page).toHaveURL(/\/network\/runs\/first\?tab=details$/)
+  await expect(detail(page)).toContainText("First DNS")
+  await expect(page.getByRole("button", { name: "Next run", exact: true })).toBeDisabled()
+  await page.getByRole("button", { name: "Previous run", exact: true }).click()
+  await expect(page).toHaveURL(/\/network\/runs\/second\?tab=details$/)
+  await rail.getByRole("button", { name: /^All/ }).click()
+  await expect(rail.getByRole("link")).toHaveCount(3)
+})
+
+test("a run that is gone says so and leads back to the list", async ({ page }) => {
+  await fixture(page)
+  await page.goto("/network/runs/expired")
+  await expect(page.getByText("No saved run with that ID is kept")).toBeVisible()
+  await page.getByRole("link", { name: "All saved runs", exact: true }).click()
+  await expect(page).toHaveURL(/\/network\/runs$/)
+})
+
+test("nothing watched is a mark, a sentence and the step that makes one", async ({ page }) => {
+  await fixture(page, [])
+  await page.route("**/api/v1/certificates/watched**", (route) => json(route, []))
+  await page.goto("/network/runs")
+  await expect(page.getByText("No saved runs", { exact: true })).toBeVisible()
+  const panel = page.getByRole("region", { name: "Watched probes" })
+  await expect(panel).toContainText("No probe is watched")
+  await expect(panel.getByRole("link", { name: "Port check", exact: true })).toHaveAttribute(
+    "href",
+    "/network/tools?tool=port",
+  )
+})
 
 test("watched probes are the watch list's own, checked and stopped from the runs page", async ({
   page,

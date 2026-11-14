@@ -1154,12 +1154,15 @@ evidence, traffic/shaping/eBPF, connections and tools. Connection path adds sour
 evidence with explicit basis and scope, the native nginx stream on the destination port as observed
 evidence with the backend leg nginx logged for a measured connection, and each forwarding site's
 service policy; Saved runs adds bounded durable lifecycle, retention, export and compatible
-comparison, and lists the **Watched probes** beside them: TCP endpoints the proxy watch list's own
+comparison, each run a page of its own (`/network/runs/[id]`, `components/network/run-page.tsx`:
+Result, Compare, History and Details, with the list as a rail), and lists the **Watched probes**
+under them: TCP endpoints the proxy watch list's own
 monitor connects to on its schedule, with each connect time, check-now and stop for administrators
 (`components/network/watched-probes.tsx`, `lib/watched-probes.ts`), started from the TCP port
 check's **Watch on a schedule**; Packet captures adds bounded immutable scope, dated native
-progress/cleanup, original private PCAP access and separately redacted support export; reload never
-starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
+progress/cleanup, original private PCAP access and separately redacted support export, each capture
+a page of its own (`/network/captures/[id]`, `components/network/capture-page.tsx`: the interface,
+filter and file as a picture, the record on a second view); reload never starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
 selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) read
 each group's policy and carrying member, every member measured through its own path (state, round
 trip, loss, a strip of recent samples, its mark, table and probe source), the rules' current advice,
