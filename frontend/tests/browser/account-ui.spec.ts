@@ -421,13 +421,100 @@ test("security is a form with its state under each head", async ({ page }) => {
   await expect(path).toContainText("Not enrolled")
   await expect(path).toContainText("a password alone gets in")
   await expect(page.getByRole("heading", { name: "Two-factor" })).toBeVisible()
-  await expect(page.getByText("Your password is the only factor")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Enable two-factor" })).toBeVisible()
+  // The state is the head's one line of facts; the verb is under it and why behind its ⓘ.
+  const twoFactor = page.locator("[data-slot=setting]", { hasText: "Two-factor" })
+  await expect(
+    twoFactor.getByText("your password is the only factor · optional on this install"),
+  ).toBeVisible()
+  await expect(
+    twoFactor.getByRole("button", { name: "Enable two-factor", exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText(/one stolen credential away/)).toHaveCount(0)
+  await readTip(
+    page,
+    twoFactor.getByRole("button", { name: "Why enable two-factor" }),
+    /one stolen credential away/,
+  )
+
+  // Four sections, one under another on the column's edges.
+  const column = page.locator("[data-slot=settings-column]")
+  await expect(column.locator("[data-slot=setting]")).toHaveCount(4)
+  await risen(page)
+  const boxes = await column.locator("[data-slot=setting]").evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect()
+      return { x: Math.round(box.x), y: box.y, bottom: box.bottom, width: Math.round(box.width) }
+    }),
+  )
+  for (const [index, box] of boxes.entries()) {
+    expect(box.x).toBe(boxes[0].x)
+    expect(box.width).toBe(boxes[0].width)
+    if (index > 0) expect(box.y).toBeGreaterThanOrEqual(boxes[index - 1].bottom)
+  }
+  expect(boxes[0].width).toBeLessThanOrEqual(768)
+  await expect(page.getByRole("link", { name: "Review where you are signed in" })).toHaveAttribute(
+    "href",
+    "/account/sessions",
+  )
 
   // The password rule lights as it is met.
+  // Nothing is prefilled, and the current password alone raises no bar: a
+  // password manager fills it in unasked.
+  const bar = page.getByRole("region", { name: "Save changes" })
+  for (const label of ["Current password", "New password", "Confirm new password"]) {
+    const field = page.getByLabel(label, { exact: true })
+    await expect(field).toHaveValue("")
+    await expect(field).toHaveAttribute("type", "password")
+  }
+  await page.getByLabel("Current password", { exact: true }).fill("old-password-1A")
+  await expect(bar).toHaveCount(0)
+
+  // The password rule lights as it is met, and the change is the floating bar's.
   await page.getByLabel("New password", { exact: true }).fill("Correcthorse1")
   await expect(page.getByText("12 characters or more")).toHaveClass(/text-success/)
   await expect(page.getByText(/three of upper case/)).toHaveClass(/text-success/)
+  const change = bar.getByRole("button", { name: /^Change password/ })
+  await expect(bar.getByText("Password · The new passwords do not match yet")).toBeVisible()
+  await expect(change).toBeDisabled()
+  await page.getByLabel("Confirm new password", { exact: true }).fill("Correcthorse1")
+  await expect(bar.getByText("Password · Signs out every session, this one included")).toBeVisible()
+  const sent = page.waitForRequest(
+    (request) => request.method() === "POST" && request.url().endsWith("/api/v1/account/password"),
+  )
+  // Enter in a field is the bar's command.
+  await page.getByLabel("Confirm new password", { exact: true }).press("Enter")
+  expect((await sent).postDataJSON()).toEqual({
+    currentPassword: "old-password-1A",
+    newPassword: "Correcthorse1",
+  })
+})
+
+test("security keeps its sections where they are as a factor is read, and fits a phone", async ({
+  page,
+}) => {
+  await mockAccount(page)
+  await page.goto("/account/security")
+  const twoFactor = page.locator("[data-slot=setting]", { hasText: "Two-factor" })
+  await expect(
+    twoFactor.getByText("asked at every sign-in · optional on this install"),
+  ).toBeVisible()
+  await expect(twoFactor.getByRole("button", { name: "Regenerate recovery codes" })).toBeVisible()
+  await expect(twoFactor.getByRole("button", { name: "Turn off" })).toBeVisible()
+  // Discard empties what was typed.
+  await page.getByLabel("New password", { exact: true }).fill("x")
+  const bar = page.getByRole("region", { name: "Save changes" })
+  await bar.getByRole("button", { name: "Discard" }).click()
+  await expect(page.getByLabel("New password", { exact: true })).toHaveValue("")
+  await expect(bar).toHaveCount(0)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/account/security")
+  await expect(page.getByRole("heading", { name: "Password" })).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
 
   await expect(page.getByText("3 sessions signed in · 1 awaiting a second factor")).toBeVisible()
 })
