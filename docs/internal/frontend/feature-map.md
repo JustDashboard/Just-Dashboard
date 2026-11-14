@@ -1333,6 +1333,17 @@ available. SSH edits are reviewed and protected by lockout guards; intrusion con
 capabilities, confirmation and audit. Automatic posture findings and settings recommendation
 comparisons were removed in 0.7.5
 
+Since 0.8.7 the overview is its identity line, the picture of the ways in and the access-boundary
+report: the picture's nodes carry the readings (connections, firewall, fail2ban, sshd, who is signed
+in) and their marks link to Connections, Firewall, Intrusion, SSH and Logins. Logins
+(`/security/logins`) opens on this server's identity line and a picture of where sessions are held
+from, who is attacking and which accounts are in; then open sessions (End session, `system.admin`
+and `destructive`), attackers ranked by attempts (Block at the firewall and the address lookups in
+each row's menu; an address the firewall already denies reads "blocked"), and the login record
+(Successful / Failed for administrators as `?failed=1`, a filter as `?q=`, new records held behind
+"N new logins · Show"). Checked by `security-logins.spec.ts` and `security-ui.spec.ts`; captures of
+every state with `JD_SECURITY_SHOTS=<folder>` and `security-logins-shots.spec.ts`
+
 **Implementation:** `app/(dashboard)/security/`, `components/security/`; backend in
 [`../backend/observability-security.md`](../backend/observability-security.md)
 

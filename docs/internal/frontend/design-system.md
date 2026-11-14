@@ -89,7 +89,7 @@ taking a frame:
   Docker holds on disk and what the registries say, over its framed table; the Volumes page's
   band of who holds the data and where each volume stands, over its framed table; the attention
   and storage blocks on a container's page), the
-  Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
+  Security section's exposure facts, findings, probe forms and the Auth log, Firewall
   log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
   facts, route picture, traffic, certificate and error band, attention list, sites and Engine log;
@@ -276,8 +276,10 @@ finished. §7 frames a `Pane` for this very property, and the only thing separat
 So **a panel whose body is a table is framed, and every other block on the page stays plain.** That
 is not a retreat from this section's argument — it is the argument: the frame separates *because* the
 readings, findings and lists around it have none. Security's Logins is the shape to check a page
-against — three framed grids read against one unframed `StatGrid`, and the page reads as three tables
-rather than as a stack of containers. A page on which the table is the only block is the easy case;
+against — since 0.8.7 one framed table, the login record, under a picture, a run of cards and a
+ranked list that have no frame, where it was three framed grids under an unframed `StatGrid`; the
+page reads as one table rather than as a stack of containers. A page on which the table is the
+only block is the easy case;
 a page on which everything is a table has a different problem than this rule.
 
 The flip is one word at the call site plus one on the bleed. A table inside a *plain* panel is bled
@@ -1822,6 +1824,30 @@ findings remain plain. `components/security/marks.tsx` supplies the inline addre
 process and interface marks. A product is named only when it can be identified; no logo is guessed
 for ufw, sshd or an unknown interface. Source choices in the firewall dialog use the same lit
 `ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
+
+**Since 0.8.7 the overview and Logins open on a line and a picture, with no tile row.** The
+overview's five linked tiles stood between its identity line and the picture, and four of them said
+what a node already said. The picture (`perimeter.tsx`) stands directly under the line now and
+carries each reading on its node: the peers and sockets on the internet's, the policy, the rule
+count and the open ports on the firewall's, the jails and bans on fail2ban's, how a login gets in
+(`ssh-reading.ts`) on sshd's, and a fifth node for who is signed in. A node's mark is the way to its
+page (Connections, Firewall, Intrusion, SSH, Logins), so the row of links is the picture. A layer
+whose read is in flight or failed is said to be unread, never drawn as a missing layer. Logins
+(`logins-panels.tsx`) opens on `HostIdentity` in the project's layout — this server, how many are
+signed in and how many addresses are trying as its state, the last login and the failed attempts as
+its facts, the page's keys and Refresh at the far end — then a `WireFlow` picture
+(`logins-picture.tsx`): where sessions are held from and who is attacking on the left, sshd in the
+middle, the accounts on the right. A session's line moves; an attacker is in the danger colour and
+moves while an attempt is under a quarter of an hour old; one the firewall already turns away
+(`refusedBy`, read from the rules the layout polls) is grey and dashed. The picture is four rows in
+every state and while it waits (`drawnFirst` shares the rows between who is in and who is trying,
+the last row counting the rest), so the lists under it do not move. Under it a session is a
+`ChoiceRow` with End session in its `⋯`, offered only with `system.admin` and `destructive` as the
+route requires; attackers are a `RankList` (attempts and their share in columns, no bar per row)
+with Block and the lookups in each row's `⋯` and "blocked" where the firewall already refuses the
+address; the login record is the page's one framed table, a line to a row, and a two-line list
+below `sm`. Empty, each list says so on one line at a row's height; a host without `last` or
+`lastb` says which package is missing and links Packages.
 
 **The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
 register. Sites opens on its identity line and the site band (§15, *The proxy's Sites page*); what
