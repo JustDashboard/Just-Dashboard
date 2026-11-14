@@ -7,6 +7,7 @@ import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-fl
 import { plural } from "@/lib/format"
 import { flowBytes, observerReading, type FlowReport } from "@/lib/network-flows"
 import { UTCTime, dayWords } from "@/components/network/flows/marks"
+import type { FlowAnchor } from "@/components/network/flows/views"
 
 const SOURCES_DRAWN = 2
 
@@ -41,6 +42,7 @@ export function FlowsPicture({
   loading,
   stale,
   words,
+  onJump,
 }: {
   data?: FlowReport
   /** The UTC day the page is reading, `2026-10-07`. */
@@ -50,6 +52,8 @@ export function FlowsPicture({
   stale?: boolean
   /** Keep every node's words on a phone: the off state, where they are the page. */
   words?: boolean
+  /** Open the view a node stands for, at its block. */
+  onJump: (anchor: FlowAnchor) => void
 }) {
   if (loading && !data) return <Waiting words={words} />
   const settings = data?.settings
@@ -58,8 +62,7 @@ export function FlowsPicture({
   const flowing = (has: boolean): WireLine =>
     has ? { state: "up", moving: recording } : { state: "idle" }
   const cycle = data?.lastCycle
-  const jump = (id: string) => () =>
-    document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" })
+  const jump = (anchor: FlowAnchor) => () => onJump(anchor)
 
   const sampled: WireFlowNode[] = cycle?.sources.length
     ? cycle.sources.map((source) => {
@@ -83,6 +86,8 @@ export function FlowsPicture({
             : source.status === "observed"
               ? { state: "up", moving: recording }
               : { state: "warning" },
+          onPress: jump("flow-sample"),
+          label: `Go to the latest sample of ${source.name}`,
         }
       })
     : [
