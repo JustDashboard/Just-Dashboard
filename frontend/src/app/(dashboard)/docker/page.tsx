@@ -3,20 +3,20 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Box, Clipboard, Cross, Layers, Sparkles } from "@/components/icons"
+import { ArrowRight, Box, Clipboard, Layers, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import type {
   ComposeStack,
   Container,
-  ContainerSparkline,
   ContainerStats,
   DockerDiskUsage,
   DockerEvent,
   DockerEventFeed,
   DockerInfo,
+  DockerNetwork,
+  VolumeDetail,
 } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -24,80 +24,54 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/components/deploy/vocabulary"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { ProductLogos, imageProducts, platformProduct } from "@/components/product-logo"
-import { Page, PageContext, PageState, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { ChoiceList } from "@/components/flow"
+import { FactDot } from "@/components/metrics/host-identity"
+import { Page, PageContext } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { Workspace } from "@/components/workspace/workspace"
 import { CleanupPanel } from "@/components/docker/cleanup"
 import { ContainerBand } from "@/components/docker/container-band"
-import { ContainerRows, ProjectKey } from "@/components/docker/container-table"
 import { DiskSummary } from "@/components/docker/disk-panel"
+import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
+import { EnginePicture } from "@/components/docker/engine-picture"
 import { ExplainIcon } from "@/components/docker/explain"
-import { StackStateBadge } from "@/components/docker/stack-state"
-import { useContainerControl } from "@/components/docker/container-actions"
-import {
-  BUCKET_ORDER,
-  containerBucket,
-  crashed,
-  mergeEvents,
-  overviewOrder,
-  recentChanges,
-  type ContainerBucket,
-} from "@/components/docker/overview"
+import { StackChoiceRow } from "@/components/docker/stack-row"
+import { stackLines } from "@/components/docker/stack-readings"
+import { containerBucket, oomKilledIds, recentEntries } from "@/components/docker/containers"
+import { mergeEvents, recentChanges } from "@/components/docker/overview"
 import { Button } from "@/components/ui/button"
 
-/** The state chips, in the order they are asked about; the toned two only while there is one. */
-const STATES: { value: ContainerBucket; label: string; tone?: "danger" | "warning" }[] = [
-  { value: "running", label: "Running" },
-  { value: "failing", label: "Failing", tone: "danger" },
-  { value: "starting", label: "Starting", tone: "warning" },
-  { value: "stopped", label: "Stopped" },
-]
-
-const BUCKETS = new Set<string>(BUCKET_ORDER)
-
-/** The project chip for containers started by hand rather than by compose. */
-const STANDALONE = "\u0000standalone"
-
 /**
- * Is Docker okay right now, and what is it doing?
+ * Is Docker okay right now, and what is it made of?
  *
- * The daemon first, as the identity line Services and Live open on — Docker
- * drawn as itself, its version, the host it runs on, the storage driver, how
- * many containers are running and how many compose projects are up — with the
- * native runtime verdict at its right end, which narrows the table to failing containers.
+ * The daemon first, as the line every Docker page opens on
+ * (`DockerIdentity`): Docker drawn as itself with its version, the verdict
+ * beside its name, the host it runs on, the storage driver, how many
+ * containers are running, how many compose projects are up and how many
+ * images it holds.
  *
  * Then `ContainerBand`: the containers using the most processor and memory as
  * spans of one bar the size of the machine, and the last thing that happened
  * to each container, live off the daemon's events.
  *
- * It replaced four tiles (§15 pass 2 names the exit), and each figure went
- * where it is said better:
+ * Then the engine as a picture (`EnginePicture`): the compose projects and
+ * the containers started by hand on one side of Docker, the networks and
+ * volumes it keeps on the other, the failing ones lit. It replaced a table of
+ * every container — the one `/docker/containers` draws, a press away from the
+ * section's title and from the verdict, which opens that table narrowed to
+ * what is failing. A second copy of the table answered "what is each
+ * container using", which the band above and that page already do; the
+ * picture answers what the engine holds and where the trouble is.
  *
- *   **Running** is the identity line's fact and the table's state chips, which
- *   count *and* narrow — failing in its tone and first in the table, where the
- *   old page had a separate "not running" list above everything because the
- *   tile could only count them.
+ * Last, the compose projects as cards that open them, beside what Docker
+ * keeps on disk (or the cleanup, once there is a gigabyte worth reclaiming).
  *
- *   **Runtime health** is the verdict at the line's end, and each container's
- *   health is its State cell: up for how long, and whether a check passes,
- *   fails, or does not exist.
- *
- *   **Compose stacks** is the identity line's "3 of 4 projects up" and the
- *   Compose projects head, where each project now draws its services as a
- *   strip of their states.
- *
- * Then every container as a table — framed, because it is one (§2) — read
- * from the containers socket so its figures move with every frame, each row a
- * container you open. New containers rise into place; a container changing
- * state changes in place. Disk and cleanup stay where they were, beside the
- * projects.
+ * The page has its shape before anything is read: the line, the band and the
+ * picture are drawn waiting, so nothing moves when the answers land.
  */
 export default function DockerOverviewPage() {
   const { can } = useAuth()
@@ -105,15 +79,9 @@ export default function DockerOverviewPage() {
   const { confirm, dialog } = useConfirm()
   const { host, snapshot } = useMetrics()
   const now = useNow(60_000)
-
-  const [query, setQuery] = useSessionState("docker.overview.query", "")
-  const [rememberedState, setState] = useSessionState("docker.overview.state", "")
-  const state = (BUCKETS.has(rememberedState) ? rememberedState : "") as ContainerBucket | ""
-  const [project, setProject] = useSessionState("docker.overview.project", "")
-  const [, rememberNavigation] = useSessionState<{ id: string; name: string }[]>(
-    "docker.containers.navigation",
-    [],
-  )
+  // The Containers page's own state chip, so the verdict opens that table
+  // already narrowed to what is failing.
+  const [, setContainersState] = useSessionState<string>("docker.containers.state.075", "")
 
   // The list arrives once over REST, so the page draws without waiting for
   // the socket; the socket then carries every change and every reading.
@@ -150,17 +118,19 @@ export default function DockerOverviewPage() {
     0,
   )
 
-  const trends = usePoll<ContainerSparkline[]>(
-    (signal) =>
-      get<ContainerSparkline[]>(
-        "/docker/containers/stats/history",
-        { range: "1h", points: 40 },
-        signal,
-      ),
-    120_000,
-  )
   const stacks = usePoll<ComposeStack[]>(
     (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),
+    60_000,
+  )
+  // What the picture's other side is made of. Read rarely: a network or a
+  // volume appears with a deploy, and the containers socket says when one
+  // of those has happened.
+  const networks = usePoll<DockerNetwork[]>(
+    (signal) => get<DockerNetwork[]>("/docker/networks/", undefined, signal),
+    60_000,
+  )
+  const volumes = usePoll<VolumeDetail[]>(
+    (signal) => get<VolumeDetail[]>("/docker/volumes/", undefined, signal),
     60_000,
   )
   const disk = usePoll<DockerDiskUsage>(
@@ -172,69 +142,27 @@ export default function DockerOverviewPage() {
     300_000,
   )
 
+  const read = streamed !== undefined || list.data !== undefined
   const containers = useMemo(() => streamed ?? list.data ?? [], [streamed, list.data])
   const detected = useMemo(() => stacks.data ?? [], [stacks.data])
-  const trendByName = useMemo(
-    () => new Map((trends.data ?? []).map((line) => [line.name, line])),
-    [trends.data],
+  const lines = useMemo(
+    () => stackLines(detected, containers, stats),
+    [detected, containers, stats],
   )
-  const changes = useMemo(
-    () => recentChanges(mergeEvents(feed.data?.events ?? [], live), now),
-    [feed.data, live, now],
+  const events = useMemo(() => mergeEvents(feed.data?.events ?? [], live), [feed.data, live])
+  const changes = useMemo(() => recentChanges(events, now), [events, now])
+  // Which containers are failing is the Containers page's reading, with its
+  // event log telling a kill for memory from a stop: the verdict opens that
+  // page's table, and the two must count the same containers.
+  const oomKilled = useMemo(() => oomKilledIds(recentEntries(events)), [events])
+  const buckets = useMemo(
+    () => containers.map((c) => containerBucket(c, oomKilled.has(c.id))),
+    [containers, oomKilled],
   )
 
-  const counts = useMemo(() => {
-    const bucket: Record<ContainerBucket, number> = {
-      failing: 0,
-      starting: 0,
-      running: 0,
-      stopped: 0,
-    }
-    const projects = new Map<string, number>()
-    for (const c of containers) {
-      bucket[containerBucket(c)]++
-      const key = c.composeStack || STANDALONE
-      projects.set(key, (projects.get(key) ?? 0) + 1)
-    }
-    return { bucket, projects }
-  }, [containers])
-
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return overviewOrder(
-      containers.filter((c) => {
-        if (state && containerBucket(c) !== state) return false
-        if (project && (c.composeStack || STANDALONE) !== project) return false
-        if (!needle) return true
-        return (
-          c.name.toLowerCase().includes(needle) ||
-          c.image.toLowerCase().includes(needle) ||
-          c.composeStack?.toLowerCase().includes(needle) === true
-        )
-      }),
-    )
-  }, [containers, query, state, project])
-  const { pending, act } = useContainerControl(list.refresh)
-
-  /** Goes to one container, with the table's order kept for its page's previous and next. */
   const open = useCallback(
-    (id: string, tab?: string) => {
-      rememberNavigation(
-        Array.from(
-          document.querySelectorAll<HTMLElement>(
-            "[data-native-workspace='Docker'] [data-workspace-item]",
-          ),
-        )
-          .slice(0, 500)
-          .map((item) => ({
-            id: item.dataset.workspaceItem!,
-            name: item.dataset.workspaceName ?? "",
-          })),
-      )
-      const suffix = tab ? `?tab=${encodeURIComponent(tab)}` : ""
-      router.push(`/docker/containers/${encodeURIComponent(id)}${suffix}`)
-    },
-    [router, rememberNavigation],
+    (id: string) => router.push(`/docker/containers/${encodeURIComponent(id)}`),
+    [router],
   )
   // A change names a container by the name a redeploy keeps; the id it had
   // may be gone, and Docker resolves the name to whichever has it now.
@@ -243,36 +171,45 @@ export default function DockerOverviewPage() {
       open(containers.find((c) => c.name === target.name)?.id ?? target.name),
     [containers, open],
   )
+  const openFailing = useCallback(() => {
+    setContainersState("failing")
+    router.push("/docker/containers")
+  }, [router, setContainersState])
 
-  if (!list.data && !streamed) {
-    if (list.error) {
-      return (
-        <Page>
-          <PageContext title="Docker" />
-          <ErrorState error={list.error} />
-        </Page>
-      )
-    }
-    return <PageState eyebrow="Server" title="Docker" />
+  const header = <PageContext title="Docker" />
+
+  // The containers could not be read at all, though Docker answered the
+  // layout's check: the page still opens on what it is about, says so in a
+  // sentence, and offers the read again.
+  if (!read && list.error) {
+    return (
+      <Page>
+        {header}
+        <DockerIdentity
+          version={info.data?.ServerVersion}
+          host={{ hostname: host?.hostname || info.data?.Name, platform: host?.platform }}
+          state={<Status tone="warning" label="Not read" />}
+          facts={<span>The containers could not be read</span>}
+        />
+        <ErrorState error={list.error} onRetry={list.refresh} retryable />
+      </Page>
+    )
   }
 
-  const failing = counts.bucket.failing
-  const starting = counts.bucket.starting
+  const failing = buckets.filter((bucket) => bucket === "failing").length
+  const starting = buckets.filter((bucket) => bucket === "starting").length
   const running = containers.filter((c) => c.state === "running").length
   const active = detected.filter((s) => s.deployed)
   const reclaimable = disk.data
     ? disk.data.images.reclaimable + disk.data.buildCache.reclaimable
     : 0
-  const narrowed = Boolean(query.trim() || state || project)
-  const projectChips = [...counts.projects.entries()].sort(([a], [b]) =>
-    a === STANDALONE ? 1 : b === STANDALONE ? -1 : a.localeCompare(b),
-  )
-
-  const header = <PageContext title="Docker" />
+  const version = info.data?.ServerVersion
+  const settled = (poll: { data?: unknown; error?: unknown }) =>
+    poll.data !== undefined || poll.error !== undefined
 
   // A server with nothing on it is not an error state, and it is the one
   // moment where the page should be teaching rather than reporting.
-  if (containers.length === 0 && detected.length === 0 && stacks.data) {
+  if (read && containers.length === 0 && detected.length === 0 && stacks.data) {
     return (
       <Page className="animate-rise">
         {header}
@@ -287,104 +224,81 @@ export default function DockerOverviewPage() {
       name="Docker"
       refresh={() => {
         list.refresh()
-        list.refresh()
-        trends.refresh()
         stacks.refresh()
+        networks.refresh()
+        volumes.refresh()
         disk.refresh()
         feed.refresh()
-      }}
-      escape={() => {
-        if (query) {
-          setQuery("")
-          return true
-        }
-        if (project) {
-          setProject("")
-          return true
-        }
-        if (state) {
-          setState("")
-          return true
-        }
-        return false
       }}
       commands={[
         {
           id: "failing",
-          label: state === "failing" ? "Show every container" : "Show failing containers",
-          run: () => setState(state === "failing" ? "" : "failing"),
+          label: "Show failing containers",
+          disabled: failing === 0,
+          run: openFailing,
         },
       ]}
     >
-      {/* The page rises once, when its first container list lands — the same
-          arrival the host Overview makes. */}
-      <Page className="animate-rise">
+      <Page>
         {header}
 
-        <HostIdentity
-          mark="docker"
-          fallback={Box}
-          title={info.data?.ServerVersion ? `Docker ${info.data.ServerVersion}` : "Docker"}
-          facts={
-            <>
-              {(host?.hostname || info.data?.Name) && (
-                <>
-                  <HostFact product={platformProduct(host?.platform)}>
-                    {host?.hostname || info.data?.Name}
-                  </HostFact>
-                  <FactDot />
-                </>
-              )}
-              {info.data?.Driver && (
-                <>
-                  <span>
-                    {info.data.Driver}
-                    {info.data.CgroupVersion && ` on cgroup v${info.data.CgroupVersion}`}
-                  </span>
-                  <FactDot />
-                </>
-              )}
-              <span className="numeric">
-                {running} of {plural(containers.length, "container")} running
-              </span>
-              {detected.length > 0 && (
-                <>
-                  <FactDot />
-                  <span className="numeric">
-                    {active.length} of {plural(detected.length, "project")} up
-                  </span>
-                </>
-              )}
-              {info.data?.Images !== undefined && (
-                <>
-                  <FactDot />
-                  <span className="numeric">
-                    {plural(info.data.Images, "image")}
-                    {disk.data && ` · ${bytes(disk.data.layersSize)}`}
-                  </span>
-                </>
-              )}
-            </>
+        <DockerIdentity
+          version={version}
+          host={{ hostname: host?.hostname || info.data?.Name, platform: host?.platform }}
+          state={
+            !read ? undefined : failing > 0 ? (
+              <VerdictButton onPress={openFailing}>
+                <Status tone="danger" label={`${plural(failing, "container")} failing`} />
+              </VerdictButton>
+            ) : starting > 0 ? (
+              <Status tone="warning" label={`${plural(starting, "container")} starting`} />
+            ) : (
+              <Status tone="running" label="Nothing failing" />
+            )
           }
-          aside={
-            <div className="flex flex-wrap items-center gap-3">
-              {failing > 0 ? (
-                <button
-                  type="button"
-                  aria-pressed={state === "failing"}
-                  onClick={() => setState(state === "failing" ? "" : "failing")}
-                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
-                >
-                  <Status tone="danger" label={`${plural(failing, "container")} failing`} />
-                </button>
-              ) : starting > 0 ? (
-                <Status tone="warning" label={`${plural(starting, "container")} starting`} />
-              ) : (
-                <Status tone="running" label="Nothing failing" />
-              )}
-
-              <WorkspaceHelp compact />
-            </div>
+          facts={
+            !read ? (
+              <TextShimmer>Reading the containers…</TextShimmer>
+            ) : (
+              <>
+                {info.data?.Driver && (
+                  <span className="contents max-sm:hidden">
+                    <span>
+                      {info.data.Driver}
+                      {info.data.CgroupVersion && ` on cgroup v${info.data.CgroupVersion}`}
+                    </span>
+                    <FactDot />
+                  </span>
+                )}
+                <span className="numeric">
+                  {running} of {plural(containers.length, "container")} running
+                </span>
+                {detected.length > 0 && (
+                  <>
+                    <FactDot />
+                    <span className="numeric">
+                      {active.length} of {plural(detected.length, "project")} up
+                    </span>
+                  </>
+                )}
+                {info.data?.Images !== undefined && (
+                  <span className="contents max-sm:hidden">
+                    <FactDot />
+                    <span className="numeric">
+                      {plural(info.data.Images, "image")}
+                      {disk.data && ` · ${bytes(disk.data.layersSize)}`}
+                    </span>
+                  </span>
+                )}
+              </>
+            )
+          }
+          command={
+            can("service.control") && (
+              <Button size="sm" asChild>
+                <Link href="/deploy">Open Deployments</Link>
+              </Button>
+            )
           }
         />
 
@@ -396,21 +310,26 @@ export default function DockerOverviewPage() {
           hostMemory={info.data?.MemTotal ?? 0}
           changes={changes}
           listening={feed.data?.listening ?? true}
+          loaded={read}
+          eventsRead={settled(feed) || live.length > 0}
           onOpen={openChange}
         />
 
         {socketError && <ErrorState error={new Error(socketError)} />}
 
-        {/* Framed, because it is a table: the grid owns a scroll region and
-            the edge is what says so (§2). Everything around it stays plain. */}
-        <Panel>
+        {/* Plain: a picture is a reading, and the frame is for the table it
+            replaced (§2). The title keeps the count and the way to that
+            table. */}
+        <Panel plain aria-label="What the engine holds">
           <PanelHeader
             title={
               <span className="inline-flex items-center gap-1.5">
                 Containers
-                <span className="numeric text-body font-normal text-muted-foreground">
-                  {containers.length}
-                </span>
+                {read && (
+                  <span className="numeric text-body font-normal text-muted-foreground">
+                    {containers.length}
+                  </span>
+                )}
                 <ExplainIcon name="container" />
               </span>
             }
@@ -422,123 +341,68 @@ export default function DockerOverviewPage() {
                 All containers <ArrowRight className="size-3" />
               </Link>
             }
-          >
-            <ChipStrip role="group" aria-label="State" className="mr-auto">
-              {STATES.map(({ value, label, tone }) => {
-                const count = counts.bucket[value]
-                if ((tone || value === "stopped") && count === 0 && state !== value) return null
-                return (
-                  <FilterChip
-                    key={value}
-                    selected={state === value}
-                    onClick={() => setState(state === value ? "" : value)}
-                  >
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "size-1.5 rounded-full",
-                        tone === "danger"
-                          ? "bg-destructive"
-                          : tone === "warning"
-                            ? "bg-warning"
-                            : value === "running"
-                              ? "bg-success"
-                              : "bg-muted-foreground/50",
-                      )}
-                    />
-                    {label}
-                    <ChipCount
-                      className={cn(
-                        tone === "danger" && "text-destructive opacity-100",
-                        tone === "warning" && "text-warning opacity-100",
-                      )}
-                    >
-                      {count}
-                    </ChipCount>
-                  </FilterChip>
-                )
-              })}
-            </ChipStrip>
-          </PanelHeader>
-          <PanelToolbar>
-            <SearchInput
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Name, image or project"
-              containerClassName="sm:w-64"
+          />
+          <PanelBody className="pt-8 pb-0">
+            <EnginePicture
+              containers={containers}
+              stacks={detected}
+              networks={networks.data}
+              volumes={volumes.data}
+              oomKilled={oomKilled}
+              version={version}
+              loading={!read || !settled(stacks) || !settled(networks) || !settled(volumes)}
             />
-            {projectChips.length > 1 && (
-              <ChipStrip role="group" aria-label="Project">
-                <FilterChip selected={project === ""} onClick={() => setProject("")}>
-                  Every project <ChipCount>{containers.length}</ChipCount>
-                </FilterChip>
-                {projectChips.map(([name, count]) => (
-                  <FilterChip
-                    key={name}
-                    selected={project === name}
-                    title={name === STANDALONE ? "Started by hand rather than by compose" : name}
-                    onClick={() => setProject(project === name ? "" : name)}
-                  >
-                    {name !== STANDALONE && <ProjectKey project={name} />}
-                    {name === STANDALONE ? "Standalone" : name}
-                    <ChipCount>{count}</ChipCount>
-                  </FilterChip>
-                ))}
-              </ChipStrip>
-            )}
-            {narrowed && (
-              <FilterChip
-                selected
-                className="ml-auto"
-                aria-label="Clear every filter"
-                onClick={() => {
-                  setQuery("")
-                  setState("")
-                  setProject("")
-                }}
-              >
-                Clear
-                <Cross aria-hidden className="size-3" />
-              </FilterChip>
-            )}
-          </PanelToolbar>
-          <PanelBody flush>
-            {visible.length === 0 ? (
-              <EmptyState
-                icon={Box}
-                title={narrowed ? "No containers match" : "No containers yet"}
-                description={
-                  narrowed
-                    ? "Clear a filter, or search for a different name, image or project."
-                    : "Compose projects are on this server, but none of them is deployed."
-                }
-                className="my-4"
-              />
-            ) : (
-              <ContainerRows
-                key={[query, state, project].join("\u0000")}
-                rows={visible}
-                stats={stats}
-                trends={trendByName}
-                pending={pending}
-                confirm={confirm}
-                act={act}
-                onOpen={open}
-                onChanged={list.refresh}
-              />
-            )}
           </PanelBody>
-          <PanelFooter className="text-hint text-muted-foreground">
-            <span className="numeric">{plural(visible.length, "container")}</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>failing first, then by name</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>CPU is a share of one core</span>
-          </PanelFooter>
         </Panel>
 
         <div className="grid min-w-0 items-start gap-x-10 gap-y-8 lg:grid-cols-2">
-          <ComposeProjects stacks={detected} canDeploy={can("service.control")} />
+          <Panel plain>
+            <PanelHeader
+              title={
+                <span className="inline-flex items-center gap-1.5">
+                  Compose projects
+                  {stacks.data && (
+                    <span className="numeric text-body font-normal text-muted-foreground">
+                      {active.length} of {detected.length} up
+                    </span>
+                  )}
+                  <ExplainIcon name="compose" />
+                </span>
+              }
+              actions={
+                <Link
+                  href="/docker/stacks"
+                  className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+                >
+                  Manage <ArrowRight className="size-3" />
+                </Link>
+              }
+            />
+            <PanelBody flush>
+              {!stacks.data && stacks.error ? (
+                <ErrorState error={stacks.error} onRetry={stacks.refresh} className="mt-3" />
+              ) : !stacks.data ? (
+                // The cards' own height, so the list lands where it waited.
+                <ul aria-hidden className="grid gap-2 pt-3">
+                  {[0, 1, 2].map((row) => (
+                    <li key={row} className="h-14 animate-pulse rounded-xl bg-muted/40" />
+                  ))}
+                </ul>
+              ) : detected.length === 0 ? (
+                <EmptyState
+                  icon={Layers}
+                  title="No compose stacks"
+                  description="A stack is a directory with a compose file in it. Containers started by hand are in the picture above."
+                />
+              ) : (
+                <ChoiceList aria-label="Compose projects" className="animate-rise pt-3">
+                  {lines.map((line) => (
+                    <StackChoiceRow key={line.stack.name} line={line} figures={false} />
+                  ))}
+                </ChoiceList>
+              )}
+            </PanelBody>
+          </Panel>
 
           {/*
             Cleanup appears only when there is something worth reclaiming. A
@@ -550,7 +414,6 @@ export default function DockerOverviewPage() {
               confirm={confirm}
               onDone={() => {
                 disk.refresh()
-                list.refresh()
                 list.refresh()
               }}
             />
@@ -585,132 +448,6 @@ export default function DockerOverviewPage() {
         {dialog}
       </Page>
     </Workspace>
-  )
-}
-
-/**
- * The compose projects, as lit cards because each opens its project (§16):
- * what it is made of as its services' products, its name in the hue the
- * table draws its containers' project in, the directory it was found in, its
- * state — and under them its services as one strip of their states, so a
- * project with one service down reads as a gap in a green line before the
- * word "Partially" is read.
- */
-function ComposeProjects({ stacks, canDeploy }: { stacks: ComposeStack[]; canDeploy: boolean }) {
-  const active = stacks.filter((s) => s.deployed).length
-  return (
-    <Panel plain>
-      <PanelHeader
-        title={
-          <span className="inline-flex items-center gap-1.5">
-            Compose projects
-            <span className="numeric text-body font-normal text-muted-foreground">
-              {active} of {stacks.length} up
-            </span>
-            <ExplainIcon name="compose" />
-          </span>
-        }
-        actions={
-          <span className="flex flex-wrap items-center gap-3">
-            <Link
-              href="/docker/stacks"
-              className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-            >
-              Manage <ArrowRight className="size-3" />
-            </Link>
-            {canDeploy && (
-              <Button size="sm" asChild>
-                <Link href="/deploy">Open Deployments</Link>
-              </Button>
-            )}
-          </span>
-        }
-      />
-      <PanelBody flush>
-        {stacks.length === 0 ? (
-          <EmptyState
-            icon={Layers}
-            title="No compose stacks"
-            description="A stack is a directory with a compose file in it — one file describing several containers that belong together. The dashboard finds them by the labels compose puts on containers, and by looking under the configured compose directories."
-          />
-        ) : (
-          <ChoiceList aria-label="Compose projects" className="animate-rise">
-            {stacks.map((stack) => (
-              <ChoiceRow
-                key={stack.name}
-                href={`/docker/stacks/${encodeURIComponent(stack.name)}`}
-                verb={`Open ${stack.name}`}
-                leading={<StackMark stack={stack} />}
-                title={
-                  <span className="flex min-w-0 items-center gap-2">
-                    <ProjectKey project={stack.name} />
-                    <span className="truncate">{stack.name}</span>
-                  </span>
-                }
-                description={<span className="font-mono">{stack.workingDir}</span>}
-                trailing={<StackStateBadge stack={stack} />}
-              >
-                <ServiceStrip stack={stack} />
-              </ChoiceRow>
-            ))}
-          </ChoiceList>
-        )}
-      </PanelBody>
-    </Panel>
-  )
-}
-
-/**
- * Each service the project declares as one segment, in its state's tone: up,
- * failing, stopped, or not created. A project that was never deployed is a
- * row of empty track, which is what it is.
- */
-function ServiceStrip({ stack }: { stack: ComposeStack }) {
-  const byName = new Map(stack.services.map((s) => [s.name, s]))
-  const names = [...new Set([...stack.declared, ...stack.services.map((s) => s.name)])]
-  if (names.length === 0) return null
-  const segments = names.map((name) => {
-    const service = byName.get(name)
-    if (!service || service.missing) return { name, tone: "bg-meter-track", word: "not created" }
-    if (service.state === "running") {
-      return service.health === "unhealthy"
-        ? { name, tone: "bg-destructive", word: "unhealthy" }
-        : service.health === "starting"
-          ? { name, tone: "bg-warning", word: "starting" }
-          : { name, tone: "bg-success", word: "running" }
-    }
-    if (service.state === "restarting" || service.state === "dead") {
-      return { name, tone: "bg-destructive", word: service.state }
-    }
-    return crashed(service)
-      ? { name, tone: "bg-destructive", word: service.status }
-      : { name, tone: "bg-muted-foreground/40", word: service.status || service.state }
-  })
-  return (
-    <div
-      role="img"
-      aria-label={segments.map((s) => `${s.name} ${s.word}`).join(", ")}
-      className="flex h-1 max-w-80 gap-0.5"
-    >
-      {segments.map((s) => (
-        <span
-          key={s.name}
-          title={`${s.name}: ${s.word}`}
-          className={cn("h-full flex-1 rounded-full transition-colors", s.tone)}
-        />
-      ))}
-    </div>
-  )
-}
-
-/** What a project is made of: its services' products, or Compose itself. */
-function StackMark({ stack }: { stack: ComposeStack }) {
-  const images = stack.services.map((service) => service.image).filter(Boolean)
-  return (
-    <ProductLogos
-      ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]}
-      ring="ring-choice-surface"
-    />
   )
 }
 

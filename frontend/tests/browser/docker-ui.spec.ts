@@ -550,10 +550,14 @@ test("a stack that was never deployed says so", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/stacks")
 
-  const never = page.locator('[data-stack-row="never-deployed"]')
+  const card = (name: string) =>
+    page
+      .locator("[data-slot=choice-row]")
+      .filter({ has: page.locator(`[data-workspace-item="stack:${name}"]`) })
+  const never = card("never-deployed")
   await expect(never).toContainText("Not deployed")
   await expect(never).toContainText("3 services defined")
-  const running = page.locator('[data-stack-row="running-app"]')
+  const running = card("running-app")
   await expect(running).toContainText("Running")
   await expect(running).toContainText("2 of 2 services up")
   await expect(page.getByText("0/0")).toHaveCount(0)
@@ -568,7 +572,7 @@ test("a stack opens as its own page", async ({ page }) => {
   await mockDocker(page)
   await page.route("**/api/v1/docker/stacks/running-app", (route) => json(route, stacks[0]))
   await page.goto("/docker/stacks")
-  await page.getByRole("button", { name: "running-app", exact: true }).first().click()
+  await page.getByRole("link", { name: "Open running-app" }).click()
 
   await expect(page).toHaveURL(/\/docker\/stacks\/running-app$/)
   // What the stack is, as facts under the title rather than a sentence read

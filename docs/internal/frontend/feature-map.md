@@ -931,6 +931,36 @@ Configuration in `?tab=`, and from `xl` the images as a rail with the table's ow
 `tests/browser/docker-image-page.spec.ts`
 
 **Implementation:** `components/docker/`; see
+
+The overview, Containers, Events and Stacks open on one line (`docker-identity.tsx`, `HostIdentity`
+laid out as a project's header): Docker's mark, "Docker" and its version, the page's verdict beside
+the name, the server as the first fact, and the page's one command at the far end (Open Deployments,
+Create stack, Events' window). The overview (`app/(dashboard)/docker/page.tsx`) reads: that line; the
+band of the busiest containers and what last happened to each; the engine as a picture
+(`engine-picture.tsx` on `WireFlow`, its nodes worked out in `engine-picture-model.ts`, unit-tested)
+with the compose projects and the containers started by hand on one side of Docker and the networks
+and volumes it keeps on the other, a line red where a project has a failing container, amber where it
+is partly up or a volume has nothing mounting it, dashed where a thing is stopped or never deployed,
+six on the left and three of each kind on the right before the rest fold into a count that opens
+their page, pointing at a project lighting what is its own; then the compose projects as one-line
+cards beside the disk. The table of every container is `/docker/containers` only: the section's
+title links to it and the verdict opens it narrowed to what is failing. The page is drawn before
+anything is read, and the picture waits at the height it had on the last visit
+(`docker.overview.picture.rows`). Stacks (`stacks-tab.tsx`) lists each stack as a one-line card
+(`stack-row.tsx`): logos, name and directory, then a strip of its services' states, its state with
+how much of it is up, summed CPU and memory and published ports in columns that line up, Deploy for
+a stack that is down, an arrow and a menu (View, Files, Open shell); nothing expands in place, and a
+stack found by a service's name or image says which matched. A stack's page reads in a container
+page's order (the band, the ports-and-networks picture, the services table), and both detail pages
+keep their list beside them from `xl` (`stack-rail.tsx`, `container-rail.tsx`, copies of
+`procs/process-rail.tsx`): the list's own search, chips and order from its session keys, the item
+on screen filled (and drawn first when the filter does not hold it), Alt+↑ and Alt+↓ and the two
+arrows walking it with `?tab=` carried. Beside the rail the blocks that went side by side at 1280px
+and 1536px do so at 1600px and 1856px (`beside-rail.ts`)
+
+**Implementation:** `components/docker/`; checked by `tests/browser/docker-overview.spec.ts`,
+`stacks-ui.spec.ts`, `stack-detail.spec.ts`, `container-page.spec.ts`, `docker-events.spec.ts` and
+`docker-ui.spec.ts`; see
 [`features-terminal.md`](features-terminal.md#feature-panels) and
 [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md)
 
@@ -1005,13 +1035,15 @@ is told the page is one's, and the server is not asked
 ### `/docker/events`
 
 What the Docker daemon did and who did it, over a 1h / 6h / 24h / All window: Docker's identity line
-with the verdict (a restart loop named, the containers that failed, or nothing), the socket's state
-and the window; four readings (failures, restarts, created or removed, external), each counting up
+(the one every Docker section page opens on) with the verdict beside its name (a restart loop named,
+the containers that failed, or nothing), the socket's state and, at its end, the window; four readings (failures, restarts, created or removed, external), each counting up
 with its trend across the window and narrowing the page to what it counts; the containers the record
 names as a table, worst first, each with its state now from Docker's listing, its window as a lane
 of outcome-coloured marks (a loop a red band), its failures, comebacks and who last acted on it, a
-row narrowing the feed and its name opening the container; and the feed, restart loops and a
-container's events moments apart folded into one row each, every row saying who did it. The buffer
+row narrowing the feed and its name opening the container; and the feed, a plain section (a title,
+a hairline, rows on hairlines, scrolling with the page; framed with a scroll of its own until 0.8.7),
+restart loops and a container's events moments apart folded into one row each, every row saying who
+did it. The buffer
 is read whole once and its newest hundred every fifteen seconds, so the polled copy's audit-log
 match replaces the socket's; an exit right after a kill is read as the stop it was
 

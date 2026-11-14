@@ -43,6 +43,8 @@ export function ContainerBand({
   hostMemory,
   changes,
   listening,
+  loaded = true,
+  eventsRead = true,
   onOpen,
 }: {
   containers: Container[]
@@ -54,6 +56,10 @@ export function ContainerBand({
   changes: ContainerChange[]
   /** Whether the events feed is connected; an empty Recent means nothing only while it is. */
   listening: boolean
+  /** Whether the containers have been read: until they are, the blocks say so rather than "nothing". */
+  loaded?: boolean
+  /** Whether the events have been read, for Recent. */
+  eventsRead?: boolean
   onOpen: (container: { id?: string; name: string }) => void
 }) {
   const now = useNow(15_000)
@@ -120,7 +126,9 @@ export function ContainerBand({
           )
         }
         message={
-          up === 0 ? (
+          !loaded ? (
+            <TextShimmer>Reading the containers…</TextShimmer>
+          ) : up === 0 ? (
             "Nothing is running."
           ) : measured.length === 0 ? (
             <TextShimmer>Measuring the first interval…</TextShimmer>
@@ -167,7 +175,9 @@ export function ContainerBand({
           )
         }
         message={
-          up === 0 ? (
+          !loaded ? (
+            <TextShimmer>Reading the containers…</TextShimmer>
+          ) : up === 0 ? (
             "Nothing is running."
           ) : byMemory.length === 0 ? (
             <TextShimmer>Waiting for the first reading…</TextShimmer>
@@ -210,11 +220,13 @@ export function ContainerBand({
           </Link>
         }
         message={
-          changes.length > 0
-            ? undefined
-            : listening
-              ? "Nothing has started, stopped or failed in the last day."
-              : "The dashboard is not listening to Docker's events."
+          changes.length > 0 ? undefined : !eventsRead ? (
+            <TextShimmer>Reading what Docker did…</TextShimmer>
+          ) : listening ? (
+            "Nothing has started, stopped or failed in the last day."
+          ) : (
+            "The dashboard is not listening to Docker's events."
+          )
         }
         parts={changes.slice(0, SHOWN + 1).map((change) => ({
           key: change.name,

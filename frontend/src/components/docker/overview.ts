@@ -2,15 +2,11 @@ import type { Container, DockerEvent } from "@/lib/types"
 import type { DotTone } from "@/components/status-dot"
 
 /**
- * The words the Docker overview reads containers and their events in: which
- * of the table's state chips a container sits under, how a stopped one
- * stopped, and the last thing that happened to each.
+ * The words the Docker overview reads the daemon's events in: the last thing
+ * that happened to each container. Which containers are failing is the
+ * Containers page's reading (`containers.ts`), so the overview's verdict and
+ * the table it opens count the same ones.
  */
-
-/** Where a container sits for the overview's state chips, in the order they are asked about. */
-export type ContainerBucket = "failing" | "starting" | "running" | "stopped"
-
-export const BUCKET_ORDER: ContainerBucket[] = ["failing", "starting", "running", "stopped"]
 
 /** Docker's "Exited (137) 12 minutes ago", as its code and how long ago. */
 export function exitOf(container: Pick<Container, "state" | "status">) {
@@ -29,65 +25,6 @@ export function exitOf(container: Pick<Container, "state" | "status">) {
 export function crashed(container: Pick<Container, "state" | "status">) {
   const exit = exitOf(container)
   return exit !== undefined && exit.code !== 0 && exit.code !== 143
-}
-
-/**
- * A container's chip. Failing is what to act on: a health check failing, a
- * restart policy cycling, a dead container or one that crashed. Starting is a
- * health check that has not passed yet. A container stopped cleanly, paused
- * or never started is stopped — on a host with one-shot jobs that is most of
- * them, and none of them is a problem.
- */
-export function containerBucket(container: Container): ContainerBucket {
-  if (container.state === "running") {
-    if (container.health === "unhealthy") return "failing"
-    if (container.health === "starting") return "starting"
-    return "running"
-  }
-  if (container.state === "restarting" || container.state === "dead") return "failing"
-  return crashed(container) ? "failing" : "stopped"
-}
-
-export function bucketTone(bucket: ContainerBucket): DotTone {
-  switch (bucket) {
-    case "failing":
-      return "danger"
-    case "starting":
-      return "warning"
-    case "running":
-      return "running"
-    default:
-      return "stopped"
-  }
-}
-
-/** Failing first, then starting, running and stopped, each by name — so a project's containers sit together. */
-export function overviewOrder(containers: Container[]): Container[] {
-  const rank = (c: Container) => BUCKET_ORDER.indexOf(containerBucket(c))
-  return [...containers].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
-}
-
-/**
- * The second line under a stopped container's state: how it stopped and when.
- * A container the kernel killed for memory says so, because 137 alone reads
- * the same as a stop that timed out; the runtime finding is what tells them
- * apart.
- */
-export function stoppedWords(container: Container): string {
-  const exit = exitOf(container)
-  if (!exit) {
-    if (container.state === "created") return "never started"
-    return container.status.replace(/^(Up|Exited|Created|Restarting|Paused|Dead)\s*/i, "").trim()
-  }
-  const oom = false
-  const how = oom
-    ? "killed for memory"
-    : exit.code === 0
-      ? "finished"
-      : exit.code === 143
-        ? "stopped"
-        : `exit ${exit.code}`
-  return exit.ago ? `${how} · ${exit.ago}` : how
 }
 
 /** The actions an event is worth a line for. The rest — exec, attach, kill before a die — are the daemon working. */
