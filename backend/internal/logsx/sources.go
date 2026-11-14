@@ -42,7 +42,11 @@ type Source struct {
 	Path     string     `json:"path,omitempty"`
 	Size     int64      `json:"size,omitempty"`
 	Modified *time.Time `json:"modified,omitempty"`
-	Rotated  bool       `json:"rotated"`
+	// Oldest is when the first record a source still keeps was written. Only
+	// the whole journal says it, described on its own (`/logs/source`): how
+	// far back it goes is the first thing to know before searching it.
+	Oldest  *time.Time `json:"oldest,omitempty"`
+	Rotated bool       `json:"rotated"`
 	// Archives counts the rotated generations sitting next to a live file, and
 	// ArchiveBytes their total size. A source that says "+ 7 archives, 2.1 GB"
 	// is telling the operator both that history is searchable past last

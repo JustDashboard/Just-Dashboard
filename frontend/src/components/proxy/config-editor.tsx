@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { Tabs as TabsPrimitive } from "radix-ui"
 import { CheckCircle, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, errorMessage, get, post, put } from "@/lib/api"
@@ -16,8 +17,11 @@ import { Modal } from "@/components/modal"
 import { Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { ConfigFileHistory } from "@/components/proxy/config-history"
 import { DiagnosticList } from "@/components/proxy/diagnostic-list"
 import { diffStat } from "@/components/proxy/config-tree"
 import { refusalOf } from "@/components/proxy/engine-lifecycle"
@@ -42,7 +46,17 @@ type ConfigEditorProps = {
   siteDisabled?: boolean
   /** Told whether nginx was reloaded with the save. */
   onSaved?: (reloaded: boolean) => void
+  /**
+   * The file's kept revisions as a second view beside the editor, with
+   * restore — for an administrator, where the page keeps the history.
+   */
+  history?: { root: string; onRestored?: () => void }
+  /** The view on screen, where the page keeps it in its address. */
+  view?: EditorView
+  onViewChange?: (view: EditorView) => void
 }
+
+export type EditorView = "file" | "history"
 
 type ConfigRead = { content: string; revision: string }
 type ConfigDraft = ConfigRead & { original: string }
@@ -75,6 +89,9 @@ function ConfigEditorBody({
   actions,
   siteDisabled = false,
   onSaved,
+  history,
+  view: givenView,
+  onViewChange,
 }: ConfigEditorProps) {
   const key = `${kind}:${path}`
   const [owner] = useState(() => configDrafts.generation())
@@ -151,6 +168,13 @@ function ConfigEditorBody({
       })
     return () => controller.abort()
   }, [open, path, key, attempt])
+
+  const [ownView, setOwnView] = useState<EditorView>("file")
+  const view: EditorView = history ? (givenView ?? ownView) : "file"
+  const setView = (next: EditorView) => {
+    setOwnView(next)
+    onViewChange?.(next)
+  }
 
   const loaded = read?.ok === true
   const failed = read?.ok === false ? read.error : undefined
@@ -296,6 +320,135 @@ function ConfigEditorBody({
   const currentDiff =
     stale && typeof stale === "object" ? unifiedDiff(stale.content, content, name) : undefined
 
+  const fileView = (
+    <>
+      {stale && (
+        <Notice
+          tone="warning"
+          title={
+            stale === "gone" ? "File removed — draft retained" : "File changed — draft retained"
+          }
+        >
+          <p>Your draft is still here. Saving is paused until you review the current file.</p>
+          {typeof stale === "object" ? (
+            <>
+              <Disclosure quiet summary="Compare current file with your draft">
+                {currentDiff ? (
+                  <DiffView body={currentDiff} singleFile lineNumbers />
+                ) : (
+                  <Well>
+                    {currentDiff === null
+                      ? "Too many changes to line up; review the current file below."
+                      : "Only the final line feed differs."}
+                  </Well>
+                )}
+                <Disclosure quiet summary="Current file on disk">
+                  <Well className="max-h-48 overflow-auto whitespace-pre-wrap">
+                    {stale.content}
+                  </Well>
+                </Disclosure>
+              </Disclosure>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  acknowledge(stale.content, stale.revision)
+                  setStale(null)
+                  setReview({ reload: false })
+                }}
+              >
+                Review draft against current file
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" variant="outline" onClick={readAgain}>
+              Read current file again
+            </Button>
+          )}
+        </Notice>
+      )}
+      {unread && (
+        <Notice tone="warning" icon={Warning} title="nginx is not reading this file">
+          The site is disabled, so a config test cannot see it — it will pass whatever is in it.
+          Enable the site before trusting the result.
+        </Notice>
+      )}
+
+      {failed ? (
+        <ErrorState error={failed} onRetry={readAgain} />
+      ) : (
+        <>
+          {review && (
+            <div className="flex min-h-0 flex-1 flex-col gap-3">
+              <p className="text-hint text-muted-foreground">
+                {stat && (stat.added > 0 || stat.removed > 0) && (
+                  <>
+                    <span className="numeric font-medium text-success">+{stat.added}</span>{" "}
+                    <span className="numeric font-medium text-destructive">−{stat.removed}</span> in{" "}
+                    <span className="font-mono">{name}</span>.{" "}
+                  </>
+                )}
+                {kind === "caddy" ? "Caddy" : "nginx"} tests the file before it is written, and a
+                file it refuses is not saved. Ctrl+S again saves.
+              </p>
+              {diff === null ? (
+                <Notice title="Too many changes to show">
+                  The buffer differs from the file in more places than can be lined up here. Saving
+                  writes the whole buffer; Back to editing returns to it.
+                </Notice>
+              ) : diff === "" ? (
+                <Notice title="Only the end of the file changes">
+                  The last line gains or loses its line feed; every line reads as it did.
+                </Notice>
+              ) : (
+                <Pane className="min-h-0 flex-1 overflow-hidden">
+                  <DiffView body={diff ?? ""} singleFile lineNumbers className="h-full" />
+                </Pane>
+              )}
+            </div>
+          )}
+          {/* Hidden rather than unmounted while the diff is up, so Back to
+              editing returns to the same editor: its undo history, its
+              cursor and where it was scrolled. */}
+          <Pane
+            className={cn("min-h-0 flex-1", review && "hidden")}
+            aria-busy={!loaded || undefined}
+          >
+            {loaded ? (
+              <CodeEditor
+                className="h-full"
+                language="ini"
+                value={content}
+                readOnly={readOnly || busy !== undefined}
+                revealLine={goTo?.line ?? initialLine}
+                revealAgain={goTo?.asked}
+                onSave={() => {
+                  if (!readOnly && dirty && !busy && !stale) setReview({ reload: false })
+                }}
+                onChange={(v) => {
+                  contentRef.current = v
+                  setContent(v)
+                  retain()
+                  setShown(null)
+                }}
+              />
+            ) : (
+              <LoadingRows rows={8} className="p-4" />
+            )}
+          </Pane>
+        </>
+      )}
+
+      {shown && !review && (
+        <TestShown
+          shown={shown}
+          path={path}
+          onGoTo={(line) => setGoTo((was) => ({ line, asked: (was?.asked ?? 0) + 1 }))}
+        />
+      )}
+    </>
+  )
+
   return (
     <>
       <SidePanel
@@ -319,7 +472,7 @@ function ConfigEditorBody({
         }
         bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"
         footer={
-          !editable ? undefined : review ? (
+          !editable || view !== "file" ? undefined : review ? (
             <>
               <Button size="sm" variant="outline" onClick={() => setReview(null)} disabled={saving}>
                 Back to editing
@@ -374,129 +527,51 @@ function ConfigEditorBody({
           )
         }
       >
-        {stale && (
-          <Notice
-            tone="warning"
-            title={
-              stale === "gone" ? "File removed — draft retained" : "File changed — draft retained"
-            }
+        {history ? (
+          <Tabs
+            value={view}
+            onValueChange={(next) => setView(next as EditorView)}
+            className="flex min-h-0 flex-1 flex-col gap-3"
           >
-            <p>Your draft is still here. Saving is paused until you review the current file.</p>
-            {typeof stale === "object" ? (
-              <>
-                <Disclosure quiet summary="Compare current file with your draft">
-                  {currentDiff ? (
-                    <DiffView body={currentDiff} singleFile lineNumbers />
-                  ) : (
-                    <Well>
-                      {currentDiff === null
-                        ? "Too many changes to line up; review the current file below."
-                        : "Only the final line feed differs."}
-                    </Well>
-                  )}
-                  <Disclosure quiet summary="Current file on disk">
-                    <Well className="max-h-48 overflow-auto whitespace-pre-wrap">
-                      {stale.content}
-                    </Well>
-                  </Disclosure>
-                </Disclosure>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    acknowledge(stale.content, stale.revision)
-                    setStale(null)
-                    setReview({ reload: false })
-                  }}
-                >
-                  Review draft against current file
-                </Button>
-              </>
-            ) : (
-              <Button size="sm" variant="outline" onClick={readAgain}>
-                Read current file again
-              </Button>
-            )}
-          </Notice>
-        )}
-        {unread && (
-          <Notice tone="warning" icon={Warning} title="nginx is not reading this file">
-            The site is disabled, so a config test cannot see it — it will pass whatever is in it.
-            Enable the site before trusting the result.
-          </Notice>
-        )}
-
-        {failed ? (
-          <ErrorState error={failed} onRetry={readAgain} />
-        ) : (
-          <>
-            {review && (
-              <div className="flex min-h-0 flex-1 flex-col gap-3">
-                <p className="text-hint text-muted-foreground">
-                  {stat && (stat.added > 0 || stat.removed > 0) && (
-                    <>
-                      <span className="numeric font-medium text-success">+{stat.added}</span>{" "}
-                      <span className="numeric font-medium text-destructive">−{stat.removed}</span>{" "}
-                      in <span className="font-mono">{name}</span>.{" "}
-                    </>
-                  )}
-                  {kind === "caddy" ? "Caddy" : "nginx"} tests the file before it is written, and a
-                  file it refuses is not saved. Ctrl+S again saves.
-                </p>
-                {diff === null ? (
-                  <Notice title="Too many changes to show">
-                    The buffer differs from the file in more places than can be lined up here.
-                    Saving writes the whole buffer; Back to editing returns to it.
-                  </Notice>
-                ) : diff === "" ? (
-                  <Notice title="Only the end of the file changes">
-                    The last line gains or loses its line feed; every line reads as it did.
-                  </Notice>
-                ) : (
-                  <Pane className="min-h-0 flex-1 overflow-hidden">
-                    <DiffView body={diff ?? ""} singleFile lineNumbers className="h-full" />
-                  </Pane>
-                )}
-              </div>
-            )}
-            {/* Hidden rather than unmounted while the diff is up, so Back to
-                editing returns to the same editor: its undo history, its
-                cursor and where it was scrolled. */}
-            <Pane
-              className={cn("min-h-0 flex-1", review && "hidden")}
-              aria-busy={!loaded || undefined}
+            <TabsPrimitive.List
+              aria-label={`Views of ${name}`}
+              className="-mt-1 flex shrink-0 gap-1 border-b border-hairline"
             >
-              {loaded ? (
-                <CodeEditor
-                  className="h-full"
-                  language="ini"
-                  value={content}
-                  readOnly={readOnly || busy !== undefined}
-                  revealLine={goTo?.line ?? initialLine}
-                  revealAgain={goTo?.asked}
-                  onSave={() => {
-                    if (!readOnly && dirty && !busy && !stale) setReview({ reload: false })
-                  }}
-                  onChange={(v) => {
-                    contentRef.current = v
-                    setContent(v)
-                    retain()
-                    setShown(null)
-                  }}
-                />
-              ) : (
-                <LoadingRows rows={8} className="p-4" />
-              )}
-            </Pane>
-          </>
-        )}
-
-        {shown && !review && (
-          <TestShown
-            shown={shown}
-            path={path}
-            onGoTo={(line) => setGoTo((was) => ({ line, asked: (was?.asked ?? 0) + 1 }))}
-          />
+              <TabsPrimitive.Trigger value="file" className={tabClasses(view === "file", "h-9")}>
+                File
+              </TabsPrimitive.Trigger>
+              <TabsPrimitive.Trigger
+                value="history"
+                className={tabClasses(view === "history", "h-9")}
+              >
+                History
+              </TabsPrimitive.Trigger>
+            </TabsPrimitive.List>
+            {/* Kept mounted while History is on screen, so the editor comes
+                back with its buffer, undo history and scroll as they were. */}
+            <TabsContent
+              value="file"
+              forceMount
+              className="flex min-h-0 flex-1 flex-col gap-3 data-[state=inactive]:hidden"
+            >
+              {fileView}
+            </TabsContent>
+            <TabsContent value="history" className="flex min-h-0 flex-1 flex-col">
+              <ConfigFileHistory
+                path={path}
+                root={history.root}
+                onRestored={() => {
+                  // The file changed under the editor. A clean buffer reads it
+                  // again; a dirty one keeps its draft, and its save meets the
+                  // conflict review against the restored file.
+                  if (!dirty) readAgain()
+                  history.onRestored?.()
+                }}
+              />
+            </TabsContent>
+          </Tabs>
+        ) : (
+          fileView
         )}
       </SidePanel>
 

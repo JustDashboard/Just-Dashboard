@@ -179,7 +179,11 @@ inspector names each line; boxes drag and stay where they were put, and a whole 
 its head, per account; the canvas moves like a whiteboard's (two fingers slide it, a pinch zooms, a
 mouse drags open ground) and nothing on it changes size but by the zoom. No bar runs over the
 canvas. Below `lg` it is the canvas alone, and a tap floats one *Open* button to the box's page.
-Read-only: every box opens its own page
+Read-only: every box opens its own page. With no place left behind and every system at once too
+small to read, it opens on the dashboard's own system; what a source did not answer for is one
+line per cause in the inspector ("Docker is not answering: containers, stacks and volumes not
+drawn", **Open Docker**); and the inspector's *On this server* is a row per kind that lights that
+kind's boxes
 
 **Implementation:** `app/(dashboard)/map/`, `components/map/`, `lib/server-systems.ts` and
 `lib/server-map.ts` (unit-tested); [server map](../server-map.md); checked by
@@ -453,31 +457,53 @@ localhost) and `api-keys.spec.ts`; key filtering, ordering and replacement roles
 
 ### `/audit`
 
-Four readings of the last day (changes with an hourly trend, failures, the people behind them as
-faces, sign-ins with the refused ones), read from their own `since` query so a filter does not
-narrow them; the filtered, paginated trail as a framed table shelved by day, each entry drawn with
-the mark of the section it touched, its actor as a face (a key in the corner for an API key, with
-the key named — "· key ci-deploy", its id in the tooltip — when the row recorded it; "· by the
-assistant" for the assistant; "· through Just Hub as <hub user>" for a session a hub sign-in ticket
-opened, the session's id in the tooltip, which is the `sessionId` of the `hub.signin` row that
-opened it; the webhook's and the dashboard's own marks for machines), its address as the network it
-is on, the method and path in the request log's hues and the outcome's code in its family's colour;
-section chips with their marks set the action filter; entries a poll brings rise into place
+An identity line saying how the last day went: what the server refused as its state ("1 of 10
+failed", and "1 sign-in refused" in amber), then this server, the changes in the last day, the
+people behind them as faces with the automated changes, and the sign-ins with where the last came
+from; `?` and a `⋯` menu at its end holding Export as CSV and Refresh. Under it the day as one
+strip, an hour to a stretch in the colour of how its changes went (green, amber where some were
+refused, red where all were, the track where nothing changed), with the busiest sections on the
+line under it and the pointed hour in their place (`components/audit/day-strip.tsx`, the model in
+the unit-tested `day.ts`). Both are read from their own `since` query, on the hour, so a filter
+does not narrow them, and both stand at their final height while the day is read. Then the
+filtered, paginated trail as a framed table shelved by day, one line to a row at every width: the
+time, the actor as a face (a key in the corner for an API key, with the key named — "· key
+ci-deploy", its id in the tooltip — when the row recorded it; "· by the assistant" for the
+assistant; "· through Just Hub as <hub user>" for a session a hub sign-in ticket opened, the
+session's id in the tooltip, which is the `sessionId` of the `hub.signin` row that opened it; the
+webhook's and the dashboard's own marks for machines) with its address as the network it is on, the
+action with the mark of the section it touched, the target with any detail after it, and the
+outcome's code in its family's colour. The action is the row's button and the keyboard's place on
+it: it opens the entry whole in a popover (`entry-detail.tsx`), with the method and path in the
+request log's hues, the key's record or the session's id, and whatever a one-line cell cut short.
+Below `2xl` a row that came through a key or a session says that in place of its address's digits.
+The user and action filters are on the frame's title line and one row of chips is under it
+(Failures only, then the sections with their marks, which set the action filter); entries a poll
+brings wait behind "N new entries · Show" beside the count and rise into place. Export as CSV
+downloads what the filters match, every page of it up to 20,000 rows and none newer than the press
+(`export.ts`, unit-tested; cells a spreadsheet would run as a formula are made text). An account
+without `system.admin`, or one the server refuses, is told the log is for administrators and is
+offered no filter
 
-**Implementation:** audit page, `components/audit/marks.tsx` (unit-tested); checked by
+**Implementation:** audit page, `components/audit/` (`marks.tsx`, `day.ts` and `export.ts`
+unit-tested); checked by `tests/browser/audit-ui.spec.ts` (fixture in `audit-fixture.ts`) and
 `tests/browser/system-ui.spec.ts`
 
 ### `/backups`
 
 Routes: `/backups`, `/backups/[job]`
 
-Backup coverage, jobs, destinations, schedules, next runs and recorded outcomes. Manual runs,
+Backup coverage, jobs, destinations, schedules, next runs and recorded outcomes. The page opens on
+an identity line: how the jobs stand as its state (a job that failed, one being taken, every job
+backed up, with paused ones after), the jobs, what they hold and the next backup as its facts
+(`components/backups/readings.ts`, unit-tested), New backup as its command for an administrator and
+a `⋯` menu holding Import from a destination… and Refresh. Manual runs,
 restore, retention and job configuration keep their confirmed controls. A job may encrypt its
 archives (on by default for S3 and B2): its card and identity line say so, an encrypted run carries
 a lock on the rail and an Encryption block in its inspector, and the Backup key panel under the jobs
 shows the server's key, what depends on it and whether a copy has been exported, with a confirmed
 Export key… for an administrator (`components/backups/backup-key.tsx`, `encryption.ts`), and Import
-key… for one exported elsewhere, listed beside it. Import… opens Import from a destination
+key… for one exported elsewhere, listed beside it. The menu's Import opens Import from a destination
 (`components/backups/import-dialog.tsx`, words in the unit-tested `import-model.ts`): this server's
 destinations as choices or another typed in with its keys, then the archives it did not write
 grouped by server and job, each with what it covers, its size, time and whether a key here opens it,
@@ -487,8 +513,10 @@ runs, offer only Test destination and Remove imported job, and its runs restore 
 dialogs, the in-place one saying per source what it overwrites and what it makes first (a volume
 through Docker, a directory) (`tests/browser/backup-import.spec.ts`). A job opens on its own page
 (`/backups/[job]`, `components/backups/job-detail.tsx`): its identity line, its picture narrowed to
-the one job, its readings, and its runs as a rail beside the run they show, with each run's log,
-archive and restores. Automatic overdue/attention recommendations were removed in 0.7.5
+the one job (its middle the schedule over the next run), one reading as a sentence (what it holds
+over how much is kept, with the archive sizes as its trend), and its runs as a rail beside the run
+they show, each run one height with its archive's size as a figure, with each run's log, archive
+and restores. Automatic overdue/attention recommendations were removed in 0.7.5
 
 **Implementation:** `components/backups/`; backend in
 [`../backend/git-backups-users.md`](../backend/git-backups-users.md)
@@ -908,11 +936,17 @@ in [`../backend/git-backups-users.md`](../backend/git-backups-users.md#git-worki
 
 Every log source in one place: a source rail (`source-rail.tsx`) beside one pane with Live, History
 and Insights (`log-workspace.tsx`), the same readings and views a service's own page reads through
-`service-logs.tsx`
+`service-logs.tsx`. The whole journal's identity line carries the systemd logo, how many units
+write to it, its size on disk and its oldest line (`GET /logs/source?source=journal:`, asked once
+the journal is the source on screen; the two facts keep their room while they are asked). A kind
+of source that is absent is one line in the rail with the thing's mark and the page that says
+more (`MissingLine`, worded by `logKindMissing`): "Docker is not running" to `/docker`, "PM2 is
+not installed" to `/processes/pm2`, "No systemd on this server" to `/processes/services`
 
 **Implementation:** logs page, `components/logs/`, `lib/log-filter.ts`, `lib/log-lenses.ts`,
 `lib/log-sources.ts`; checked by `tests/browser/logs-ui.spec.ts`, `logs-lens.spec.ts`,
-`logs-views.spec.ts`, `logs-handoff.spec.ts` and `logs-buffer.spec.ts`; backend contract in
+`logs-views.spec.ts`, `logs-handoff.spec.ts`, `logs-buffer.spec.ts` and `missing-states.spec.ts`;
+backend contract in
 [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#logs)
 
 ### `/packages`
@@ -946,8 +980,10 @@ supervisor's processes, or the copies of one program started by hand, summed ove
 with shared pages counted once — as spans of one bar the size of the machine that ease to each poll,
 one of them on the line beneath it (a bar reading, design system §10) and a press narrowing the
 table to its workload), over the inventory table whose head counts running, sleeping, blocked and
-zombie as state chips beside the user facet and an automatic focus that says why, with owner chips
-(PM2 and Docker drawn with their marks) and the chosen workload as a chip under it; fixed columns,
+zombie as state chips beside the ranking as five chips (Automatic, which says why it chose, CPU,
+Memory, Disk I/O, Uptime), with owner chips (PM2 and Docker drawn with their marks), the accounts as
+chips beside them (the three with the most processes, the rest behind one more chip, the one in
+force always drawn) and the chosen workload as a chip under it; fixed columns,
 so a long command line never pushes the readings or the row menu past the panel's edge, CPU and
 memory as a figure beside a short bar, a container owner by its name, a kernel thread, a zombie and
 an unreadable command line each saying which it is, and a process that started since the last poll
@@ -976,10 +1012,12 @@ the container's — every signal with what it will do to *this* process from its
 switch to send it to its children too, the priority stepper and the out-of-memory bias as five
 presets) and **Logs** (its supervisor's log through the service logs) — and it stops reading and
 says so when the process exits or its PID is reused; below `xl` the page is the one pane and scrolls
-as a whole. PM2: PM2's own identity line (the account, the Node every application runs, the boot
-hook, the last save and the application count as facts; whether it resurrects on boot as the
-verdict, read against the saved list's own names so an application started since the save turns it
-amber and offers **Save list** beside it; several accounts as rows under it), a band of what PM2
+as a whole. PM2: PM2's own identity line laid out as a project's header (whether it resurrects on
+boot as the verdict beside its name, read against the saved list's own names so an application
+started since the save turns it amber and offers **Save list**; the account, the Node every
+application runs, the boot hook, the last save and the application count as facts; **Start
+application** as the line's one command and the daemon-wide save/reload/restart/stop in its menu;
+several accounts as rows under it), a band of what PM2
 takes of the machine (`pm2-band.tsx`, bar readings: the five heaviest applications by processor and
 by memory, a cluster summed into one, as spans of one bar the size of the host beside everything
 else in use, easing to each poll, a press narrowing the table to the application with a chip to let
@@ -988,20 +1026,38 @@ table of every instance — crashing applications first, each drawn as its inter
 ticking, CPU and memory as a figure beside a short bar (memory against the limit PM2 restarts it at,
 where it has one), its restart count rising when it moves with the unstable ones in red, *not saved*
 where the saved list lacks it, fixed columns from `xl` with the mode folded into the name line below
-`2xl` — with start/reload/restart/stop inline and logs, scale, reset counters, flush, delete behind
-the menu; a detail sheet addressed by `?app=` (an exact `account:id`, or a bare name from the live
-table's owner link, which opens a cluster's first running instance) whose overview is one scroll —
-four live readings from the process table's read of its PID every two seconds (CPU, memory against
-its restart limit, disk I/O, restarts) over the sampler's recent windows, a cluster's other
-instances as rows that open in the same sheet with Scale beside them, what it listens on and who can
-reach each address, the command coloured as a command, how PM2 runs it and its log files — and whose
-Logs tab is the service logs on the process's `pm2:` source (the sheet's layout) under the record's
-own facts — restarts, unstable restarts, uptime — with an Around the last start window only where
-PM2 stamps its lines, and the server's reason instead of a socket where the logs are outside the log
-roots; a scale dialog that is a stepper over the workers, those to start outlined and those to stop
-struck, with one per core a press away; a start-application dialog whose interpreter and mode are
-cards with their marks and which shows the `pm2 start` command it will run, coloured; and
-daemon-wide save/reload/restart/stop. Services: the machine's identity line (systemd's version, the
+`2xl`, every row one height — with start/reload/restart/stop inline and logs, scale, reset counters,
+flush, delete behind the menu; a row opens the application's own page. The line and the band are
+drawn while the list is read; a server without PM2, one where PM2 is installed and no daemon runs,
+and a PM2 that does not answer each say so under PM2's mark with the next step
+(`pm2-missing.tsx`). **An application's page** (`/processes/pm2/[app]`, `pm2-app-page.tsx`; the
+name is the address, `?account=` only where two accounts run the same name, and the old `?app=`
+address — an exact `account:id` or a bare name — redirects there): from `xl` the list folded into
+a rail beside it (`pm2-app-rail.tsx`: the list's own search, state chip and order, a cluster one
+row, held while the pointer is in it), Alt+↑/↓ and two arrows to walk it with the view carried
+along; the identity line (the application as its interpreter, its name and state, its script, fork
+or cluster of n, restarts and unstable restarts, uptime ticking) with one command — Start where a
+worker is down, otherwise Reload — and the rest in a menu; then the views as the underlined strip,
+`?tab=` in the address — **Overview** (`pm2-app-overview.tsx`: notices where PM2 gave up, where
+some workers are down and where a reboot would not bring it back; *Where it runs*, the process
+page's wired picture with the account's daemon and its boot hook on the left and each worker as a
+process, the port they answer on, the log and the working directory on the right; *What it
+takes*, four reading lines — CPU and memory summed over its workers from the process table's read of
+each PID, memory against the limit PM2 restarts a worker at, disk rates and restarts — that hold
+their place while it is not running; the command; how PM2 runs it; and whether it comes back
+after a reboot), **Instances** (a cluster only: each worker a one-line card that opens its
+process's page, with its own verbs in its menu and Scale on the title line), **Logs** (the service
+logs on each worker's `pm2:` source under the record's own facts — restarts, unstable restarts,
+uptime — with an Around the last start window only where PM2 stamps its lines, and the server's
+reason instead of a socket where the logs are outside the log roots), **Environment** (read from
+the running process, credentials masked as on a process's page) and **Control** (every verb as a
+row that says what it does, and the startup list). A verb pressed on the page reaches every worker
+in turn through the per-process routes (`pm2-app-actions.tsx`); a worker's own verbs reach it
+alone. Below `xl` the page is the one pane and scrolls as a whole. Dialogs: a scale dialog
+(`pm2-scale-dialog.tsx`) that is a stepper over the workers, those to start outlined and those to
+stop struck, with one per core a press away, opened from a row, the Instances view or the menu; and
+a start-application dialog whose interpreter and mode are
+cards with their marks and which shows the `pm2 start` command it will run, coloured. Services: the machine's identity line (systemd's version, the
 active and boot-enabled counts and when it booted as facts, the failed count as the verdict that
 narrows the table to them, Reload unit files and the shortcuts at its right end), then
 `procs/service-band.tsx`, bar readings — the five services using the most processor and memory as
@@ -1087,47 +1143,99 @@ the same sheet without verbs, and one left to systemd says so first and links th
 service's Runs with Live and History. The job editor sheet asks what runs, then when — its frequency
 a grid of toggles — over a preview of the schedule in words, its week and its next three runs
 
+**Where there is no systemd** (a container, a host started by another init, or the dashboard's own
+container without `/run/systemd`), the Services list, a unit's page and Scheduled's Timers draw
+one screen (`procs/no-systemd.tsx` over `MissingThing`): the systemd logo, why, **Open Processes**
+and the mount to copy. A unit's page is that screen whole, with no rail, whether the list answered
+`available: false` or the unit's read answered `systemd_not_running`, and systemctl's own refusal
+is behind *What the server said*; on Scheduled it is one block under Timers and the cron jobs
+above it are drawn as usual
+
 **Implementation:** processes layout and pages, `components/procs/` (`process-page.tsx`,
 `process-rail.tsx`, `process-overview.tsx`, `process-views.tsx`, `process-detail.tsx`,
 `process-facts.ts`, `wiring-picture.tsx`, `services.tsx`, `service-page.tsx`, `service-rail.tsx`,
 `service-overview.tsx`, `service-views.tsx`, `service-facts.ts`, `service-band.tsx`, `pm2-band.tsx`,
-`pm2-shared.ts`, `unit-runs.tsx`, `units.ts`, `schedule-band.tsx`, `cron-job-sheet.tsx`,
+`pm2-shared.ts`, `pm2-facts.ts`, `pm2-app-page.tsx`, `pm2-app-rail.tsx`, `pm2-app-overview.tsx`,
+`pm2-app-views.tsx`, `pm2-app-actions.tsx`, `pm2-scale-dialog.tsx`, `pm2-start-dialog.tsx`,
+`pm2-missing.tsx`, `unit-runs.tsx`, `units.ts`, `schedule-band.tsx`, `cron-job-sheet.tsx`,
 `timer-sheet.tsx`), `components/verbs.tsx`, `lib/cron.ts`, `lib/crontab.ts`, `lib/schedule.ts`,
-`lib/unit-runs.ts` (`units.ts`, `pm2-shared.ts`, `process-facts.ts`, `service-facts.ts` and these
-unit-tested); checked by `tests/browser/processes-ui.spec.ts` and
+`lib/unit-runs.ts` (`units.ts`, `pm2-shared.ts`, `pm2-facts.ts`, `process-facts.ts`,
+`service-facts.ts` and these unit-tested); checked by `tests/browser/processes-ui.spec.ts`,
+`tests/browser/pm2-application.spec.ts` and
 `tests/browser/services-ui.spec.ts`
 
 ### `/proxy/*`
 
 Proxy overview, Sites and site details, Certificates, Streams, Ports, Configuration, TLS tools and
-Traffic show observed inventories and records. Alerts (`/proxy/alerts`, administrators) is its own
+Traffic show observed inventories and records. Certificates keeps its views in the address
+(`?tab=`: certificates, renewal, DNS challenge, ACME accounts, local CA, signing requests, watched
+domains), and a certificate is a page of its own, `/proxy/certificates/<name>` with `?path=` where
+two share a name (`certificate-page.tsx`, its rail and picture; the shared console, forms and verbs
+in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are
 `components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's identity bar
-links there with the firing count. Site/stream configuration, certificate issuance/renewal,
+links there with the firing count. Ports (`/proxy/ports`) opens on its counts, a picture of which
+networks reach which listening programs and the list of sockets; each listening port has its own page
+(`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
+reach, owner, clients and history, and the list as a rail; the old `?socket=` sheet address opens
+it. Site/stream configuration, certificate issuance/renewal,
 requested TLS scans, nginx tests/lint and traffic diagnostics keep their own controls and
 authorization. The overview has no automatic attention list or domain suggestions. Certificate
 hygiene and finding snoozes are removed; nginx Settings exposes current values and edit constraints
 without advice or recommended values
 
+Streams (`/proxy/streams`, 0.8.7) opens on its identity line — the forwards as the services their
+ports are, the stream module's state, how many forward and how many are open to anyone, the hour's
+sessions, the verdict (a press narrows the list to what it counts) and New stream — then the wiring
+picture of the host's ports through nginx to where they go (`stream-picture.tsx`), the module and
+include steps where they are still to do (`stream-setup.tsx`), and the forwards as one-line rows,
+each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`).
+A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a rail from `xl`,
+`stream-rail.tsx`) holds what the traffic sheet and the edit form did: Overview (the forward drawn,
+what it carried as reading lines and its sessions and outcomes), Clients (with Deny or Allow),
+Connected now, and Settings (the form as a settings column with one save bar, administrators only),
+`?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
+`stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
+the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
+Configuration (`/proxy/config`) opens on nginx's directory as an identity line with Test config, the
+include picture over the files by folder, and for administrators What nginx loads, Settings (one
+column, one save bar, a reload switch), Lint and History as `?tab=` views; a file's revisions and
+restore are the config editor's History view (`?view=history`, the old `?history=` link lands
+there). Tunnel (`/proxy/tunnel`) opens on the tunnel's identity line with Check now, the picture of
+hostname → Cloudflare's edge → connector → this server, and the hostnames as one-line cards; not
+connected, the dashed picture, a choice of token or API and one form (administrators only).
+
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)
 
+Traffic (`/proxy/traffic`, every account) is the last hour across every site from
+`GET /proxy/traffic`: requests a minute, the failing share, the slowest site's response time in
+words and bytes sent, the hour by the minute, the sites busiest first (each opening its site page,
+where its requests are read), and nginx's error log grouped from `GET /proxy/errors` over a window,
+for every site or one (`?tab=errors&site=`). The old one-site address `?site=<name>` redirects to
+`/proxy/sites/<name>`. Checked by `tests/browser/proxy-traffic.spec.ts`; the logic is
+`components/proxy/site-traffic.ts` (unit-tested)
+
 ### `/network/*`
 
-Nineteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
+Eighteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
 rules, monitored egress groups, firewall, gateway/NAT, protections/blocklists,
 WireGuard/Tailscale/Headscale, resolver/hosts/lookup and private retained native DNS policy/trust
-evidence, traffic/shaping/eBPF, connections and tools. Connection path adds source/container
+evidence, traffic/shaping/eBPF, connections and tools. Connection path (a tool of the Tools
+workbench since 0.8.7; `/network/investigate` redirects to it) adds source/container
 evidence with explicit basis and scope, the native nginx stream on the destination port as observed
 evidence with the backend leg nginx logged for a measured connection, and each forwarding site's
 service policy; Saved runs adds bounded durable lifecycle, retention, export and compatible
-comparison, and lists the **Watched probes** beside them: TCP endpoints the proxy watch list's own
+comparison, each run a page of its own (`/network/runs/[id]`, `components/network/run-page.tsx`:
+Result, Compare, History and Details, with the list as a rail), and lists the **Watched probes**
+under them: TCP endpoints the proxy watch list's own
 monitor connects to on its schedule, with each connect time, check-now and stop for administrators
 (`components/network/watched-probes.tsx`, `lib/watched-probes.ts`), started from the TCP port
 check's **Watch on a schedule**; Packet captures adds bounded immutable scope, dated native
-progress/cleanup, original private PCAP access and separately redacted support export; reload never
-starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
+progress/cleanup, original private PCAP access and separately redacted support export, each capture
+a page of its own (`/network/captures/[id]`, `components/network/capture-page.tsx`: the interface,
+filter and file as a picture, the record on a second view); reload never starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
 selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) read
 each group's policy and carrying member, every member measured through its own path (state, round
 trip, loss, a strip of recent samples, its mark, table and probe source), the rules' current advice,
@@ -1136,26 +1244,64 @@ after, the measurements and the connections moved, pinned and flushed, and the l
 expectations and phases; destructive confirmations guard fail over/fail back now, enable, disable,
 removal and turning automation on, which stays disabled until a passed simulation of the current
 configuration. Address planning joins held reservations with fresh overlap coverage and native owner
+progress/cleanup, original private PCAP access and separately redacted support export; reload never
+starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
+selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) are
+a list and a page a group: `/network/egress` opens on an identity line (how many of the six slots
+are used, how many carry traffic, how many switch on their own, members proven) over one card a
+group (its carrying member as the state, how it switches, its verbs in a menu), and
+`/network/egress/[name]` is the group: the carrying member as its state, **Run simulation** as the
+command, a `WireFlow` picture of the selected traffic, the group and its members (the carrying wire
+moves, a failed member is dashed), then views in the address (`?tab=`): Members (state, round trip,
+loss and a strip of recent samples a member, the rules' current advice, readiness, what each member
+is bound to and how the group decides), Decisions (a timeline whose evidence opens on the routes
+before and after, the measurements and the connections moved, pinned and flushed) and Simulation
+(the last run's expectations and phases). From `xl` the list stands beside it as a rail; Alt+↑/↓
+walk it with the view kept. Destructive confirmations guard fail over/fail back now, enable,
+disable, removal and turning automation on, which stays disabled until a passed simulation of the
+current configuration; an account that cannot use a verb is not shown it.
+Address planning joins held reservations with fresh overlap coverage and native owner
 handoffs; External checks retain scoped signed source evidence; Socket history defaults off and
 separates native TCP deltas from explicitly reviewed kernel TCP/UDP payload subtotals, retained
 ownership and coverage gaps. Traffic explicitly distinguishes download policing from owned IFB/CAKE
-SQM; its live window states the newest reading's age, uplink packets, TCP's resent share and round
-trip, recorded windows take a typed or dragged range with p50/p95/p99 and (admin) change/incident
-marks, devices carry alert-only transfer budgets, programs say what a read could not see and list
-UDP peers without bytes, every container opens into its chart, service and attributed peers, each
-queue says what the next change does with it (kernel default, preserved fq_codel, refused foreign
-tree) and drift names parameters changed in place, CAKE shows its measured per-class delay and takes
+SQM. It opens on the uplink's identity line (what it carries in words, the newest reading's age as
+its state, whether history is kept) over four views in the address (`?tab=`: Bandwidth, Budgets,
+Shaping, and the eBPF programs, each of which is a page, `/network/traffic/ebpf/[id]`, with the
+list as a rail). Uplink packets and TCP's resent share and round trip are two reading lines, the
+window is in the address (`?window=`, or a typed or dragged `?from=&to=`) and a recorded one says
+its throughput spread in words with (admin) change/incident marks, devices carry alert-only
+transfer budgets set in a sheet, programs say what a read could not see and list UDP peers without
+bytes, every container opens its own page (`/network/traffic/containers/[name]`: chart, service,
+attributed peers, the other containers as a rail), each queue is a one-line card whose sheet holds
+its evidence for any account and the form for an administrator: what the next change does with it
+(kernel default, preserved fq_codel, refused foreign tree) and the parameters drift changed in
+place, CAKE shows its measured per-class delay and takes
 an upload profile, congestion control is compared on live sockets before and after a switch, eBPF
 programs open into maps, attachments and cost with the dashboard's observer marked, and an install
 is followed by configured/active/verified phases (`components/network/traffic/`, `install.tsx`);
-Connections opens an address into its tuples, closes and layers, reads a past hour from socket
-history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
+Connections opens on its identity line and picture, lists each address as a one-line card, gives an
+address a page of its own (`/network/connections/[address]`: its sockets, closes and layers, a past
+hour from socket history), and blocks with a reason, an end and an incident
+(`components/network/connections/`); VPN
 opts in to IPv6 addressing and separate egress with per-family evidence and translated-connection
 counts; each tunnel calls out stale always-on handshakes, captured transports and passed budgets,
 opens a record (endpoint evidence, trend, lifecycle with outcomes), and each peer's sheet adds its
 trend, endpoint history, alert-only budget, editing (a device's regenerated configuration), site
 verification and a Linux kill-switch download, with archived tunnels restorable and
 Tailscale/Headscale approval and key expiry read-only (`components/network/vpn/record.tsx`,
+Connections opens an address into its tuples, closes and layers, reads a past hour from socket
+history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
+opens each VPN on its own identity line with no tile row, opts in to IPv6 addressing and separate
+egress with per-family evidence and translated-connection counts on the row that switches that
+family's exit; each tunnel's picture marks stale always-on handshakes, captured transports and
+passed budgets on the peer they are about, a tunnel has a page of its own (`/network/vpn/<name>`:
+endpoint evidence, trend and what each peer moved, lifecycle with outcomes, kept for a removed
+tunnel beside its restore), and each peer's sheet adds its trend, endpoint history, alert-only
+budget, editing (a device's regenerated configuration), site verification and a Linux kill-switch
+download, with archived tunnels restorable, tailnet machines and Headscale nodes as one-line cards,
+the exit-node offer and subnet routes as settings on one save bar, a Tailscale that waits for
+sign-in offering the address it waits at, and Headscale approval and key expiry read-only
+(`components/network/vpn/`: `tunnel-page.tsx`, `tunnel-reading.ts`, `tailscale-offers.tsx`,
 `peer-actions.tsx`, `archive.tsx`). Twenty-six admin-only server diagnostics, each rendering one
 shared structured result (verdict, checks, findings with owners, facts with their basis, tables with
 in-product row links, metrics and limits) with raw output behind a disclosure, a server-held quick
@@ -1181,17 +1327,54 @@ Gateway separates installed readiness from measured reachability (a target check
 and, for administrators, external evidence after the last change), previews each forward or NAT
 change's impacts and modeled policy layers while the form is edited, offers one-to-one, IPv6 prefix
 and destination-scoped NAT, flags a drifted auto source-translation decision with its re-decide, and
-labels live counters by table generation beside totals carried across reloads. Protection adds
+labels live counters by table generation beside totals carried across reloads. Protection
+(`components/network/protection/`) opens on an identity line (what the lists dropped and the limits
+refused, New blocklist as its command) and a `WireFlow` picture of who is refused, this server's
+filter and what gets through, and has three views in the address (`?tab=`): the lists, limits,
+exceptions and trusted addresses as one-height rows, the connection table (administrators), and the
+kernel's protections as a settings column on the shared save bar. It adds
 service-profile limits with a ceiling for everyone, meter occupancy and per-limit refusal trends,
 scoped expiring exceptions, trusted-address notes with staleness review, feed schedules, signatures,
-diffs and provenance, a list preview naming local networks and open sessions, explicit session
-revocation, workload kernel profiles staged into the existing apply bar with per-interface effective
-values, and an administrator's connection-table pressure panel. Private verification is available,
+diffs and provenance (a list's standing and enforcement evidence head its editor), a list preview
+naming local networks and open sessions, explicit session revocation, workload kernel profiles
+staged beside hand edits with per-interface effective values, and the connection table's band,
+charts, shares and what they point at. Private verification is available,
 and IPv4 WireGuard full tunnels explain IPv6 leak blocking. DNS, VPN and Interfaces each end on
 their service's log — the resolvers, tunnels and link daemons the page lists, read in the shared
 `ServiceLogs` pane ([`docker-files-logs.md`](../backend/docker-files-logs.md)). The [complete
 inventory](../../audits/2026-10-08-network-audit/README.md) distinguishes UI, API and inspection
 limits
+
+**The three evidence pages share one layout (0.8.7).** External checks, Address planning and Socket
+history each opened on four tiles over a paragraph, a form and a framed table, with their forms folded
+into disclosures. Each now opens on an identity line (`HostIdentity` in its project layout, its facts
+through `IdentityFacts`) whose state is the page's verdict and whose one command is its main verb, and
+none has a `StatGrid`:
+
+- **External checks** (`components/network/external/`): the picture is the enrolled sources, the
+  internet and this server's approved services, each line the last check's outcome (`reading.ts`:
+  reached, a measured stage refused, partly unknown, in flight, or no measurement, which is dashed and
+  never red). Checks are one framed table, a line each, the chosen one read out under it; sources are
+  `ChoiceRow`s whose press runs a check from them. Run a check, Enroll a source (the one-use credential
+  is shown in the sheet that made it and stays reachable from the source's menu until it expires) and
+  Compare are sheets. Revoke needs `destructive` as well as `system.admin`.
+- **Address planning** (`components/network/ipam/`): named as the rail names it. A pool is a card
+  holding one `BarReading` of planned, observed and free blocks with the server's exact counts and its
+  owners as logos (`reading.ts` joins a pool's held plans with the native observations inside its
+  network); the prefix preview is a field over the bands; reservations are `ChoiceRow`s that link to
+  the Docker or WireGuard creation form while they are only reserved (`?ipamReservation=`); coverage is
+  a framed table. New pool and Reserve are sheets. Retire and Release need `destructive`.
+- **Socket history** (`components/network/flows/`, `components/network/kernel-observer.tsx`): with the
+  recorder off and nothing kept, the page is the picture of what would be sampled and kept, one
+  sentence and Start recording. With a record, the picture is the latest sample's sources, the
+  recorder and what it keeps; the UTC day and the two filters are the table's toolbar; a socket hour
+  is one line and the chosen one is read out under the table; the totals of the rows shown are the
+  table's foot, native counters and kernel payload apart; the day's twenty-four hours are a strip
+  that reads one hour on a fixed line. Sampling policy is a sheet, Erase is in the menu, and the
+  kernel observer keeps its own reviewed activation.
+
+Every reading these pages gave as "Unknown" is still given as "Unknown": a check that expired or was
+cancelled measured nothing, a UDP row has no byte counters, and an hour with no block was not sampled.
 
 **Implementation:** network pages, `components/network/`, shared security firewall/connection
 components; checked by `network-*.spec.ts`, `security-ui.spec.ts` and `design-system.spec.ts`
@@ -1203,6 +1386,27 @@ state, sessions, login records and enforcement evidence. The access-boundary rep
 available. SSH edits are reviewed and protected by lockout guards; intrusion controls keep their
 capabilities, confirmation and audit. Automatic posture findings and settings recommendation
 comparisons were removed in 0.7.5
+
+Since 0.8.7 the overview is its identity line, the picture of the ways in and the access-boundary
+report: the picture's nodes carry the readings (connections, firewall, fail2ban, sshd, who is signed
+in) and their marks link to Connections, Firewall, Intrusion, SSH and Logins. Logins
+(`/security/logins`) opens on this server's identity line and a picture of where sessions are held
+from, who is attacking and which accounts are in; then open sessions (End session, `system.admin`
+and `destructive`), attackers ranked by attempts (Block at the firewall and the address lookups in
+each row's menu; an address the firewall already denies reads "blocked"), and the login record
+(Successful / Failed for administrators as `?failed=1`, a filter as `?q=`, new records held behind
+"N new logins · Show"). Checked by `security-logins.spec.ts` and `security-ui.spec.ts`; captures of
+every state with `JD_SECURITY_SHOTS=<folder>` and `security-logins-shots.spec.ts`
+
+Intrusion (0.8.7) is an identity line, a picture of the internet, this server and the three
+engines, and one engine at a time as a view in the address: `?tab=fail2ban`, `crowdsec`, `suricata`
+or `blocked` (every engine's refused addresses folded by address). Without `tab` it opens on the
+first engine that is installed. A jail is a page, `/security/intrusion/jails/[jail]`: what it holds
+with Unban and Never ban again on each address, its policy, and Ban an address, Tune and Release
+every ban as its verbs. One form bans through CrowdSec or a jail. A stopped fail2ban is started
+from the page (`POST /systemd/fail2ban.service/start`, `service.control`) and an absent one is
+installed from it. SSH (0.8.7) stages its directives in one column and applies them through the
+shared save bar and a review dialog; `?setting=<key>` still lands on a directive.
 
 **Implementation:** `app/(dashboard)/security/`, `components/security/`; backend in
 [`../backend/observability-security.md`](../backend/observability-security.md)
@@ -1277,23 +1481,43 @@ customization
 
 ## The Network pages in more detail
 
-The DNS page opens on the resolver chain and `resolver-owner.tsx`: who writes `/etc/resolv.conf`,
-what programs ask, whether the page's resolved drop-in reaches them, the owner's own place to change
-DNS (a link to the Interfaces page for a NetworkManager profile) and the evidence and conflicts behind
-the verdict. `link-scopes.tsx` lists each link's resolved scope and, for an administrator, edits a
-link's split DNS through its native profile as a temporary apply (`split-dns.ts`, unit-tested).
-`upstreams.tsx` offers clearing each list on purpose, up to eight verification names, the server's
-verification plan in the confirmation and every check's result — or the failed check of a change that
-was put back — after it (`verification.tsx`). `tls-check.tsx` checks each configured DoT server's
-certificate, `dnssec-chain.tsx` traces a name's chain of trust for administrators, the host records
-editor previews overlaps before saving and checks local NSS resolution after, the lookup race compares
-over DNS over TLS with the DO bit and asks before sending a private name to unseen forwarding, and the
-ad-blocking rows hand a detected AdGuard Home, Pi-hole or Technitium to its native connection
-(Inspect) or to a seeded connection form (Connect). Connection sheets add `service-dhcp.tsx`, the
-engine's read-only DHCP ranges and leases. Checked by `tests/browser/network-dns.spec.ts` and
+The DNS page (`components/network/dns/dns-page.tsx`) opens on the resolver's identity line: its name
+(systemd-resolved, or `/etc/resolv.conf` where programs do not ask the stub), the address programs
+ask, where a lookup goes in words ("Cloudflare over opportunistic TLS") and the share answered from
+the cache (`reading.ts`, unit-tested), with **Resolve a name** as the command and the engines' two
+verbs in the menu. Under it are five views named in the address (`?tab=`, `views.ts`); the anchors
+older links carry (`#dns-links`, `#dns-upstreams`) open the view their section moved to.
+
+- **Resolver**: the chain on `WireFlow` (`resolver-chain.tsx`), with the cache share and the lookup
+  count on the resolver's node and the failures and DNSSEC verdicts as two `ReadingLine`s under it;
+  what answers on port 53; each link's scope as a one-line card that, for an administrator, opens the
+  link's split DNS through its native profile as a temporary apply (`link-scopes.tsx`, `split-dns.ts`,
+  unit-tested); `tls-check.tsx`, each configured DoT server's certificate; and `resolver-owner.tsx`:
+  who writes `/etc/resolv.conf`, what programs ask, whether the page's resolved drop-in reaches them,
+  the owner's own place to change DNS and the evidence and conflicts behind the verdict.
+- **Lookups** (`lookups.tsx`, `?tool=`): one name shared by three lookups, each keeping its answer.
+  The lookup compares named resolvers over DNS over TLS with the DO bit and asks before sending a
+  private name to unseen forwarding, an acknowledgement that holds only for the name it was given
+  for; the policy investigation and `dnssec-chain.tsx` are an administrator's and are not offered to
+  anyone else.
+- **Settings** (`settings-view.tsx`): one column of `SettingSection`s on the page's one save bar.
+  `upstreams.tsx` is the resolver's form (public resolvers, servers, fallback, domains, clearing each
+  list on purpose, DNS over TLS, DNSSEC and the cache as `Segments`, up to eight verification names);
+  Save shows the server's verification plan in the confirmation, and every check's result, or the
+  failed check of a change that was put back, lands at the head of the column (`verification.tsx`).
+  It needs `system.admin` and `destructive`, as its routes do. The host records editor is the second
+  form: it previews overlaps before saving and checks local NSS resolution after.
+- **Services**: the ad-blocking cards hand a detected AdGuard Home, Pi-hole or Technitium to its
+  native connection (the card opens it) or to a seeded connection form (Connect), over the connected
+  engines and the owned setups. Connection sheets add `service-dhcp.tsx`, the engine's read-only DHCP
+  ranges and leases.
+- **Log**: resolved's unit, the resolver programs and the DNS containers (`log-sources.ts`).
+
+Every block waits for the first read at the height it had on the last visit (`ghost.tsx`,
+`shapeOf`). Checked by `tests/browser/network-dns.spec.ts`, `network-dns-evidence.spec.ts` and
 `network-dns-services.spec.ts`.
 
-The DNS page also mounts `components/network/dns/services.tsx` for administrators, including while
+The DNS page's Services view mounts `components/network/dns/services.tsx` for administrators, including while
 the host resolver reading is unavailable. Native connections default read-only; replacement requires
 the complete native credential and selected custom CA again. Engine sheets keep listeners, runtime,
 upstreams, client access/settings, authoritative zones, local overrides, native views, filtering groups,
@@ -1341,7 +1565,24 @@ Its [source-matched build, 13 interaction cases and phone/desktop inspection](..
 pass, as do the [combined reachable checks](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md).
 Broader P17 acceptance remains open.
 
-Network interface sheets add the administrator-only native persistent profile editor
+**Interfaces** (`app/(dashboard)/network/interfaces/`, `components/network/interfaces/`) opens on one
+line (how many devices, which is the uplink, how many were made here, **New device**), lists the
+devices by what they are for as one-line cards, then the namespaces as cards with their device count
+(a namespace's routes, resolver and listeners stay its sheet) and the link log. A device is a page,
+`/network/interfaces/[name]` (`device-page.tsx`; the old `?device=` address redirects there), on the
+process page's shape: its line with its state and guard, **Set up** as the command of a device that
+is down, **Set down** and **Delete** in the menu; the views **Traffic** (a `WireFlow` picture of what
+it is wired to, the last fifteen minutes, what it carried since it was made, link errors, a tunnel's
+readiness), **Addresses**, **Ports** (a bridge's ports as cards, the switch and its forwarding
+database), **Settings** (MTU, bridge membership, VLANs and flood ends as sections under one save bar,
+each its own write and a destructive one confirmed; the driver) and, for an administrator,
+**History** (the audit trail's `network.link.`, `network.address.` and `network.native.` entries for
+that device, narrowed in the page) with `?tab=` in the address; and from `xl` the list as a rail
+(`device-rail.tsx`) with the list's own search and Everything switch, Alt+↑/↓ to walk it. The pure
+part (`device-facts.ts`: grouping, state, views, the picture's two sides, a change in words) is
+tested in `bun test src`.
+
+A device's Settings view adds the administrator-only native persistent profile editor
 (`components/network/interfaces/native-profile.tsx`). It reads the supported existing owner, including
 standalone veth profiles verified by the backend's private reciprocal-peer fences, and retains
 typed IPv4/IPv6 address, DNS/domain and route drafts after refusals, and requires a reviewed generation
@@ -1359,6 +1600,35 @@ ordinary preference off was the first line of all nineteen Network pages until 0
 so a reload arms the guard again; `tests/browser/network-confirmation.spec.ts`). These interactions
 are checked by `network-native-profile.spec.ts`; the native manager's separate evidence and limits are
 documented in [the backend contract](../backend/network-native-managers.md).
+
+The Routing page (`app/(dashboard)/network/routing/page.tsx`, `components/network/routing/`) opens on
+its identity line (`identity.tsx`): the default way out, the counts of tables, routes and rules,
+whether the server forwards as its state, *Add route* as the command and *Add rule* and *Refresh*
+behind the `⋯`. Under it are four views named in the address (`?tab=history`, `bgp`, `forwarding`;
+the first has no parameter). Overview is the decision picture (`decision-map.tsx`, hand-laid: two
+columns wired to each other) with its question in its head: the family chips and one target field
+(`route-lookup.tsx`). An address or network typed there narrows the routes to those covering it
+and the history to the changes touching it; one literal address is also put to the kernel
+(`GET /network/routing/lookup`, when the typing pauses and every fifteen seconds after), with the
+packet's source and mark behind the field's sliders, and the table the kernel names is lit in the
+picture, with the rule where one rule alone leads to that table. The line under the head is the
+answer; with nothing asked it is this browser's reply path and how far the kernel vouches for the
+highlight, the long form behind an `ⓘ`. Every route is then one line of one framed table
+(`route-tables.tsx`), the routing table a column and a chip, the device and its source on one mono
+line, Edit and Remove on the dashboard's own rows and why a guarded row stays behind an `ⓘ` a
+keyboard reaches; the policy rules are a second framed table with *Add rule* on its title line.
+Below 1100px a route is two lines of one height, and a rule below 768px. History
+(`route-history.tsx`) is a line a change with the observer's limits behind an `ⓘ`; BGP (`bgp.tsx`)
+is FRR's neighbours, OSPF adjacencies and the route browser as framed tables, or a designed empty
+state that links to Packages. Forwarding (`forwarding.tsx`) is a setting: a `WireFlow` of each
+family, this server and what needs it, then a switch row a family, changed as a draft and written
+by the page's save bar (`SaveBarProvider`), which asks before it stops a family; the view stays
+mounted so a draft stays on the bar while another view is read. An account that cannot change
+anything is shown no command, no row verb and no switch. The page is drawn before its first read
+at the size it had last time (`useViewState("network.routing.shape")`). Checked by
+`tests/browser/network-routing.spec.ts`, with what the forms send in
+`network-routing-firewall.spec.ts` and `network-audit.spec.ts`; the pure readings are
+`route-reading.test.js`.
 
 ## A deployment's project pages in more detail
 

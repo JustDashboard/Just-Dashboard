@@ -387,3 +387,240 @@ export function seriesRows(series: Record<string, SeriesPoint[] | undefined>, ke
   }
   return [...byTs.values()].sort((a, b) => a.ts - b.ts)
 }
+
+/**
+ * What the page says of itself on its opening line and its section heads:
+ * what the lists dropped and the limits refused since the table was loaded,
+ * the same since the recorder first saw each rule, and what is in force.
+ */
+export function protectionTotals(
+  view: Pick<ProtectionView, "blocklists" | "limits" | "exceptions">,
+) {
+  const sum = <T>(rows: T[], of: (row: T) => number) => rows.reduce((n, row) => n + of(row), 0)
+  // The earliest a group's totals reach; a group with none yet says only what
+  // the loaded table counted.
+  const since = (rows: { total?: { since: string | null } }[]) =>
+    rows
+      .map((row) => row.total?.since)
+      .filter((at): at is string => Boolean(at))
+      .sort()[0]
+  const lists = view.blocklists
+  const on = lists.filter((l) => l.enabled)
+  const limitsOn = view.limits.filter((l) => l.enabled)
+  const exceptions = view.exceptions ?? []
+  return {
+    lists: lists.length,
+    listsOn: on.length,
+    networks: sum(on, (l) => l.count),
+    failing: lists.filter((l) => l.error).length,
+    dropped: sum(lists, (l) => l.packets),
+    droppedBytes: sum(lists, (l) => l.bytes),
+    droppedEver: sum(lists, (l) => l.total?.packets ?? 0),
+    droppedSince: since(lists),
+    limits: view.limits.length,
+    limitsOn: limitsOn.length,
+    refused: sum(view.limits, (l) => l.packets),
+    refusedBytes: sum(view.limits, (l) => l.bytes),
+    refusedEver: sum(view.limits, (l) => l.total?.packets ?? 0),
+    refusedSince: since(view.limits),
+    exceptions: exceptions.length,
+    exceptionsLive: exceptions.filter((e) => !e.expired).length,
+    letThrough: sum(exceptions, (e) => e.packets),
+    inForce: on.length > 0 || limitsOn.length > 0,
+  }
+}
+
+/** A state word and the dot it stands beside. */
+export type StateWord = {
+  label: string
+  tone: "running" | "stopped" | "warning" | "danger"
+  /** The switch beside it already says this much: a narrow row leaves it out. */
+  plain?: boolean
+}
+
+/**
+ * The one state a blocklist's row says: the worst thing true of it. A row is
+ * one line, so a list that is signed, stale and failing says it is failing;
+ * its editor lists the rest (`listFacts`).
+ */
+export function listState(
+  list: Pick<
+    ProtectionBlocklist,
+    "enabled" | "error" | "containsYou" | "enforcement" | "stale" | "integrity"
+  >,
+): StateWord {
+  if (list.error) return { label: "Fetch failed", tone: "danger" }
+  if (list.containsYou) return { label: "Holds your address", tone: "warning" }
+  if (list.enabled && list.enforcement === "degraded")
+    return { label: "Degraded enforcement", tone: "warning" }
+  if (list.enabled && list.stale) return { label: "Stale", tone: "warning" }
+  if (list.enabled && list.enforcement === "unknown")
+    return { label: "Enforcement unknown", tone: "warning" }
+  if (!list.enabled) return { label: "Off", tone: "stopped", plain: true }
+  if (list.enforcement === "verified") return { label: "Verified set", tone: "running" }
+  if (list.integrity === "signed") return { label: "Signed", tone: "running" }
+  return { label: "In force", tone: "running", plain: true }
+}
+
+/** Everything a list's row has no room for, as the short facts its editor opens on. */
+export function listFacts(
+  list: ProtectionBlocklist,
+  presets: ProtectionView["presets"],
+  when: (iso: string) => string,
+) {
+  const fetched = isFetched(list)
+  return [
+    listWhat(list, presets),
+    `${list.count.toLocaleString()} ${list.count === 1 ? "network" : "networks"}`,
+    coverageWord(list.coverage),
+    fetched ? (list.refreshed ? `fetched ${when(list.refreshed)}` : "not fetched yet") : undefined,
+    fetched ? refreshWord(list, when) : undefined,
+    diffWord(list.lastDiff),
+    list.integrity === "signed" ? "signed" : undefined,
+    list.containsYou ? "holds your address" : undefined,
+    list.enabled && list.enforcement === "verified" ? "verified set" : undefined,
+    list.enabled && list.enforcement === "degraded" ? "degraded enforcement" : undefined,
+    list.enabled && list.enforcement === "unknown" ? "enforcement unknown" : undefined,
+  ].filter((fact): fact is string => Boolean(fact))
+}
+
+/** A list's coverage in the width a row has: the share without "of IPv4". */
+export function coverageShort(c: BlocklistCoverage | undefined) {
+  return coverageWord(c)?.replace("% of IPv4)", "%)")
+}
+
+/** When a fetched list was last read and when it next is, as a row's two short lines. */
+export function fetchWords(
+  list: Pick<
+    ProtectionBlocklist,
+    "kind" | "refreshed" | "refresh" | "nextRefresh" | "failures" | "enabled"
+  >,
+  when: (iso: string) => string,
+) {
+  if (list.kind === "manual") return undefined
+  const schedule = list.refresh || "24h"
+  const label =
+    schedule === "manual"
+      ? "by hand"
+      : (REFRESH_CHOICES.find((c) => c.value === schedule)?.label ?? "Daily").toLowerCase()
+  const failures = list.failures ?? 0
+  // "in 3h", where the page's clock says "3h from now": the column is narrow.
+  const next = list.enabled && list.nextRefresh ? when(list.nextRefresh) : undefined
+  return {
+    fetched: `${label} · ${list.refreshed ? `fetched ${when(list.refreshed)}` : "not fetched yet"}`,
+    next: [
+      failures > 0 ? `${failures} failed` : undefined,
+      next
+        ? next.endsWith(" from now")
+          ? `next in ${next.slice(0, -" from now".length)}`
+          : `next ${next}`
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  }
+}
+
+/**
+ * What a row says under a list's name: its countries, the host its feed is
+ * read from, how many addresses were typed. A feed is said by its host rather
+ * than its preset's name, which is nearly always the list's own name again.
+ */
+export function listSource(list: ProtectionBlocklist) {
+  switch (list.kind) {
+    case "country":
+      return countriesWord(list.countries)
+    case "feed":
+      return feedName([], "", list.url) || list.url
+    default:
+      return count(list.entries.length, "address", "addresses") + " typed"
+  }
+}
+
+/** A limit in the few words a picture's node has: its rate, else its ceiling. */
+export function limitShort(limit: ProtectionLimit) {
+  if (limit.rate > 0)
+    return `${limit.rate.toLocaleString()} ${PER_WORD[limit.per]}${limit.perSource ? " per address" : ""}`
+  if (limit.maxConnections > 0) return `${limit.maxConnections.toLocaleString()} open per address`
+  if ((limit.globalConnections ?? 0) > 0)
+    return `${(limit.globalConnections ?? 0).toLocaleString()} open for everyone`
+  return undefined
+}
+
+/** How many sources a limit's per-source sets track now, and how full they are. */
+export function metersWord(limit: Pick<ProtectionLimit, "meters">) {
+  const m = limit.meters
+  if (!m || m.error) return undefined
+  if (m.rateSources === null && m.connSources === null) return undefined
+  const tracked = Math.max(m.rateSources ?? 0, m.connSources ?? 0)
+  const full = tracked / m.capacity
+  return `tracking ${tracked.toLocaleString()} source${tracked === 1 ? "" : "s"}${full >= 0.8 ? ` (${Math.round(full * 100)}% of its meter)` : ""}`
+}
+
+/** How an exception stands: it ends, it ended, or it holds until it is removed. */
+export function exceptionState(
+  e: { expiresAt: string | null; expired: boolean },
+  when: (iso: string) => string,
+): StateWord {
+  if (!e.expiresAt) return { label: "Until removed", tone: "running" }
+  return e.expired
+    ? { label: `Ended ${when(e.expiresAt)}`, tone: "warning" }
+    : { label: `Ends ${when(e.expiresAt)}`, tone: "running" }
+}
+
+/** What a trusted address's row says of its standing, when there is anything to say. */
+export function trustedState(
+  e: Pick<ProtectionTrusted, "stale" | "expired">,
+): StateWord | undefined {
+  if (e.expired) return { label: "Expired", tone: "warning" }
+  if (e.stale) return { label: "Stale", tone: "warning" }
+  return undefined
+}
+
+/**
+ * The choice the trusted editor opens on, and what each choice sends. An
+ * address that already ends keeps its end unless the reader picks another:
+ * the server takes an empty expiry as "never", so a note saved from a form
+ * that opened on "Until removed" quietly made a week's trust permanent.
+ */
+export const KEEP_EXPIRY = "keep"
+
+export function trustedExpiryChoice(e: Pick<ProtectionTrusted, "expiresAt" | "expired">) {
+  return e.expiresAt && !e.expired ? KEEP_EXPIRY : "never"
+}
+
+export function trustedExpiry(
+  e: Pick<ProtectionTrusted, "expiresAt" | "expired">,
+  choice: string,
+  now: Date = new Date(),
+) {
+  if (choice === KEEP_EXPIRY) return e.expiresAt && !e.expired ? e.expiresAt : ""
+  return expiryFrom(choice === "never" ? "" : choice, now)
+}
+
+/**
+ * The control a kernel setting takes in the settings column: a switch for one
+ * the kernel holds as off or on, segments for another small choice, a field
+ * for a number. A switch is only honest while the value is one of its two, so
+ * an on/off setting found at a third value keeps its segments.
+ */
+export function settingControl(s: ProtectionSetting, value: string) {
+  if (s.kind !== "choice" || s.allowed.length > 3) return "number" as const
+  const onOff = s.allowed.length === 2 && s.allowed.includes("0") && s.allowed.includes("1")
+  return onOff && (value === "0" || value === "1") ? ("switch" as const) : ("segments" as const)
+}
+
+/** How many of each kind the picture draws; the lists under it hold the rest. */
+export const LISTS_DRAWN = 3
+export const LIMITS_DRAWN = 1
+
+/** Every counter the picture's lines are alive by, under the key `grown` compares. */
+export function protectionCounters(
+  view: Pick<ProtectionView, "blocklists" | "limits" | "exceptions">,
+) {
+  return Object.fromEntries([
+    ...view.blocklists.map((l) => [`list:${l.id}`, l.packets] as const),
+    ...view.limits.map((l) => [`limit:${l.id}`, l.packets] as const),
+    ["exceptions", (view.exceptions ?? []).reduce((n, e) => n + e.packets, 0)] as const,
+  ])
+}
