@@ -760,8 +760,10 @@ fleet/project attention panels and optional Before you deploy reports were remov
 settings carries the migration rehearsal's terms under the release tasks (`settings/rehearsal.tsx`):
 the switch, the database to restore when the tasks reach several, whether a release that cannot be
 rehearsed stops or continues with a warning, and the restore and size limits, with a note naming a
-task the rehearsal cannot run; the run page reads a `rehearse_migration` step's report as four
-figures — the restore and its source, the tasks, the longest lock, the copy removed — over each
+task the rehearsal cannot run; the run page reads a `rehearse_migration` step's report as one
+sentence on the step's mark with a line of facts (`run-verdict.tsx`, its words in the unit-tested
+`run-verdicts.ts`) — whether the tasks passed, the restore and its source, the longest lock, the copy
+removed — over each
 task's exit and every lock with what production will wait for (`run-rehearsal.tsx`, its words in
 `rehearsal-model.ts`, unit-tested). While a release just cut over to is on watch, the project
 Overview opens on its window (`release-watch.tsx`), in the Overview's block shape: the proxy's mark
@@ -787,9 +789,10 @@ carries the traffic replay's terms under *Traffic replay*, beside the release st
 with the runtime plan (`settings/replay.tsx`): the switch, the requests replayed, the status drift
 allowed, the slowdown factor, the time limit and the path prefixes, each refused under its own field
 before the save when the server would refuse it; the run page reads a `replay_traffic` step in the
-Verify stage as four figures — requests replayed of those recorded, drifted against the share
+Verify stage as one sentence on the step's mark with a line of facts (`run-verdict.tsx`) — how many
+replayed requests matched, then those drifted against the share
 allowed, how long 19 in 20 of the candidate's answers took against the recorded ones, the time taken
-— over each request the candidate answered differently by method, path, recorded status and its
+and how many were recorded — over each request the candidate answered differently by method, path, recorded status and its
 answer (`run-replay.tsx`, its words in `replay-model.ts`, unit-tested). Deployments also carries
 each release's data point as a tag, *Restore data as of this release…* under the release's verbs,
 and the *Data copies* panel — a copy's address revealed on request, *Compare with live*, *Keep 1
@@ -854,6 +857,20 @@ the records to create by hand, leading to Certificates where a saved token is th
 `dns_record_writable` finding offers *Create the record*, which opens the page on that sheet by
 `?record=` (`settings/dns-record-panel.tsx`, its words in the unit-tested `dns-record-model.ts`;
 [DNS records](../deployments/dns-records.md)).
+
+Five of these pages took the deploy standard's last steps in 0.8.7. A project's Logs reads the hour in
+the Overview's `ReadingLine`s where four tiles stood and is one pane with a bottom bar on a phone
+([request observability](../deployments/request-observability.md)). Deployments opens Delivery on the
+Overview's sentence on the source's mark with the rate, the frequency, the usual time and the recovery
+as one line of facts (`deliveryFacts` in `delivery-model.ts`, each fact's basis its title), its waiting
+shape the lead's and the charts' own, and a run's row says its time once, in amber when it ran long,
+with no bar under it. A run at work that has written nothing shows the step it is at in the console,
+its name lit (`build-console.tsx`). On `/deploy/new` the GitHub App that is not connected is the
+Credentials picture, small (`new-project/app-picture.tsx`), with Connect on the section's title line,
+the Git column ends on Import, and a shelf of one template stands beside its neighbours in the cards'
+columns. A subject's assistant whose settings cannot be read is the off state with *Try again*
+(`assistant/off.tsx`), a database's included. A line of facts that wraps is `deploy/fact-line.tsx`,
+which never leaves a separator at a line's end.
 
 **Implementation:** `components/deploy/`; see
 [`../deployments/implementation.md`](../deployments/implementation.md); checked by

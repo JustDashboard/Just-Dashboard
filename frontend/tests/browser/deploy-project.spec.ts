@@ -324,11 +324,16 @@ test("the deployments tab reports delivery figures with their basis and window",
   await mockProject(page)
   await page.goto("/deploy/7/deployments")
   await expect(page.getByRole("heading", { name: "Delivery" })).toBeVisible()
-  await expect(page.getByText("75%", { exact: true })).toBeVisible()
-  await expect(page.getByText("9 of 12 decided releases", { exact: true })).toBeVisible()
-  await expect(page.getByText("2.1", { exact: true })).toBeVisible()
-  await expect(page.getByText("1.5h", { exact: true })).toBeVisible()
-  await expect(page.getByText("mean over 2 recovered failures", { exact: true })).toBeVisible()
+  // The Overview's lead, on the source's mark, then the figures as one line
+  // of facts whose basis is each one's title.
+  await expect(
+    page.getByText("9 of 12 releases succeeded in the last 30 days", { exact: true }),
+  ).toBeVisible()
+  const facts = page.locator('[data-slot="delivery-facts"]')
+  await expect(facts.getByTitle("9 of 12 decided releases")).toHaveText("75% succeeded")
+  await expect(facts.getByTitle("9 successful over 30 days")).toHaveText("2.1 a week")
+  await expect(facts.getByTitle("Mean over 2 recovered failures")).toHaveText("1.5h to recover")
+  await expect(facts.getByText("1 failed in a row")).toHaveClass(/text-destructive/)
   await expect(page.getByText(/Health gate failed/)).toBeVisible()
   await expect(page.getByTestId("insights-daily").locator("li")).toHaveCount(31)
   // Release time is drawn on the same days as the releases, against a scale

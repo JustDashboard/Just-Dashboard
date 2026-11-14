@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types"
 import { Disclosure, Field, FormNote, OptionRow } from "@/components/form"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
+import { cn } from "@/lib/utils"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
@@ -516,28 +517,48 @@ export function SourceTemplate({
                 )}
               </section>
             )}
-            {shown.map((shelf) => (
-              // The cards arrive staggered by their own index, so the group
-              // does not also rise: that is one block animating twice.
-              <div key={shelf.key} className="space-y-2">
-                <p className="eyebrow">{shelf.label}</p>
-                {/* Kinds, so cards (§16). The shelf is the grid's
+            {/* The shelves stand in the cards' own columns. One with several
+                templates takes the row and lays them across it; one with a
+                single template is as wide as its card, so three shelves of
+                one — a search's answer, a short catalogue — sit side by side
+                rather than as a narrow column with the width empty beside it. */}
+            <div className={SHELVES}>
+              {shown.map((shelf) => (
+                // The cards arrive staggered by their own index, so the group
+                // does not also rise: that is one block animating twice.
+                <div
+                  key={shelf.key}
+                  className={cn(
+                    "flex min-w-0 flex-col gap-2",
+                    shelf.entries.length > 1 && "col-span-full",
+                  )}
+                >
+                  <p className="eyebrow">{shelf.label}</p>
+                  {/* Kinds, so cards (§16). The shelf is the grid's
                     `role="group"` name — a bare `aria-label` on a div names
                     nothing, so the eyebrow would reach a reader and no one
                     else. */}
-                <ChoiceGrid columns="fill" role="group" aria-label={shelf.label}>
-                  {shelf.entries.map((entry, index) => (
-                    <TemplateCard
-                      key={entry.id}
-                      entry={entry}
-                      index={index}
-                      selected={selectedId === entry.id}
-                      onSelect={() => select(entry)}
-                    />
-                  ))}
-                </ChoiceGrid>
-              </div>
-            ))}
+                  <ChoiceGrid
+                    columns="fill"
+                    role="group"
+                    aria-label={shelf.label}
+                    // Beside a taller neighbour a lone card is its height, as
+                    // the cards of one shelf already are each other's.
+                    className="flex-1"
+                  >
+                    {shelf.entries.map((entry, index) => (
+                      <TemplateCard
+                        key={entry.id}
+                        entry={entry}
+                        index={index}
+                        selected={selectedId === entry.id}
+                        onSelect={() => select(entry)}
+                      />
+                    ))}
+                  </ChoiceGrid>
+                </div>
+              ))}
+            </div>
           </div>
         </PanelBody>
       </Panel>
@@ -762,6 +783,9 @@ export function SourceTemplate({
     </div>
   )
 }
+
+/** The shelves' grid: the columns `ChoiceGrid columns="fill"` lays its cards in, and its gap. */
+const SHELVES = "grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-x-3 gap-y-5"
 
 /**
  * One template on a shelf or in Your templates: its mark, name and what it is

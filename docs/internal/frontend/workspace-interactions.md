@@ -95,6 +95,8 @@ count on a glyph's shoulder, clear of the home indicator, not drawn from the bre
 head of a page a row opened. The page keeps its own state for which pane is shown, and the frame is held
 to the window below the break so the pane has a height to be the whole of. Six pages are on it:
 
+to the window below the break so the pane has a height to be the whole of. Five pages are on it:
+
 | Page | Break | Stops | Opens on |
 | --- | --- | --- | --- |
 | Git workspace | `lg` | Changes, History, Branches, GitHub, Files | Changes |
@@ -103,6 +105,7 @@ to the window below the break so the pane has a height to be the whole of. Six p
 | `/network/tools` | `md` | Tool, Every tool | the tool, the one a link asked for |
 | `/files` | `lg` | Places, Folder, Details | the folder |
 | `/files/editor` | `lg` | Files, Editor | the editor |
+| `/deploy/[id]/logs` | `md` | Requests, Insights, Output, Builds, Events | the view the address or the project asks for |
 
 Logs and the tools run to the screen's edges below `md` and open on the thing the page is for; picking a
 source or a tool returns to it. Logs keeps its tablet layout from `md` to `lg` (the rail stacked over the
@@ -110,8 +113,11 @@ lines, the page scrolling), which was a choice made for a request record's chart
 wider screen's toggle and is not drawn on a phone, where the bar reaches the sources whether or not they
 were hidden at a desk. `tests/browser/phone-panes.spec.ts` holds both at 390×844 (the working control in
 view without scrolling, the bar at the foot, every row reachable), a tablet's stack and a desk's columns;
-`git-panel.spec.ts` and `database-assistant.spec.ts` hold the two that came first. The database
-workbenches, a deployment's Logs page and the container, process and stack detail pages are not on it yet.
+`git-panel.spec.ts` and `database-assistant.spec.ts` hold the two that came first. A deployment's Logs
+is the pane under the project's header, which the shell holds to the window below `md`; its readings and
+alerts are not a stop but a page behind the pane's first line, with `PaneBack` and the bar out of its way
+(`deploy-logs-page.spec.ts`). The database
+workbenches and the container, process and stack detail pages are not on it yet.
 
 Files keeps its pane against the folder it was picked in, so arriving at a folder by any route (a place,
 a crumb, Back, a search result) shows the listing without an effect to put it there, and a place that is
