@@ -12,6 +12,7 @@ import { Status, type Verdict } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { reloadToast } from "@/components/proxy/load-proof"
 import { sitePath } from "@/components/proxy/site-verbs"
+import { certificateFileHref } from "@/components/proxy/certificate-paths"
 
 const STATE: Record<TLSOrigin["state"], { verdict: Verdict; label: string }> = {
   current: { verdict: "ok", label: "Serving the current file" },
@@ -144,7 +145,7 @@ function CertificateFact({ label, cert }: { label: string; cert: Certificate }) 
   return (
     <Detail label={label}>
       <Link
-        href={`/proxy/certificates?cert=${encodeURIComponent(cert.path)}`}
+        href={certificateFileHref(cert)}
         className="font-mono break-all underline-offset-4 hover:underline"
       >
         {cert.path}

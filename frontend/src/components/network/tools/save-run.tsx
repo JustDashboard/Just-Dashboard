@@ -14,6 +14,7 @@ import {
   type DiagnosticRequest,
   type DiagnosticRun,
 } from "@/lib/network-diagnostics"
+import { runHref } from "@/components/network/saved-runs"
 
 /** Save an explicit new run from the draft; opening the dialog emits no probe. */
 export function SaveDiagnosticRun({
@@ -60,7 +61,7 @@ export function SaveRunSnapshot({
             : { request: draft.request }),
         },
       )
-      router.push(`/network/runs?run=${encodeURIComponent(saved.id)}`)
+      router.push(runHref(saved.id))
       setDraft(undefined)
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
@@ -179,7 +180,7 @@ export function SaveHeldResult({
         resultId,
         name: name.trim(),
       })
-      router.push(`/network/runs?run=${encodeURIComponent(saved.id)}`)
+      router.push(runHref(saved.id))
       setOpen(false)
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))

@@ -18,17 +18,10 @@ import {
   wayOut,
   type MemberReading,
 } from "@/components/docker/networks"
+import { deviceHref } from "@/components/network/interfaces/device-facts"
 
 /** A wire moving less than this is drawn still, as on every Network picture. */
 const MOVING = 1024
-
-/**
- * Room under the hub for the three lines hung there, and as much over it so
- * the mark stays on the picture's middle: a network nothing is on has no
- * column tall enough to hold them, and they ran into what stands under the
- * picture.
- */
-const HUB = "lg:py-12"
 
 /** The hub's share of the width: a mark and three short lines, so the members keep theirs. */
 const HUB_SHARE = 0.4
@@ -90,7 +83,7 @@ export function NetworkPicture({
       <WireFlow
         loading
         start={{ title: "Leads to", nodes: [], loadingRows: 1 }}
-        hub={{ mark: <HubMark driver="bridge" />, eyebrow: "Network", className: HUB }}
+        hub={{ mark: <HubMark driver="bridge" />, eyebrow: "Network" }}
         hubShare={HUB_SHARE}
         end={{
           title: "Members",
@@ -136,7 +129,7 @@ export function NetworkPicture({
       ) : (
         "the card's own network"
       ),
-      href: way.device ? `/network/interfaces?device=${encodeURIComponent(way.device)}` : undefined,
+      href: way.device ? deviceHref(way.device) : undefined,
       label: way.device ? `Open ${way.device} on Interfaces` : undefined,
       line: { state: "up" },
     })
@@ -267,8 +260,14 @@ export function NetworkPicture({
         ) : (
           network.name
         ),
-        hint: network.subnets[0] && <span className="font-mono">{network.subnets[0]}</span>,
-        className: HUB,
+        // The line is held open for a network with no subnet of its own: the
+        // picture keeps room for the hub's words, and what stands under it
+        // must not move when such a network lands.
+        hint: network.subnets[0] ? (
+          <span className="font-mono">{network.subnets[0]}</span>
+        ) : (
+          <span aria-hidden>&nbsp;</span>
+        ),
       }}
       hubShare={HUB_SHARE}
       end={{

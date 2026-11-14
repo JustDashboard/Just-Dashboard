@@ -980,7 +980,10 @@ page's order (the band, the ports-and-networks picture, the services table), and
 keep their list beside them from `xl` (`stack-rail.tsx`, `container-rail.tsx`, copies of
 `procs/process-rail.tsx`): the list's own search, chips and order from its session keys, the item
 on screen filled (and drawn first when the filter does not hold it), Alt+↑ and Alt+↓ and the two
-arrows walking it with `?tab=` carried. Beside the rail the blocks that went side by side at 1280px
+arrows walking it with `?tab=` carried. The column itself is one component for a container, a
+stack, an image, a volume and a network (`docker/item-rail.tsx`: `DockerRail` and `DockerRailRow`);
+each `*-rail.tsx` is its row and where its list comes from.
+Beside the rail the blocks that went side by side at 1280px
 and 1536px do so at 1600px and 1856px (`beside-rail.ts`)
 
 An image is a page of its own, `/docker/images/[id]` (`image-page.tsx`; the old `?image=` address
@@ -1362,8 +1365,9 @@ by memory, a cluster summed into one, as spans of one bar the size of the host b
 else in use, easing to each poll, a press narrowing the table to the application with a chip to let
 it go), state chips (online, stopped, errored) in the table's head that count and narrow, and a
 table of every instance — crashing applications first, each drawn as its interpreter, its uptime
-ticking, CPU and memory as a figure beside a short bar (memory against the limit PM2 restarts it at,
-where it has one), its restart count rising when it moves with the unstable ones in red, *not saved*
+ticking, CPU and memory as figures in aligned columns (memory over the limit PM2 restarts it at,
+where it has one; the short meter each row had is gone, since a meter a row is a bar a row and the
+band over the list is where they are compared), its restart count rising when it moves with the unstable ones in red, *not saved*
 where the saved list lacks it, fixed columns from `xl` with the mode folded into the name line below
 `2xl`, every row one height — with start/reload/restart/stop inline and logs, scale, reset counters,
 flush, delete behind the menu; a row opens the application's own page. The line and the band are
@@ -1562,7 +1566,8 @@ parts that hold unsaved changes (`site-sections.ts`, unit-tested) and one floati
 form's saves (`site-settings.tsx`); leaving it with unsaved changes asks first. A new site, or a copy
 of one, is still made in a sheet over the list (`SiteForm`, the same fields). `?site=<name>` lands on
 the site's Settings for an administrator and a file the form owns, and opens the config viewer
-otherwise. Checked by `tests/browser/proxy-site-page.spec.ts`, `proxy-site-builder.spec.ts`,
+otherwise. On Settings the identity line does not offer Edit, as its command or in its menu: the
+form is what is on screen. Checked by `tests/browser/proxy-site-page.spec.ts`, `proxy-site-builder.spec.ts`,
 `proxy-sites-list.spec.ts` and `proxy-sites-tools.spec.ts`.
 
 Every page of the section opens on an identity line laid out as a project's header (0.8.7): the

@@ -24,6 +24,7 @@ import { notify } from "@/lib/toast"
 import type { RetiredRoute, VHost } from "@/lib/types"
 import type { Verb } from "@/components/verbs"
 import { activeOwner } from "@/components/proxy/site-details"
+import { siteHref } from "@/components/proxy/site-tabs"
 
 /**
  * A site's verbs, declared once.
@@ -351,7 +352,8 @@ export function useSiteVerbs({
       key: "traffic",
       label: "Traffic",
       icon: ChartActivity,
-      run: () => router.push(`/proxy/traffic?site=${encodeURIComponent(vhost.name)}`),
+      // The site's requests are its own page's Logs view.
+      run: () => router.push(siteHref(vhost.name, "logs")),
     })
   }
   if (history && admin && hasFile) {

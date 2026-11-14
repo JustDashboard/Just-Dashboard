@@ -15,7 +15,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/components/deploy/vocabulary"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { HUE } from "@/components/overview/readings"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductLogo, ProductLogos, hasProductLogo, pm2Product } from "@/components/product-logo"
@@ -67,7 +66,6 @@ import {
   pm2Order,
   savedDrift,
 } from "@/components/procs/pm2-shared"
-import { MiniBar } from "@/components/procs/process-table"
 import { cpuTone } from "@/components/procs/shared"
 
 /** PM2 reads its list every five seconds, and so does this page. */
@@ -606,7 +604,6 @@ type RowProps = {
   unsaved: boolean
   arrived: boolean
   now: number
-  heaviest: number
   started?: number
   /** Which of its cluster's instances this is, counted from one, and how many there are. */
   position?: [number, number]
@@ -643,10 +640,6 @@ function PM2Rows({
   const now = useNow(1000)
   const arrived = useArrivals(rows.map(pm2Key))
   const starts = useStarts(rows, now)
-  // Memory without a limit is drawn against the heaviest listed instance:
-  // against the host's total, a column of 3% applications is a column of
-  // empty tracks.
-  const heaviest = rows.reduce((top, p) => Math.max(top, p.memory), 0)
   const positions = useMemo(() => pm2Positions(all), [all])
   const props = (process: PM2Process): RowProps => ({
     process,
@@ -654,7 +647,6 @@ function PM2Rows({
     unsaved: unsaved.has(pm2AppKey(process)),
     arrived: arrived.has(pm2Key(process)),
     now,
-    heaviest,
     started: starts.get(pm2Key(process)),
     position: positions.get(pm2Key(process)),
     ...rest,
@@ -668,8 +660,8 @@ function PM2Rows({
               <TableHead>Application</TableHead>
               <TableHead className="w-36">Status</TableHead>
               <TableHead className="hidden w-28 2xl:table-cell">Mode</TableHead>
-              <TableHead className="w-32 text-right">CPU</TableHead>
-              <TableHead className="w-40 text-right">Memory</TableHead>
+              <TableHead className="w-24 text-right">CPU</TableHead>
+              <TableHead className="w-32 text-right">Memory</TableHead>
               <TableHead className="w-28 text-right">Restarts</TableHead>
               <TableHead className="w-36">
                 <span className="sr-only">Actions</span>
@@ -794,7 +786,7 @@ function PM2Row(props: RowProps) {
         <CpuReading process={process} />
       </TableCell>
       <TableCell className="py-2">
-        <MemoryReading process={process} heaviest={props.heaviest} />
+        <MemoryReading process={process} />
       </TableCell>
       <TableCell className="py-2 text-right">
         <Restarts process={process} />
@@ -946,42 +938,39 @@ function ModeCell({ process, position }: Pick<RowProps, "process" | "position">)
   )
 }
 
-/** A share of one core, as a figure and a short bar that fills at a whole core. */
+/**
+ * A share of one core, as a figure in its column, toned where it is high. It
+ * had a short meter beside it in every row, and a meter a row is a bar a row:
+ * the band over the list is where the applications are drawn against each
+ * other, and a column of figures is read down.
+ */
 function CpuReading({ process }: { process: PM2Process }) {
   if (process.status !== "online") {
     return <p className="text-right font-mono text-muted-foreground">—</p>
   }
   const tone = cpuTone(process.cpu)
   return (
-    <div className="flex items-center justify-end gap-2">
-      <MiniBar
-        value={Math.min(process.cpu, 100)}
-        color={
-          tone === "danger" ? "var(--destructive)" : tone === "warning" ? "var(--warning)" : HUE.cpu
-        }
-      />
-      <span
-        className={cn(
-          "numeric w-13 text-right font-mono",
-          tone === "danger"
-            ? "font-medium text-destructive"
-            : tone === "warning"
-              ? "text-warning"
-              : "text-muted-foreground",
-        )}
-      >
-        {percent(process.cpu)}
-      </span>
-    </div>
+    <p
+      className={cn(
+        "numeric text-right font-mono",
+        tone === "danger"
+          ? "font-medium text-destructive"
+          : tone === "warning"
+            ? "text-warning"
+            : "text-muted-foreground",
+      )}
+    >
+      {percent(process.cpu)}
+    </p>
   )
 }
 
 /**
- * Resident memory, against the limit PM2 restarts the application at when it
- * has one — that is the ceiling it lives under — and otherwise against the
- * heaviest listed instance.
+ * Resident memory as a figure, and under it the limit PM2 restarts the
+ * application at when it has one: that is the ceiling it lives under, and the
+ * figure is toned as it nears it.
  */
-function MemoryReading({ process, heaviest }: { process: PM2Process; heaviest: number }) {
+function MemoryReading({ process }: { process: PM2Process }) {
   if (process.status !== "online") {
     return <p className="text-right font-mono text-muted-foreground">—</p>
   }
@@ -990,35 +979,27 @@ function MemoryReading({ process, heaviest }: { process: PM2Process; heaviest: n
     limit === undefined ? "default" : limit >= 95 ? "danger" : limit >= 80 ? "warning" : "default"
   return (
     <div
-      className="flex items-center justify-end gap-2"
+      className="min-w-0 text-right"
       title={
         process.maxMemoryRestart
           ? `${percent(limit)} of the ${bytes(process.maxMemoryRestart, 0)} PM2 restarts it at`
           : undefined
       }
     >
-      <MiniBar
-        value={limit ?? (heaviest > 0 ? (process.memory / heaviest) * 100 : 0)}
-        color={
-          tone === "danger" ? "var(--destructive)" : tone === "warning" ? "var(--warning)" : HUE.mem
-        }
-      />
-      <span className="min-w-0 text-right">
-        <span
-          className={cn(
-            "numeric block font-mono",
-            tone === "warning" && "text-warning",
-            tone === "danger" && "text-destructive",
-          )}
-        >
-          {bytes(process.memory)}
-        </span>
-        {process.maxMemoryRestart ? (
-          <span className="numeric block text-hint text-muted-foreground">
-            of {bytes(process.maxMemoryRestart, 0)}
-          </span>
-        ) : null}
+      <span
+        className={cn(
+          "numeric block font-mono",
+          tone === "warning" && "text-warning",
+          tone === "danger" && "text-destructive",
+        )}
+      >
+        {bytes(process.memory)}
       </span>
+      {process.maxMemoryRestart ? (
+        <span className="numeric block text-hint text-muted-foreground">
+          of {bytes(process.maxMemoryRestart, 0)}
+        </span>
+      ) : null}
     </div>
   )
 }

@@ -113,6 +113,7 @@ import {
   ListField,
 } from "@/components/proxy/site-form"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
+import { siteHref } from "@/components/proxy/site-tabs"
 import { useConfirm } from "@/components/confirm-dialog"
 import {
   gatesHere,
@@ -734,7 +735,7 @@ function DomainsForm({
               // Which proxy answers is the host's, nginx or Caddy; the site is
               // this environment's own, named by its id.
               <Link
-                href={`/proxy/sites?site=${encodeURIComponent(observed.siteName)}`}
+                href={siteHref(observed.siteName)}
                 className="flex min-w-0 items-center gap-1 rounded-sm font-mono focus-ring transition-colors hover:text-foreground hover:underline"
               >
                 <span className="truncate">{observed.siteName}</span>

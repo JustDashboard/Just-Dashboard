@@ -156,7 +156,7 @@ test("a link into a hidden section opens it, and the rail says it is hidden", as
   await expect(site).toBeVisible()
   await site.click()
 
-  await expect(page).toHaveURL(/\/proxy\/sites\?site=just-dashboard-env-12\.conf$/)
+  await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-env-12\.conf$/)
   // The rail went into the section anyway, so it can say where you are.
   await expect(rail(page).getByText("Proxy & TLS", { exact: true })).toBeVisible()
   await expect(rail(page).getByRole("link", { name: "Sites" })).toHaveAttribute(

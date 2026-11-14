@@ -131,7 +131,7 @@ test("recent errors are the hour's 5xx by site", async ({ page }) => {
       .getByRole("list", { name: "Sites answering 5xx" })
       .getByRole("button", { name: "Open app.example.com's requests" }),
   ).toBeVisible()
-  await expect(errors.locator("[data-slot=reading-line]")).toContainText("app.example.com")
+  await expect(errors.locator("[data-slot=bar-reading-line]")).toContainText("app.example.com")
 })
 
 test("what nginx logged sits beside the sites and opens the error log", async ({ page }) => {
@@ -181,7 +181,7 @@ test("what nginx logged sits beside the sites and opens the error log", async ({
   // A notice has nothing to act on, and is not drawn.
   await expect(errors.getByRole("listitem")).toHaveCount(2)
   await logged.hover()
-  await expect(errors.locator("[data-slot=reading-line]")).toContainText(
+  await expect(errors.locator("[data-slot=bar-reading-line]")).toContainText(
     "The application took too long to answer",
   )
   await expect(logged).toHaveAttribute("title", "Look at what the application was doing.")

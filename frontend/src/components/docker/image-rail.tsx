@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef } from "react"
-import Link from "next/link"
+import { useMemo } from "react"
 import { get } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import type { Container, DockerImage, ImageUpdateStatus } from "@/lib/types"
@@ -22,8 +21,7 @@ import {
   type ImageTab,
   type Use,
 } from "@/components/docker/images"
-import { SearchInput } from "@/components/page"
-import { LoadingRows } from "@/components/state"
+import { DockerRail, DockerRailRow } from "@/components/docker/item-rail"
 import { StatusDot } from "@/components/status-dot"
 
 const SORT_WORDS: Record<ImageSort, string> = {
@@ -136,68 +134,33 @@ export function ImageRail({
   tab: ImageTab
   className?: string
 }) {
-  const listed = rail.rows.some((row) => row.id === current)
-  const pinned = !listed && currentRow ? currentRow : undefined
-  const list = useRef<HTMLOListElement>(null)
-  // The image on screen is kept in view: opened from a link or by Alt+↓ past
-  // the column's edge, it would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current, rail.rows.length])
-
   return (
-    <nav
-      aria-label="Images"
-      data-slot="image-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={rail.query}
-          onChange={(event) => rail.setQuery(event.target.value)}
-          placeholder="Name, version or id"
-          aria-label="Search the images"
-          containerClassName="sm:w-full"
+    <DockerRail<Pick<DockerImage, "id" | "repoTags" | "size">>
+      slot="image-rail"
+      label="Images"
+      search={{ label: "Search the images", placeholder: "Name, version or id" }}
+      rows={rail.rows}
+      keyOf={(image) => image.id}
+      current={(image) => image.id === current}
+      pinned={currentRow}
+      row={(image, on) => (
+        <RailRow
+          image={image}
+          current={on}
+          tab={tab}
+          state={rail.states.get(image.id)}
+          running={rail.running.get(image.id)}
         />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{rail.caption}</span>
-          {rail.filtered && (
-            <button
-              type="button"
-              onClick={rail.clearFilters}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
-            >
-              Clear filters
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Images to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {pinned && <RailRow image={pinned} current tab={tab} />}
-        {pinned && rail.rows.length > 0 && (
-          <li aria-hidden className="mx-3 my-1.5 border-t border-hairline" />
-        )}
-        {rail.rows.map((row) => (
-          <RailRow
-            key={row.id}
-            image={row}
-            current={row.id === current}
-            tab={tab}
-            state={rail.states.get(row.id)}
-            running={rail.running.get(row.id)}
-          />
-        ))}
-        {rail.loading && rail.rows.length === 0 && <LoadingRows rows={8} />}
-        {!rail.loading && rail.rows.length === 0 && !pinned && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No image matches.</li>
-        )}
-      </ol>
-    </nav>
+      )}
+      loading={rail.loading}
+      empty="No image matches."
+      query={rail.query}
+      onQuery={rail.setQuery}
+      filtered={rail.filtered}
+      onClearFilters={rail.clearFilters}
+      caption={rail.caption}
+      className={className}
+    />
   )
 }
 
@@ -218,52 +181,39 @@ function RailRow({
   const tag = primaryTag(image)
   const coloured = state === "outdated" || state === "pinned" || state === "local"
   return (
-    <li className="min-w-0">
-      <Link
-        href={imageHref(image.id, tab)}
-        // A rail of a hundred images is not a hundred pages to fetch ahead.
-        prefetch={false}
-        data-workspace-item={image.id}
-        data-workspace-name={tag ?? shortId(image.id)}
-        aria-current={current ? "page" : undefined}
-        aria-label={tag ?? `untagged ${shortId(image.id)}`}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <span className="relative flex shrink-0">
-          <ImageLogo image={image} className="size-7 rounded-md [&_img]:size-4" />
-          {running !== undefined && (
-            <span
-              aria-hidden
-              className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-            >
-              <StatusDot state={running ? "running" : "exited"} className="size-1.5" />
-            </span>
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn(
-              "block truncate font-mono text-xs",
-              current ? "font-semibold" : "font-medium",
-              !tag && "font-sans font-normal text-muted-foreground italic",
-            )}
-          >
-            {tag ? <ReferenceWords reference={tag} /> : "untagged"}
-          </span>
-          <span
-            className="block truncate text-hint text-muted-foreground"
-            style={state && coloured ? { color: FRESHNESS_COLOR[state] } : undefined}
-          >
-            {!tag ? shortId(image.id) : state ? FRESHNESS_LABEL[state].toLowerCase() : " "}
-          </span>
-        </span>
+    <DockerRailRow
+      item={image.id}
+      name={tag ?? shortId(image.id)}
+      label={tag ?? `untagged ${shortId(image.id)}`}
+      current={current}
+      href={imageHref(image.id, tab)}
+      mark={<ImageLogo image={image} className="size-7 rounded-md [&_img]:size-4" />}
+      dot={
+        running === undefined ? null : (
+          <StatusDot state={running ? "running" : "exited"} className="size-1.5" />
+        )
+      }
+      end={
         <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
           {bytes(image.size)}
         </span>
-      </Link>
-    </li>
+      }
+    >
+      <span
+        className={cn(
+          "block truncate font-mono text-xs",
+          current ? "font-semibold" : "font-medium",
+          !tag && "font-sans font-normal text-muted-foreground italic",
+        )}
+      >
+        {tag ? <ReferenceWords reference={tag} /> : "untagged"}
+      </span>
+      <span
+        className="block truncate text-hint text-muted-foreground"
+        style={state && coloured ? { color: FRESHNESS_COLOR[state] } : undefined}
+      >
+        {!tag ? shortId(image.id) : state ? FRESHNESS_LABEL[state].toLowerCase() : " "}
+      </span>
+    </DockerRailRow>
   )
 }

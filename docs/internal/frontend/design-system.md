@@ -290,7 +290,11 @@ the recorder keeps), `eyebrow: false` for a node that has none, `hint` as a coun
 size. The hub takes the same `loadingLines` for its caption, and with it a phone's rows of marks draw
 those lines too. With neither given a picture waits exactly as it did. A page never draws grey nodes
 of its own; it says how many rows (`loadingRows`, remembered from the last visit where the count is the
-server's) and what a row holds. `LinePlaceholder` (`components/network/identity-facts.tsx`) is still the
+server's) and what a row holds (a volume's and an image's pictures, the last two that drew their own,
+wait this way too). Wide, the hub's words hang under its mark out of the flow, so the picture
+measures what of them reaches past its own box and holds that room open under itself (`useHubRoom`):
+a page does not pad its hub for them, and a picture that already had the room is what it was.
+`LinePlaceholder` (`components/network/identity-facts.tsx`) is still the
 grey bar for a line of words outside a picture, a grey bar after a real space so the line box is the
 one the words will have, and the same file holds `IdentityFacts`, which keeps two lines' room for an
 identity line's facts on a phone, where four facts wrap and a single bar in their place did not. Those
@@ -766,7 +770,13 @@ revision the last write handed back and fills what a form does not own from that
 that owns only a field of a part (Build's release tasks are a field of `build`) passes a function
 of the latest copy. A refused form keeps its edits and says why under the field, and the bar stays
 with what is left; when everything went through it says *Saved* and when it applies, then leaves —
-so the forms no longer toast their own success. A clean page has nothing to save and no button:
+so the forms no longer toast their own success. What the bar says is one rule
+(`settings/save-bar-words.ts`): a form's `applies` is one of four kinds (at once, when nginx next
+reloads, when the server restarts, on the next deployment), a page holding several is told which is
+soonest and what the rest wait for, a form whose save does something none of them says gives the
+line and the command in its own words (`note`, `verb`; the note is also where it says why it cannot
+be saved), and a form without one gets the bar's words for a value that cannot be saved. A column beside a rail asks for the bar `inline`, at the foot of that column. A proxy
+site's form keeps a bar of its own, since it is one draft with two saves. A clean page has nothing to save and no button:
 re-checking an untouched Source means saving an edit to it. The game server's settings take the
 same bar, and hold its Save while a value is outside its declared range; so does Account → Workspace,
 whose purposes and rail switches are one draft of the sidebar, and the profile, whose display name
@@ -791,7 +801,8 @@ switches on Runtime, Build and Domains each carried three or four lines under th
 traffic replay sends and withholds, what sleeping keeps, how a rehearsal restores its copy), read
 again on every visit. An `OptionRow`'s hint is one clause now, the section's facts line still says
 what the section currently is, and the paragraph a reader wants once is an `InfoTip` at the end of
-that line (`settings/facts-line.tsx`, `FactsLine`): there rather than on a field the switch reveals,
+that line (`settings/facts-line.tsx`, `FactsLine`; a tooltip a keyboard opened stays open while the
+page scrolls to its mark, `ui/tooltip.tsx`): there rather than on a field the switch reveals,
 because those fields are not on the page while the switch is off, which is when the question is
 asked. **A list inside a settings form is one line per thing, and the line opens its small form.**
 Health checks and release tasks were framed boxes of fields, open all the time, so two of either
@@ -1396,7 +1407,9 @@ above:
   sixty times a second (`design-system.spec.ts` counts the frames a page with wires asks for).
   The element a `BorderBeam` is put in clips (`overflow-hidden`) when it is not the frame itself:
   the light is a square centred on the edge it lights, so half of it lies outside the frame, and on
-  a phone that half reached past the page and scrolled it sideways each lap;
+  a phone that half reached past the page and scrolled it sideways each lap. Since 0.8.7 the
+  light's own box clips it (`ui/border-beam.tsx`), so a busy `ChoiceRow` and a working
+  `ProductCard` need nothing of their holder;
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
   on the Overview when a run watched there from start to finish ends in success, and from the
   sidebar's update notice when an update of the dashboard itself finishes while the tab is open —
@@ -1934,7 +1947,8 @@ a time as a view in the address (`?tab=fail2ban|crowdsec|suricata`, the first in
 without one), and the addresses every engine and the firewall refuse are the fourth view,
 `?tab=blocked`. Each engine's view opens on its own line (`engine-head.tsx`). Its tiles are
 `ReadingLine`s, a log lens's reading among them through `lens-reading-line.tsx`, which keeps the
-press that narrows the log; Suricata's severities are one `BarReading`; repeat offenders are a
+press that narrows the log (`ReadingLine`'s own `onPress`: a button laid over the line, named by
+`label`; `BarReading`'s line under a band has its own slot, `bar-reading-line`); Suricata's severities are one `BarReading`; repeat offenders are a
 `RankList`. A blocked address, a decision and an alert are one line a row at one height
 (`line-list.tsx`: a grid every row shares where the list has 42rem of its own width, two fixed
 lines where it has not, measured on the list and not the window). A jail's detail is a page of its
@@ -1945,7 +1959,9 @@ error under a fold, and an absent one hands off to its package as CrowdSec and S
 SSH's four readings are lines on a hue each (`--tag-green` for a login, amber for a failure, red
 for an unknown account, violet for the addresses behind them), and its directives are one centred
 column of `SettingSection`s: a switch for a yes or no, `Segments` for three short words, a list
-otherwise, each row one height with *sshd runs …* under a staged value. The floating save bar
+otherwise, each row one height with *sshd runs …* under a staged value. While the draft changes
+something an *Edited N* chip stands at the end of the first section's title line and narrows the
+page to those rows; no chip stands over the settings when nothing is edited. The floating save bar
 (`save-bar.tsx`) replaced an apply bar of the page's own; **Save** opens a review that lists each old
 and new value, what the change does to the dashboard's access boundary and which recovery stands
 behind it, and a change that would cut the way in holds the review's button.

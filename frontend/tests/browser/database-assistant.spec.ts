@@ -887,6 +887,12 @@ test("the database's assistant, for the pull request @shots", async ({ page }) =
 
   const rail = page.getByRole("navigation", { name: "Sidebar" })
   await rail.getByRole("link", { name: "Assistant", exact: true }).click()
+  // The editor's column is the same chat (`[data-slot=agent-chat]`), so the
+  // question waits for the page: asked at once it was typed into the column
+  // of the page being left, and the page arrived with an empty box and an
+  // Ask that could not be pressed.
+  await expect(page).toHaveURL(/\/databases\/1\/assistant$/)
+  await expect(pane(page)).toHaveCount(0)
   await ask(chat(page), "How much disk does it use?")
   await expect(chat(page).locator("[data-slot=agent-approval]")).toBeVisible()
   await page.waitForTimeout(600)

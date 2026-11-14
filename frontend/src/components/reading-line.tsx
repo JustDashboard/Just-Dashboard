@@ -14,11 +14,19 @@ import { cn } from "@/lib/utils"
  * with nothing to say yet, say so in `NoReading` rather than leave a part out.
  *
  * With `href` the line is a way to the page that has the rest, and `label` is
- * where it goes. Without one it is a reading and nothing else, so it takes no
- * hover wash and no place in the tab order.
+ * where it goes. With `onPress` it is a button that does something on the page
+ * it is on (a log lens's reading narrows the log to the lines it counts), and
+ * `label` is what the press does. The button is laid over the line rather than
+ * wrapped around it, since a mark and a sparkline are not what a button may
+ * hold; a page used to lay its own. Without either it is a reading and nothing
+ * else, so it takes no hover wash and no place in the tab order.
+ *
+ * `BarReading`'s line under a band is another thing with its own slot
+ * (`bar-reading-line`): a spec that counts the one must not count the other.
  */
 export function ReadingLine({
   href,
+  onPress,
   label,
   mark,
   name,
@@ -28,7 +36,9 @@ export function ReadingLine({
   className,
 }: {
   href?: string
-  /** Where the line goes, as its accessible name. Only read with `href`. */
+  /** The line is a button that does this. Not read with `href`. */
+  onPress?: () => void
+  /** Where the line goes or what a press does, as its accessible name. */
   label?: string
   /** A `WireMark`, on the measure's own hue or the reading's tone. */
   mark: React.ReactNode
@@ -55,6 +65,21 @@ export function ReadingLine({
     </>
   )
   const shape = "flex min-w-0 items-center gap-3.5 rounded-lg px-2 py-2.5"
+  if (!href && onPress)
+    return (
+      <div
+        data-slot="reading-line"
+        className={cn(shape, "relative transition-colors hover:bg-row-hover", className)}
+      >
+        {body}
+        <button
+          type="button"
+          onClick={onPress}
+          aria-label={label}
+          className="absolute inset-0 rounded-lg focus-ring"
+        />
+      </div>
+    )
   if (!href)
     return (
       <div data-slot="reading-line" className={cn(shape, className)}>

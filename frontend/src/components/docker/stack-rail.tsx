@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { Layers } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, percent, plural } from "@/lib/format"
@@ -9,11 +9,10 @@ import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { SearchInput } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { LoadingRows } from "@/components/state"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
+import { DockerRail, DockerRailRow } from "@/components/docker/item-rail"
 import {
   STACK_FILTER_KEYS,
   stackLines,
@@ -97,8 +96,8 @@ export function useStackRail() {
  * in the logo's corner, its name, how much of it is up and, while it runs,
  * what its containers take together; the one on screen is filled.
  *
- * The same column the processes, the services and a container have
- * (`procs/service-rail`, which this copies).
+ * The column itself is the one every Docker item's page has (`item-rail.tsx`);
+ * this file is where the list comes from, and the stack's row.
  */
 export function StackRail({
   rows,
@@ -128,67 +127,27 @@ export function StackRail({
   bindings: React.HTMLAttributes<HTMLElement>
   className?: string
 }) {
-  const listed = rows.some((line) => line.stack.name === current)
-  const pinned = !listed && currentRow ? currentRow : undefined
-  const list = useRef<HTMLOListElement>(null)
-  // The stack on screen is kept in view: opened from a link or by Alt+↓ past
-  // the column's edge, it would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current, rows.length])
-
   return (
-    <nav
-      aria-label="Stacks"
-      data-slot="stack-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Stack, service or image"
-          aria-label="Search the stacks"
-          containerClassName="sm:w-full"
-        />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{caption}</span>
-          {filtered && (
-            <button
-              type="button"
-              onClick={onClearFilters}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
-            >
-              Clear filters
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Stacks to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-        {...bindings}
-      >
-        {pinned && <RailRow line={pinned} current onOpen={onOpen} />}
-        {pinned && rows.length > 0 && (
-          <li aria-hidden className="mx-3 my-1.5 border-t border-hairline" />
-        )}
-        {rows.map((line) => (
-          <RailRow
-            key={line.stack.name}
-            line={line}
-            current={line.stack.name === current}
-            onOpen={onOpen}
-          />
-        ))}
-        {loading && rows.length === 0 && !pinned && <LoadingRows rows={6} />}
-        {!loading && rows.length === 0 && !pinned && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No stack matches.</li>
-        )}
-      </ol>
-    </nav>
+    <DockerRail
+      slot="stack-rail"
+      label="Stacks"
+      search={{ label: "Search the stacks", placeholder: "Stack, service or image" }}
+      rows={rows}
+      keyOf={(line) => line.stack.name}
+      current={(line) => line.stack.name === current}
+      pinned={currentRow}
+      row={(line, on) => <RailRow line={line} current={on} onOpen={onOpen} />}
+      loading={loading}
+      loadingRows={6}
+      empty="No stack matches."
+      query={query}
+      onQuery={onQuery}
+      filtered={filtered}
+      onClearFilters={onClearFilters}
+      caption={caption}
+      bindings={bindings}
+      className={className}
+    />
   )
 }
 
@@ -205,58 +164,24 @@ function RailRow({
   const words = stateWords(line)
   const tone = stackTone(stack.state)
   return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        data-workspace-item={`stack:${stack.name}`}
-        data-workspace-name={stack.name}
-        aria-current={current ? "page" : undefined}
-        aria-label={stack.name}
-        title={stack.workingDir || undefined}
-        onClick={() => onOpen(stack.name)}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <span className="relative flex shrink-0">
-          <ProductLogo
-            id={stackProducts(stack)[0]}
-            size="sm"
-            fallback={Layers}
-            className="size-7 rounded-md [&_img]:size-4"
-          />
-          <span
-            aria-hidden
-            className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-          >
-            <StatusDot tone={tone} className="size-1.5" />
-          </span>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}
-          >
-            {stack.name}
-          </span>
-          <span
-            className={cn(
-              "numeric block truncate text-hint",
-              words.unhealthy > 0
-                ? "text-destructive"
-                : tone === "warning"
-                  ? "text-warning"
-                  : "text-muted-foreground",
-            )}
-          >
-            {words.unhealthy > 0
-              ? `${words.short} · ${words.unhealthy} unhealthy`
-              : stack.state === "running" || !stack.deployed
-                ? words.short
-                : `${stackLabel(stack.state).toLowerCase()} · ${words.short}`}
-          </span>
-        </span>
-        {stack.running > 0 && line.measured && (
+    <DockerRailRow
+      item={`stack:${stack.name}`}
+      name={stack.name}
+      title={stack.workingDir || undefined}
+      current={current}
+      onOpen={() => onOpen(stack.name)}
+      mark={
+        <ProductLogo
+          id={stackProducts(stack)[0]}
+          size="sm"
+          fallback={Layers}
+          className="size-7 rounded-md [&_img]:size-4"
+        />
+      }
+      dot={<StatusDot tone={tone} className="size-1.5" />}
+      end={
+        stack.running > 0 &&
+        line.measured && (
           <span className="flex shrink-0 flex-col items-end">
             <span className="numeric font-mono text-hint text-muted-foreground">
               {percent(line.cpu)}
@@ -265,8 +190,28 @@ function RailRow({
               {line.memory ? bytes(line.memory) : "—"}
             </span>
           </span>
+        )
+      }
+    >
+      <span className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}>
+        {stack.name}
+      </span>
+      <span
+        className={cn(
+          "numeric block truncate text-hint",
+          words.unhealthy > 0
+            ? "text-destructive"
+            : tone === "warning"
+              ? "text-warning"
+              : "text-muted-foreground",
         )}
-      </button>
-    </li>
+      >
+        {words.unhealthy > 0
+          ? `${words.short} · ${words.unhealthy} unhealthy`
+          : stack.state === "running" || !stack.deployed
+            ? words.short
+            : `${stackLabel(stack.state).toLowerCase()} · ${words.short}`}
+      </span>
+    </DockerRailRow>
   )
 }

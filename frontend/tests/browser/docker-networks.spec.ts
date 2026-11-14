@@ -67,7 +67,7 @@ test("the band says which networks are busy, how much of the pool is taken and w
 
   // Docker names the container by id; the page names it. Newest first.
   const recent = band.getByRole("region", { name: "Recent network changes" })
-  const line = recent.locator("[data-slot=reading-line]")
+  const line = recent.locator("[data-slot=bar-reading-line]")
   await expect(line).toContainText("shop-web-1")
   await expect(line).toContainText("joined")
   await recent.getByRole("button", { name: "Open monitoring_default" }).hover()

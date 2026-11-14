@@ -131,7 +131,7 @@ or one database inside Databases — or, inside a group, the group, a section in
 pages (Monitoring → Processes → PM2; Administration → Proxy & TLS → Sites).
 
 `components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
-`PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation`, and for the sections an
+`PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `navCurrent`, `sectionsFor`, `navLocation`, and for the sections an
 account hides `shownFor`, `hideableSections` and `sectionEntry` — so `app-sidebar.tsx` and
 `command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
 may carry a `capability`, and every reader hides what the role cannot use. ⌘K covers every page and is
@@ -141,6 +141,16 @@ A section's `children` are its pages **including its own landing page, first and
 shows** — "Browse", "Live", "Version", otherwise "Overview" — so every destination in a panel is a leaf
 and "where am I" points at exactly one row. The palette skips the child whose href is the section's own,
 which is how one array serves both.
+
+**Which row is lit** is `navCurrent` in `nav.ts`, for a section's panel and for a database's or a
+project's own alike: a row is current on its page and on the pages opened from it (a volume under
+Volumes, a jail under Intrusion, a statement under a database's Performance), so an item's page two
+levels down still lights one row. The exception keeps a parent and its child from both being lit: a row
+other rows of the panel hang under (Docker's Overview at `/docker`, a database's Home, Metrics above its
+Alerts) is the landing page and is current on its own address alone, unless it is the list its items
+open under (`LIST_LANDINGS`: Live for `/processes/<pid>`, Projects for a project and `/deploy/new`,
+Control center for a database), which keeps the addresses no other row owns. A run is one of its
+project's Deployments. An address under a section that no row owns lights nothing.
 
 A section with more pages than a reader scans as one list puts them under **headings**, as a project's
 rail does with *Settings*: a `NavChild` names its `group`, `groupedChildren` (`nav.ts`) turns the list
@@ -195,7 +205,7 @@ What a hidden section loses is exactly three things, each read through `useHidde
   whose remaining entries the role cannot open goes with them — Administration with Packages
   hidden, to an account without `system.admin`). A section's root is hidden, never a page inside it.
   **While you are inside a hidden section it is drawn anyway**: a deployment's domain links to
-  `/proxy/sites?site=…`, about 150 such links cross sections, and the rail must still say where you
+  `/proxy/sites/<name>`, about 150 such links cross sections, and the rail must still say where you
   are. It says why the row is there, too — `HiddenHere` in `app-sidebar.tsx` puts one line under the
   panel's head, "Proxy & TLS is hidden from your sidebar. Show it", and Show it removes the section
   from the list. The line is in the rail rather than over the page so a `fill` page (the terminal, a
@@ -538,7 +548,11 @@ phone keeps the whole width for the list.
 
 Each resource result uses its existing detail address. Sites open `/proxy/sites/<name>` for
 inspection rather than the legacy `?site=` editing link. Containers and stacks open their dedicated
-pages; Git, systemd and PM2 retain query-selection links, including PM2's daemon and numeric ID.
+pages, and a PM2 application opens its own (`/processes/pm2/<name>`, with `?account=` where two
+accounts run one of that name); Git and systemd retain query-selection links. Nothing in the product
+writes an address that opened a sheet any more (the server map, the palette, a project's deep links,
+the investigator's evidence and the pictures all name the item's page); every such address still
+redirects, for the links already out there.
 Names with the same spelling retain separate identities. The current database keeps the existing
 engine-dependent pages and broken-connection restriction; saved databases also retain the
 `open <name>` search phrase. Page commands, proxy commands and

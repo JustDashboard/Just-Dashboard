@@ -50,7 +50,7 @@ func TestStreamListenerJoinsTheStreamAndItsBackendLeg(t *testing.T) {
 		t.Fatal(err)
 	}
 	stream := findEvidence(t, r, "stream")
-	if stream.Basis != Observed || stream.State != "live" || stream.OwnerPath != "/proxy/streams?stream=pg" ||
+	if stream.Basis != Observed || stream.State != "live" || stream.OwnerPath != "/proxy/streams/pg" ||
 		!strings.Contains(stream.Summary, "nginx forwards TCP on port 6432/tcp to 10.0.0.5:5432, 10.0.0.6:5432.") {
 		t.Fatalf("stream = %+v", stream)
 	}

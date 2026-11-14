@@ -81,6 +81,12 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
     rows.map((row) => row.getBoundingClientRect().height),
   )
   expect(new Set(heights)).toEqual(new Set([32]))
+  // The block holds eight rows, waiting or read, and a server fills them: no
+  // band of nothing stands between the last process and the section under it.
+  await expect(ranked).toHaveCount(8)
+  const last = (await ranked.last().boundingBox())!
+  const processor = (await page.getByRole("heading", { name: "Processor" }).boundingBox())!
+  expect(processor.y - (last.y + last.height)).toBeLessThan(96)
 
   // One section per resource, in the order a reader asks about them.
   const sections = await page
@@ -120,7 +126,7 @@ test("each resource reads what it is now beside what it did", async ({ page }) =
   ).toBeVisible()
   await expect(memory.getByText("6.5 GB", { exact: true })).toBeVisible()
   await expect(memory.locator("[data-slot=reading-span]")).toHaveCount(2)
-  const line = memory.locator("[data-slot=reading-line]")
+  const line = memory.locator("[data-slot=bar-reading-line]")
   await expect(line).toHaveCount(1)
   await expect(line).toContainText("Programs")
   await expect(line).toContainText("9.0 GB")

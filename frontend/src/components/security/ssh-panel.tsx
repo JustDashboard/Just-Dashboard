@@ -39,7 +39,7 @@ import {
   SettingSection,
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/tabs"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { AUTH_LOG } from "@/components/security/host-logs"
 import {
@@ -259,6 +259,23 @@ export function SSHPanel() {
   const keys = data.keyedAccounts.reduce((n, account) => n + account.keys, 0)
   const showing = only === "edited" && edited > 0 ? "edited" : "all"
   const visible = (s: SSHSetting) => showing === "all" || changed(s)
+  // The first group on the page, whose title line carries the filter.
+  const firstGroup = SSH_GROUPS.find((group) =>
+    general.some((s) => sshGroup(s.key) === group.title && visible(s)),
+  )?.title
+  // Narrows the page to what the draft changes. It stands at the end of the
+  // first section's title line and only while something is edited: it was a
+  // strip of its own over the settings, where with nothing edited a lone
+  // "All 10" chip chose between everything and everything.
+  const onlyEdited = edited > 0 && (
+    <FilterChip
+      selected={showing === "edited"}
+      onClick={() => setOnly(showing === "edited" ? "all" : "edited")}
+    >
+      <span style={{ color: "var(--git-modified)" }}>Edited</span>
+      <ChipCount>{edited}</ChipCount>
+    </FilterChip>
+  )
   const draft = (key: string) => {
     const s = setting(key)
     return s ? valueOf(s) : undefined
@@ -440,17 +457,9 @@ export function SSHPanel() {
         id="ssh-settings"
         className="mx-auto w-full max-w-3xl min-w-0 scroll-mt-20 space-y-8 pb-10"
       >
-        <ChipStrip aria-label="Which settings to show">
-          <FilterChip selected={showing === "all"} onClick={() => setOnly("all")}>
-            All <ChipCount>{data.settings.length}</ChipCount>
-          </FilterChip>
-          {edited > 0 && (
-            <FilterChip selected={showing === "edited"} onClick={() => setOnly("edited")}>
-              <span style={{ color: "var(--git-modified)" }}>Edited</span>
-              <ChipCount>{edited}</ChipCount>
-            </FilterChip>
-          )}
-        </ChipStrip>
+        {/* Only where no group is left to carry it: the jump host's rows
+            alone are edited and the filter is on. */}
+        {!firstGroup && onlyEdited && <div className="flex justify-end">{onlyEdited}</div>}
 
         <SettingForm
           name="sshd settings"
@@ -471,6 +480,7 @@ export function SSHPanel() {
                 title={group.title}
                 state={<span className="numeric">{plural(settings.length, "directive")}</span>}
                 status={settingStatus({ dirty: settings.some(changed) })}
+                actions={group.title === firstGroup ? onlyEdited || undefined : undefined}
               >
                 <div className="divide-y divide-hairline">{settings.map(row)}</div>
               </SettingSection>

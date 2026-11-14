@@ -41,6 +41,7 @@ import { Tag } from "@/components/tag"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { useNow } from "@/components/deploy/vocabulary"
 import { Button } from "@/components/ui/button"
+import { siteSettingsHref } from "@/components/proxy/site-tabs"
 
 /**
  * The TLS report's deep scan: what the quick report leaves out because it
@@ -213,7 +214,8 @@ function DeepReport({
           ...finding,
           action: {
             label: `Open ${site.name}`,
-            onClick: () => router.push(`/proxy/sites?site=${encodeURIComponent(site.name)}`),
+            // Where the site is changed, which is what the finding asks for.
+            onClick: () => router.push(siteSettingsHref(site.name)),
           },
         }
       : finding,

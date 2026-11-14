@@ -39,13 +39,13 @@ test("the page opens on the host, who is busy and what changed, with no tiles", 
   await expect(cpu.getByRole("button").first()).toHaveAccessibleName("Open mongod.service")
   await expect(cpu.getByRole("button")).toHaveCount(5)
   const memory = band.getByLabel("Memory by service")
-  await expect(memory.locator("[data-slot=reading-line]")).toContainText("1.2 GB")
+  await expect(memory.locator("[data-slot=bar-reading-line]")).toContainText("1.2 GB")
 
   // What happened, newest first: the restart in progress, the failure and
   // why, the restart a reader made — and not the boot's own starts.
   const recent = band.getByLabel("Recent changes")
   const changes = recent.getByRole("button")
-  const line = recent.locator("[data-slot=reading-line]")
+  const line = recent.locator("[data-slot=bar-reading-line]")
   await expect(changes.nth(0)).toHaveAccessibleName(/redis-server/)
   await expect(line).toContainText("redis-server")
   await expect(line).toContainText("restarting")

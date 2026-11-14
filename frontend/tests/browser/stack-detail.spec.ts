@@ -89,7 +89,7 @@ test("draws how the stack is reached and what happened to it", async ({ page }) 
 
   // A service's changes are a mark each, newest first.
   const recent = page.getByRole("region", { name: "Recent changes" })
-  const line = recent.locator("[data-slot=reading-line]")
+  const line = recent.locator("[data-slot=bar-reading-line]")
   await expect(line).toContainText("exited 1")
   await recent.getByRole("button", { name: "Open worker" }).nth(1).hover()
   await expect(line.getByText(/^restarted ×5 in \d+ min · exit 1$/)).toBeVisible()
@@ -98,7 +98,7 @@ test("draws how the stack is reached and what happened to it", async ({ page }) 
 
   const memory = page.getByRole("region", { name: "Memory by service" })
   await memory.getByRole("button", { name: "Open db" }).hover()
-  await expect(memory.locator("[data-slot=reading-line]")).toContainText(/9\d% of its limit/)
+  await expect(memory.locator("[data-slot=bar-reading-line]")).toContainText(/9\d% of its limit/)
 })
 
 test("every block of the band is one height before its readings land and after", async ({

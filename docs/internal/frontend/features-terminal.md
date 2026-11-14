@@ -195,7 +195,9 @@ that does something.
   runs, and its ports and networks as tables. From `xl` the Containers table stands beside the page
   as a rail (`container-rail.tsx`: the table's search, chips and order from its session keys, Alt+↑
   and Alt+↓ to walk it with the view carried), and a stack's page keeps the Stacks list the same
-  way (`stack-rail.tsx`); `beside-rail.ts` says where the two pages' blocks go side by side now that
+  way (`stack-rail.tsx`); the column the five Docker item pages share is `item-rail.tsx`
+  (`DockerRail`, `DockerRailRow`), and each `*-rail.tsx` is its row and its list;
+  `beside-rail.ts` says where the two pages' blocks go side by side now that
   the rail takes its width. The tables are `container-tables.tsx`, which also draws the
   Environment tab: each name's namespace in its lane hue, each value in its kind's code hue, and
   the kinds — credentials, addresses, paths, switches, numbers — as chips that count and narrow, beside

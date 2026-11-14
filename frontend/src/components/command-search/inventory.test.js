@@ -124,7 +124,7 @@ test("live search projects explicit metadata and encodes identities without inde
     expect(results[1][0].href).toBe("/proxy/sites/a%20%26%20b")
     expect(results[3][0].href).toBe("/docker/containers/a%2Fb")
     expect(results[5][0].href).toBe("/git?repo=%2Fsrv%2Fa%20%26%20b")
-    expect(results[7][0].href).toBe("/processes/pm2?app=a%3Ab%3A0")
+    expect(results[7][0].href).toBe("/processes/pm2/shop")
     expect(results[9][0].href).toBe("/excalidraw/6")
     for (const call of calls) {
       expect(call.options.method).toBe("GET")

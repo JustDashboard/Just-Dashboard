@@ -396,3 +396,46 @@ test("a game server gets the two pages nothing else has", async ({ page }) => {
   await expect(rail(page).getByRole("link", { name: "Players", exact: true })).toBeVisible()
   await expect(rail(page).getByRole("link", { name: "Server settings", exact: true })).toBeVisible()
 })
+
+// The rail is the only thing that says where a page sits, and an item's page
+// (a container, a jail, a package) is two levels under its section: until
+// 0.8.7 the rail lit a row on an exact address alone, so on every such page
+// nothing in it was lit. One item page per section, and one lit row on each.
+const ITEM_PAGES: [path: string, row: string][] = [
+  ["/processes/pm2/api", "PM2"],
+  ["/processes/services/nginx.service", "Services"],
+  ["/docker/volumes/pgdata", "Volumes"],
+  ["/docker/images/sha256:0f3a", "Images"],
+  ["/docker/networks/bridge", "Networks"],
+  ["/packages/nginx", "Packages"],
+  ["/system-users/groups/wheel", "System users"],
+  ["/security/intrusion/jails/sshd", "Intrusion"],
+  ["/network/dns/services/unbound", "DNS"],
+  ["/proxy/sites/app.example.com", "Sites"],
+  ["/databases/3/access/app", "Control center"],
+]
+
+test("an item's page lights the row it was opened from, and only that row", async ({ page }) => {
+  // One test walks every page of the list, so its budget grows with it.
+  test.setTimeout(ITEM_PAGES.length * 10_000)
+  await mockShell(page)
+  for (const [path, row] of ITEM_PAGES) {
+    await page.goto(path)
+    const lit = rail(page).locator('[data-sidebar="menu-button"][data-active="true"]')
+    await expect(lit, path).toHaveText([row])
+    // A page that was sent elsewhere would be lit for another reason.
+    expect(new URL(page.url()).pathname, path).toBe(path)
+  }
+})
+
+test("a run lights its project's Deployments, and the step back lights Projects", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.goto("/deploy/7/runs/41")
+  const lit = rail(page).locator('[data-sidebar="menu-button"][data-active="true"]')
+  await expect(lit).toHaveText(["Deployments"])
+
+  await page.getByRole("button", { name: "Back to Deployments" }).click()
+  await expect(lit).toHaveText(["Projects"])
+})

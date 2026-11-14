@@ -1186,9 +1186,8 @@ test("an expiry bar leads to its certificate", async ({ page }) => {
   await page.goto("/proxy")
 
   await page.getByRole("button", { name: "Show old.example.com in Certificates" }).click()
-  await expect(page).toHaveURL(
-    "/proxy/certificates?cert=%2Fetc%2Fssl%2Fjust-dashboard%2Fold.example.com%2Ffullchain.pem",
-  )
+  // The certificate's own page, not the list with the sheet's old `?cert=`.
+  await expect(page).toHaveURL(/\/proxy\/certificates\/old\.example\.com(\?|$)/)
 })
 
 test("a status that fails after answering is reported rather than drawn as current", async ({

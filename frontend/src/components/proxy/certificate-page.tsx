@@ -58,6 +58,7 @@ import { CertLife, ExpiryStatus, expiryTone } from "@/components/proxy/expiry-st
 import { PrivateTrustNote } from "@/components/proxy/local-ca-panel"
 import { certificateProduct } from "@/components/proxy/marks"
 import { sitePath } from "@/components/proxy/site-verbs"
+import { streamHref } from "@/components/proxy/stream-facts"
 
 const BACK = (
   <Link
@@ -489,7 +490,7 @@ function CertificateOverview({
     ...cert.usedBy.map((site) => ({ key: `site:${site}`, href: sitePath(site), label: site })),
     ...(cert.usedByStreams ?? []).map((stream) => ({
       key: `stream:${stream}`,
-      href: `/proxy/streams?stream=${encodeURIComponent(stream)}`,
+      href: streamHref(stream),
       label: `stream ${stream}`,
     })),
   ]

@@ -4,8 +4,6 @@ import { Box, Globe, Layers } from "@/components/icons"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import type { ImageDetail, ImageUpdateStatus } from "@/lib/types"
-import { cn } from "@/lib/utils"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
 import { ReferenceWords } from "@/components/docker/image-marks"
 import {
@@ -18,7 +16,6 @@ import {
 } from "@/components/docker/images"
 import { ProductGlyph, hasProductLogo, hostProduct, imageProduct } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { Skeleton } from "@/components/ui/skeleton"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
 
 /** How many containers the picture names before the rest are one "N more". */
@@ -54,12 +51,6 @@ export function ImagePicture({
   const tag = detail ? primaryTag(detail) : undefined
   const product = tag ? imageProduct(tag) : undefined
   const sized = detail?.layers.filter((layer) => layer.size > 0).length ?? 0
-  // Wide, `WireFlow` draws its own waiting shape. In the phone's rows it
-  // waits with the hub's name alone, a line shorter than the name and the
-  // size the image lands with, so there the waiting picture is drawn here:
-  // the same marks and the same two lines, grey.
-  const wide = useMediaQuery("(min-width: 1024px)")
-  const waiting = !detail && !wide
 
   return (
     <WireFlow
@@ -67,15 +58,11 @@ export function ImagePicture({
       // taller: the height the picture has with the most it ever draws.
       className="lg:flex lg:min-h-60 lg:flex-col lg:justify-center"
       phone="marks"
-      loading={!detail && wide}
+      loading={!detail}
       start={{
         title: "Comes from",
         loadingRows: 1,
-        nodes: detail
-          ? [origin(detail, tag, state ?? "unknown", update, pulling)]
-          : waiting
-            ? [WAITING("origin")]
-            : [],
+        nodes: detail ? [origin(detail, tag, state ?? "unknown", update, pulling)] : [],
       }}
       hub={{
         mark: (size) => (
@@ -88,58 +75,29 @@ export function ImagePicture({
           </WireMark>
         ),
         eyebrow: "Image",
-        title: detail ? (
+        title: detail && (
           <span className="font-mono break-all">
             {tag ? <ReferenceWords reference={tag} /> : shortId(detail.id)}
           </span>
-        ) : (
-          <Words className="w-32" />
         ),
-        hint: detail ? (
+        hint: detail && (
           <span className="numeric">
             {bytes(detail.size)} · {plural(sized, "layer")}
           </span>
-        ) : (
-          <Words className="w-24" />
         ),
+        // The name and the size the image lands with, in the phone's rows too.
+        loadingLines: { hint: 1 },
       }}
       end={{
         title: "Containers",
         loadingRows: 1,
         max: NAMED,
         more: { onPress: onContainers, words: (hidden) => `${hidden} more` },
-        nodes: detail
-          ? detail.usedBy.length === 0
-            ? [NOBODY]
-            : detail.usedBy.map(user)
-          : waiting
-            ? [WAITING("user")]
-            : [],
+        nodes: detail ? (detail.usedBy.length === 0 ? [NOBODY] : detail.usedBy.map(user)) : [],
       }}
     />
   )
 }
-
-/** A grey bar where a line of words will be, the height of the line it stands in. */
-function Words({ className }: { className?: string }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn(
-        "inline-block h-[0.7em] max-w-full animate-pulse rounded-md bg-muted align-middle",
-        className,
-      )}
-    />
-  )
-}
-
-/** A mark that has not arrived, in the phone's rows. */
-const WAITING = (id: string): WireFlowNode => ({
-  id: `waiting:${id}`,
-  placeholder: true,
-  mark: <Skeleton className="size-9 rounded-xl" />,
-  line: { state: "up" },
-})
 
 /**
  * Where a container would be, for an image nothing was made from: a dashed

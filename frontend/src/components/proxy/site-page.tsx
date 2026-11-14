@@ -468,11 +468,17 @@ function SiteMain({
 
   // The one command at the line's end: the deployment that writes the route,
   // the form, or the file, whichever this site has first; the rest in `⋯`.
+  // On Settings the form is what the reader is looking at: Edit would lead
+  // where they are, so it is not offered there, as the command or in the
+  // menu, and the file stays in the menu rather than taking Edit's place.
+  const onSettings = tab === "settings"
+  const offered = onSettings ? verbs.filter((verb) => verb.key !== "edit") : verbs
   const primary =
-    verbs.find((verb) => verb.key === "deployment") ??
-    verbs.find((verb) => verb.key === "edit") ??
-    verbs.find((verb) => verb.key === "raw")
-  const rest = verbs.filter((verb) => verb !== primary)
+    offered.find((verb) => verb.key === "deployment") ??
+    (onSettings
+      ? undefined
+      : (offered.find((verb) => verb.key === "edit") ?? offered.find((verb) => verb.key === "raw")))
+  const rest = offered.filter((verb) => verb !== primary)
   const tabs = SITE_TABS.filter((key) => key !== "settings" || editable)
 
   return (

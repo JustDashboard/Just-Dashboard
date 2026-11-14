@@ -688,7 +688,29 @@ test("ssh changes are staged as a page state and applied together", async ({ pag
   const bar = page.getByRole("region", { name: "Save changes" })
   await expect(bar).toHaveCount(0)
 
+  // With nothing edited there is nothing to narrow to: no chip stands between
+  // the readings and the settings (a lone "All 10" did).
+  await expect(page.getByRole("button", { name: /^(All|Edited)\b/ })).toHaveCount(0)
+  const settings = page.locator("#ssh-settings [data-slot=setting]")
+  // Where the first two sections stand in the settings' own column: the
+  // press below scrolls the page to the switch, which moves everything.
+  const places = async () => {
+    const column = (await page.locator("#ssh-settings").boundingBox())!
+    return Promise.all(
+      [settings.first(), settings.nth(1)].map(
+        async (one) => (await one.boundingBox())!.y - column.y,
+      ),
+    )
+  }
+  await risen(page)
+  const before = await places()
+  expect(before[0]).toBe(0)
+
   await page.getByRole("switch", { name: "Password authentication" }).click()
+  // The filter arrives at the end of the first section's title line, and
+  // moves neither that section nor the one under it.
+  await expect(settings.first().getByRole("button", { name: /^Edited/ })).toBeVisible()
+  expect(await places()).toEqual(before)
   const row = page.locator("[data-slot=ssh-setting]").filter({ hasText: "Password authentication" })
   await expect(row).toHaveAttribute("data-edited", "true")
   await expect(row).toContainText("sshd runs yes")
@@ -888,8 +910,15 @@ test("the ssh page reads its auth log through the lens, the day's counts as its 
   await expect(lines.getByText("sudo", { exact: true })).toHaveCount(0)
 
   // A reading's line is a press away from the lines it counts, asked of the
-  // pane further down.
-  await page.getByRole("button", { name: "Show the lines behind accepted logins" }).click()
+  // pane further down. The press is the line's own (`ReadingLine`'s
+  // `onPress`): its button is in the line and covers it, so a press anywhere
+  // on the line is one, and the line is still one height with its neighbours.
+  const accepted = reading(page, "Accepted logins")
+  const press = accepted.getByRole("button", { name: "Show the lines behind accepted logins" })
+  const [lineBox, pressBox] = [(await accepted.boundingBox())!, (await press.boundingBox())!]
+  expect(pressBox).toEqual(lineBox)
+  expect(lineBox.height).toBe((await reading(page, "Failed attempts").boundingBox())!.height)
+  await accepted.click({ position: { x: 12, y: 12 } })
   await expect.poll(() => logs.sockets.at(-1)?.getAll("f")).toEqual(["event:ssh_accepted"])
   await expect(page.getByRole("button", { name: /^Accepted\b/ })).toHaveAttribute(
     "aria-pressed",

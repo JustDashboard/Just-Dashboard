@@ -962,7 +962,7 @@ type dbBackupSummaryRow struct {
 // dbBackupRecent is one dump on a connection's strip: its file's own time and
 // size, read from the directory entry without opening its description.
 type dbBackupRecent struct {
-	TakenAt time.Time `json:"takenAt"`
+	TakenAt time.Time `json:"takenAt,omitzero"`
 	Size    int64     `json:"size"`
 }
 

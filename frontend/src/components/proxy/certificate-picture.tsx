@@ -13,6 +13,7 @@ import { CertLife, expiryTone } from "@/components/proxy/expiry-status"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { originWord } from "@/components/proxy/certificate-inventory"
+import { streamHref } from "@/components/proxy/stream-facts"
 
 /** The most users drawn at the picture's end; the facts under it list every one. */
 const SHOWN_USERS = 4
@@ -62,7 +63,7 @@ export function CertificatePicture({ cert, vhosts }: { cert: Certificate; vhosts
     ...(cert.usedByStreams ?? []).map((name) => ({
       key: `stream:${name}`,
       name,
-      href: `/proxy/streams?stream=${encodeURIComponent(name)}`,
+      href: streamHref(name),
       kind: "stream" as const,
       product: "nginx-static",
       live: true,

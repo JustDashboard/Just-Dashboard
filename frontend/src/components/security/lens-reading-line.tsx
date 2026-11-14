@@ -19,9 +19,8 @@ export type ReadingLook = { icon: Icon; hue: string }
  * `StatGrid` becomes on a page that reads in sentences.
  *
  * A press narrows the page's log to the lines the figure counts, as the tile
- * did. `ReadingLine` is a link or a plain line, so the press is a button laid
- * over it rather than around it: a line's `div`s do not belong inside one.
- * Every state is the line's one height, so a figure landing moves nothing.
+ * did (`ReadingLine`'s own `onPress`). Every state is the line's one height,
+ * so a figure landing moves nothing.
  */
 export function LensReadingLine({
   tile,
@@ -42,44 +41,35 @@ export function LensReadingLine({
       ? `Logged only with ${reading.requires} set`
       : reading.hint
   return (
-    <div className="group/reading relative min-w-0">
-      <ReadingLine
-        className={onPick ? "transition-colors group-hover/reading:bg-row-hover" : undefined}
-        mark={
-          <WireMark size="md" hue={look.hue}>
-            <Glyph aria-hidden />
-          </WireMark>
-        }
-        name={reading.label}
-        hint={hint}
-        trend={
-          figure?.series && (
-            <TileTrend
-              values={figure.series}
-              color={look.hue}
-              label={`${reading.label} over ${window.long}`}
-            />
-          )
-        }
-      >
-        {figure ? (
-          <span className="numeric">
-            <NumberTicker value={value} decimalPlaces={decimals} />
-            {figure.capped && "+"}{" "}
-            {reading.figure === "per_minute" ? "a minute" : `in ${window.long}`}
-          </span>
-        ) : (
-          <NoReading>No reading yet</NoReading>
-        )}
-      </ReadingLine>
-      {onPick && (
-        <button
-          type="button"
-          onClick={onPick}
-          aria-label={`Show the lines behind ${reading.label.toLowerCase()}`}
-          className="absolute inset-0 rounded-lg focus-ring"
-        />
+    <ReadingLine
+      onPress={onPick}
+      label={`Show the lines behind ${reading.label.toLowerCase()}`}
+      mark={
+        <WireMark size="md" hue={look.hue}>
+          <Glyph aria-hidden />
+        </WireMark>
+      }
+      name={reading.label}
+      hint={hint}
+      trend={
+        figure?.series && (
+          <TileTrend
+            values={figure.series}
+            color={look.hue}
+            label={`${reading.label} over ${window.long}`}
+          />
+        )
+      }
+    >
+      {figure ? (
+        <span className="numeric">
+          <NumberTicker value={value} decimalPlaces={decimals} />
+          {figure.capped && "+"}{" "}
+          {reading.figure === "per_minute" ? "a minute" : `in ${window.long}`}
+        </span>
+      ) : (
+        <NoReading>No reading yet</NoReading>
       )}
-    </div>
+    </ReadingLine>
   )
 }

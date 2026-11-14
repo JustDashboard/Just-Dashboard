@@ -102,7 +102,7 @@ test("a network that reaches out goes through this server, and a macvlan straigh
   await expect(card.getByText("Straight onto")).toBeVisible()
   await expect(card.getByRole("link", { name: "Open enp3s0 on Interfaces" })).toHaveAttribute(
     "href",
-    "/network/interfaces?device=enp3s0",
+    "/network/interfaces/enp3s0",
   )
 
   await page.goto("/docker/networks/bridge")
@@ -369,6 +369,32 @@ test("a network the inspect cannot read is drawn from the list, and with neither
   await page.reload()
   await expect(page.locator("[data-slot=error-state]")).toBeVisible()
   await expect(identity(page)).toHaveCount(0)
+})
+
+// A network nothing is on has no column as tall as the hub's mark and its
+// three lines. The picture keeps the room those lines need under itself
+// (`WireFlow`), where this page used to pad its own hub by a guess.
+test("the picture keeps room for the hub's words where no column is tall enough", async ({
+  page,
+}) => {
+  await mockNetworkPage(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/networks/old-staging")
+  const flow = picture(page)
+  await expect(flow.getByText("Nothing is attached.")).toBeVisible()
+  await risen(page)
+  const words = (await flow.getByText("172.23.0.0/16").boundingBox())!
+  const box = (await flow.boundingBox())!
+  const foot = words.y + words.height
+  expect(foot).toBeLessThanOrEqual(box.y + box.height + 0.5)
+  // The room is what the words reach past the columns by, not a fixed pad
+  // around the mark: the mark stands at the picture's head.
+  expect((await flow.locator("[data-slot=wire-hub-room]").boundingBox())!.height).toBeGreaterThan(0)
+  const mark = (await flow.getByText("Bridge", { exact: true }).boundingBox())!
+  expect(mark.y - box.y).toBeLessThan(120)
+  // What stands under the picture begins after them.
+  const under = (await page.locator("[data-slot=reading-lines]").first().boundingBox())!
+  expect(under.y).toBeGreaterThanOrEqual(foot)
 })
 
 for (const width of [1280, 390]) {

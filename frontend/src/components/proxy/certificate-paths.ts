@@ -57,6 +57,15 @@ export function certificateHref(cert: Named, all: Named[] | undefined, tab?: str
 }
 
 /**
+ * A certificate's own page, from a place that holds the one certificate and
+ * not the inventory it would take to know whether its name is shared: its
+ * file goes with its name, which names one certificate whatever the rest are.
+ */
+export function certificateFileHref(cert: Named): string {
+  return `/proxy/certificates/${encodeURIComponent(cert.name || UNNAMED)}?path=${encodeURIComponent(cert.path)}`
+}
+
+/**
  * The certificate an address names: by its file where the address carries
  * one, which is unique, and otherwise the first certificate of that name.
  */

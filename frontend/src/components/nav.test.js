@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { NAV, groupedChildren, navLocation, shownFor, tabTitle } from "./nav"
+import { NAV, groupedChildren, navCurrent, navLocation, shownFor, tabTitle } from "./nav"
 
 test("a page in the nav names the tab", () => {
   expect(tabTitle("/files")).toBe("Files · Just Dashboard")
@@ -171,4 +171,109 @@ test("no two pages of one section share a glyph", () => {
       .map((child) => child.title)
     expect({ section: section.title, shared }).toEqual({ section: section.title, shared: [] })
   }
+})
+
+/** Every row of a section's panel, as the rail hands them to `navCurrent`. */
+function panelOf(href) {
+  const find = (entries) => {
+    for (const entry of entries) {
+      if (entry.href === href && entry.children) return entry
+      const inner = entry.children ? find(entry.children) : undefined
+      if (inner) return inner
+    }
+    return undefined
+  }
+  return find(NAV.flatMap((group) => group.items)).children
+}
+
+/** The titles the panel lights for an address: one, or none. */
+function lit(panel, pathname) {
+  const hrefs = panel.flatMap((row) => (row.href === undefined ? [] : [row.href]))
+  return panel
+    .filter((row) => row.href !== undefined && navCurrent(row.href, hrefs, pathname))
+    .map((row) => row.title)
+}
+
+test("an item's page lights the row it was opened from", () => {
+  const cases = [
+    ["/docker", "/docker/containers/4f2a", "Containers"],
+    ["/docker", "/docker/stacks/shop", "Stacks"],
+    ["/docker", "/docker/images/sha256:abc", "Images"],
+    ["/docker", "/docker/volumes/pgdata", "Volumes"],
+    ["/docker", "/docker/networks/bridge", "Networks"],
+    ["/processes", "/processes/pm2/api", "PM2"],
+    ["/processes", "/processes/services/nginx.service", "Services"],
+    ["/security", "/security/intrusion/jails/sshd", "Intrusion"],
+    ["/network", "/network/dns/services/unbound", "DNS"],
+    ["/network", "/network/traffic/containers/web", "Traffic"],
+    ["/network", "/network/vpn/wg0", "VPN"],
+    ["/network", "/network/connections/203.0.113.9", "Connections"],
+    ["/proxy", "/proxy/sites/example.com", "Sites"],
+    ["/proxy", "/proxy/ports/443", "Ports"],
+  ]
+  for (const [section, pathname, title] of cases) {
+    expect([pathname, lit(panelOf(section), pathname)]).toEqual([pathname, [title]])
+  }
+})
+
+test("a section's landing page is not lit on the pages of its other rows", () => {
+  expect(lit(panelOf("/docker"), "/docker")).toEqual(["Overview"])
+  expect(lit(panelOf("/docker"), "/docker/images")).toEqual(["Images"])
+  expect(lit(panelOf("/network"), "/network/firewall")).toEqual(["Firewall"])
+  expect(lit(panelOf("/dashboard"), "/dashboard/configuration")).toEqual(["Configuration"])
+  // An address under the section that no row owns lights nothing: the
+  // overview is not where a page that does not exist was opened from.
+  expect(lit(panelOf("/docker"), "/docker/nothing-here")).toEqual([])
+})
+
+test("a landing page that is the list keeps the items it lists", () => {
+  expect(lit(panelOf("/processes"), "/processes")).toEqual(["Live"])
+  expect(lit(panelOf("/processes"), "/processes/4242")).toEqual(["Live"])
+  expect(lit(panelOf("/processes"), "/processes/pm2")).toEqual(["PM2"])
+  expect(lit(panelOf("/deploy"), "/deploy/new")).toEqual(["Projects"])
+  expect(lit(panelOf("/deploy"), "/deploy/12/logs")).toEqual(["Projects"])
+  expect(lit(panelOf("/deploy"), "/deploy/templates")).toEqual(["Templates"])
+  expect(lit(panelOf("/databases"), "/databases/3/query")).toEqual(["Control center"])
+  expect(lit(panelOf("/databases"), "/databases/map")).toEqual(["Map"])
+})
+
+test("a group's panel lights the page an item hangs under", () => {
+  const administration = NAV.flatMap((group) => group.items).find(
+    (entry) => entry.title === "Administration",
+  ).children
+  expect(lit(administration, "/packages/nginx")).toEqual(["Packages"])
+  expect(lit(administration, "/system-users/groups/wheel")).toEqual(["System users"])
+  expect(lit(administration, "/system-users/user/deploy")).toEqual(["System users"])
+  const monitoring = NAV.flatMap((group) => group.items).find(
+    (entry) => entry.title === "Monitoring",
+  ).children
+  expect(lit(monitoring, "/metrics/alerts")).toEqual(["Alerts"])
+  expect(lit(monitoring, "/metrics")).toEqual(["Metrics"])
+})
+
+test("a database's and a project's own panels light one row", () => {
+  const database = [
+    { title: "Home", href: "/databases/3" },
+    { title: "Data", href: "/databases/3/data?schema=public&table=orders" },
+    { title: "Access", href: "/databases/3/access" },
+    { title: "Performance", href: "/databases/3/performance" },
+    { title: "General", href: "/databases/3/settings" },
+    { title: "Network", href: "/databases/3/settings/network" },
+  ]
+  expect(lit(database, "/databases/3")).toEqual(["Home"])
+  expect(lit(database, "/databases/3/data")).toEqual(["Data"])
+  expect(lit(database, "/databases/3/access/app")).toEqual(["Access"])
+  expect(lit(database, "/databases/3/performance/statements/9f~2a")).toEqual(["Performance"])
+  expect(lit(database, "/databases/3/settings")).toEqual(["General"])
+  expect(lit(database, "/databases/3/settings/network")).toEqual(["Network"])
+
+  const project = [
+    { title: "Overview", href: "/deploy/12" },
+    { title: "Deployments", href: "/deploy/12/deployments" },
+    { title: "Logs", href: "/deploy/12/logs" },
+  ]
+  // A run is one of the project's Deployments, though its address is not under them.
+  expect(lit(project, "/deploy/12/runs/88")).toEqual(["Deployments"])
+  expect(lit(project, "/deploy/12")).toEqual(["Overview"])
+  expect(lit(project, "/deploy/12/logs")).toEqual(["Logs"])
 })

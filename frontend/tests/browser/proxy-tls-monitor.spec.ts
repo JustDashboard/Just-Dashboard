@@ -196,7 +196,7 @@ test("findings the quick report lists are not repeated, and the HTTP/2 one opens
 
   await page.getByText("HTTP/2 is on in the site form and not offered").click()
   await page.getByRole("button", { name: "Open app.example.com" }).click()
-  await expect(page).toHaveURL(/\/proxy\/sites\?site=app\.example\.com$/)
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com\?tab=settings$/)
 })
 
 test("each connection feature reads as its answer", async ({ page }) => {
