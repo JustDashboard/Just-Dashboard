@@ -45,9 +45,12 @@ test("the reply decision names the kernel's table and the evaluated rule, and sa
   await loaded(page)
   await expect(page.getByText("5270 · your replies (evaluated)")).toBeVisible()
   await expect(page.getByText("table 52 · answers you (kernel)")).toBeVisible()
-  await expect(
-    page.getByText(/the lit rule is the one the evaluated rules reach it by/),
-  ).toBeVisible()
+  const answer = page.locator('[data-slot="route-answer"]')
+  await expect(answer).toContainText("table from the kernel, rule evaluated")
+  await page.getByRole("button", { name: "How the highlight was decided" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText(
+    /the lit rule is the one the evaluated rules reach it by/,
+  )
 
   await mockNetwork(page, [], {
     overrides: {
@@ -67,10 +70,12 @@ test("the reply decision names the kernel's table and the evaluated rule, and sa
   await loaded(page)
   await expect(page.getByText("table 52 · answers you (kernel)")).toBeVisible()
   await expect(page.getByText(/your replies \(/)).toHaveCount(0)
-  await expect(page.getByText(/the rule is not named: .*UID is not known/)).toBeVisible()
+  await expect(answer).toContainText("table from the kernel, rule not named")
+  await page.getByRole("button", { name: "How the highlight was decided" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText(/the rule is not named: .*UID is not known/)
 })
 
-test("a target narrows every table to its covering routes and the history to its changes", async ({
+test("a target narrows the routes to those covering it and the history to its changes", async ({
   page,
 }) => {
   const historyQueries: string[] = []
@@ -103,18 +108,25 @@ test("a target narrows every table to its covering routes and the history to its
       limits: ["Readings are taken every 30 seconds."],
     })
   })
-  await page.goto("/network/routing")
+  await page.goto("/network/routing?tab=history")
   await loaded(page)
   await expect(page.getByText("10.0.9.0/24 dev br-old proto kernel")).toBeVisible()
-  await expect(page.getByText("Readings are taken every 30 seconds.")).toBeVisible()
+  await page.getByRole("button", { name: "What the history cannot see" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText("Readings are taken every 30 seconds.")
+  await page.keyboard.press("Escape")
 
+  await page.getByRole("tab", { name: "Overview" }).click()
   await page.getByRole("textbox", { name: "Target", exact: true }).fill("10.8.0.7")
   // main selects its /24; the office table, which only rule 10000 reaches, its default.
-  await expect(page.getByText("selected for 10.8.0.7")).toHaveCount(2)
-  await expect(page.getByText(/2 of \d+ cover 10\.8\.0\.7/)).toBeVisible()
-  await expect(page.getByText("No route in this table covers 10.8.0.7.").first()).toBeVisible()
-  await expect(page.getByText("No recorded change touches 10.8.0.7.")).toBeVisible()
+  const routes = page.getByRole("region", { name: "Routes", exact: true })
+  await expect(routes.getByText("selected", { exact: true })).toHaveCount(2)
+  await expect(routes.getByText(/3 of \d+ cover 10\.8\.0\.7/)).toBeVisible()
+  await routes.getByRole("button", { name: /^tailscale/ }).click()
+  await expect(routes.getByText("No route in this table covers 10.8.0.7.")).toBeVisible()
+  await page.getByRole("tab", { name: "History" }).click()
+  await expect(page.getByText("No recorded change touches 10.8.0.7")).toBeVisible()
   expect(historyQueries.some((q) => q.includes("target=10.8.0.7"))).toBe(true)
+  await page.getByRole("tab", { name: "Overview" }).click()
   await page.getByRole("textbox", { name: "Target", exact: true }).fill("not an address")
   await expect(page.getByText("Use an IPv4 or IPv6 address or network.")).toBeVisible()
 })
@@ -378,12 +390,20 @@ test("forwarding shows its measured health and how Docker was counted", async ({
       },
     },
   })
-  await page.goto("/network/routing")
+  await page.goto("/network/routing?tab=forwarding")
   await loaded(page)
-  await expect(page.getByText(/Forwarding traffic · 43 datagrams\/s over 15s/)).toBeVisible()
-  await expect(page.getByText(/Counts all 5 Docker bridge networks/)).toBeVisible()
+  // The measured reading is on the picture's family; what was a footnote is behind its row's mark.
+  await expect(page.getByText("Forwarding traffic", { exact: true })).toBeVisible()
+  await expect(page.getByText(/43 datagrams\/s over 15s/)).toBeVisible()
   await expect(page.getByText("Some devices do not forward")).toBeVisible()
-  await expect(page.getByText(/Traffic arriving on wg0 is not forwarded/)).toBeVisible()
+  await expect(page.getByText(/not from wg0/)).toBeVisible()
+  await page.getByRole("button", { name: "About IPv4 forwarding" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText(/Counts all 5 Docker bridge networks/)
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "About IPv6 forwarding" }).focus()
+  await expect(
+    page.getByRole("tooltip").filter({ hasText: /Traffic arriving on wg0 is not forwarded/ }),
+  ).toBeVisible()
 })
 
 test("BGP shows each neighbour's filters, OSPF adjacencies and a bounded route browser", async ({
@@ -454,7 +474,7 @@ test("BGP shows each neighbour's filters, OSPF adjacencies and a bounded route b
       ],
     })
   })
-  await page.goto("/network/routing")
+  await page.goto("/network/routing?tab=bgp")
   await loaded(page)
   await expect(page.getByText("route-map in EDGE-IN")).toBeVisible()
   await expect(page.getByText("prefix-list out OWN")).toBeVisible()
@@ -463,7 +483,8 @@ test("BGP shows each neighbour's filters, OSPF adjacencies and a bounded route b
   await expect(page.getByText("10.10.0.0/24")).toBeVisible()
   await expect(page.getByText("best", { exact: true })).toBeVisible()
   expect(reads[0]).toContain("family=ipv4Unicast")
-  await expect(page.getByText(/configured in FRR itself/)).toBeVisible()
+  await page.getByRole("button", { name: "Where BGP is configured" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText(/configured in FRR itself/)
 })
 
 test("a pending routing change shows what it was checked against and the connections it moved", async ({

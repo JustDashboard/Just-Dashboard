@@ -1,42 +1,39 @@
 "use client"
 
-import { useState } from "react"
 import { get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { WGArchived, WGInterface } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
-import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
+import { Button } from "@/components/ui/button"
 import { NetworkReadWarning } from "@/components/network/read-warning"
-import { TunnelRecord } from "./record"
+import { tunnelHref } from "./tunnel-reading"
 
-/**
- * Tunnels removed from here. Each file was moved aside, not deleted, because
- * the server's key lives nowhere else: restoring puts the same key and peers
- * back, so every client's existing configuration connects again. The exit
- * node, the firewall opening and saved client configurations are not in the
- * file; the restore says which it could not bring back.
- */
-export function ArchivedTunnels({ onRestored }: { onRestored: () => void }) {
-  const archive = usePoll<WGArchived[]>(
+/** The tunnels removed from here, read once a minute: the VPN page's list and a tunnel page's rail. */
+export function useArchive(enabled = true) {
+  return usePoll<WGArchived[]>(
     (signal) => get("/network/vpn/archive", undefined, signal),
     60_000,
+    [],
+    {
+      enabled,
+    },
   )
+}
+
+/**
+ * Putting a removed tunnel back, after a confirmation that says what comes
+ * with it. The file holds the server's key and its peers, so every client's
+ * existing configuration connects again; the exit node, the firewall opening
+ * and saved client configurations are not in it, and the answer says which it
+ * could not bring back.
+ */
+export function useRestore(onRestored: () => void) {
   const { confirm, dialog } = useConfirm()
-  const [record, setRecord] = useState<string>()
-  const list = archive.data ?? []
-  if (archive.error && list.length === 0)
-    return (
-      <NetworkReadWarning
-        error={archive.error}
-        refresh={archive.refresh}
-        reading="tunnel archive"
-      />
-    )
-  if (list.length === 0) return null
   const restore = (a: WGArchived) =>
     confirm({
       title: `Restore ${a.name}`,
@@ -59,19 +56,46 @@ export function ArchivedTunnels({ onRestored }: { onRestored: () => void }) {
             : res.firewall.reason,
         })
         for (const w of res.warnings) notify.warning(w)
-        archive.refresh()
         onRestored()
       },
     })
+  return { restore, dialog }
+}
+
+/** An archived tunnel's mono line: what the file holds, or why it cannot come back. */
+export function archivedLine(a: WGArchived) {
+  return a.restorable
+    ? `udp ${a.listenPort} · ${a.addresses.join(", ")} · ${plural(a.peers, "peer")}`
+    : (a.refusal ?? "cannot be restored")
+}
+
+/**
+ * Tunnels removed from here, one card each. A file was moved aside, not
+ * deleted, because the server's key lives nowhere else. A card opens the
+ * tunnel's own page, where its history is kept after it is gone; Restore is
+ * the card's one verb.
+ */
+export function ArchivedTunnels({ onRestored }: { onRestored: () => void }) {
+  const archive = useArchive()
+  const { restore, dialog } = useRestore(() => {
+    archive.refresh()
+    onRestored()
+  })
+  const list = archive.data ?? []
+  if (archive.error && list.length === 0)
+    return (
+      <NetworkReadWarning
+        error={archive.error}
+        refresh={archive.refresh}
+        reading="tunnel archive"
+      />
+    )
+  if (list.length === 0) return null
   return (
     <Panel plain>
       <PanelHeader
         title="Archived tunnels"
-        actions={
-          <span className="numeric text-hint text-muted-foreground">
-            {plural(list.length, "file")}
-          </span>
-        }
+        actions={<span className="numeric text-hint text-muted-foreground">{list.length}</span>}
       />
       <PanelBody>
         <NetworkReadWarning
@@ -80,21 +104,20 @@ export function ArchivedTunnels({ onRestored }: { onRestored: () => void }) {
           lastSuccess={archive.lastSuccess}
           reading="tunnel archive"
         />
-        <RowList aria-label="Archived tunnels">
+        <ChoiceList aria-label="Archived tunnels">
           {list.map((a) => (
-            <Row
+            <ChoiceRow
               key={a.file}
+              href={tunnelHref(a.name, "history")}
+              verb={`Open ${a.name}'s history`}
+              leading={<ProductLogo id="wireguard" size="sm" />}
               title={<span className="font-mono">{a.name}</span>}
-              subtitle={
-                a.restorable
-                  ? `removed ${relativeTime(new Date(a.archivedAt * 1000).toISOString())} · udp ${a.listenPort} · ${a.addresses.join(", ")} · ${plural(a.peers, "peer")}`
-                  : a.refusal
-              }
+              description={<span className="font-mono">{archivedLine(a)}</span>}
               trailing={
                 <>
-                  <Button size="xs" variant="ghost" onClick={() => setRecord(a.name)}>
-                    History
-                  </Button>
+                  <span className="text-hint text-muted-foreground max-sm:hidden">
+                    removed {relativeTime(new Date(a.archivedAt * 1000).toISOString())}
+                  </span>
                   <Button
                     size="xs"
                     variant="outline"
@@ -108,11 +131,8 @@ export function ArchivedTunnels({ onRestored }: { onRestored: () => void }) {
               }
             />
           ))}
-        </RowList>
+        </ChoiceList>
       </PanelBody>
-      {record && (
-        <TunnelRecord tunnel={record} open onOpenChange={(open) => !open && setRecord(undefined)} />
-      )}
       {dialog}
     </Panel>
   )

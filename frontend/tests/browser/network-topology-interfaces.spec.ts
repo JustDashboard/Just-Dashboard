@@ -12,7 +12,7 @@ import {
 
 /**
  * The Overview's identity, flow paths, throughput age and incident history,
- * and the Interfaces page's device, bridge, readiness and namespace readings,
+ * and a device's page: its driver, bridge, readiness and namespace readings,
  * against the mocked API. Each check is about what a page does with an
  * answer — a failed reading drawn as failed, a selection drilled into the
  * devices under it, a membership change previewed before it is offered.
@@ -22,11 +22,20 @@ test.use({ viewport: { width: 1440, height: 1000 } })
 
 const now = () => Math.floor(Date.now() / 1000)
 
-async function openDevice(page: Page, name: string) {
+/**
+ * Opens a device by the address that used to open its sheet, which the
+ * Overview and the Drift page still send: it lands on the device's own page.
+ */
+async function openDevice(page: Page, name: string, tab?: string) {
   await page.goto(`/network/interfaces?device=${encodeURIComponent(name)}`)
+  await expect(page).toHaveURL(new RegExp(`/network/interfaces/${name}$`))
   await loaded(page)
-  return page.getByRole("dialog")
+  if (tab) await page.getByRole("tab", { name: tab }).click()
+  return page.locator("[data-slot=page]")
 }
+
+/** The page's one Save, which floats while a section holds an edit. */
+const saveBar = (page: Page) => page.getByRole("region", { name: "Save changes" })
 
 test("the identity says both forwarding families and keeps a translated source from posing as public", async ({
   page,
@@ -204,8 +213,8 @@ test("the throughput tiles and the chart drill into the devices under them", asy
   await expect(carried).toHaveCount(0)
 
   await page.getByRole("link", { name: /Open ens3: what it received/ }).click()
-  await expect(page).toHaveURL(/\/network\/interfaces/)
-  await expect(page.getByRole("dialog").getByText("ens3").first()).toBeVisible()
+  await expect(page).toHaveURL(/\/network\/interfaces\/ens3$/)
+  await expect(page.getByRole("region", { name: "About ens3" })).toContainText("Uplink")
 })
 
 // What a keyboard and a screen reader need of the overview. A node's mark is
@@ -304,7 +313,7 @@ test("interfaces flag Docker devices that could not be joined instead of hiding 
   await expect(page.getByText("container not joined · on docker0")).toBeVisible()
 })
 
-test("a device sheet reads its driver, offloads, error counters and address origins", async ({
+test("a device's page reads its driver, offloads, error counters and address origins", async ({
   page,
 }) => {
   await mockNetwork(page, [], {
@@ -321,16 +330,19 @@ test("a device sheet reads its driver, offloads, error counters and address orig
       ),
     },
   })
-  const sheet = await openDevice(page, "ens3")
-  const hardware = sheet.locator("[data-slot=panel]").filter({ hasText: "Driver and errors" })
-  await expect(hardware.getByText("virtio_net 1.0.0")).toBeVisible()
-  await expect(hardware.getByText("0000:00:03.0")).toBeVisible()
-  await expect(hardware.getByRole("list", { name: "Offloads" })).toContainText(
+  const device = await openDevice(page, "ens3")
+  const errors = device.locator("[data-slot=panel]").filter({ hasText: "Link errors" })
+  await expect(errors.getByText("CRC errors (received)")).toBeVisible()
+  await expect(errors.getByText("41")).toBeVisible()
+  await page.getByRole("tab", { name: "Addresses" }).click()
+  await expect(device.getByText(/from DHCP, valid 23 h 3 min/)).toBeVisible()
+  await page.getByRole("tab", { name: "Settings" }).click()
+  const driver = device.locator("[data-slot=setting]").filter({ hasText: "Driver" })
+  await expect(driver.getByText("virtio_net 1.0.0")).toBeVisible()
+  await expect(driver.getByText("0000:00:03.0")).toBeVisible()
+  await expect(driver.getByRole("list", { name: "Offloads" })).toContainText(
     "rx-checksumming · fixed",
   )
-  await expect(hardware.getByText("CRC errors (received)")).toBeVisible()
-  await expect(hardware.getByText("41")).toBeVisible()
-  await expect(sheet.getByText(/from DHCP, valid 23 h 3 min/)).toBeVisible()
 })
 
 test("namespaces keep a failed item visible and open as their own network", async ({ page }) => {
@@ -353,8 +365,12 @@ test("namespaces keep a failed item visible and open as their own network", asyn
   await page.goto("/network/interfaces")
   await loaded(page)
   await page.getByRole("switch", { name: "Show containers' namespaces" }).click()
-  await expect(page.getByText(/Its devices could not be read: nsenter: cannot open/)).toBeVisible()
+  // The card says its devices are unknown, not that it has none; why is its sheet's.
   await expect(page.getByText("devices unknown")).toBeVisible()
+  await page.getByRole("button", { name: "Inspect gone" }).click()
+  await expect(page.getByRole("dialog").getByText("Its devices could not be read")).toBeVisible()
+  await expect(page.getByRole("dialog").getByText(/nsenter: cannot open/)).toBeVisible()
+  await page.keyboard.press("Escape")
 
   await page.getByRole("button", { name: "Inspect lab" }).click()
   const sheet = page.getByRole("dialog")
@@ -409,18 +425,23 @@ test("a veth hands off to the namespace it leads into and a container's to the i
       ],
     },
   })
-  const sheet = await openDevice(page, "lab-h")
-  await expect(sheet.getByText("Its other end is lab-n inside lab.")).toBeVisible()
-  await sheet.getByRole("button", { name: "Open namespace lab" }).click()
+  const device = await openDevice(page, "lab-h")
+  // Its other end is a node of its picture, and that node opens the namespace.
+  const away = device.getByRole("region", { name: "Leads to" })
+  await expect(away).toContainText("lab-n")
+  await expect(away).toContainText("inside lab")
+  await away.getByRole("button", { name: "Open namespace lab" }).click()
   await expect(
     page.getByRole("dialog").getByRole("table", { name: "Namespace routes" }),
   ).toBeVisible()
   await expect(page.getByRole("dialog").getByRole("button", { name: "Open lab-h" })).toBeVisible()
 
   const container = await openDevice(page, "veth6e4f828")
+  await container.getByRole("button", { name: "More for veth6e4f828" }).click()
   await expect(
-    container.getByRole("link", { name: "Investigate a connection from postgres" }),
+    page.getByRole("menuitem", { name: "Investigate a connection from postgres" }),
   ).toHaveAttribute("href", "/network/investigate?container=postgres")
+  await expect(page.getByRole("menuitem", { name: "Open postgres’s namespace" })).toBeVisible()
 })
 
 test("a managed bridge reads as a switch and a port's VLAN policy is applied and confirmed", async ({
@@ -428,20 +449,28 @@ test("a managed bridge reads as a switch and a port's VLAN policy is applied and
 }) => {
   const mutations: Mutation[] = []
   await mockNetwork(page, mutations)
-  const bridge = await openDevice(page, "jd-lab")
+  const bridge = await openDevice(page, "jd-lab", "Ports")
   const sw = bridge.locator("[data-slot=panel]").filter({ hasText: "Switch" }).first()
   await expect(sw.getByText("on · 802.1Q")).toBeVisible()
-  await expect(sw.getByRole("table", { name: "VLANs by port" })).toContainText("native 1")
-  await expect(sw.getByRole("table", { name: "Forwarding database" })).toContainText(
+  // Each port is a card that opens that device, with the VLANs it carries on its line.
+  const card = bridge.locator("[data-slot=choice-list] > li").filter({ hasText: "vlan30" })
+  await expect(card.locator("[data-slot=port-vlans]")).toContainText("native 1")
+  await expect(card.getByRole("link", { name: "Open vlan30" })).toHaveAttribute(
+    "href",
+    "/network/interfaces/vlan30",
+  )
+  await expect(bridge.getByRole("table", { name: "Forwarding database" })).toContainText(
     "02:42:0a:00:04:02",
   )
+  await page.getByRole("tab", { name: "Settings" }).click()
   await expect(bridge.getByText("jd-lab's own VLANs")).toBeVisible()
 
-  const port = await openDevice(page, "vlan30")
-  const policy = port.locator("[data-slot=panel]").filter({ hasText: "VLANs on jd-lab" })
+  const port = await openDevice(page, "vlan30", "Settings")
+  const policy = port.getByRole("form", { name: "VLANs" })
+  await expect(policy.getByText("VLANs on jd-lab")).toBeVisible()
   await policy.getByLabel("Native VLAN").fill("10")
   await policy.getByLabel("Tagged VLANs").fill("20, 30-31")
-  await policy.getByRole("button", { name: "Apply VLANs" }).click()
+  await saveBar(page).getByRole("button", { name: /^Save/ }).click()
   const confirm = page
     .getByRole("alertdialog")
     .or(page.getByRole("dialog").filter({ hasText: "Take VLAN 1 off vlan30" }))
@@ -478,19 +507,15 @@ test("a refused bridge move is previewed with what it would leave behind and can
       },
     },
   })
-  const sheet = await openDevice(page, "vlan30")
-  await sheet.getByRole("combobox", { name: "Bridge membership" }).click()
+  const device = await openDevice(page, "vlan30", "Settings")
+  await device.getByRole("combobox", { name: "Bridge membership" }).click()
   await page.getByRole("option", { name: "No bridge" }).click()
-  const preview = sheet.getByLabel("What the move would do")
+  const preview = device.getByLabel("What the move would do")
   await expect(preview.getByText("Refused")).toBeVisible()
   await expect(preview.getByText(/carries this server's default route/)).toBeVisible()
   await expect(preview.getByText(/stops receiving the frames jd-lab switches/)).toBeVisible()
-  await expect(
-    sheet
-      .locator("[data-slot=panel]")
-      .filter({ hasText: "Bridge membership" })
-      .getByRole("button", { name: "Apply" }),
-  ).toBeDisabled()
+  // The page's one Save is held while the move is refused.
+  await expect(saveBar(page).getByRole("button", { name: /^Save/ })).toBeDisabled()
 })
 
 test("a VXLAN's readiness names its checks and limits and edits its flood ends", async ({
@@ -542,15 +567,22 @@ test("a VXLAN's readiness names its checks and limits and edits its flood ends",
       },
     },
   })
-  const sheet = await openDevice(page, "vx42")
-  const checks = sheet.getByRole("list", { name: "Readiness checks" })
+  const device = await openDevice(page, "vx42")
+  const checks = device.getByRole("list", { name: "Readiness checks" })
   await expect(checks.getByText("Failing")).toBeVisible()
   await expect(checks.getByText(/leaves through vx42 itself/)).toBeVisible()
-  await expect(sheet.getByText(/neither encrypted nor authenticated/)).toBeVisible()
-  const ends = sheet.getByLabel("Further ends")
+  await expect(device.getByText(/neither encrypted nor authenticated/)).toBeVisible()
+  // Its far side is drawn: the remote and every further end it floods to.
+  const away = device.getByRole("region", { name: "Leads to" })
+  await expect(away).toContainText("198.51.100.7")
+  await expect(away).toContainText("UDP 4789")
+  await expect(away).toContainText("198.51.100.8")
+  await page.getByRole("tab", { name: "Settings" }).click()
+  const ends = device.getByLabel("Further ends", { exact: true })
   await expect(ends).toHaveValue("198.51.100.8")
   await ends.fill("198.51.100.8, 198.51.100.9")
-  await sheet.getByRole("button", { name: "Save ends" }).click()
+  const save = saveBar(page).getByRole("button", { name: /^Save/ })
+  await save.click()
   await expect.poll(() => mutations.length).toBe(1)
   expect(mutations[0]).toEqual({
     method: "PUT",
@@ -558,8 +590,8 @@ test("a VXLAN's readiness names its checks and limits and edits its flood ends",
     body: { remotes: ["198.51.100.8", "198.51.100.9"] },
   })
   await ends.fill("2001:db8::9")
-  await expect(sheet.getByText("Every end is IPv4, like the remote.")).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Save ends" })).toBeDisabled()
+  await expect(device.getByText("Every end is IPv4, like the remote.")).toBeVisible()
+  await expect(save).toBeDisabled()
 })
 
 test("bridges, macvlans and dummies explain themselves before they are made", async ({ page }) => {
@@ -587,7 +619,7 @@ test("bridges, macvlans and dummies explain themselves before they are made", as
   })
 })
 
-test("a dummy's sheet hands a route into it to the routing page", async ({ page }) => {
+test("a dummy's page hands a route into it to the routing page", async ({ page }) => {
   const dummy = {
     ...links.find((l) => l.name === "vlan30"),
     name: "svc0",
@@ -618,8 +650,8 @@ test("a dummy's sheet hands a route into it to the routing page", async ({ page 
       },
     },
   })
-  const sheet = await openDevice(page, "svc0")
-  await sheet.getByRole("link", { name: "Route a destination into svc0" }).click()
+  const device = await openDevice(page, "svc0")
+  await device.getByRole("link", { name: "Route a destination into svc0" }).click()
   await expect(page).toHaveURL(/\/network\/routing/)
   const form = page.getByRole("dialog")
   await expect(form.getByRole("combobox").filter({ hasText: "svc0" })).toBeVisible()
@@ -678,7 +710,7 @@ for (const tunnel of [
     limit: /not probed/,
   },
 ]) {
-  test(`a ${tunnel.kind} sheet shows what this host can establish about it`, async ({ page }) => {
+  test(`a ${tunnel.kind}'s page shows what this host can establish about it`, async ({ page }) => {
     const device = {
       ...links.find((l) => l.name === "vlan30"),
       name: tunnel.name,
@@ -701,13 +733,16 @@ for (const tunnel of [
         },
       },
     })
-    const sheet = await openDevice(page, tunnel.name)
-    const panel = sheet.locator("[data-slot=panel]").filter({ hasText: tunnel.title })
+    const shown = await openDevice(page, tunnel.name)
+    const panel = shown.locator("[data-slot=panel]").filter({ hasText: tunnel.title })
     await expect(panel.getByRole("list", { name: "Readiness checks" })).toContainText(
       tunnel.checks[0].label,
     )
     await expect(panel.getByText(tunnel.expect)).toBeVisible()
     await expect(panel.getByText(tunnel.limit)).toBeVisible()
-    await expect(panel.getByLabel("Further ends")).toHaveCount(0)
+    // Flood ends are a unicast VXLAN's; no other device's settings offer them.
+    await page.getByRole("tab", { name: "Settings" }).click()
+    await expect(shown.getByRole("heading", { name: "Device", exact: true })).toBeVisible()
+    await expect(shown.getByLabel("Further ends", { exact: true })).toHaveCount(0)
   })
 }

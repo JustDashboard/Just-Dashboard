@@ -39,13 +39,17 @@ const FILTERS: FileFilter[] = ["all", "read", "unread", "managed", "hand"]
 export function ConfigFilesView({
   tree,
   admin,
+  query,
+  onQueryChange: setQuery,
   onOpen,
 }: {
   tree: ProxyConfigFiles
   admin: boolean
+  /** The search, held by the page so the picture over the list can narrow it to a folder. */
+  query: string
+  onQueryChange: (query: string) => void
   onOpen: (path: string, line?: number) => void
 }) {
-  const [query, setQuery] = useSessionState("proxy.config.query", "")
   const [filter, setFilter] = useSessionState<FileFilter>("proxy.config.filter", "all")
   const counts = useMemo(() => filterCounts(tree.files), [tree.files])
   // A remembered filter with nothing under it any more shows every file

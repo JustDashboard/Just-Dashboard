@@ -36,6 +36,7 @@ See what the server is doing right now, what it did this week, and what is about
 - Every verb on a service says what it does first: start, stop, restart, reload, freeze, enable, mask, signals sent through systemd, and its memory, processor and task limits
 - Every PM2 application has a page of its own as well: the daemon and boot hook that keep it running, its workers, port and log as one picture, what it is using now, its logs and environment, and verbs that reach every worker of a cluster
 - One log viewer for files, containers, stacks, PM2 and the journal, with insights
+- A server with no systemd, Docker or PM2 says so in one sentence with the next step, on Services, Scheduled, the logs and the map
 - On a phone the log has the whole screen, and the sources are one tap away on a bar at the foot
 - Every service shows its own logs on its own page
 

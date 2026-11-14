@@ -1,40 +1,35 @@
 "use client"
 
-import { useMemo } from "react"
-import { Bug, FirewallCheck, NetworkDevice, SecureConnection, SignIn } from "@/components/icons"
 import { get } from "@/lib/api"
-import { networkOf } from "@/lib/clients"
-import { cn } from "@/lib/utils"
-import type { BanSummary, Connections, Fail2banJail, LoginSession, SSHDConfig } from "@/lib/types"
-import type { Tone } from "@/components/tone"
+import type { Connections, Fail2banJail, LoginSession, SSHDConfig } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
+import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Page, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
-import { Skeleton } from "@/components/ui/skeleton"
-import { NumberTicker } from "@/components/ui/number-ticker"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { ProductGlyphs, processProduct } from "@/components/product-logo"
 import { ExposureIdentity } from "@/components/security/exposure-panel"
-import { Perimeter } from "@/components/security/perimeter"
+import { Perimeter, type Read, type SSHWords } from "@/components/security/perimeter"
 import { BoundaryPanel } from "@/components/security/boundary-view"
 import { useSecurity } from "@/components/security/security-context"
 import { sshReading } from "@/components/security/ssh-reading"
 
 type Fail2banReply = { available: boolean; running: boolean; jails: Fail2banJail[] }
 
-/** Observed access arrangement and native service readings, followed by the access-boundary report. */
+const read = <T,>(poll: PollState<T>): Read<T> => ({
+  data: poll.data,
+  failed: Boolean(poll.error && !poll.data),
+})
+
+/**
+ * How the panel is reached, the ways onto the machine as one picture whose
+ * marks are the ways to the section's pages, and the access-boundary report.
+ * The picture carries the readings a row of five tiles used to: each stood
+ * over the node that already said it.
+ */
 export default function SecurityOverviewPage() {
-  const { firewall, exposure } = useSecurity()
+  const { firewall, firewallError, exposure } = useSecurity()
   const { can } = useAuth()
   const admin = can("system.admin")
 
   const fail2ban = usePoll<Fail2banReply>((signal) => get("/fail2ban/", undefined, signal), 20_000)
-  const bans = usePoll<BanSummary>(
-    (signal) => get("/fail2ban/offenders", { top: 1 }, signal),
-    120_000,
-  )
   const connections = usePoll<Connections>(
     (signal) => get("/connections", undefined, signal),
     10_000,
@@ -49,34 +44,21 @@ export default function SecurityOverviewPage() {
   const sshd = usePoll<SSHDConfig>((signal) => get("/ssh/config", undefined, signal), 0, [], {
     enabled: admin,
   })
-  const ssh = sshReading(sshd.data ?? undefined)
-
-  const bannedNow = fail2ban.data?.jails.reduce((n, j) => n + j.currentlyBanned, 0) ?? 0
-  const fromInternet = connections.data?.peers.filter((p) => !p.private).length
-  const remote = sessions.data?.filter((s) => s.isSsh).length ?? 0
-  // What the peers are talking to, as the programs holding the sockets; and
-  // where the shells are held from, as the networks that have a mark.
-  const reached = useMemo(
-    () => [
-      ...new Set(
-        (connections.data?.peers ?? [])
-          .flatMap((p) => p.processes)
-          .map(processProduct)
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ],
-    [connections.data],
-  )
-  const loginNetworks = useMemo(
-    () => [
-      ...new Set(
-        (sessions.data ?? [])
-          .map((s) => networkOf(s.from || "127.0.0.1").product)
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ],
-    [sessions.data],
-  )
+  // The door that matters most says how it stands: keys only, passwords
+  // allowed, or root's password, with where sshd listens.
+  const ssh: SSHWords | undefined = !admin
+    ? {
+        value: "Administrators only",
+        tone: "default",
+        hint: "its settings name who holds a key",
+      }
+    : sshd.error && !sshd.data
+      ? {
+          value: "Unreadable",
+          tone: "warning",
+          hint: "its settings could not be read",
+        }
+      : sshReading(sshd.data ?? undefined)
 
   return (
     <Page className="animate-rise">
@@ -84,258 +66,19 @@ export default function SecurityOverviewPage() {
 
       <ExposureIdentity exposure={exposure} />
 
-      <StatGrid columns={5}>
-        <AreaTile
-          icon={FirewallCheck}
-          title="Firewall"
-          href="/network/firewall"
-          loading={!firewall}
-          value={
-            !firewall
-              ? undefined
-              : !firewall.available
-                ? "None"
-                : firewall.enabled
-                  ? firewall.backend
-                  : "Not enabled"
-          }
-          tone={
-            !firewall || !firewall.available ? "warning" : firewall.enabled ? "default" : "danger"
-          }
-          hint={
-            !firewall || !firewall.available
-              ? "install ufw or firewalld"
-              : `${firewall.rules.filter((r) => !r.ipv6).length} rules · ${
-                  firewall.policy.incoming
-                    ? `inbound ${firewall.policy.incoming}`
-                    : "inbound policy unknown"
-                }`
-          }
-        />
-        {/* The door that matters most says how it stands: keys only, passwords
-            allowed, or root's password, with where sshd listens. It was the
-            one tile in the row that read "Configuration". */}
-        <AreaTile
-          icon={SecureConnection}
-          title="SSH"
-          href="/security/ssh"
-          loading={admin && sshd.loading && !sshd.data}
-          value={
-            !admin ? "Administrators only" : sshd.error && !sshd.data ? "Unreadable" : ssh?.value
-          }
-          tone={sshd.error && !sshd.data ? "warning" : (ssh?.tone ?? "default")}
-          hint={
-            !admin
-              ? "its settings name who holds a key"
-              : sshd.error && !sshd.data
-                ? "sshd's configuration could not be read"
-                : ssh?.hint
-          }
-        />
-        <AreaTile
-          icon={Bug}
-          title="Intrusion"
-          href="/security/intrusion"
-          loading={fail2ban.loading && !fail2ban.data}
-          products={fail2ban.data?.running ? ["fail2ban"] : []}
-          value={
-            fail2ban.error ? (
-              "Unreadable"
-            ) : !fail2ban.data ? undefined : !fail2ban.data.available ? (
-              "No fail2ban"
-            ) : !fail2ban.data.running ? (
-              "Not running"
-            ) : (
-              <Count value={bannedNow} unit=" banned now" />
-            )
-          }
-          tone={
-            fail2ban.error
-              ? "warning"
-              : !fail2ban.data
-                ? "default"
-                : !fail2ban.data.available || !fail2ban.data.running
-                  ? "warning"
-                  : bannedNow > 0
-                    ? "warning"
-                    : "default"
-          }
-          // What the jails did over the days fail2ban.log covers: a reading
-          // that moves, where the figure is only this moment of it.
-          trend={
-            fail2ban.data?.running && bans.data ? (
-              <TileTrend
-                values={bans.data.perDay.map((d) => d.count)}
-                color="var(--chart-3)"
-                label={`Bans per day over the last ${bans.data.perDay.length} days`}
-              />
-            ) : undefined
-          }
-          hint={
-            fail2ban.error
-              ? "fail2ban status could not be read"
-              : !fail2ban.data
-                ? undefined
-                : fail2ban.data.running
-                  ? `${fail2ban.data.jails.length} fail2ban jail${fail2ban.data.jails.length === 1 ? "" : "s"} watching`
-                  : fail2ban.data.available
-                    ? "fail2ban is not running"
-                    : "fail2ban is not installed"
-          }
-        />
-        <AreaTile
-          icon={NetworkDevice}
-          title="Connections"
-          href="/network/connections"
-          loading={connections.loading && !connections.data}
-          products={reached}
-          value={
-            fromInternet !== undefined ? (
-              <Count value={fromInternet} />
-            ) : connections.error ? (
-              "Unreadable"
-            ) : undefined
-          }
-          trailing={connections.data ? "from the internet" : undefined}
-          tone={(fromInternet ?? 0) > 0 ? "warning" : "default"}
-          hint={
-            connections.data
-              ? `${connections.data.peers.length} remote address${connections.data.peers.length === 1 ? "" : "es"} · ${connections.data.total} sockets`
-              : undefined
-          }
-        />
-        <AreaTile
-          icon={SignIn}
-          title="Logins"
-          href="/security/logins"
-          loading={sessions.loading && !sessions.data}
-          products={loginNetworks}
-          value={
-            sessions.data ? (
-              sessions.data.length === 0 ? (
-                "Nobody in"
-              ) : (
-                <Count
-                  value={sessions.data.length}
-                  unit={sessions.data.length === 1 ? " session" : " sessions"}
-                />
-              )
-            ) : sessions.error ? (
-              "Unreadable"
-            ) : undefined
-          }
-          hint={
-            sessions.data
-              ? remote > 0
-                ? `${remote} over ssh`
-                : "nobody holds a shell right now"
-              : undefined
-          }
-        />
-      </StatGrid>
-
-      <Panel plain>
-        <PanelHeader title="Ways in" />
-        <PanelBody>
-          <Perimeter
-            exposure={exposure}
-            firewall={firewall}
-            fail2ban={fail2ban.data}
-            fromInternet={fromInternet}
-          />
-        </PanelBody>
-      </Panel>
+      <Perimeter
+        exposure={exposure}
+        firewall={{ data: firewall, failed: Boolean(firewallError && !firewall) }}
+        fail2ban={read(fail2ban)}
+        connections={read(connections)}
+        sessions={read(sessions)}
+        ssh={ssh}
+      />
 
       {/* The ways in as boundaries every change is judged against: Caddy
           alone on a routable address, the allowlist before sign-in, the
           tailnet, SSH for a tunnel and tailnet-only previews. */}
       <BoundaryPanel />
     </Page>
-  )
-}
-
-/**
- * A count that counts up when it lands and glides to each poll's value after,
- * as the host Overview's readings do; the unit is set after it as written.
- */
-function Count({ value, unit }: { value: number; unit?: string }) {
-  return (
-    <>
-      <NumberTicker value={value} />
-      {unit}
-    </>
-  )
-}
-
-/**
- * One area, its headline figure, and the way to its page — a `StatTile`
- * behind a `StatLink`, exactly as the host Overview draws its Services row.
- * The glyph before the name is wayfinding, not decoration: it is the mark the
- * sidebar entry carries, so the eye finds "Firewall" without reading. What
- * the figure counts is said with the products themselves after the hint —
- * the programs the peers reach, the network the shells are held from, the
- * tool doing the banning. The figure rises once when its poll lands and a
- * count ticks up to its value, so a row of five fills in rather than
- * flickering from bone to number.
- */
-function AreaTile({
-  icon: Icon,
-  title,
-  href,
-  value,
-  hint,
-  trailing,
-  trend,
-  tone = "default",
-  loading,
-  products = [],
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  title: string
-  href: string
-  value?: React.ReactNode
-  hint?: React.ReactNode
-  /** The figure's unit, set beside it rather than folded into it. */
-  trailing?: React.ReactNode
-  /** The figure's recent shape, where the area keeps one. */
-  trend?: React.ReactNode
-  tone?: Tone
-  loading?: boolean
-  /** What the figure counts, as `product-logo` ids. */
-  products?: string[]
-}) {
-  const settled = !loading
-  return (
-    <StatLink href={href} label={title}>
-      <StatTile
-        className="h-full transition-colors group-hover:bg-row-hover"
-        label={
-          <>
-            <Icon aria-hidden className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand" />
-            {title}
-          </>
-        }
-        value={
-          <span
-            key={settled ? "figure" : "skeleton"}
-            className={cn(
-              "inline-block max-w-full truncate align-bottom",
-              settled && "animate-rise",
-            )}
-          >
-            {loading ? <Skeleton className="my-1.5 h-5 w-24" /> : (value ?? "—")}
-          </span>
-        }
-        tone={value == null ? "default" : tone}
-        trailing={loading ? undefined : trailing}
-        trend={settled ? trend : undefined}
-        hint={
-          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-            {hint && <span className="truncate">{hint}</span>}
-            {settled && <ProductGlyphs ids={products} />}
-          </span>
-        }
-      />
-    </StatLink>
   )
 }
