@@ -223,7 +223,7 @@ export function AlertRow({
         wide && (
           <span className="flex items-center gap-3">
             {mark}
-            <span className="flex w-72 min-w-0">{status}</span>
+            <span className="flex w-64 min-w-0">{status}</span>
           </span>
         )
       }

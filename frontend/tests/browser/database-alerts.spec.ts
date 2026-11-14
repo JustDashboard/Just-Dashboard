@@ -325,13 +325,13 @@ test.describe("database alerts", () => {
       const boxes = await cards.evaluateAll((rows) =>
         rows.map((row) => {
           const box = row.getBoundingClientRect()
-          return { top: Math.round(box.top), height: Math.round(box.height) }
+          return { top: box.top, height: box.height }
         }),
       )
-      expect(new Set(boxes.map((box) => box.height)).size).toBe(1)
+      const spread = (values: number[]) => Math.max(...values) - Math.min(...values)
+      expect(spread(boxes.map((box) => box.height))).toBeLessThan(0.5)
       // Nothing hangs between two cards: each starts where the last one ended, plus the gap.
-      const steps = boxes.slice(1).map((box, at) => box.top - boxes[at].top)
-      expect(new Set(steps).size).toBe(1)
+      expect(spread(boxes.slice(1).map((box, at) => box.top - boxes[at].top))).toBeLessThan(0.5)
       // No bar on a row of its own, and no sentence under one.
       await expect(page.getByText(/of the volume shop-pgdata is used/)).toHaveCount(1)
       await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
