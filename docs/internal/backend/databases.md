@@ -1719,7 +1719,7 @@ are decided here, not by the page.
   `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE`, `SET`, `COMMENT`, a column `DEFAULT`, a `DO` body. The
   pass reads the text by PostgreSQL's own lexical rules (dollar quoting; `E''`, `U&''`, `N''`, `B''` and
   `X''` strings; block comments that nest; numbers in every base 16 takes, underscores included), keeps
-  the `$n` markers the Statements panel asks a value for, and replaces every literal with `?`. That is
+  the `$n` markers a statement's Plan view asks a value for, and replaces every literal with `?`. That is
   every literal, not every value the extension missed: a type's modifiers and an `ORDER BY` position read
   `?` too. In a statement the extension keeps as it came, two values that need no quotes are masked
   however they are written, a bare word included: whatever follows a role's `PASSWORD` (`CREATE`/`ALTER`
