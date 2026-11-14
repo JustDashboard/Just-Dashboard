@@ -333,25 +333,22 @@ export function TransportSecuritySection() {
 
   return (
     <>
-      {chooses && admin && can("destructive") ? (
-        <SettingForm
-          name="Encryption in transit"
-          onSave={() => change(require ? "require" : "allow")}
-          dirty={dirty}
-          changes={dirty ? 1 : 0}
-          saving={Boolean(working)}
-          canEdit
-          applies="immediately"
-          onDiscard={() => {
-            setEdit(undefined)
-            setRefusal(undefined)
-          }}
-        >
-          {section}
-        </SettingForm>
-      ) : (
-        section
-      )}
+      {/* One form in every state, so the picture is not drawn again when the read lands. */}
+      <SettingForm
+        name="Encryption in transit"
+        onSave={() => change(require ? "require" : "allow")}
+        dirty={dirty}
+        changes={dirty ? 1 : 0}
+        saving={Boolean(working)}
+        canEdit={chooses && admin && can("destructive")}
+        applies="immediately"
+        onDiscard={() => {
+          setEdit(undefined)
+          setRefusal(undefined)
+        }}
+      >
+        {section}
+      </SettingForm>
       {dialog}
     </>
   )

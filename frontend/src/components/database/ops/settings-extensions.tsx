@@ -217,6 +217,7 @@ function Extensions() {
     waiting: libraries,
     covers: libraries.length > 0 ? ["shared_preload_libraries"] : [],
     refresh: list.refresh,
+    ready: data !== undefined || down || list.error !== undefined,
   })
 
   const actions = (extension: DbExtension) => {
@@ -246,7 +247,6 @@ function Extensions() {
         {mayEnable && hasUpdate(extension) && (
           <Button
             size="xs"
-            className="rounded-full px-3"
             aria-label={`Update ${extension.name}`}
             onClick={() => setOpened({ kind: "update", extension })}
           >

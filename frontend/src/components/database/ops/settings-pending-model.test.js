@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { pendingHeadline, pendingItems } from "./settings-pending-model"
+import {
+  pendingHeadline,
+  pendingItems,
+  rememberWaiting,
+  rememberedWaiting,
+} from "./settings-pending-model"
 
 const waits = (name) => ({ name, mono: true, state: "restart" })
 
@@ -43,5 +48,15 @@ describe("what the strip at the head of a database's settings names", () => {
     expect(pendingHeadline(1, 0)).toBe("1 waiting for a restart")
     expect(pendingHeadline(2, 1)).toBe("2 waiting for a restart · 1 unsaved change")
     expect(pendingHeadline(1, 3)).toBe("1 waiting for a restart · 3 unsaved changes")
+  })
+
+  test("what one page learnt is what the next one draws first, by database", () => {
+    expect(rememberedWaiting(1)).toBeUndefined()
+    rememberWaiting(1, [waits("shared_buffers")])
+    expect(rememberedWaiting(1)).toEqual([waits("shared_buffers")])
+    expect(rememberedWaiting(2)).toBeUndefined()
+    // Nothing waiting is remembered too: the strip does not come back from an older answer.
+    rememberWaiting(1, [])
+    expect(rememberedWaiting(1)).toEqual([])
   })
 })

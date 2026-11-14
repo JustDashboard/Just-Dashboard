@@ -304,7 +304,7 @@ export function ParametersSection() {
           report.push({
             name: parameter.name,
             statements: answer.statements,
-            words: `${reset ? "Reset to" : "Now"} ${answer.value || "empty"}${parameter.unit ? ` ${parameter.unit}` : ""}. ${changeWords(answer)}`,
+            words: `${reset ? "Reset to" : "Set to"} ${answer.value || "empty"}${parameter.unit ? ` ${parameter.unit}` : ""}. ${changeWords(answer)}`,
             tone: answer.restartRequired || !answer.persisted ? "warning" : "default",
             previous: reset || parameter.redacted ? undefined : parameter.value,
           })
@@ -380,6 +380,7 @@ export function ParametersSection() {
       state: "reset" in change.edit ? "reset" : "changed",
     })),
     refresh: list.refresh,
+    ready: data !== undefined || down || list.error !== undefined,
   })
 
   const rows = (parameters: Parameter[]) => (
@@ -389,6 +390,7 @@ export function ParametersSection() {
           key={parameter.name}
           parameter={parameter}
           editable={editable(parameter)}
+          aligned={mayEdit}
           resets={Boolean(resets)}
           edit={edits[parameter.name]}
           held={kept[parameter.name]}
@@ -633,9 +635,13 @@ export function ParametersSection() {
  * range, where it may be set) and the whole of a description the row has cut
  * short are behind the ⓘ beside its name.
  */
+/** The room a row's unit and reset take at its end, left on the lines that have neither. */
+const SLOTS = "sm:pr-[4.5rem]"
+
 function ParameterRow({
   parameter,
   editable,
+  aligned,
   resets,
   edit,
   held,
@@ -645,6 +651,8 @@ function ParameterRow({
 }: {
   parameter: Parameter
   editable: boolean
+  /** The reader may change parameters here: every row keeps the controls' edge, so values line up. */
+  aligned: boolean
   /** The server can put a parameter back to a default it publishes. */
   resets: boolean
   edit: ParameterEdit | undefined
@@ -668,7 +676,7 @@ function ParameterRow({
   return (
     <li
       data-parameter={parameter.name}
-      className="grid min-w-0 items-center gap-x-4 gap-y-1.5 py-2.5 sm:grid-cols-[minmax(0,1fr)_15rem]"
+      className="grid min-w-0 items-center gap-x-4 gap-y-1.5 py-2.5 sm:grid-cols-[minmax(0,1fr)_18rem]"
     >
       <div className="min-w-0 space-y-0.5">
         {/* A fixed line: a tag is a pixel taller than the name beside it. */}
@@ -776,25 +784,35 @@ function ParameterRow({
                   onChange={(event) => set(event.target.value)}
                   autoComplete="off"
                   spellCheck={false}
-                  className="min-w-0 flex-1 font-mono sm:h-8 sm:w-36 sm:flex-none sm:text-right sm:text-xs"
+                  className="min-w-0 flex-1 font-mono sm:h-8 sm:text-right sm:text-xs"
                 />
-                {parameter.unit && (
-                  <span className="shrink-0 text-hint text-muted-foreground">{parameter.unit}</span>
-                )}
               </>
             )}
-            {resets && parameter.changed && !resetting && (
-              <IconAction
-                label={`Reset ${parameter.name} to its default`}
-                disabled={busy}
-                onClick={() => onEdit({ reset: true })}
-              >
-                <RotateCounterClockwise />
-              </IconAction>
-            )}
+            {/* The unit's place and the reset's, kept on every row so the values end on one edge. */}
+            <span className="w-8 shrink-0 truncate text-hint text-muted-foreground">
+              {parameter.type !== "bool" && parameter.type !== "enum" ? parameter.unit : ""}
+            </span>
+            <span className="flex w-7 shrink-0 justify-center">
+              {resets && parameter.changed && !resetting && (
+                <IconAction
+                  label={`Reset ${parameter.name} to its default`}
+                  disabled={busy}
+                  onClick={() => onEdit({ reset: true })}
+                >
+                  <RotateCounterClockwise />
+                </IconAction>
+              )}
+            </span>
           </div>
         ) : (
-          <div className="flex h-11 min-w-0 items-center sm:h-8 sm:justify-end">
+          <div
+            className={cn(
+              "flex min-w-0 items-center sm:h-8 sm:justify-end",
+              // Beside rows that hold a control it is the control's height; a list
+              // nobody may edit is set closer.
+              aligned ? cn("h-11", SLOTS) : "h-8",
+            )}
+          >
             <ParameterValue parameter={parameter} />
           </div>
         )}
@@ -804,6 +822,7 @@ function ParameterRow({
           title={problem ?? facts}
           className={cn(
             "numeric w-full truncate text-hint sm:text-right",
+            aligned && SLOTS,
             problem ? "text-destructive" : "text-muted-foreground",
           )}
         >

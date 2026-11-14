@@ -17,6 +17,8 @@ import { isDown } from "@/components/database/ops/performance-parts"
 import {
   pendingHeadline,
   pendingItems,
+  rememberWaiting,
+  rememberedWaiting,
   type PendingReport,
   type PendingWord,
 } from "@/components/database/ops/settings-pending-model"
@@ -32,7 +34,12 @@ const PendingContext = createContext<{
 
 /** What a report says, without the function it carries: two that say the same are one. */
 const said = (report: PendingReport) =>
-  JSON.stringify([report.waiting ?? [], report.edits ?? [], report.covers ?? []])
+  JSON.stringify([
+    report.waiting ?? [],
+    report.edits ?? [],
+    report.covers ?? [],
+    report.ready ?? true,
+  ])
 
 /**
  * Puts what a section holds on the strip at the head of its page: what it has
@@ -83,6 +90,10 @@ export function usePendingReport(key: string, report: PendingReport) {
  *
  * The page a parameter is changed on reads the whole list anyway, so it
  * reports what waits (`usePendingReport`) and this asks for nothing there.
+ *
+ * What a page learns is remembered for the next one, so the strip is in its
+ * place when the next settings page is first painted and that page's read
+ * landing moves nothing.
  */
 export function SettingsPending({
   page,
@@ -111,12 +122,13 @@ export function SettingsPending({
   const value = useMemo(() => ({ report }), [report])
 
   // A SQL engine marks the parameters it has stored and not yet read. A
-  // key–value server sets its configuration at once and a document database
-  // lists counters, so neither is asked.
+  // key–value server sets its configuration at once, a document database
+  // lists counters and a file has no server to restart, so none of them is asked.
   const asks =
     page !== "parameters" &&
     engine.kind === "sql" &&
     engine.can("settings") &&
+    !engine.can("fileBased") &&
     !isDown(status.state)
   const list = usePoll(
     (signal) =>
@@ -172,7 +184,19 @@ export function SettingsPending({
     return () => window.clearTimeout(timer)
   }, [flight, reread])
 
-  const { waiting, edits } = pendingItems(stored, Object.values(reports))
+  const found = pendingItems(stored, Object.values(reports))
+  // Until this page's own reads have answered, what the last page knew stands.
+  const settled =
+    (!asks || list.data !== undefined || list.error !== undefined) &&
+    Object.values(reports).every((one) => one.ready !== false)
+  const waiting = settled ? found.waiting : (rememberedWaiting(id) ?? found.waiting)
+  const { edits } = found
+  const names = waiting.map((item) => `${item.name}:${item.state}`).join(",")
+  useEffect(() => {
+    if (settled) rememberWaiting(id, waiting)
+    // `names` is what `waiting` says: the list itself is new on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, settled, names])
   const drawn = waiting.length > 0
   const mayRestart = power.can.restart && Boolean(summary)
   const restart = () => {

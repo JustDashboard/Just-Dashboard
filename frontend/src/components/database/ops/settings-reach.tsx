@@ -332,6 +332,24 @@ export function ReachabilitySection() {
     edits: dirty ? [{ name: "Reachable from", state: "changed" }] : [],
   })
 
+  // What each answer does, behind the label: the cards said it in a paragraph each.
+  const what = (
+    <ul className="space-y-1">
+      <li>
+        This server: port {port} on loopback, for programs here and the deployments linked to it.
+      </li>
+      <li>
+        One address: port {port} on one address of this machine: a tailnet, a VPN, a local network.
+      </li>
+      <li>
+        Allowed: port {port} on every interface, and the gateway refuses every address not on your
+        list.
+      </li>
+      <li>Anywhere: port {port} on every interface. Only the password is in the way.</li>
+      <li>Save asks first: a new binding replaces the container and drops its sessions.</li>
+    </ul>
+  )
+
   const section = (
     <SettingSection
       id="reachability"
@@ -366,29 +384,7 @@ export function ReachabilitySection() {
 
       {mayChange && data && draft && (
         <>
-          <Field
-            label="Reachable from"
-            info={
-              <ul className="space-y-1">
-                <li>
-                  This server: port {port} on loopback, for programs here and the deployments linked
-                  to it.
-                </li>
-                <li>
-                  One address: port {port} on one address of this machine: a tailnet, a VPN, a local
-                  network.
-                </li>
-                <li>
-                  Allowed: port {port} on every interface, and the gateway refuses every address not
-                  on your list.
-                </li>
-                <li>Anywhere: port {port} on every interface. Only the password is in the way.</li>
-                <li>
-                  Save asks first: a new binding replaces the container and drops its sessions.
-                </li>
-              </ul>
-            }
-          >
+          <Field label="Reachable from" info={what}>
             <Segments
               fill
               label="Where it is reachable from"
@@ -434,7 +430,7 @@ export function ReachabilitySection() {
       {/* The place the answers take, kept while they are read. */}
       {admin && can("destructive") && !data && !access.error && (
         <div data-slot="reach-loading">
-          <Field label="Reachable from">
+          <Field label="Reachable from" info={what}>
             <Skeleton className="h-8 w-full" />
           </Field>
         </div>
@@ -477,24 +473,23 @@ export function ReachabilitySection() {
 
   return (
     <>
-      {mayChange ? (
-        <SettingForm
-          name="Where it is reachable from"
-          onSave={save}
-          dirty={dirty}
-          changes={dirty ? 1 : 0}
-          saving={busy}
-          invalid={dirty && Boolean(draft?.problem)}
-          canEdit
-          applies="immediately"
-          onDiscard={() => setEdit(() => ({}))}
-          error={turnedDown && `It was not changed. ${turnedDown}`}
-        >
-          {section}
-        </SettingForm>
-      ) : (
-        section
-      )}
+      {/* One form in every state, so the section is not drawn again when the
+          binding lands and with it the right to change it. It is on the bar
+          only for the role and the container that can be changed. */}
+      <SettingForm
+        name="Where it is reachable from"
+        onSave={save}
+        dirty={dirty}
+        changes={dirty ? 1 : 0}
+        saving={busy}
+        invalid={dirty && Boolean(draft?.problem)}
+        canEdit={mayChange}
+        applies="immediately"
+        onDiscard={() => setEdit(() => ({}))}
+        error={turnedDown && `It was not changed. ${turnedDown}`}
+      >
+        {section}
+      </SettingForm>
       {dialog}
     </>
   )
@@ -777,7 +772,7 @@ function ReachPicture({
         <>
           This server
           {machine.length > 0 && (
-            <span className="font-mono tracking-normal"> · {machine.join(", ")}</span>
+            <span className="font-mono leading-none tracking-normal"> · {machine.join(", ")}</span>
           )}
         </>
       }

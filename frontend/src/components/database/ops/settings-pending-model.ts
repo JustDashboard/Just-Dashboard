@@ -29,6 +29,8 @@ export type PendingReport = {
   edits?: PendingWord[]
   /** Reads the section's own state again, once a restart has ended. */
   refresh?: () => void
+  /** False while the section is still reading what it would report. */
+  ready?: boolean
 }
 
 /**
@@ -57,4 +59,20 @@ export function pendingItems(
 export function pendingHeadline(waiting: number, edits: number): string {
   const stored = `${waiting} waiting for a restart`
   return edits > 0 ? `${stored} · ${plural(edits, "unsaved change")}` : stored
+}
+
+/**
+ * What waited the last time a settings page of this database knew, kept for
+ * as long as the dashboard is open. The strip is drawn from it on the first
+ * paint of the next page, so going from one settings page to another does not
+ * bring the strip in a moment after the page and push the page down.
+ */
+const remembered = new Map<number, PendingWord[]>()
+
+export function rememberWaiting(id: number, waiting: readonly PendingWord[]) {
+  remembered.set(id, [...waiting])
+}
+
+export function rememberedWaiting(id: number): PendingWord[] | undefined {
+  return remembered.get(id)
 }
