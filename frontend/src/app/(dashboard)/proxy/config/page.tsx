@@ -35,7 +35,6 @@ import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import type { ConfigTest } from "@/components/proxy/test-result"
 import { testedLabel, warningCount } from "@/components/proxy/config-test"
 import {
-  authorship,
   folderOf,
   includeMap,
   readCount,
@@ -386,7 +385,6 @@ function ConfigIdentity({
       folders: new Set(tree.files.map((f) => folderOf(f.path, tree.root))).size,
       read: readCount(tree.files),
       unread: unreadCount(tree.files),
-      ...authorship(tree.files),
     }
   }, [tree])
 
@@ -440,11 +438,6 @@ function ConfigIdentity({
                 ", every file"
               )}
             </HostFact>
-            <FactDot />
-            <span title={`${counts.hand} written by hand`}>
-              <span className="numeric font-medium text-foreground">{counts.managed}</span> by the
-              dashboard
-            </span>
           </>
         )
       }

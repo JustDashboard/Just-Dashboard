@@ -411,26 +411,15 @@ function FleetState({ targets }: { targets: FleetTarget[] }) {
 
 function FleetFacts({ targets }: { targets: FleetTarget[] }) {
   const facts = fleetFacts(targets)
-  // The state beside the name says the worst of these; the rest follow here.
-  const worst = fleetWorst(facts)
+  // The state beside the name says the worst of the reports. How many are
+  // below A, expiring or unreachable are the chips over the list, where a
+  // press narrows to them; they were counted here as well.
   const parts: React.ReactNode[] = [
     <span key="total">{plural(facts.total, "name")}</span>,
     <span key="scanned">
       {facts.scanned === facts.total ? "all scanned" : `${facts.scanned} scanned`}
     </span>,
   ]
-  if (facts.belowA > 0 && worst !== "below")
-    parts.push(
-      <span key="below" className="font-medium text-warning">
-        {facts.belowA} below A
-      </span>,
-    )
-  if (facts.expiring > 0 && worst !== "expiring")
-    parts.push(
-      <span key="expiring" className="font-medium text-warning">
-        {facts.expiring} expiring
-      </span>,
-    )
   if (facts.newest) parts.push(<span key="newest">last report {relativeTime(facts.newest)}</span>)
   return parts.flatMap((part, index) =>
     index === 0 ? [part] : [<FactDot key={`dot-${index}`} />, part],

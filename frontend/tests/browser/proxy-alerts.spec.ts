@@ -265,8 +265,8 @@ test("the line counts the rules that are on, what fires and who is told", async 
   await expect(identity.getByText("2 rules on", { exact: true })).toBeVisible()
   await expect(identity.getByText("1 firing", { exact: true })).toBeVisible()
   await expect(identity.getByText("telling 1 channel", { exact: true })).toBeVisible()
-  await expect(identity.getByText("1 paused", { exact: true })).toBeVisible()
-  // The list's count stays the list's.
+  // How many are paused is the list's count, not the line's.
+  await expect(identity.getByText("1 paused", { exact: true })).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Rules" })).toContainText("3 rules · 1 paused")
   // Check now is Firing's own verb, and still asks.
   let asked = 0

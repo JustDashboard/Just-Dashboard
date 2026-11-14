@@ -342,8 +342,13 @@ export function StreamsPage() {
                 stream module {moduleLabel(data.module)}
               </span>
             </HostFact>
-            <FactDot />
-            <span className="numeric">{plural(data.streams.length, "forward")}</span>
+            {/* None is the state beside the name; a count of nothing under it said it twice. */}
+            {data.streams.length > 0 && (
+              <>
+                <FactDot />
+                <span className="numeric">{plural(data.streams.length, "forward")}</span>
+              </>
+            )}
             {open > 0 && (
               <>
                 <FactDot />

@@ -1705,9 +1705,12 @@ test("every site opens on its figures in words and lists one-line cards", async 
     const identity = page.locator("[data-slot='host-identity']")
     await expect(identity.getByRole("heading", { name: "Every site" })).toBeVisible()
     await expect(identity).toContainText("6 names")
-    await expect(identity).toContainText("3 below A")
-    await expect(identity).toContainText("1 expiring")
+    // The worst of the reports is the line's state; the counts are the chips
+    // over the list, and are not said on the line as well.
     await expect(identity).toContainText("1 unreachable")
+    await expect(identity).not.toContainText("below A")
+    await expect(page.getByRole("button", { name: /^Below A 3$/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: /^Expiring 1$/ })).toBeVisible()
     await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
     await expect(page.locator("table")).toHaveCount(0)
 

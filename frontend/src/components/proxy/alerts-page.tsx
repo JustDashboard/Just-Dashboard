@@ -49,7 +49,7 @@ import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/compo
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
 import { EmptyNote, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { HostIdentity } from "@/components/metrics/host-identity"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   AllClear,
@@ -500,18 +500,6 @@ export function AlertsPage() {
               <span className="numeric">
                 {told === 0 ? "telling nobody yet" : `telling ${plural(told, "channel")}`}
               </span>
-              {paused > 0 && (
-                <>
-                  <FactDot />
-                  <span className="numeric">{paused} paused</span>
-                </>
-              )}
-              {muted.length > 0 && (
-                <>
-                  <FactDot />
-                  <span className="numeric">{muted.length} muted</span>
-                </>
-              )}
             </>
           )
         }

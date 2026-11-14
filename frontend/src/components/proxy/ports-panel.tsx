@@ -435,10 +435,10 @@ function PortsView() {
       <Identity
         facts={
           <>
+            {/* How many, and how many of them the internet reaches: the page's
+                reading. The protocols and the private networks were here too,
+                each the figure on its chip over the list, said twice. */}
             <span className="numeric text-foreground">{counts.all} listening</span>
-            <span className="numeric">
-              {counts.tcp} TCP, {counts.udp} UDP
-            </span>
             <FactDot />
             <span className={cn("numeric", internetTone)} title={internetHint(all)}>
               {counts.internet > 0
@@ -447,14 +447,6 @@ function PortsView() {
                   ? `${onTheUplink} internet-facing if the uplink is mapped`
                   : "nothing the internet can reach"}
             </span>
-            {counts.private > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric" title={privateHint(all)}>
-                  {counts.private} on private networks
-                </span>
-              </>
-            )}
             <FactDot />
             <Freshness
               at={data.at}
@@ -583,7 +575,13 @@ function PortsView() {
                   {(Object.keys(REACH_LABEL) as ReachFilter[])
                     .filter((key) => key === "all" || key === reach || facets.reach[key] > 0)
                     .map((key) => (
-                      <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
+                      <FilterChip
+                        key={key}
+                        selected={reach === key}
+                        onClick={() => setReach(key)}
+                        // Which networks, where the count alone does not say.
+                        title={key === "private" ? privateHint(all) : undefined}
+                      >
                         {REACH_LABEL[key]} <ChipCount>{facets.reach[key]}</ChipCount>
                       </FilterChip>
                     ))}

@@ -1927,8 +1927,8 @@ port and the handshake, the failed step red and the rest not reached. The row is
 before anything is asked and while the first answer is on its way, at its loaded height, with a
 pulse down its lines while a scan is in flight and once when the answer lands. The four tiles that
 opened the report ("—" before a scan) are gone: each reading stands on its step. Every site is an
-identity line saying the names, how many are below A, expiring or unreachable and how old the newest
-report is, with Scan all sites and an Export CSV menu, over one-line cards (the engine's mark with
+identity line saying the names, how many are scanned, the worst of the reports as its state and how old the newest
+report is (how many are below A, expiring or unreachable are the chips over the list), with Scan all sites and an Export CSV menu, over one-line cards (the engine's mark with
 the report's verdict in its corner, the name, its days, protocol, issues and age in aligned columns
 and the grade last) that open the report. The request tester's line is the request: the URL, then
 the answer's status in its colour, protocol, first byte, total and bytes read; its redirect chain
@@ -1993,9 +1993,10 @@ report keeps findings, protocol checks and HTTP readings beside the live certifi
 vertical chain; long header values wrap instead of hiding the verdict. Its scan field is one input
 group, the address and its port, with a hint naming what will be scanned and a native datalist of
 known names; a scan in flight is a line with its elapsed time and an outline Cancel. The Ports page (0.8.7) opens on
-its identity line — "9 listening · 7 TCP, 2 UDP · 5 internet-facing · 2 on private networks · 2
-dangerous services exposed", each count's make-up its tooltip, the dangerous exposure beside the
-name as the page's state, then how old the list is, with Find a free port as the line's command and
+its identity line — "9 listening · 5 internet-facing", the count's make-up its tooltip, the dangerous
+exposure ("2 dangerous services exposed") beside the name as the page's state, then how old the list
+is (the protocols and the private networks are the chips over the list, which networks the chip's
+tooltip), with Find a free port as the line's command and
 Refresh, Pause and the two exports in its `⋯` — where four tiles stood; then
 `ports-picture.tsx`, who reaches what: the networks a socket answers on (the internet, the tailnet,
 a VPN, a private network, Docker's networks, only this server) wired to the programs listening
@@ -2051,8 +2052,8 @@ narrowed to it. `proxy-traffic.spec.ts` covers every state at 1280 and 390.
 **Configuration and Tunnel open on what they are about.** Neither draws a way back over its line,
 as no page of the section does. Configuration (`/proxy/config`) is an
 identity line — nginx's mark, its directory in mono, how many files in how many folders, how many
-nginx reads, how many the dashboard wrote, and for an administrator the last config test as a
-coloured word — with Test config as the line's brand command and a `⋯` of Read again, the main
+nginx reads, and for an administrator the last config test as a
+coloured word beside the directory (who wrote the files is the chips over the list) — with Test config as the line's brand command and a `⋯` of Read again, the main
 file, the last test and the engine overview. Under it the views are an underlined strip in the
 address (`?tab=effective`, `settings`, `lint`, `history`; Files has none), administrators only as
 before. Files opens on the directory as nginx walks it (`config-picture.tsx`, its lanes from

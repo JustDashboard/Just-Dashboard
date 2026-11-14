@@ -1716,8 +1716,10 @@ test("the configuration page lists nginx's files by folder, each saying whether 
   await expect(identity).toContainText("13 files in 8 folders")
   // A link and its file are one file read once; the module outside counts.
   await expect(identity).toContainText("7 read, 3 not")
-  await expect(identity).toContainText("2 by the dashboard")
-  await expect(identity.getByTitle("7 written by hand")).toBeVisible()
+  // Who wrote them is the chips over the list, not counted on the line as well.
+  await expect(identity).not.toContainText("by the dashboard")
+  await expect(page.getByRole("button", { name: /^Managed 2$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^By hand 7$/ })).toBeVisible()
   await expect(identity).toContainText("no test since the dashboard started")
   await expect(page.locator("[data-slot='stat-grid'], [data-slot='stat-tile']")).toHaveCount(0)
 
