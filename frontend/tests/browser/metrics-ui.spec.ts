@@ -81,6 +81,12 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
     rows.map((row) => row.getBoundingClientRect().height),
   )
   expect(new Set(heights)).toEqual(new Set([32]))
+  // The block holds eight rows, waiting or read, and a server fills them: no
+  // band of nothing stands between the last process and the section under it.
+  await expect(ranked).toHaveCount(8)
+  const last = (await ranked.last().boundingBox())!
+  const processor = (await page.getByRole("heading", { name: "Processor" }).boundingBox())!
+  expect(processor.y - (last.y + last.height)).toBeLessThan(96)
 
   // One section per resource, in the order a reader asks about them.
   const sections = await page
