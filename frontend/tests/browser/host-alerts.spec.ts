@@ -20,11 +20,15 @@ const rule = (id: number, kind: string, params: object, more: object = {}) => ({
   ...more,
 })
 
-/** Four rules in the four states a row has: firing, unjudged, watching, paused. */
+/**
+ * Four rules in the four states a row has: firing, unjudged, watching, paused.
+ * The last pass is ten minutes before the fixture's clock, well past the 45
+ * seconds inside which the page says "just now".
+ */
 const everyState = {
   intervalSeconds: 60,
   metrics: true,
-  lastPass: iso(now - 20_000),
+  lastPass: iso(now - 600_000),
   rules: [
     rule(1, "container_down", { minutes: 2 }),
     rule(
@@ -249,6 +253,10 @@ test("the page opens on what the rules are doing, with its verbs on that line", 
     checks++
     await json(route, everyState)
   })
+  // The line says how long ago the rules were checked, and `now` is the
+  // moment this file was loaded: a fresh worker read "just now" and one a
+  // few minutes old "3m 20s ago". The page reads the fixture's own clock.
+  await page.clock.setFixedTime(new Date(now))
   await page.goto("/metrics/alerts")
   const line = identity(page)
   await expect(line).toHaveAttribute("data-layout", "project")
@@ -256,7 +264,7 @@ test("the page opens on what the rules are doing, with its verbs on that line", 
   await expect(line.getByText("1 firing", { exact: true })).toHaveClass(/text-destructive/)
   await expect(line).toContainText("3 rules on, 1 paused")
   await expect(line).toContainText("telling 1 channel of 2")
-  await expect(line).toContainText(/checked .* ago, every minute/)
+  await expect(line).toContainText("checked 10m ago, every minute")
   // One command on the line; Check now is behind the menu, and neither
   // stands on a section's line any more.
   await expect(line.getByRole("button", { name: "Add rule" })).toBeVisible()
