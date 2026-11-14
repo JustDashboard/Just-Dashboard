@@ -414,11 +414,20 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   boxes floating on the page; the screen is one working surface. The three columns' top strips are all
   40px (the rail's and the tools column's `PaneHeader` are pinned to `h-10`, the emulator's strip is
   `min-h-10`), so their hairlines meet as one rule across the frame. Immersive mode drops the wrapper's
-  frame along with the page. Below `lg` the rail and the tools column **cover the emulator** inside the
-  frame instead of sitting beside it — stacked over and under it they left a phone's terminal one line
-  tall — so only one of the two is up at a time (`useMediaQuery` in `page.tsx` decides), picking a
-  session puts the rail away, and each carries its own hide button while it is an overlay — and only
-  then: beside the emulator, the strip's two toggles are the one way to hide either panel.
+  frame along with the page. Below `lg` the frame is the screen, edge to edge as the Git workspace's
+  is, and shows **one pane at a time** over the shared bar at its foot (`phone-panes.tsx`): Sessions,
+  Terminal, Files and Git, the last two being the tools column's halves, with the count of changed
+  files on Git. The page opens on the emulator. The rail and the column used to cover the emulator
+  there, each with a hide button of its own; covered, the emulator was still laid out, so a phone's
+  keyboard rising for the session filter fitted it to a few rows and told the shell so. Now a pane
+  that is not shown is `display: none` and the emulators are handed `visible={false}`
+  (`XtermPane`'s own state for a window that is not on screen): they keep their sockets and their
+  grids, the page's measure of the pane grid ignores a size of nothing, and showing the pane again
+  fits each emulator and says its size once. Picking a session, or opening one, shows the emulator
+  and gives it the keyboard. The strip's two toggles are not drawn on a phone and their chords move
+  between the panes instead; beside the emulator they remain the one way to hide either panel.
+  Which half of the column is open is held by the page (`terminal.tools.tab`), since the bar picks it
+  as well as the column's own strip, which a phone does not draw.
 - `session-rail.tsx` is a plain column: a "Sessions" strip with the new-session button, then the
   list, newest first. A row is one line — the program mark, the session's label and, at the end, the
   activity mark (below), with the close button after it under the pointer (`rowReveal`). That is
