@@ -2146,7 +2146,10 @@ test("on a phone the table editor is one pane with a bar at its foot, and a row 
   await expect(page.locator("[data-slot=row-card][data-state=inserted]")).toHaveCount(1)
   await bar(page).getByRole("button", { name: "Discard", exact: true }).click()
 
-  // The tables are the bar's first stop, and choosing one goes back to its rows.
+  // The tables are the bar's first stop, and choosing one goes to its rows:
+  // not to the row panel the table before it was left on.
+  await card(page, 0).click()
+  await expect(panel).toContainText("Row 1")
   await showPane(page, "Tables")
   const rail = page.getByRole("navigation", { name: "tables of this schema" })
   await rail.getByRole("link", { name: /^other/ }).click()

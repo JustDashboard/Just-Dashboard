@@ -182,6 +182,8 @@ export function SqlData() {
   if (railFor !== wantedKey) {
     setRailFor(wantedKey)
     setRailOver(wantedKey === "")
+    // Another table opens on its rows, not on the row panel the last one was left on.
+    setInspectingOver(false)
   }
 
   const detail = useTableDetail(id, shown?.schema ?? "", shown?.table ?? "", shown !== null)
@@ -335,11 +337,17 @@ export function SqlData() {
   const pane: DataPane = railOver ? "tables" : rowOver ? "details" : "rows"
   const pickPane = (next: DataPane) => {
     setRailOver(next === "tables")
+    // With no table open there is no row to show: the stop leads to what
+    // the schema holds, and leaves nothing behind for the table opened next.
+    if (next === "details" && shown === null) return
     if (next === "details") {
       // The row panel is the Data view's: another view of the table gives way.
       if (view.view !== "data") setView({ view: "data" })
       setInspecting(true)
-    } else if (next === "rows") setInspecting(false)
+    }
+    // One pane at a time: the row panel lies over the table as the rail
+    // does, and left open it lay over the rail too.
+    else setInspecting(false)
   }
 
   // Beside the table the rail is a column to show or put away, from the
