@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
-import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, LoadingPanel } from "@/components/state"
 import { FilterChip } from "@/components/tabs"
@@ -17,6 +16,7 @@ import {
 } from "@/components/ui/table"
 import { redisCommandStats } from "@/components/database/redis/api"
 import { micros, perSecond } from "@/components/database/redis/performance/samples"
+import { Fig, ShareCell, ShareHead, TitleFact } from "@/components/database/ops/performance-words"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisCommandStat, RedisCommandStats } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
@@ -34,9 +34,13 @@ const ORDERS: { id: Order; label: string }[] = [
  *
  * The figures count from when the server started. Total time is the order
  * that says where the load is — a command a microsecond long, run a million
- * times, weighs more than a slow one run once — and the bar under each name
- * is its share of all of it. Two readings of the same counters give how
+ * times, weighs more than a slow one run once — and each command's share of
+ * all of it is a figure beside its time, in a column of its own: it was a bar
+ * under the name until 0.8.7. Two readings of the same counters give how
  * often each is being called now.
+ *
+ * What the server has run in all is one fact on the title line, where four
+ * tiles stood over the list.
  */
 export function CommandsView({ redis }: { redis: Redis }) {
   const { id } = redis
@@ -61,24 +65,9 @@ export function CommandsView({ redis }: { redis: Redis }) {
   }
   const rows = [...data.commands].sort((a, b) => b[order] - a[order])
   const percentiles = rows.some((command) => command.p99Us !== undefined)
-  const most = Math.max(...rows.map((command) => command[order]), 1)
 
   return (
     <div className="space-y-6">
-      <MetricStrip>
-        <Metric
-          label="Commands run"
-          value={data.totalCalls.toLocaleString()}
-          hint="since it started"
-        />
-        <Metric label="Time spent running them" value={micros(data.totalUsec)} />
-        <Metric
-          label="On average"
-          value={data.totalCalls > 0 ? micros(data.totalUsec / data.totalCalls) : "—"}
-          hint="a command"
-        />
-        <Metric label="Different commands" value={data.commands.length.toLocaleString()} />
-      </MetricStrip>
       {stats.error && (
         <p role="status" className="text-hint text-warning">
           The statistics could not be read again just now: {stats.error.message}
@@ -88,17 +77,28 @@ export function CommandsView({ redis }: { redis: Redis }) {
         <PanelHeader
           title="Commands"
           actions={
-            <div role="group" aria-label="Order" className="flex gap-0.5">
-              {ORDERS.map((entry) => (
-                <FilterChip
-                  key={entry.id}
-                  selected={order === entry.id}
-                  onClick={() => setOrder(entry.id)}
-                >
-                  {entry.label}
-                </FilterChip>
-              ))}
-            </div>
+            <>
+              <TitleFact>
+                <Fig>{data.totalCalls.toLocaleString()}</Fig> run since it started, in{" "}
+                <Fig>{micros(data.totalUsec)}</Fig>
+                {data.totalCalls > 0 && (
+                  <>
+                    : <Fig>{micros(data.totalUsec / data.totalCalls)}</Fig> each
+                  </>
+                )}
+              </TitleFact>
+              <div role="group" aria-label="Order" className="flex gap-0.5">
+                {ORDERS.map((entry) => (
+                  <FilterChip
+                    key={entry.id}
+                    selected={order === entry.id}
+                    onClick={() => setOrder(entry.id)}
+                  >
+                    {entry.label}
+                  </FilterChip>
+                ))}
+              </div>
+            </>
           }
         />
         <PanelBody flush className="group-data-[plain]/panel:-mx-4">
@@ -110,6 +110,7 @@ export function CommandsView({ redis }: { redis: Redis }) {
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="w-2/5">Command</TableHead>
                   <TableHead className="text-right">Total time</TableHead>
+                  <ShareHead />
                   <TableHead className="text-right">Calls</TableHead>
                   <TableHead className="text-right">Now</TableHead>
                   <TableHead className="text-right">Per call</TableHead>
@@ -124,26 +125,11 @@ export function CommandsView({ redis }: { redis: Redis }) {
                   const failed = (command.failed ?? 0) + (command.rejected ?? 0)
                   return (
                     <TableRow key={command.command}>
-                      <TableCell className="py-2">
-                        <span className="block font-mono font-medium">{command.command}</span>
-                        <span
-                          aria-hidden
-                          className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-meter-track"
-                        >
-                          <span
-                            className="block h-full rounded-full bg-primary transition-[width]"
-                            style={{ width: `${Math.max((command[order] / most) * 100, 1.5)}%` }}
-                          />
-                        </span>
+                      <TableCell className="py-2 font-mono font-medium">
+                        {command.command}
                       </TableCell>
-                      <TableCell className="numeric text-right">
-                        {micros(command.usec)}
-                        <span className="ml-1.5 text-muted-foreground">
-                          {data.totalUsec > 0
-                            ? `${((command.usec / data.totalUsec) * 100).toFixed(1)}%`
-                            : ""}
-                        </span>
-                      </TableCell>
+                      <TableCell className="numeric text-right">{micros(command.usec)}</TableCell>
+                      <ShareCell part={command.usec} whole={data.totalUsec} />
                       <TableCell className="numeric text-right">
                         {command.calls.toLocaleString()}
                       </TableCell>
