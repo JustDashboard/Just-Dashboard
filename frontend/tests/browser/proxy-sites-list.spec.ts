@@ -1185,6 +1185,9 @@ test("the password-file warning says what nginx really does without the file", a
 test("a deployment's route leads to its deployment and is edited only after asking", async ({
   page,
 }) => {
+  // Two openings of the file viewer, each waiting on Monaco: 27s of a 30s
+  // timeout on a machine at load 22.
+  test.slow()
   await mockProxy(page, { included: true })
   await serveSites(page, [app, owned, leftBehind])
   const asked: string[] = []
@@ -1268,7 +1271,15 @@ test("a deployment's route leads to its deployment and is edited only after aski
   await expect(page.getByText(/anyway completed/)).toHaveCount(0)
   await expect(page.getByText("shop writes this route", { exact: true })).toHaveCount(0)
   expect(asked).toContain("form")
+})
 
+// Its own test: with the visits above it ran within seconds of its timeout
+// on a busy machine.
+test("an archived deployment's route is the operator's, and a live one's menu leads to its deployment", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, owned, leftBehind])
   // An archived environment deploys nothing: its route is the operator's.
   await page.goto("/proxy/sites")
   const leftMenu = await openMenu(page, "just-dashboard-env-9.conf")
