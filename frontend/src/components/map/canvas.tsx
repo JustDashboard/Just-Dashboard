@@ -18,9 +18,12 @@ import {
   ArrowUpRight,
   Fullscreen,
   FullscreenClose,
+  Information,
+  Layers,
   Minus,
   Plus,
   RotateCounterClockwise,
+  ServerMap,
   SidebarRightClose,
   SidebarRightOpen,
   Warning,
@@ -55,7 +58,11 @@ import {
   type StackData,
 } from "@/components/map/nodes"
 import { SystemRail } from "@/components/map/rail"
+import { PaneBar } from "@/components/phone-panes"
 import { unreadNotices } from "@/components/map/unread"
+
+/** A phone's panes: the systems, the canvas, and the inspector. */
+type MapPane = "systems" | "map" | "about"
 
 const ZOOM = { min: 0.06, max: 2 }
 /**
@@ -117,7 +124,9 @@ export type Unread = { key: string; label: string; reason?: string }
  * The map's canvas: every system's diagram in its own frame, side by side,
  * with the rail of systems down its left and the inspector down its right, and
  * nothing over it but the few controls that float on it. On a phone it is the
- * canvas alone.
+ * canvas alone, unless the page asks for `panes`: then the rail and the
+ * inspector are panes of their own over it, and a bar at the foot picks which
+ * of the three is shown (`components/phone-panes.tsx`).
  *
  * The server map draws every system the server runs on it; the databases map
  * draws one diagram for each database on the same canvas, so both move,
@@ -140,6 +149,7 @@ export function MapCanvas({
   full,
   onFullscreen,
   initialSystem,
+  panes,
 }: {
   /** Every system, laid out on its own (`detectSystems`, `detectDatabaseSystems`). */
   systems: System[]
@@ -157,6 +167,12 @@ export function MapCanvas({
   onFullscreen: () => void
   /** A system asked for by the address (`?system=`), flown to on arrival. */
   initialSystem?: string
+  /**
+   * On a phone, the rail and the inspector as panes with a bar at the foot to
+   * reach them. Without it a phone has the canvas alone, as the server map
+   * decided for itself.
+   */
+  panes?: boolean
 }) {
   const flow = useReactFlow()
   const router = useRouter()
@@ -207,6 +223,10 @@ export function MapCanvas({
   const [tapped, setTapped] = useState<string | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const inspecting = inspectorOpen && !bare
+  // Which of a phone's three panes is shown. The canvas stays drawn under the
+  // other two, so it is where it was left when the reader comes back to it.
+  const [pane, setPane] = useState<MapPane>("map")
+  const stops = bare && Boolean(panes)
 
   const chosenSeat = chosen ? seats.get(chosen) : undefined
   const chosenNode = chosenSeat?.system.nodes.find((n) => n.id === chosen)
@@ -678,6 +698,17 @@ export function MapCanvas({
     }
   }
 
+  // Picked from a phone's rail: shown on the canvas, and not kept as the
+  // desk's place. A phone only looks.
+  const look = (id: string) => {
+    setChosen(null)
+    setKinds(null)
+    setFocus(id)
+    setTapped(id)
+    flyTo(id, 0)
+    setPane("map")
+  }
+
   const tappedSystem = tapped ? bySystem.get(tapped)?.system : undefined
   // What a phone's one button opens: nothing draws "Everything else" a page of its own.
   const wayOn = chosenNode
@@ -690,7 +721,7 @@ export function MapCanvas({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" onKeyDown={onKey}>
       <div
         className={cn(
-          "grid min-h-0 flex-1",
+          "relative grid min-h-0 flex-1",
           bare
             ? "grid-cols-1"
             : inspecting
@@ -846,7 +877,60 @@ export function MapCanvas({
             onFrame={frameNode}
           />
         )}
+        {stops && pane === "systems" && (
+          <div
+            data-slot="map-pane"
+            data-pane="systems"
+            className="absolute inset-0 z-10 flex flex-col bg-background [&>nav]:flex-1 [&>nav]:border-r-0"
+          >
+            <SystemRail board={board} systems={systems} focus={focus} onFocus={look} />
+          </div>
+        )}
+        {stops && pane === "about" && (
+          <div
+            data-slot="map-pane"
+            data-pane="about"
+            className="absolute inset-0 z-10 flex flex-col bg-background [&>aside]:flex-1 [&>aside]:border-l-0"
+          >
+            <MapInspector
+              board={board}
+              systems={systems}
+              system={chosenSeat?.system ?? focusSystem}
+              node={chosenNode}
+              notices={notices ?? undefined}
+              kinds={kinds}
+              // What is picked here is shown on the canvas, so the canvas is
+              // what the reader is taken to.
+              onKinds={(next) => {
+                selectKinds(next)
+                if (next) setPane("map")
+              }}
+              onChoose={(id) => {
+                choose(id)
+                frameNode(id)
+              }}
+              onHover={setHovered}
+              onFocus={look}
+              onFrame={(id) => {
+                frameNode(id)
+                setPane("map")
+              }}
+            />
+          </div>
+        )}
       </div>
+      {stops && (
+        <PaneBar
+          label={board.label}
+          stops={[
+            { key: "systems", label: board.rail.label, icon: <Layers /> },
+            { key: "map", label: "Map", icon: <ServerMap /> },
+            { key: "about", label: "Inspector", icon: <Information /> },
+          ]}
+          active={pane}
+          onPick={setPane}
+        />
+      )}
     </div>
   )
 }
