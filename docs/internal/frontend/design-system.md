@@ -243,9 +243,10 @@ they do), whether it answers, then the page's verbs, Connect and one `⋯`. The 
 over these four (`shell/database-shell.tsx`, where the engine has the page). A part of the page hands
 its verbs up rather than the page being rebuilt around the head: `HeadVerbs` draws its children in
 the head's verb slot and `useHeadMenu` puts verbs in the menu, under the page's name and above the
-database's own. The rules it keeps: **one** brand-faced command in the head (Insert row, Insert, Add
-label or Edit; on Query the command is Run, which stays between the statement and its result with
-Explain beside it, the row limit inside Run's menu and Format and Save in the head's); every
+database's own. The rules it keeps: **one** brand-faced command on the page (Insert row, Add label
+or Edit in the head; MongoDB's Insert is outlined there because Find, in its query bar, is that
+page's; on Query it is Run, which stays between the statement and its result with Explain beside
+it, the row limit inside Run's menu and Format and Save in the head's); every
 icon-only control of a workbench (read again, show or hide a side column, lay out the other way,
 clear the transcript) is a word in the menu; an object's own verbs (a table's rename and drop) stay
 beside the object's name, not among the database's. What a schema or a table amounts to is one
