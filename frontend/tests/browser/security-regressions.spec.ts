@@ -266,6 +266,9 @@ test("the row editor submits exact BIGINT digits", async ({ page }) => {
   ])
 })
 
+/** The audit log is an administrator's: the page asks the server for nothing as anyone else. */
+const auditor = { ...signedIn, capabilities: [...signedIn.capabilities, "system.admin"] }
+
 test("slow polling has only one request in flight", async ({ page }) => {
   await page.clock.install()
   const pending: Route[] = []
@@ -299,7 +302,7 @@ test("slow polling has only one request in flight", async ({ page }) => {
       pending.push(route)
       return
     }
-    await fulfill(route, path === "/auth/session" ? signedIn : [])
+    await fulfill(route, path === "/auth/session" ? auditor : [])
   })
   await page.goto("/audit")
   await expect(page.getByRole("table").getByText("INITIAL_RESULT", { exact: true })).toBeVisible()
@@ -540,7 +543,7 @@ test("resource filters keep focus while stale responses are discarded", async ({
       }
       return fulfill(route, entries("INITIAL_FILTER_RESULT"))
     }
-    await fulfill(route, path === "/auth/session" ? signedIn : [])
+    await fulfill(route, path === "/auth/session" ? auditor : [])
   })
   await page.goto("/audit")
   await expect(
