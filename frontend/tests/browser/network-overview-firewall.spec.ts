@@ -41,6 +41,23 @@ const height = async (locator: Locator) => Math.round((await locator.boundingBox
 const fits = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
 
+/**
+ * A note behind an `ⓘ` says what it should. A tooltip opens on the pointer's
+ * move onto its mark and not on its resting there, and this page is still
+ * drawing its log when the pointer arrives, so the pointer is taken off and
+ * brought back until the note is up rather than trusted to one arrival.
+ */
+async function reads(page: Page, name: string, text: string) {
+  const mark = page.getByRole("button", { name })
+  await expect(async () => {
+    await page.mouse.move(0, 0)
+    await mark.hover()
+    await expect(page.getByRole("tooltip")).toContainText(text, { timeout: 2000 })
+  }).toPass({ timeout: 30_000 })
+  await page.mouse.move(0, 0)
+  await expect(page.getByRole("tooltip")).toHaveCount(0)
+}
+
 /** Holds one route's answer until `release` is called, so the page can be measured while it waits. */
 async function held(page: Page, path: string, body: unknown) {
   let release = () => {}
@@ -531,6 +548,10 @@ test("a recorded change is one line, and what it asked for opens from it", async
   await loaded(page)
   const changes = page.locator("[data-slot=firewall-change]")
   await expect(changes).toHaveCount(2)
+  // What the record cannot see is the note on the title, not a line under
+  // the list, and the guard is the note on the rules it protects, not a footer.
+  await reads(page, "What the record cannot see", "Only changes made from this dashboard are")
+  await reads(page, "About the lock-out guard", "Your current address is protected from lockout.")
   // With a request, a detail and a pending tag, or with none of them.
   expect(await height(changes.nth(0))).toBe(await height(changes.nth(1)))
   await expect(changes.nth(0)).toContainText("refused")
@@ -548,17 +569,6 @@ test("a recorded change is one line, and what it asked for opens from it", async
   await expect(request.getByRole("region", { name: "Asked for" })).toContainText("100.64.0.0/10")
   await expect(request).toContainText("pending 01234567")
   expect(await top(changes.nth(1))).toBe(second)
-  await page.keyboard.press("Escape")
-  // What the record cannot see is the note on the title, not a line under the list.
-  await page.getByRole("button", { name: "What the record cannot see" }).hover()
-  await expect(page.getByRole("tooltip")).toContainText(
-    "Only changes made from this dashboard are recorded.",
-  )
-  // And the guard is the note on the rules it protects, not a footer.
-  await page.getByRole("button", { name: "About the lock-out guard" }).hover()
-  await expect(page.getByRole("tooltip")).toContainText(
-    "Your current address is protected from lockout.",
-  )
 })
 
 test("a host with no firewall offers ufw where the package manager has it", async ({ page }) => {
