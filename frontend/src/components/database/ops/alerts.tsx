@@ -14,6 +14,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
 import { toldBy } from "@/components/deploy/settings/traffic-alerts"
+import { ChoiceList } from "@/components/flow"
 import { FactDot } from "@/components/metrics/host-identity"
 import { Panel, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
@@ -50,7 +51,8 @@ import { useDatabase } from "@/components/database/shell/database-context"
  * the deployments' notification channels once when it crosses its line and
  * once when it is back. The page opens on that path drawn — the database,
  * this server that reads it every thirty seconds, the channels — over the
- * rules as sentences with where each stands, and what was told lately.
+ * rules as cards of one height with where each stands, and what was told
+ * lately.
  *
  * Reading it is anybody's; a rule, its test and its removal are an
  * administrator's, which is when the verbs and the starter cards are drawn.
@@ -276,10 +278,7 @@ export function Alerts() {
             />
           )
         ) : (
-          <ul
-            aria-label="Alert rules"
-            className="min-w-0 animate-rise divide-y divide-hairline pt-3"
-          >
+          <ChoiceList aria-label="Alert rules" className="animate-rise pt-3">
             {rules.map((rule) => (
               <AlertRow
                 key={rule.id}
@@ -307,10 +306,11 @@ export function Alerts() {
                 }
                 channels={shared ? undefined : channelList}
                 verbs={admin ? verbsFor(rule) : undefined}
+                onEdit={mayDestroy ? () => edit({ rule }) : undefined}
                 className={cn(arrived.has(String(rule.id)) && "animate-rise")}
               />
             ))}
-          </ul>
+          </ChoiceList>
         )}
       </Panel>
 
