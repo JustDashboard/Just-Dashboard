@@ -80,16 +80,9 @@ export function TunnelPage() {
     answer && answer.at > (read.lastSuccess ?? 0) ? answer.status : (read.data ?? answer?.status)
   const settle = (next: TunnelStatus) => setAnswer({ status: next, at: Date.now() })
 
-  const header = (
-    <PageContext
-      eyebrow={
-        <Link href="/proxy" className="rounded-sm focus-ring hover:underline">
-          Proxy & TLS
-        </Link>
-      }
-      title="Tunnel"
-    />
-  )
+  // No way back above the line: the rail lists the section's pages, and
+  // none of the others draws one.
+  const header = <PageContext title="Tunnel" />
 
   if (!status) {
     return (
@@ -97,6 +90,13 @@ export function TunnelPage() {
         {header}
         <TunnelIdentityShell
           title="Cloudflare Tunnel"
+          state={
+            read.loading || !read.error ? (
+              <Status tone="unknown" label="Reading" />
+            ) : (
+              <Status tone="danger" label="Not read" />
+            )
+          }
           facts={read.loading ? <TextShimmer>Reading the tunnel…</TextShimmer> : undefined}
         />
         {read.loading || !read.error ? (
@@ -120,22 +120,32 @@ export function TunnelPage() {
   )
 }
 
-/** The identity line's frame: Cloudflare's mark and a title, for loading and connected alike. */
+/**
+ * The identity line's frame, laid out as a project's header: Cloudflare's
+ * mark, a title with the tunnel's state beside it, its facts under them, one
+ * command at the end and the rest behind `⋯` — loading, connected and not.
+ */
 function TunnelIdentityShell({
   title,
+  state,
   facts,
-  aside,
+  command,
+  menu,
 }: {
   title: React.ReactNode
+  state: React.ReactNode
   facts?: React.ReactNode
-  aside?: React.ReactNode
+  command?: React.ReactNode
+  menu?: React.ReactNode
 }) {
   return (
     <HostIdentity
       mark="cloudflare"
       title={title}
+      state={state}
       facts={facts ?? <span>&nbsp;</span>}
-      aside={aside}
+      command={command}
+      menu={menu}
     />
   )
 }
@@ -217,17 +227,18 @@ function Connected({
     <>
       <TunnelIdentityShell
         title={name}
+        state={
+          <Status
+            tone={health.tone}
+            label={
+              health.label === "Connected"
+                ? plural(status.readyConnections, "edge connection")
+                : health.label
+            }
+          />
+        }
         facts={
           <>
-            <Status
-              tone={health.tone}
-              label={
-                health.label === "Connected"
-                  ? plural(status.readyConnections, "edge connection")
-                  : health.label
-              }
-            />
-            <FactDot />
             <span>{connection?.mode === "api" ? "created here" : "token pasted"}</span>
             <FactDot />
             <HostFact product="docker">
@@ -261,17 +272,15 @@ function Connected({
             )}
           </>
         }
-        aside={
-          <div className="flex flex-wrap items-center gap-2">
-            {admin && (
-              <Button size="sm" onClick={check} pending={syncing} disabled={syncing}>
-                <RefreshClockwise />
-                {syncing ? "Checking…" : "Check now"}
-              </Button>
-            )}
-            {verbs.length > 0 && <VerbMenu verbs={verbs} label="More tunnel actions" />}
-          </div>
+        command={
+          admin && (
+            <Button size="sm" onClick={check} pending={syncing} disabled={syncing}>
+              <RefreshClockwise />
+              {syncing ? "Checking…" : "Check now"}
+            </Button>
+          )
         }
+        menu={verbs.length > 0 && <VerbMenu verbs={verbs} label="More tunnel actions" />}
       />
 
       {(health.tone === "danger" || status.error) && (
@@ -676,10 +685,9 @@ function Setup({
     <>
       <TunnelIdentityShell
         title="Cloudflare Tunnel"
+        state={<Status tone="unknown" label="not connected" />}
         facts={
           <>
-            <Status tone="unknown" label="not connected" />
-            <FactDot />
             <span className={cn(!status.api.available && "text-muted-foreground")}>
               {status.api.available
                 ? "Cloudflare credentials saved"
