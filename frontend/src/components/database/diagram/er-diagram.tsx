@@ -6,7 +6,6 @@ import {
   Background,
   BackgroundVariant,
   MarkerType,
-  MiniMap,
   ReactFlow,
   ReactFlowProvider,
   getViewportForBounds,
@@ -30,6 +29,7 @@ import {
   EyeOff,
   Fullscreen,
   FullscreenClose,
+  Layout,
   GridSquare,
   Image as ImageIcon,
   Inspect,
@@ -44,7 +44,6 @@ import {
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
-import { hueFor, LANES } from "@/lib/hue"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
@@ -57,7 +56,8 @@ import { Segments } from "@/components/deploy/settings/segments"
 import { FormFact } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
-import { Pane, PaneHeader } from "@/components/panel"
+import { PaneHeader } from "@/components/panel"
+import { PaneBar } from "@/components/phone-panes"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {
@@ -83,14 +83,17 @@ import { useFocusReturn } from "@/components/database/schema/focus"
 import { selectStatement } from "@/components/database/schema/select"
 import { useSettledAddress } from "@/components/database/schema/use-settled-address"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { HeadVerbs, WorkbenchFrame, useHeadMenu } from "@/components/database/workbench/chrome"
 import {
+  CanvasHolds,
   DiagramSchemaPicker,
   FIT,
+  FIT_PADDING,
+  FLOAT,
   Legend,
-  fitPadding,
   NoteDialog,
   Saved,
-  ZoomControls,
+  ZoomBar,
 } from "@/components/database/diagram/chrome"
 import {
   DIAGRAM_COLORS,
@@ -257,67 +260,71 @@ export function ErDiagram() {
         immersive && "fixed inset-0 z-50 p-3",
       )}
     >
-      {/* Framed: a canvas is a working region with its own scroll (§2). */}
-      <Pane className="min-h-0 flex-1">
-        {ready ? (
-          <ReactFlowProvider>
-            <Canvas
-              // Another schema, or more of this one, is another picture.
-              key={`${schema}:${limit}`}
-              root={root}
-              graph={graph}
-              doc={doc}
-              status={memory.status}
-              updatedAt={memory.updatedAt}
-              update={memory.update}
-              reset={memory.reset}
-              picker={picker}
-              refresh={read.refresh}
-              full={fullscreen || immersive}
-              onFullscreen={toggleFullscreen}
-              onLeaveImmersive={() => setImmersive(false)}
-            />
-          </ReactFlowProvider>
-        ) : (
-          <>
-            <PaneHeader className="h-10">{picker}</PaneHeader>
-            {read.error && !graph ? (
-              <div className="p-4">
-                <ReadFailed error={read.error} onRetry={read.refresh} />
-              </div>
-            ) : !graph || !doc || doc.legacy ? (
-              <CanvasSkeleton />
-            ) : (
-              <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-                <EmptyState
-                  className="border-0"
-                  mark={<EngineMark engine={engine} />}
-                  title={`No tables in ${schema || `this ${engine.nouns.container}`}`}
-                  description="A schema's tables and views are drawn here, with the keys between them."
-                  action={
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {canCreate && engine.has("schema") && (
-                        <Button size="sm" variant="outline" asChild>
-                          <Link href={href("schema", { table: null, new: "table" })}>
-                            New {engine.nouns.object}
-                          </Link>
-                        </Button>
-                      )}
-                      {schema !== "" && engine.can("schemas") && (
-                        <Button size="sm" variant="outline" asChild>
-                          <Link href={href("diagram", { every: "1", limit: null })}>
-                            Show every {engine.nouns.container}
-                          </Link>
-                        </Button>
-                      )}
-                    </div>
-                  }
-                />
-              </div>
-            )}
-          </>
-        )}
-      </Pane>
+      {/* Framed: a canvas is a working region with its own scroll (§2), under
+          the head every workbench of a database has. In full screen the head
+          goes, and the canvas's own floats carry the way back. */}
+      <WorkbenchFrame section="diagram" full={fullscreen || immersive}>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {ready ? (
+            <ReactFlowProvider>
+              <Canvas
+                // Another schema, or more of this one, is another picture.
+                key={`${schema}:${limit}`}
+                root={root}
+                graph={graph}
+                doc={doc}
+                status={memory.status}
+                updatedAt={memory.updatedAt}
+                update={memory.update}
+                reset={memory.reset}
+                picker={picker}
+                refresh={read.refresh}
+                full={fullscreen || immersive}
+                onFullscreen={toggleFullscreen}
+                onLeaveImmersive={() => setImmersive(false)}
+              />
+            </ReactFlowProvider>
+          ) : (
+            <>
+              <PaneHeader className="h-10">{picker}</PaneHeader>
+              {read.error && !graph ? (
+                <div className="p-4">
+                  <ReadFailed error={read.error} onRetry={read.refresh} />
+                </div>
+              ) : !graph || !doc || doc.legacy ? (
+                <CanvasSkeleton />
+              ) : (
+                <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+                  <EmptyState
+                    className="border-0"
+                    mark={<EngineMark engine={engine} />}
+                    title={`No tables in ${schema || `this ${engine.nouns.container}`}`}
+                    description="A schema's tables and views are drawn here, with the keys between them."
+                    action={
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {canCreate && engine.has("schema") && (
+                          <Button size="sm" variant="outline" asChild>
+                            <Link href={href("schema", { table: null, new: "table" })}>
+                              New {engine.nouns.object}
+                            </Link>
+                          </Button>
+                        )}
+                        {schema !== "" && engine.can("schemas") && (
+                          <Button size="sm" variant="outline" asChild>
+                            <Link href={href("diagram", { every: "1", limit: null })}>
+                              Show every {engine.nouns.container}
+                            </Link>
+                          </Button>
+                        )}
+                      </div>
+                    }
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </WorkbenchFrame>
     </div>
   )
 }
@@ -455,14 +462,13 @@ function Canvas({
    */
   const canvas = useRef<HTMLDivElement>(null)
   useCanvasPinch(canvas, ZOOM)
-  const minimap = doc.minimap
   const fitPicture = useCallback(
     (duration: number, all = false) => {
       const nodes = flow.getNodes()
       const box = canvas.current?.getBoundingClientRect()
       if (nodes.length === 0 || !box || box.width === 0) return
       // "Fit to view" is the reader asking for everything, however small.
-      const padding = fitPadding(minimap && box.width >= 640)
+      const padding = FIT_PADDING
       if (all) return void flow.fitView({ padding, duration })
       const zoomFor = (part: Node[]) =>
         getViewportForBounds(
@@ -476,7 +482,7 @@ function Canvas({
       // What is fitted on arrival, widest first: everything; the tables that
       // have relations; the best-connected table with what it touches. The
       // first that can be read is the one drawn, and the last is drawn at the
-      // floor even if it overflows — the rest is a pan away, on the minimap.
+      // floor even if it overflows — the rest is a pan away.
       const degree = new Map<string, number>()
       for (const e of graph.edges) {
         if (e.from === e.to) continue
@@ -498,7 +504,7 @@ function Canvas({
         maxZoom: ARRIVE_AT_MOST,
       })
     },
-    [flow, graph, minimap],
+    [flow, graph],
   )
 
   // Re-laying out is a deliberate act — changing the direction or the detail,
@@ -736,6 +742,17 @@ function Canvas({
     else if (e.key === "h" && focus) hide([focus])
   }
 
+  // Which way the layout runs is a word in the head's menu: it was one of
+  // two unnamed glyphs beside the search.
+  useHeadMenu([
+    {
+      key: "direction",
+      label: doc.direction === "LR" ? "Lay out top to bottom" : "Lay out left to right",
+      icon: doc.direction === "LR" ? ArrowUpDown : ArrowLeftRight,
+      run: () => update({ direction: doc.direction === "LR" ? "TB" : "LR" }),
+    },
+  ])
+
   const active = useMemo(() => (matches ? new Set(matches.keys()) : near), [matches, near])
   const shown = useMemo(
     () =>
@@ -836,6 +853,41 @@ function Canvas({
   return (
     // The keys are the diagram's own: heard while focus is inside it.
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" onKeyDown={onKey}>
+      <HeadVerbs>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" aria-label="Export the diagram">
+              <Download />
+              Export
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel>A picture</DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => void exportAs("png")}>
+              <ImageIcon />
+              PNG
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void exportAs("svg")}>
+              <ImageIcon />
+              SVG
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>As text</DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => void exportAs("mermaid")}>
+              <Code />
+              Mermaid
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void exportAs("dbml")}>
+              <Code />
+              DBML
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void exportAs("json")}>
+              <Code />
+              JSON, with this layout
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </HeadVerbs>
       <PaneHeader className="min-h-10 flex-wrap gap-x-1.5 gap-y-1">
         {picker}
         <SearchInput
@@ -887,17 +939,6 @@ function Canvas({
           onChange={(detail) => update({ detail })}
           className="ml-1 [&_button]:h-7 [&_button]:px-2 [&_button]:text-hint"
         />
-        <IconAction
-          label={doc.direction === "LR" ? "Lay out top to bottom" : "Lay out left to right"}
-          className="size-7"
-          onClick={() => update({ direction: doc.direction === "LR" ? "TB" : "LR" })}
-        >
-          {doc.direction === "LR" ? <ArrowLeftRight /> : <ArrowUpDown />}
-        </IconAction>
-        <IconAction label="Tidy: lay every table out again" className="size-7" onClick={tidy}>
-          <RotateCounterClockwise />
-        </IconAction>
-
         <span className="flex-1" />
 
         <Saved status={status} updatedAt={updatedAt} arranged={isArranged(doc)} />
@@ -953,12 +994,6 @@ function Canvas({
               Snap to grid
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
-              checked={doc.minimap}
-              onCheckedChange={(v) => update({ minimap: v })}
-            >
-              Minimap
-            </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem
               checked={doc.labels}
               onCheckedChange={(v) => update({ labels: v })}
             >
@@ -1009,57 +1044,6 @@ function Canvas({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="xs" variant="ghost" className="h-7" aria-label="Export the diagram">
-              <Download />
-              <span className="max-md:sr-only">Export</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>A picture</DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => void exportAs("png")}>
-              <ImageIcon />
-              PNG
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void exportAs("svg")}>
-              <ImageIcon />
-              SVG
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>As text</DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => void exportAs("mermaid")}>
-              <Code />
-              Mermaid
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void exportAs("dbml")}>
-              <Code />
-              DBML
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void exportAs("json")}>
-              <Code />
-              JSON, with this layout
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <IconAction
-          label={inspector ? "Hide the inspector (I)" : "Show the inspector (I)"}
-          aria-pressed={inspector}
-          className="size-7"
-          onClick={toggleInspector}
-        >
-          {inspector ? <SidebarRightClose /> : <SidebarRightOpen />}
-        </IconAction>
-        <IconAction
-          label={full ? "Leave full screen" : "Full screen"}
-          aria-pressed={full}
-          className="size-7"
-          onClick={onFullscreen}
-        >
-          {full ? <FullscreenClose /> : <Fullscreen />}
-        </IconAction>
       </PaneHeader>
 
       {graph.truncated && (
@@ -1091,12 +1075,14 @@ function Canvas({
       <div
         className={cn(
           "grid min-h-0 flex-1",
-          inspector
-            ? "grid-cols-1 max-lg:grid-rows-[minmax(0,1fr)_minmax(0,42%)] lg:grid-cols-[minmax(0,1fr)_18rem]"
-            : "grid-cols-1",
+          // Beside the canvas where there is room for both; below that the
+          // inspector is a pane of its own and the bar at the foot moves
+          // between the two, where it used to take the lower half of a
+          // canvas that had none to spare.
+          inspector ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_18rem]" : "grid-cols-1",
         )}
       >
-        <div ref={canvas} className="relative min-h-0 min-w-0">
+        <div ref={canvas} className={cn("relative min-h-0 min-w-0", inspector && "max-lg:hidden")}>
           <ReactFlow
             nodes={shown}
             edges={shownEdges}
@@ -1153,32 +1139,36 @@ function Canvas({
                 color="var(--grid-dot)"
               />
             )}
-            {doc.minimap && (
-              <MiniMap
-                pannable
-                zoomable
-                ariaLabel="Minimap"
-                className="!right-3 !bottom-3 !h-24 !w-40 overflow-hidden !rounded-md !border !bg-card max-sm:!hidden"
-                maskColor="color-mix(in oklab, var(--color-background) 70%, transparent)"
-                // Several schemas in one picture: each table is its schema's hue.
-                nodeColor={(n) => {
-                  const of = byId.get(n.id)?.schema
-                  return qualified && of
-                    ? `color-mix(in oklab, ${hueFor(of.toLowerCase(), LANES)} 70%, var(--color-muted))`
-                    : "color-mix(in oklab, var(--color-chart-1) 55%, var(--color-muted))"
-                }}
-                nodeStrokeWidth={0}
-              />
-            )}
           </ReactFlow>
 
-          <ZoomControls
-            onFit={() => fitPicture(FIT.duration, true)}
+          <CanvasHolds
             focus={focused ? nameOf(focused) : null}
             locked={doc.locked}
             onClear={() => focusTable(null)}
             onUnlock={() => update({ locked: false })}
           />
+          {/* The panel and the whole screen, on the canvas they act on, as
+              the server's map has them. They are the two controls that must
+              be there when the frame's head is not: in full screen. */}
+          <div className={cn(FLOAT, "top-3 right-3")}>
+            <IconAction
+              label={inspector ? "Hide the inspector (I)" : "Show the inspector (I)"}
+              aria-pressed={inspector}
+              className="size-7"
+              onClick={toggleInspector}
+            >
+              {inspector ? <SidebarRightClose /> : <SidebarRightOpen />}
+            </IconAction>
+            <IconAction
+              label={full ? "Leave full screen" : "Full screen"}
+              aria-pressed={full}
+              className="size-7"
+              onClick={onFullscreen}
+            >
+              {full ? <FullscreenClose /> : <Fullscreen />}
+            </IconAction>
+          </div>
+          <ZoomBar onFit={() => fitPicture(FIT.duration, true)} onTidy={tidy} />
           <Legend schemas={qualified ? schemas : undefined} />
         </div>
 
@@ -1208,6 +1198,23 @@ function Canvas({
           />
         )}
       </div>
+
+      {!full && (
+        <PaneBar<"diagram" | "inspector">
+          label="Diagram"
+          active={inspector ? "inspector" : "diagram"}
+          onPick={(pane) => setAskedFor(pane === "inspector")}
+          stops={[
+            { key: "diagram", label: "Diagram", icon: <Layout /> },
+            {
+              key: "inspector",
+              // Named for what it would be about.
+              label: focused ? "Table" : pickedRelation ? "Relation" : "Tables",
+              icon: <SidebarRightOpen />,
+            },
+          ]}
+        />
+      )}
 
       {/* One menu for every table, opened at the point it was asked for from —
           a table's own button or a right-click — rather than a menu per node.

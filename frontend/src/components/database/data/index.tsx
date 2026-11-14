@@ -3,21 +3,30 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Plus, SidebarLeftOpen, Table } from "@/components/icons"
+import {
+  GridSquare,
+  Plus,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+  SidebarRightOpen,
+  Table,
+} from "@/components/icons"
 import { usePanelSize } from "@/lib/panel-size"
 import { cn } from "@/lib/utils"
 import { useMemoryState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { IconAction } from "@/components/icon-action"
+import { PaneBar } from "@/components/phone-panes"
 import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, ErrorState } from "@/components/state"
+import type { Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EMPTY_CHANGE_STATE, useChangeSet, type ChangeSetState } from "@/components/database/grid"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
 import {
   SETTLED,
   addressKey,
@@ -42,6 +51,13 @@ import { readView, sameRows, viewParams, type ViewState } from "@/components/dat
 import { TableWorkbench, type TableWorkbenchHandle } from "@/components/database/data/workbench"
 
 const NO_STAGED: Record<string, number> = {}
+const NO_VERBS: Verb[] = []
+
+/** The frame's width under which a table's rows are read as cards rather than a grid. */
+const CARDS_UNDER = 640
+
+/** The panes of the table editor where it shows one at a time. */
+type DataPane = "tables" | "rows" | "details"
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -117,6 +133,7 @@ export function SqlData() {
   // the window answers.
   const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
   const windowWide = useMediaQuery("(min-width: 1024px)")
+  const windowPhone = useMediaQuery("(max-width: 639px)")
   const [railPinned, setRailPinned] = useViewState("databases.data.rail", true)
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize(
     "databases.data.rail",
@@ -134,6 +151,8 @@ export function SqlData() {
     railPinned,
   )
   const railBeside = panes.rail === "beside"
+  // Narrower than a grid can be read at, rows are cards (`row-cards.tsx`).
+  const cards = frameWidth > 0 ? frameWidth < CARDS_UNDER : windowPhone
 
   const catalog = useCatalog(id, selection.schema)
   const exporter = useExport(id)
@@ -302,6 +321,34 @@ export function SqlData() {
   }
   const railColumn = clamp(railWidth, RAIL.min, panes.railMax)
 
+  // Where the rail lies over the table the frame shows one pane at a time,
+  // and a bar at its foot says which: the tables, the rows, the open row.
+  // The three are the states the columns already had — the rail put over the
+  // table, the row panel put over it — so the bar only names them.
+  const rowOver = rowOpen && panes.inspector === "over"
+  const pane: DataPane = railOver ? "tables" : rowOver ? "details" : "rows"
+  const pickPane = (next: DataPane) => {
+    setRailOver(next === "tables")
+    if (next === "details") {
+      // The row panel is the Data view's: another view of the table gives way.
+      if (view.view !== "data") setView({ view: "data" })
+      setInspecting(true)
+    } else if (next === "rows") setInspecting(false)
+  }
+
+  // Beside the table the rail is a column to show or put away, from the
+  // head's menu; over it, the bar is how it is reached.
+  const menu: Verb[] = railBeside
+    ? [
+        {
+          key: "rail",
+          label: `${railShown ? "Hide" : "Show"} the ${engine.nouns.objects}`,
+          icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
+          run: toggleRail,
+        },
+      ]
+    : NO_VERBS
+
   const listed = catalog.data?.schema ?? selection.schema
   // The address names a schema the connection does not have.
   const unknown =
@@ -331,15 +378,31 @@ export function SqlData() {
     ROW_GROUPS.every(({ group }) => (catalog.data?.objects[group]?.length ?? 0) === 0)
 
   return (
-    <SectionFrame section="data">
-      {/* One frame around the whole workbench (§7.2): the rail, the table and
-          the row are columns of one working surface, with a hairline between
-          them rather than a gutter and three borders. */}
-      <div
+    <SectionFrame section="data" className={WORKBENCH_PAGE}>
+      {/* One frame around the whole workbench (§7.2): the head that says which
+          database and carries the open table's verbs, then the rail, the
+          table and the row as columns of one working surface, with a hairline
+          between them rather than a gutter and three borders. */}
+      <WorkbenchFrame
         ref={frame}
-        data-slot="table-editor"
+        section="data"
+        slot="table-editor"
         style={{ "--jd-data-rail": `${railColumn}px` } as React.CSSProperties}
-        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card"
+        menu={menu}
+        bar={
+          !railBeside && (
+            <PaneBar<DataPane>
+              label="Table editor"
+              active={pane}
+              onPick={pickPane}
+              stops={[
+                { key: "tables", label: "Tables", icon: <Table /> },
+                { key: "rows", label: "Rows", icon: <GridSquare /> },
+                { key: "details", label: "Details", icon: <SidebarRightOpen /> },
+              ]}
+            />
+          )
+        }
       >
         {railShown && (
           <div
@@ -380,20 +443,7 @@ export function SqlData() {
                 onReset={resetRailWidth}
                 className="absolute inset-y-0 -right-1 z-20"
               />
-            ) : (
-              shown && (
-                <div className="shrink-0 border-t border-hairline bg-surface-header p-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => setRailOver(false)}
-                  >
-                    <span className="min-w-0 truncate">Back to {shown.table}</span>
-                  </Button>
-                </div>
-              )
-            )}
+            ) : null}
           </div>
         )}
 
@@ -408,8 +458,7 @@ export function SqlData() {
             setView={setView}
             changeSet={changeSet}
             guard={guard}
-            railOpen={railShown}
-            onToggleRail={toggleRail}
+            cards={cards}
             panel={{
               open: inspecting,
               setOpen: setInspecting,
@@ -425,13 +474,6 @@ export function SqlData() {
           />
         ) : (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {!railShown && (
-              <div className="flex h-10 shrink-0 items-center border-b border-hairline bg-surface-header px-1.5">
-                <IconAction label="Show the tables" className="size-7" onClick={toggleRail}>
-                  <SidebarLeftOpen />
-                </IconAction>
-              </div>
-            )}
             {catalog.data && !unknown && !empty ? (
               <SchemaLanding catalog={catalog.data} railShown={railShown} onShowRail={toggleRail} />
             ) : (
@@ -458,14 +500,6 @@ export function SqlData() {
                         <Skeleton className="h-3.5 w-28" />
                         <Skeleton className="h-3 w-64 max-w-full" />
                       </div>
-                    </div>
-                    <div className="flex gap-6">
-                      {["w-12", "w-10", "w-14", "w-16"].map((width) => (
-                        <div key={width} className="space-y-2">
-                          <Skeleton className="h-2.5 w-10" />
-                          <Skeleton className={cn("h-3.5", width)} />
-                        </div>
-                      ))}
                     </div>
                     <div className="space-y-4">
                       {["w-40", "w-28", "w-32", "w-24"].map((width) => (
@@ -532,7 +566,7 @@ export function SqlData() {
             )}
           </div>
         )}
-      </div>
+      </WorkbenchFrame>
 
       <LeaveGuard
         open={pending !== null || (!followed && dirty)}

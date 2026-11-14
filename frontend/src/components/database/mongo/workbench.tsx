@@ -1,13 +1,23 @@
 "use client"
 
 import { useState } from "react"
-import { Copy, Download, Pencil, SettingsSliders, SidebarLeftOpen, Trash } from "@/components/icons"
+import {
+  Copy,
+  Download,
+  FileText,
+  Layers,
+  Pencil,
+  SettingsSliders,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+  Trash,
+} from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePanelSize } from "@/lib/panel-size"
 import { useMemoryState, useViewState } from "@/lib/view-state"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
+import { PaneBar } from "@/components/phone-panes"
 import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -36,8 +46,10 @@ import {
   type Mongo,
 } from "@/components/database/mongo/use-mongo"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
 
 const RAIL = { base: 300, min: 220, max: 520 }
+const NO_VERBS: Verb[] = []
 
 /** The three workbenches a collection opens in, in the rail's order. */
 const WORK: SectionId[] = ["data", "query", "schema"]
@@ -48,7 +60,11 @@ export type Workbench = {
   catalog: Catalog
   /** The open collection as the list knows it; `undefined` while the list is unread. */
   collection: MongoCollection | undefined
-  /** The control that brings the rail back, for the start of the page's own strip. */
+  /**
+   * What stands at the start of the page's own strip. It was the control
+   * that brought the rail back; the frame's head and a phone's bar do that
+   * now, so it is nothing, and kept for the pages that still take it.
+   */
   leading: React.ReactNode
   confirm: (request: ConfirmRequest) => void
   /** Opens Export for the open collection, with the query on screen when there is one. */
@@ -136,14 +152,17 @@ export function MongoWorkbench({
   // there is not: a phone shows the collections until one is opened.
   const wide = useMediaQuery("(min-width: 1024px)")
   const [railShown, setRailShown] = useViewState(`databases.${id}.mongo.rail`, true)
-  const [railOver, setRailOver] = useState(false)
+  // On a phone the frame shows one pane at a time and a bar at its foot
+  // moves between them. It opens on the collections while none is chosen —
+  // unless the view on screen needs none — and choosing one puts the rail
+  // away; with none chosen the other pane is what the database holds.
+  const [railOver, setRailOver] = useState(!collection && !collectionFree)
   const [heldCollection, setHeldCollection] = useState(collection)
   if (heldCollection !== collection) {
-    // Choosing a collection on a phone puts the rail away.
     setHeldCollection(collection)
-    setRailOver(false)
+    setRailOver(!collection && !collectionFree)
   }
-  const railVisible = wide ? railShown : railOver || (!collection && !collectionFree)
+  const railVisible = wide ? railShown : railOver
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("databases.mongo.rail", RAIL.base)
   const railPx = Math.min(Math.max(railWidth, RAIL.min), RAIL.max)
 
@@ -223,16 +242,10 @@ export function MongoWorkbench({
     ]
   }
 
-  const leading = !railVisible && (
-    <IconAction
-      label={`Show the ${engine.nouns.objects}`}
-      aria-pressed={false}
-      className="size-7 shrink-0"
-      onClick={() => (wide ? setRailShown(true) : setRailOver(true))}
-    >
-      <SidebarLeftOpen />
-    </IconAction>
-  )
+  // The rail is brought back from the head's menu beside the work, and by
+  // the bar on a phone: the pages' own strips start with what is open.
+  const leading = null
+  const page = engine.section(section)
 
   const current = catalog.current
   // A name the list does not have, once the list is read: said, not drawn as empty.
@@ -252,13 +265,44 @@ export function MongoWorkbench({
   }
 
   return (
-    <SectionFrame section={section}>
+    <SectionFrame section={section} className={WORKBENCH_PAGE}>
       {dialog}
-      {/* One frame around the workbench: the rail and the work are two
-          columns of one surface, with a hairline between them. */}
-      <div
+      {/* One frame around the workbench: the head that says which database,
+          then the rail and the work as two columns of one surface, with a
+          hairline between them. */}
+      <WorkbenchFrame
+        section={section}
+        slot="mongo-workbench"
         style={{ "--jd-mongo-rail": `${railPx}px` } as React.CSSProperties}
-        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card"
+        menu={
+          wide
+            ? [
+                {
+                  key: "rail",
+                  label: `${railShown ? "Hide" : "Show"} the ${engine.nouns.objects}`,
+                  icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
+                  run: () => setRailShown(!railShown),
+                },
+              ]
+            : NO_VERBS
+        }
+        bar={
+          !wide && (
+            <PaneBar<"rail" | "work">
+              label={page?.title ?? "Collections"}
+              active={railVisible ? "rail" : "work"}
+              onPick={(pane) => setRailOver(pane === "rail")}
+              stops={[
+                { key: "rail", label: "Collections", icon: <Layers /> },
+                {
+                  key: "work",
+                  label: page?.title ?? "Documents",
+                  icon: page ? <page.icon /> : <FileText />,
+                },
+              ]}
+            />
+          )
+        }
       >
         {railVisible && (
           <div className="relative flex shrink-0 border-hairline bg-card max-lg:absolute max-lg:inset-0 max-lg:z-20 lg:w-(--jd-mongo-rail) lg:border-r">
@@ -315,7 +359,7 @@ export function MongoWorkbench({
         ) : (
           children(workbench)
         )}
-      </div>
+      </WorkbenchFrame>
 
       {canCreate && (
         <NewCollectionDialog

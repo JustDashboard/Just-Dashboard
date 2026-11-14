@@ -18,8 +18,6 @@ import {
   Download,
   Plus,
   RefreshClockwise,
-  SidebarLeftClose,
-  SidebarLeftOpen,
   SidebarRightClose,
   SidebarRightOpen,
   Terminal,
@@ -36,6 +34,7 @@ import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import type { Verb } from "@/components/verbs"
 import { tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -51,6 +50,7 @@ import {
 import {
   DataGrid,
   buildChanges,
+  exceedsLimit,
   isNewRowId,
   useGridLayout,
   type ChangeSetController,
@@ -65,6 +65,7 @@ import {
 import { SqlReview } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { HeadVerbs, useHeadMenu } from "@/components/database/workbench/chrome"
 import { EXPORT_FORMATS, EXPORT_ROWS, EXPORT_ROWS_MAX } from "@/components/database/data/export"
 import { FilterBar } from "@/components/database/data/filter-bar"
 import { focusAfterDialog } from "@/components/database/data/focus"
@@ -77,6 +78,7 @@ import {
 import { ChangeBar, Pager } from "@/components/database/data/foot"
 import { ImportDialog } from "@/components/database/data/import-dialog"
 import { RowInspector } from "@/components/database/data/inspector"
+import { RowCards } from "@/components/database/data/row-cards"
 import { INSPECTOR } from "@/components/database/data/panes"
 import { KindGlyph, ROW_OBJECT_KINDS, rowObjectKind } from "@/components/database/data/kinds"
 import {
@@ -108,10 +110,7 @@ const VIEWS: { key: TableView; label: string }[] = [
   { key: "definition", label: "Definition" },
 ]
 const NO_ERRORS: Record<string, string> = {}
-
-/** A phone's finger: the strip's controls stand a third taller under `sm`. */
-const TOUCH = "max-sm:h-8"
-const TOUCH_ICON = "max-sm:size-8"
+const NO_VERBS: Verb[] = []
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -168,8 +167,7 @@ export function TableWorkbench({
   setView,
   changeSet,
   guard,
-  railOpen,
-  onToggleRail,
+  cards,
   panel,
   onExport,
   exporting,
@@ -185,8 +183,8 @@ export function TableWorkbench({
   changeSet: ChangeSetController
   /** Runs `run` now, or — with edits staged — once the reader has agreed to let them go. */
   guard: (heading: string, run: () => void) => void
-  railOpen: boolean
-  onToggleRail: () => void
+  /** The frame is a phone's: rows are read as cards, and the row panel is their detail. */
+  cards: boolean
   panel: RowPanel
   onExport: (request: ExportRequest) => void
   exporting: boolean
@@ -578,11 +576,144 @@ export function TableWorkbench({
       browse.refresh()
     })
 
+  // The grid stages a new row and moves to it. Where rows are cards there is
+  // no grid to ask: the row is staged here and opened in the row panel, which
+  // is where a card's row is written anyway.
+  const insertRow = () => {
+    if (grid.current) return void grid.current.insertRow()
+    const action = { type: "insert" as const, rows: [{ id: changeSet.newRowId(), values: {} }] }
+    if (exceedsLimit(changeSet.changes, action)) {
+      notify.warning("Too many changes for one apply", {
+        description: "Apply or discard what is staged, then go on.",
+      })
+      return
+    }
+    changeSet.dispatch(action)
+    setActiveRow((page?.rows.length ?? 0) + changeSet.changes.inserts.length)
+    setInspecting(true)
+  }
+
   /* --------------------------------------------------------------- render */
 
   const structureHref = href("schema", { schema: schema || null, table })
   const canAlter = can("service.control") && !readOnly && engine.can("ddl") && engine.has("schema")
   const missing = detail.error instanceof ApiError && detail.error.status === 404
+
+  // The commands of whichever view is open, drawn in the frame's head: the
+  // one that writes wears the brand face, and what is only a glyph — reading
+  // again, the row panel — is a word in the head's menu.
+  const commands = missing ? null : view.view === "data" ? (
+    <>
+      {editable && (
+        <Button type="button" size="sm" disabled={!page} onClick={insertRow}>
+          <Plus />
+          Insert row
+        </Button>
+      )}
+      {canImport && info && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => guard("Importing", () => setImporting(true))}
+        >
+          <CloudUpload />
+          Import
+        </Button>
+      )}
+      {engine.capabilities.exportFormats.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="sm" variant="outline" pending={exporting}>
+              <Download />
+              Export
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            {/* A fact about what the menu's words will save, in the
+                  quiet voice: a sentence is not a group's name. */}
+            <p className="px-2 pt-1.5 pb-1 text-hint text-muted-foreground">
+              {filtered ? "The rows these filters match" : "Every row of the table"}, up to{" "}
+              {grouped(exportRows)}
+            </p>
+            {engine.capabilities.exportFormats.map((format) => (
+              <DropdownMenuItem key={format} onSelect={() => exportAs(format)}>
+                <MenuItemText
+                  hint={
+                    <span className="text-hint text-muted-foreground">
+                      {EXPORT_FORMATS[format].detail}
+                    </span>
+                  }
+                >
+                  <span className="w-20 shrink-0">{EXPORT_FORMATS[format].label}</span>
+                </MenuItemText>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            {/* The cap is the reader's to raise before the export,
+                  not only after one came back short. */}
+            <DropdownMenuCheckboxItem
+              checked={exportRows === EXPORT_ROWS_MAX}
+              onSelect={(event) => event.preventDefault()}
+              onCheckedChange={(checked) =>
+                setExportRows(checked === true ? EXPORT_ROWS_MAX : EXPORT_ROWS)
+              }
+            >
+              Up to {grouped(EXPORT_ROWS_MAX)} rows
+            </DropdownMenuCheckboxItem>
+            {hidden && engine.can("exportColumns") && (
+              <DropdownMenuCheckboxItem
+                checked={onlyShown}
+                onSelect={(event) => event.preventDefault()}
+                onCheckedChange={(checked) => setOnlyShown(checked === true)}
+              >
+                Only the columns shown
+              </DropdownMenuCheckboxItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </>
+  ) : (
+    engine.has("schema") && (
+      <Button type="button" size="sm" variant="outline" asChild>
+        <Link href={structureHref}>
+          <Wrench />
+          {canAlter ? "Change it in Schema" : "Open in Schema"}
+        </Link>
+      </Button>
+    )
+  )
+
+  useHeadMenu(
+    missing || view.view !== "data"
+      ? NO_VERBS
+      : [
+          ...(engine.has("query") && can("service.control")
+            ? [
+                {
+                  key: "query",
+                  label: "Open as query",
+                  icon: Terminal,
+                  disabled: !page,
+                  run: openAsQuery,
+                },
+              ]
+            : []),
+          { key: "reload", label: "Read the rows again", icon: RefreshClockwise, run: refresh },
+          // On a phone the row is the bar's third pane, not a column to show.
+          ...(cards
+            ? []
+            : [
+                {
+                  key: "row",
+                  label: inspecting ? "Hide the row" : "Show the row",
+                  icon: inspecting ? SidebarRightClose : SidebarRightOpen,
+                  run: () => setInspecting(!inspecting),
+                },
+              ]),
+        ],
+  )
 
   const tabsId = useId()
   const tabs = useRef<HTMLDivElement>(null)
@@ -617,14 +748,6 @@ export function TableWorkbench({
           full 40 over the rule put this one a pixel below the rail's. */}
       <div className="flex min-h-[39px] items-stretch px-1.5 @max-[34rem]:flex-wrap">
         <div className="flex min-w-0 items-center gap-1.5 py-1 pr-2 @max-[34rem]:max-w-[calc(100%-13.5rem)]">
-          <IconAction
-            label={railOpen ? "Hide the tables" : "Show the tables"}
-            aria-pressed={railOpen}
-            className={cn("size-7 shrink-0", TOUCH_ICON)}
-            onClick={onToggleRail}
-          >
-            {railOpen ? <SidebarLeftClose /> : <SidebarLeftOpen />}
-          </IconAction>
           <KindGlyph kind={kind} />
           <h2
             className="flex min-w-0 items-baseline font-mono text-body font-medium"
@@ -666,142 +789,6 @@ export function TableWorkbench({
                 </button>
               )
             })}
-          </div>
-        )}
-        {!missing && (
-          <div className="ml-auto flex shrink-0 items-center justify-end gap-1 py-1 pl-2">
-            {view.view === "data" ? (
-              <>
-                {editable && (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="outline"
-                    aria-label="Insert row"
-                    className={TOUCH}
-                    disabled={!page}
-                    onClick={() => grid.current?.insertRow()}
-                  >
-                    <Plus />
-                    {/* The word gives way where the strip is one tight line:
-                        beside the row panel, between the widths where the
-                        commands have a line of their own and where there is
-                        room for everything. */}
-                    <span className="@min-[34rem]:@max-2xl:hidden">Insert row</span>
-                  </Button>
-                )}
-                {canImport && info && (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="outline"
-                    aria-label="Import"
-                    className={TOUCH}
-                    onClick={() => guard("Importing", () => setImporting(true))}
-                  >
-                    <CloudUpload />
-                    <span className="hidden @4xl:inline">Import</span>
-                  </Button>
-                )}
-                {engine.capabilities.exportFormats.length > 0 && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        aria-label="Export"
-                        className={TOUCH}
-                        pending={exporting}
-                      >
-                        <Download />
-                        <span className="hidden @4xl:inline">Export</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-64">
-                      {/* A fact about what the menu's words will save, in the
-                      quiet voice: a sentence is not a group's name. */}
-                      <p className="px-2 pt-1.5 pb-1 text-hint text-muted-foreground">
-                        {filtered ? "The rows these filters match" : "Every row of the table"}, up
-                        to {grouped(exportRows)}
-                      </p>
-                      {engine.capabilities.exportFormats.map((format) => (
-                        <DropdownMenuItem key={format} onSelect={() => exportAs(format)}>
-                          <MenuItemText
-                            hint={
-                              <span className="text-hint text-muted-foreground">
-                                {EXPORT_FORMATS[format].detail}
-                              </span>
-                            }
-                          >
-                            <span className="w-20 shrink-0">{EXPORT_FORMATS[format].label}</span>
-                          </MenuItemText>
-                        </DropdownMenuItem>
-                      ))}
-                      <DropdownMenuSeparator />
-                      {/* The cap is the reader's to raise before the export,
-                      not only after one came back short. */}
-                      <DropdownMenuCheckboxItem
-                        checked={exportRows === EXPORT_ROWS_MAX}
-                        onSelect={(event) => event.preventDefault()}
-                        onCheckedChange={(checked) =>
-                          setExportRows(checked === true ? EXPORT_ROWS_MAX : EXPORT_ROWS)
-                        }
-                      >
-                        Up to {grouped(EXPORT_ROWS_MAX)} rows
-                      </DropdownMenuCheckboxItem>
-                      {hidden && engine.can("exportColumns") && (
-                        <DropdownMenuCheckboxItem
-                          checked={onlyShown}
-                          onSelect={(event) => event.preventDefault()}
-                          onCheckedChange={(checked) => setOnlyShown(checked === true)}
-                        >
-                          Only the columns shown
-                        </DropdownMenuCheckboxItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-                {engine.has("query") && can("service.control") && (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="ghost"
-                    aria-label="Open as query"
-                    className={TOUCH}
-                    disabled={!page}
-                    onClick={openAsQuery}
-                  >
-                    <Terminal />
-                    <span className="hidden @5xl:inline">Open as query</span>
-                  </Button>
-                )}
-                <IconAction
-                  label="Read the rows again"
-                  className={cn("size-7", TOUCH_ICON)}
-                  onClick={refresh}
-                >
-                  <RefreshClockwise />
-                </IconAction>
-                <IconAction
-                  label={inspecting ? "Hide the row" : "Show the row"}
-                  aria-pressed={inspecting}
-                  className={cn("size-7", TOUCH_ICON)}
-                  onClick={() => setInspecting(!inspecting)}
-                >
-                  {inspecting ? <SidebarRightClose /> : <SidebarRightOpen />}
-                </IconAction>
-              </>
-            ) : (
-              engine.has("schema") && (
-                <Button type="button" size="xs" variant="outline" className={TOUCH} asChild>
-                  <Link href={structureHref}>
-                    <Wrench />
-                    {canAlter ? "Change it in Schema" : "Open in Schema"}
-                  </Link>
-                </Button>
-              )
-            )}
           </div>
         )}
       </div>
@@ -846,7 +833,192 @@ export function TableWorkbench({
     body = <GridSilhouette />
   } else {
     const viewError = browse.error && (filtered || view.sort.length > 0)
-    body = (
+    const toolbar = (
+      // Every condition and every sort key is on screen: the run wraps to
+      // another line rather than scroll what orders the rows out of sight.
+      // On a phone, where three lines of chips would be half the table, it
+      // is one line that scrolls sideways and fades at the edge it runs past.
+      <div className="flex min-w-0 flex-1 [scrollbar-width:none] items-center gap-1.5 max-sm:overflow-x-auto max-sm:[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] max-sm:pr-5 sm:flex-wrap [&::-webkit-scrollbar]:hidden">
+        <FilterBar
+          columns={columns}
+          filters={view.filters}
+          match={view.match}
+          sort={view.sort}
+          operators={operators}
+          onFiltersChange={setFilters}
+          onMatchChange={(match) => changeRows("Filtering the rows", { match, page: 1 })}
+          onSortChange={(next) => changeRows("Sorting the rows", { sort: next, page: 1 })}
+        />
+      </div>
+    )
+    const banner = (
+      <>
+        {editable && !keyed && (
+          <BannerLine>
+            <Tag>No key</Tag>
+            <span className="min-w-0 truncate">
+              A row is found by all of its values. A change that would touch more than one row is
+              refused.
+            </span>
+          </BannerLine>
+        )}
+        {viewError && (
+          <BannerLine>
+            <span className="min-w-0 truncate">
+              {view.filters
+                .map((filter) => filterLabel(filter, kinds[filter.column]))
+                .join(" · ") || "This sort"}{" "}
+              could not be applied.
+            </span>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              className="ml-auto shrink-0"
+              onClick={() =>
+                changeRows("Clearing the sort and the filters", {
+                  filters: [],
+                  sort: [],
+                  match: "all",
+                  page: 1,
+                })
+              }
+            >
+              Clear sort and filters
+            </Button>
+          </BannerLine>
+        )}
+        {shownRefusal && (
+          <div
+            role="alert"
+            className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-rule-danger bg-wash-danger px-2.5 py-1.5 text-hint"
+          >
+            <span className="font-medium">Nothing was written.</span>
+            <span className="min-w-0 flex-1">
+              {shownRefusal.position !== undefined &&
+                `Change ${shownRefusal.position} of ${shownRefusal.total}: `}
+              {shownRefusal.message}
+            </span>
+            {shownRefusal.rowId && (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  changeSet.revertRow(shownRefusal.rowId!)
+                  setRefused(null)
+                  setErrors(NO_ERRORS)
+                  // What the row holds now is what refused the change;
+                  // a keyed page can be read again under the rest of the set.
+                  if (keyed) browse.refresh()
+                }}
+              >
+                Take that change out
+              </Button>
+            )}
+            <IconAction
+              label="Dismiss"
+              className="size-6"
+              onClick={() => {
+                setRefused(null)
+                setErrors(NO_ERRORS)
+              }}
+            >
+              <Cross />
+            </IconAction>
+          </div>
+        )}
+      </>
+    )
+    const empty =
+      page && page.offset > 0 ? (
+        <GridEmpty
+          title="No rows on this page"
+          description="The table ends before here."
+          action="Back to the first page"
+          onAction={() => changeRows("Turning the page", { page: 1 })}
+        />
+      ) : filtered ? (
+        <GridEmpty
+          title="No row matches"
+          description={`Nothing in ${table} meets ${view.filters.length === 1 ? "this condition" : view.match === "any" ? "any of these conditions" : "all of these conditions"}.`}
+          action="Clear the filters"
+          onAction={() =>
+            changeRows("Clearing the filters", { filters: [], match: "all", page: 1 })
+          }
+        />
+      ) : (
+        <GridEmpty
+          title={`${table} has no rows`}
+          description={
+            editable ? "Insert one here, or import a file." : "Nothing has been written to it yet."
+          }
+          action={editable ? "Insert row" : undefined}
+          onAction={insertRow}
+        />
+      )
+
+    const footer = dirty ? (
+      <ChangeBar
+        counts={counts}
+        problems={built.problems}
+        applying={applying}
+        reviewing={reviewing}
+        confirms={cautious}
+        onReview={() => void openReview()}
+        onDiscard={() => {
+          changeSet.discardAll()
+          setRefused(null)
+          setErrors(NO_ERRORS)
+          // The bar goes with the set, and the button with the bar.
+          toRows()
+        }}
+        onApply={() => void (cautious ? openReview() : apply())}
+      />
+    ) : (
+      page && (
+        <Pager
+          page={page}
+          filtered={filtered}
+          exact={count.exact}
+          counting={count.counting}
+          countError={count.error}
+          onCount={count.count}
+          pageNumber={view.page}
+          pageSize={pageSize}
+          onPage={(next) => setView({ page: next })}
+          onPageSize={(size) => {
+            setPageSize(size)
+            setView({ page: 1 })
+          }}
+        />
+      )
+    )
+
+    body = cards ? (
+      <RowCards
+        label={`${table} rows`}
+        source={source}
+        offset={page?.offset ?? 0}
+        active={inspecting ? activeRow : -1}
+        readOnlyReason={reason}
+        rowErrors={rowErrors}
+        loading={browse.loading || detail.loading}
+        error={browse.error ?? detail.error ?? null}
+        onRetry={() => {
+          detail.refresh()
+          browse.refresh()
+        }}
+        onOpenRow={(index) => {
+          setActiveRow(index)
+          setInspecting(true)
+        }}
+        toolbar={toolbar}
+        banner={banner}
+        empty={empty}
+        footer={footer}
+      />
+    ) : (
       <DataGrid
         ref={grid}
         label={`${table} rows`}
@@ -876,171 +1048,10 @@ export function TableWorkbench({
         onFilter={operators.length > 0 ? onFilter : undefined}
         onFollowForeignKey={onFollow}
         onCopySQL={(data) => void onCopySQL(data)}
-        toolbar={
-          // Every condition and every sort key is on screen: the run wraps to
-          // another line rather than scroll what orders the rows out of sight.
-          // On a phone, where three lines of chips would be half the table, it
-          // is one line that scrolls sideways and fades at the edge it runs past.
-          <div className="flex min-w-0 flex-1 [scrollbar-width:none] items-center gap-1.5 max-sm:overflow-x-auto max-sm:[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] max-sm:pr-5 sm:flex-wrap [&::-webkit-scrollbar]:hidden">
-            <FilterBar
-              columns={columns}
-              filters={view.filters}
-              match={view.match}
-              sort={view.sort}
-              operators={operators}
-              onFiltersChange={setFilters}
-              onMatchChange={(match) => changeRows("Filtering the rows", { match, page: 1 })}
-              onSortChange={(next) => changeRows("Sorting the rows", { sort: next, page: 1 })}
-            />
-          </div>
-        }
-        banner={
-          <>
-            {editable && !keyed && (
-              <BannerLine>
-                <Tag>No key</Tag>
-                <span className="min-w-0 truncate">
-                  A row is found by all of its values. A change that would touch more than one row
-                  is refused.
-                </span>
-              </BannerLine>
-            )}
-            {viewError && (
-              <BannerLine>
-                <span className="min-w-0 truncate">
-                  {view.filters
-                    .map((filter) => filterLabel(filter, kinds[filter.column]))
-                    .join(" · ") || "This sort"}{" "}
-                  could not be applied.
-                </span>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  className="ml-auto shrink-0"
-                  onClick={() =>
-                    changeRows("Clearing the sort and the filters", {
-                      filters: [],
-                      sort: [],
-                      match: "all",
-                      page: 1,
-                    })
-                  }
-                >
-                  Clear sort and filters
-                </Button>
-              </BannerLine>
-            )}
-            {shownRefusal && (
-              <div
-                role="alert"
-                className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-rule-danger bg-wash-danger px-2.5 py-1.5 text-hint"
-              >
-                <span className="font-medium">Nothing was written.</span>
-                <span className="min-w-0 flex-1">
-                  {shownRefusal.position !== undefined &&
-                    `Change ${shownRefusal.position} of ${shownRefusal.total}: `}
-                  {shownRefusal.message}
-                </span>
-                {shownRefusal.rowId && (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="outline"
-                    onClick={() => {
-                      changeSet.revertRow(shownRefusal.rowId!)
-                      setRefused(null)
-                      setErrors(NO_ERRORS)
-                      // What the row holds now is what refused the change;
-                      // a keyed page can be read again under the rest of the set.
-                      if (keyed) browse.refresh()
-                    }}
-                  >
-                    Take that change out
-                  </Button>
-                )}
-                <IconAction
-                  label="Dismiss"
-                  className="size-6"
-                  onClick={() => {
-                    setRefused(null)
-                    setErrors(NO_ERRORS)
-                  }}
-                >
-                  <Cross />
-                </IconAction>
-              </div>
-            )}
-          </>
-        }
-        empty={
-          page && page.offset > 0 ? (
-            <GridEmpty
-              title="No rows on this page"
-              description="The table ends before here."
-              action="Back to the first page"
-              onAction={() => changeRows("Turning the page", { page: 1 })}
-            />
-          ) : filtered ? (
-            <GridEmpty
-              title="No row matches"
-              description={`Nothing in ${table} meets ${view.filters.length === 1 ? "this condition" : view.match === "any" ? "any of these conditions" : "all of these conditions"}.`}
-              action="Clear the filters"
-              onAction={() =>
-                changeRows("Clearing the filters", { filters: [], match: "all", page: 1 })
-              }
-            />
-          ) : (
-            <GridEmpty
-              title={`${table} has no rows`}
-              description={
-                editable
-                  ? "Insert one here, or import a file."
-                  : "Nothing has been written to it yet."
-              }
-              action={editable ? "Insert row" : undefined}
-              onAction={() => grid.current?.insertRow()}
-            />
-          )
-        }
-        footer={
-          dirty ? (
-            <ChangeBar
-              counts={counts}
-              problems={built.problems}
-              applying={applying}
-              reviewing={reviewing}
-              confirms={cautious}
-              onReview={() => void openReview()}
-              onDiscard={() => {
-                changeSet.discardAll()
-                setRefused(null)
-                setErrors(NO_ERRORS)
-                // The bar goes with the set, and the button with the bar.
-                toRows()
-              }}
-              onApply={() => void (cautious ? openReview() : apply())}
-            />
-          ) : (
-            page && (
-              <Pager
-                page={page}
-                filtered={filtered}
-                exact={count.exact}
-                counting={count.counting}
-                countError={count.error}
-                onCount={count.count}
-                pageNumber={view.page}
-                pageSize={pageSize}
-                onPage={(next) => setView({ page: next })}
-                onPageSize={(size) => {
-                  setPageSize(size)
-                  setView({ page: 1 })
-                }}
-              />
-            )
-          )
-        }
+        toolbar={toolbar}
+        banner={banner}
+        empty={empty}
+        footer={footer}
       />
     )
   }
@@ -1049,6 +1060,7 @@ export function TableWorkbench({
 
   return (
     <>
+      <HeadVerbs>{commands}</HeadVerbs>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {strip}
         {missing ? (
@@ -1104,7 +1116,7 @@ export function TableWorkbench({
             canDelete={canDelete}
             defaultOnUpdate={engine.can("updateDefault")}
             changeSet={changeSet}
-            onMove={(index) => grid.current?.revealRow(index)}
+            onMove={(index) => (grid.current ? grid.current.revealRow(index) : setActiveRow(index))}
             onClose={() => setInspecting(false)}
           />
         </div>

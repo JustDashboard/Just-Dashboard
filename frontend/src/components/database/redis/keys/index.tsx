@@ -1,12 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { SidebarLeftOpen } from "@/components/icons"
+import { Key, Layers, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePanelSize } from "@/lib/panel-size"
 import { useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
+import { PaneBar } from "@/components/phone-panes"
+import type { Verb } from "@/components/verbs"
 import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, Notice } from "@/components/state"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
@@ -19,8 +20,10 @@ import { NewKeyDialog } from "@/components/database/redis/keys/new-key"
 import type { RedisBytes } from "@/components/database/redis/types"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
+import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
 
 const RAIL = { base: 320, min: 240, max: 560 }
+const NO_VERBS: Verb[] = []
 
 /**
  * The key browser: the keys of one logical database beside the one that is
@@ -57,8 +60,17 @@ export function RedisKeys() {
   // there is not: a phone shows the keys until one is opened, then the key.
   const wide = useMediaQuery("(min-width: 1024px)")
   const [railShown, setRailShown] = useViewState(`databases.${id}.redis.rail`, true)
-  const [railOver, setRailOver] = useState(false)
-  const railVisible = wide ? railShown : railOver || selected === undefined
+  // On a phone the frame shows one pane at a time, with a bar at its foot:
+  // the keys while none is open, then the key. Closing a key goes back to
+  // the keys; the bar's other stop is then what the database is made of.
+  const selectedKey = selected === undefined ? "" : JSON.stringify(selected)
+  const [railOver, setRailOver] = useState(selected === undefined)
+  const [heldKey, setHeldKey] = useState(selectedKey)
+  if (heldKey !== selectedKey) {
+    setHeldKey(selectedKey)
+    setRailOver(selected === undefined)
+  }
+  const railVisible = wide ? railShown : railOver
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("databases.redis.rail", RAIL.base)
   const railPx = Math.min(Math.max(railWidth, RAIL.min), RAIL.max)
 
@@ -89,21 +101,14 @@ export function RedisKeys() {
   }
   const close = () => select(keyToAddress(undefined))
 
-  const railToggle = !railVisible && (
-    <IconAction
-      label="Show the keys"
-      aria-pressed={false}
-      className="size-7 shrink-0"
-      onClick={() => (wide ? setRailShown(true) : setRailOver(true))}
-    >
-      <SidebarLeftOpen />
-    </IconAction>
-  )
+  // The rail is brought back from the head's menu beside the key, and by
+  // the bar on a phone: the pane's own strip starts with what is open.
+  const railToggle = null
 
   const sentinel = server.data?.mode === "sentinel"
 
   return (
-    <SectionFrame section="data">
+    <SectionFrame section="data" className={WORKBENCH_PAGE}>
       {dialog}
       {server.data?.notice && !sentinel && (
         <Notice title="This server is one node of a cluster" className="shrink-0">
@@ -111,18 +116,55 @@ export function RedisKeys() {
         </Notice>
       )}
       {sentinel ? (
-        <EmptyState
-          mark={<EngineMark engine={engine} />}
-          title="A sentinel holds no keys"
-          description={server.data?.notice}
-          className="min-h-0 flex-1"
-        />
+        // The head says which server this is; the frame under it has no keys
+        // to hold.
+        <WorkbenchFrame section="data" slot="redis-keys">
+          <EmptyState
+            mark={<EngineMark engine={engine} />}
+            title="A sentinel holds no keys"
+            description={server.data?.notice}
+            className="min-h-0 flex-1 border-0"
+          />
+        </WorkbenchFrame>
       ) : (
-        // One frame around the workbench: the rail and the key are two
-        // columns of one working surface, with a hairline between them.
-        <div
+        // One frame around the workbench: the head that says which database,
+        // then the rail and the key as two columns of one working surface,
+        // with a hairline between them.
+        <WorkbenchFrame
+          section="data"
+          slot="redis-keys"
           style={{ "--jd-redis-rail": `${railPx}px` } as React.CSSProperties}
-          className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card"
+          menu={
+            wide
+              ? [
+                  {
+                    key: "rail",
+                    label: railShown ? "Hide the keys" : "Show the keys",
+                    icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
+                    run: () => setRailShown(!railShown),
+                  },
+                ]
+              : NO_VERBS
+          }
+          bar={
+            !wide && (
+              <PaneBar<"keys" | "key">
+                label="Keys"
+                active={railVisible ? "keys" : "key"}
+                onPick={(pane) => setRailOver(pane === "keys")}
+                stops={[
+                  { key: "keys", label: "Keys", icon: <Key /> },
+                  {
+                    key: "key",
+                    // Named for what is beside the keys: the open one, or
+                    // what the database is made of.
+                    label: selected !== undefined ? "Key" : "Keyspace",
+                    icon: <Layers />,
+                  },
+                ]}
+              />
+            )
+          }
         >
           {railVisible && (
             <div className="relative flex shrink-0 border-hairline max-lg:absolute max-lg:inset-0 max-lg:z-20 lg:w-(--jd-redis-rail) lg:border-r">
@@ -183,7 +225,7 @@ export function RedisKeys() {
               }}
             />
           )}
-        </div>
+        </WorkbenchFrame>
       )}
       {canWrite && (
         <NewKeyDialog
