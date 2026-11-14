@@ -23,7 +23,7 @@ async function visit(page: Page, path: string) {
   await loaded(page)
 }
 
-test("the live window says how old its reading is, with packets, TCP resent and round trip", async ({
+test("the page says how old its reading is, with packets and TCP's health in words", async ({
   page,
 }) => {
   const requests: string[] = []
@@ -32,15 +32,16 @@ test("the live window says how old its reading is, with packets, TCP resent and 
   })
   await open(page, [])
   await visit(page, "/network/traffic")
+  const identity = page.getByRole("region", { name: "About the uplink" })
+  await expect(identity).toContainText(/read \ds ago/)
+  await expect(identity).toContainText("sampled every 2s")
   const context = page.getByLabel("Live context")
-  await expect(context).toContainText("Newest reading")
-  await expect(context).toContainText(/\ds old/)
   await expect(context).toContainText("Packets on ens3")
-  await expect(context).toContainText("TCP resent")
+  await expect(context).toContainText("packets a second")
+  await expect(context).toContainText("TCP health")
   // 30 of every 1000 segments are sent again, past the 2% warning.
-  await expect(context).toContainText("3.0%")
-  await expect(context).toContainText("23 ms")
-  await expect(context).toContainText("median of 37 sockets · 9 in 10 inside 118 ms")
+  await expect(context).toContainText("3.0% resent · round trips half inside 23 ms")
+  await expect(context).toContainText("9 in 10 inside 118 ms · 37 sockets")
   await expect(page.getByLabel("ens3 packets")).toContainText("packets in")
   await expect(page.getByLabel("ens3 packets")).toContainText("3 drops in 15 min")
   expect(requests.some((u) => u.includes("latency=1"))).toBe(true)
@@ -50,12 +51,12 @@ test("a stopped sampler reads as stale, not as a quiet link", async ({ page }) =
   await open(page, [])
   await page.route("**/api/v1/network/traffic/live**", liveRoute(40))
   await visit(page, "/network/traffic")
-  const context = page.getByLabel("Live context")
-  await expect(context).toContainText(/4\ds old/)
-  await expect(context).toContainText("the sampler has not stepped; figures are stale")
+  const identity = page.getByRole("region", { name: "About the uplink" })
+  await expect(identity).toContainText(/stale, read 4\ds ago/)
+  await expect(identity).toContainText("the sampler has not stepped; figures are stale")
 })
 
-test("a typed range reads that window with its percentiles and the incidents in it", async ({
+test("a typed range reads that window with its spread in words and the incidents in it", async ({
   page,
 }) => {
   const history: URL[] = []
@@ -77,8 +78,12 @@ test("a typed range reads that window with its percentiles and the incidents in 
     .toBe(true)
   const asked = history.find((u) => u.searchParams.get("from"))!
   expect(Number(asked.searchParams.get("to")) - Number(asked.searchParams.get("from"))).toBe(5400)
-  await expect(page.getByLabel("ens3 percentiles")).toContainText("p95 ↓ 2.0 MB/s")
-  await expect(page.getByLabel("ens3 percentiles")).toContainText("over 240 15s intervals")
+  await expect(page.getByLabel("ens3 throughput spread")).toContainText("19 in 20 under ↓ 2.0 MB/s")
+  await expect(page.getByLabel("ens3 throughput spread")).toContainText("over 240 15s intervals")
+  // The range is in the address, so a reload keeps it.
+  await expect(page).toHaveURL(
+    new RegExp(`from=${asked.searchParams.get("from")}&to=${asked.searchParams.get("to")}`),
+  )
   await expect
     .poll(() => marks.some((u) => u.searchParams.get("from") === asked.searchParams.get("from")))
     .toBe(true)
@@ -96,7 +101,7 @@ test("a transfer budget reads exact and estimated bytes, alerts, and is set and 
 }) => {
   const mutations: Mutation[] = []
   await open(page, mutations)
-  await visit(page, "/network/traffic")
+  await visit(page, "/network/traffic?tab=budgets")
   const budgets = page.getByLabel("Transfer budgets")
   await expect(budgets).toContainText("830.0 GB of 1.0 TB in and out this month")
   await expect(budgets).toContainText("40.0 GB estimated from older rows")
@@ -105,13 +110,19 @@ test("a transfer budget reads exact and estimated bytes, alerts, and is set and 
   await expect(budgets).toContainText("Not measured")
   await expect(budgets).toContainText("alerts, never limits")
 
-  const form = page.getByRole("form", { name: "Set a transfer budget" })
+  // Setting one is the section's verb, in a sheet.
+  await expect(page.getByRole("form", { name: "Set a transfer budget" })).toHaveCount(0)
+  await budgets.getByRole("button", { name: "Set a transfer budget" }).click()
+  const sheet = page.getByRole("dialog")
+  const form = sheet.getByRole("form", { name: "Set a transfer budget" })
   await form.getByRole("radio", { name: "week" }).click()
   await form.getByRole("radio", { name: "out" }).click()
   await form.getByLabel("Budget", { exact: true }).fill("5 KB")
-  await expect(form.getByRole("button", { name: "Set budget" })).toBeDisabled()
+  await expect(sheet.getByRole("button", { name: "Set budget" })).toBeDisabled()
   await form.getByLabel("Budget", { exact: true }).fill("200 GB")
-  await form.getByRole("button", { name: "Set budget" }).click()
+  // ens3 has one already, and the sheet says this replaces it.
+  await expect(sheet).toContainText("Replaces the budget ens3 has.")
+  await sheet.getByRole("button", { name: "Set budget" }).click()
   await expect
     .poll(() => mutations.find((m) => m.method === "PUT"))
     .toEqual({
@@ -119,7 +130,9 @@ test("a transfer budget reads exact and estimated bytes, alerts, and is set and 
       path: "/network/traffic/quotas/ens3",
       body: { period: "week", direction: "tx", limitBytes: 200 * 2 ** 30 },
     })
-  await budgets.getByRole("button", { name: "Clear the budget on wg0" }).click()
+  await expect(sheet).toHaveCount(0)
+  await budgets.getByRole("button", { name: "Budget on wg0" }).click()
+  await page.getByRole("menuitem", { name: "Clear" }).click()
   expect(mutations.some((m) => m.method === "DELETE")).toBe(false)
   await page.getByRole("button", { name: "Clear", exact: true }).click()
   await expect
@@ -140,13 +153,13 @@ test("programs say what a read could not see and list UDP peers without byte cou
   const peers = page.getByLabel("Who agent-cli talks to", { exact: true }).last()
   await expect(peers).toContainText("UDP · 1 connection")
   await expect(peers).toContainText("no byte counters")
-  await expect(peers).toContainText("median RTT 18 ms")
+  await expect(peers).toContainText("round trips half inside 18 ms")
   await page.getByRole("button", { name: "Who agent-cli talks to" }).click()
   await page.getByRole("button", { name: "Who caddy talks to" }).click()
   await expect(page.getByText("2 unconnected UDP sockets — listeners and servers")).toBeVisible()
 })
 
-test("every container can be listed and one opens into its chart, service and peers", async ({
+test("every container can be listed and one opens its page: chart, service and peers", async ({
   page,
 }) => {
   const flows: URL[] = []
@@ -156,13 +169,14 @@ test("every container can be listed and one opens into its chart, service and pe
   await open(page, [])
   await visit(page, "/network/traffic")
   const band = page.getByLabel("Traffic by container", { exact: true })
-  await expect(band.getByRole("button", { name: "Open registry's traffic" })).toHaveCount(0)
+  await expect(band.getByRole("link", { name: "Open registry's traffic" })).toHaveCount(0)
   await band.getByRole("button", { name: "Show all 7" }).click()
   await page.getByRole("menuitem", { name: "Open registry's traffic" }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet).toContainText("infra/registry")
-  await expect(sheet).toContainText("registry:2")
-  const talked = sheet.getByLabel("Who registry talked to")
+  await expect(page).toHaveURL(/\/network\/traffic\/containers\/registry$/)
+  const identity = page.getByRole("region", { name: "About registry" })
+  await expect(identity).toContainText("infra/registry")
+  await expect(identity).toContainText("registry:2")
+  const talked = page.getByLabel("Who registry talked to")
   await expect(talked).toContainText("198.51.100.99")
   await expect(talked).toContainText("47.7 MiB")
   await expect(talked).toContainText("192.0.2.53")
@@ -177,16 +191,30 @@ test("shaping says what the next change does with each device's queues, and refu
   page,
 }) => {
   await open(page, [])
-  await visit(page, "/network/traffic")
-  const queues = page.getByRole("table").filter({ hasText: "tailscale0" })
-  await expect(queues).toContainText("captures this fq_codel's parameters and puts them back")
-  await expect(queues).toContainText("replaces the kernel's default queue")
-  await expect(queues).toContainText("Changes are refused: jd-lab has an unmanaged queue hierarchy")
-  // Drift names the parameter changed in place.
-  await expect(queues).toContainText("rtt 50000 → 100000")
-  await page.getByRole("button", { name: "Edit the limits on jd-lab" }).click()
+  await visit(page, "/network/traffic?tab=shaping")
+  const queues = page.getByRole("list", { name: "Queues by device" })
   const sheet = page.getByRole("dialog")
+  // Each device's sheet says it; the card says only the worst thing about it.
+  for (const [device, sentence] of [
+    ["tailscale0", "captures this fq_codel's parameters and puts them back"],
+    ["wg0", "replaces the kernel's default queue"],
+    // Drift names the parameter changed in place.
+    ["ens3", "rtt 50000 → 100000"],
+  ]) {
+    await queues.getByRole("button", { name: `Edit the limits on ${device}` }).click()
+    await expect(sheet).toContainText(sentence)
+    await sheet.getByRole("button", { name: "Cancel" }).click()
+    await expect(sheet).toHaveCount(0)
+  }
+  await expect(queues.getByRole("listitem").filter({ hasText: "ens3" })).toContainText(
+    "differs from saved limits",
+  )
+  await expect(queues.getByRole("listitem").filter({ hasText: "jd-lab" })).toContainText(
+    "changes refused",
+  )
+  await queues.getByRole("button", { name: "Edit the limits on jd-lab" }).click()
   await expect(sheet.getByText("This device's queues belong to something else")).toBeVisible()
+  await expect(sheet).toContainText("jd-lab has an unmanaged queue hierarchy")
   await expect(sheet.getByRole("button", { name: "Apply" })).toBeDisabled()
   await sheet.getByText("Queues and parameters").click()
   await expect(sheet.getByLabel("jd-lab queue tree")).toContainText("parent 1:10 · sfq 10:")
@@ -195,12 +223,12 @@ test("shaping says what the next change does with each device's queues, and refu
 test("an upload profile goes with CAKE and the delay CAKE measured is shown", async ({ page }) => {
   const mutations: Mutation[] = []
   await open(page, mutations)
-  await visit(page, "/network/traffic")
-  await expect(
-    page.getByText("Upload CAKE delay 1.4 ms average in best effort · 41 ms peak"),
-  ).toBeVisible()
+  await visit(page, "/network/traffic?tab=shaping")
   await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
   const sheet = page.getByRole("dialog")
+  await expect(
+    sheet.getByText("Upload CAKE delay 1.4 ms average in best effort · 41 ms peak"),
+  ).toBeVisible()
   const delay = sheet.getByLabel("Upload queue delay")
   await expect(delay).toContainText("Voice")
   await expect(delay).toContainText("6.2 ms")
@@ -235,7 +263,7 @@ test("congestion control is compared on live sockets, now and before the last sw
   page,
 }) => {
   await open(page, [])
-  await visit(page, "/network/traffic")
+  await visit(page, "/network/traffic?tab=shaping")
   const panel = page.getByLabel("Congestion control on live sockets")
   const now = panel.getByLabel("Now")
   await expect(now.getByRole("row", { name: /bbr/ })).toContainText("22 ms")
@@ -245,30 +273,26 @@ test("congestion control is compared on live sockets, now and before the last sw
   await expect(panel).toContainText("not a controlled test")
 })
 
-test("a loaded program opens into its maps, attachments and cost, and the observer is marked", async ({
+test("a loaded program opens its page: maps, attachments and cost, and the observer is marked", async ({
   page,
 }) => {
-  // The figure is a spring that counts up once it is on screen, so under load
-  // it reads "40" on its way to "41". Reduced motion writes the value at once;
-  // the animation is the ticker's own, not this page's claim.
-  await page.emulateMedia({ reducedMotion: "reduce" })
   await open(page, [])
-  await visit(page, "/network/traffic")
+  await visit(page, "/network/traffic?tab=ebpf")
   await expect(page.getByLabel("eBPF platform")).toContainText(
     "Kernel 6.14.0-37-generic · JIT on · unprivileged loading refused · BTF type information present · bpf filesystem mounted · run statistics off",
   )
-  const cgroups = page.locator("[data-slot=stat-tile]").filter({ hasText: "On cgroups" })
-  await cgroups.scrollIntoViewIfNeeded()
-  await expect(cgroups).toContainText("41")
+  await expect(page.getByLabel("eBPF inventory")).toContainText("41 cgroup attachments")
   const row = page.getByRole("row").filter({ hasText: "jd_flow_egress" })
   await expect(row).toContainText("this dashboard’s observer")
-  await row.getByRole("button", { name: "Open program 9101" }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByLabel("Where program 9101 is attached")).toContainText(
+  await row.getByRole("link", { name: "Open program 9101" }).click()
+  await expect(page).toHaveURL(/\/network\/traffic\/ebpf\/9101$/)
+  await expect(page.getByLabel("Where program 9101 is attached")).toContainText(
     "/sys/fs/cgroup/system.slice",
   )
-  await expect(sheet.getByLabel("Maps of program 9101")).toContainText("jd_events")
-  await expect(sheet.getByText("Run cost is not counted")).toBeVisible()
+  await expect(page.getByLabel("Maps of program 9101")).toContainText("jd_events")
+  await expect(page.getByLabel("Program 9101 in the kernel")).toContainText(
+    "not counted: the kernel times programs only with kernel.bpf_stats_enabled",
+  )
 })
 
 test("an install is followed by configured, active and verified phases, not by a claim", async ({
@@ -326,7 +350,7 @@ test("an install is followed by configured, active and verified phases, not by a
       }),
     )
   })
-  await visit(page, "/network/traffic")
+  await visit(page, "/network/traffic?tab=ebpf")
   await page.getByRole("button", { name: "Install bpftool" }).click()
   const phases = page.getByRole("list", { name: "After installing bpftool" }).first()
   await expect(phases).toContainText("Installed: done")
@@ -475,10 +499,13 @@ test.describe("at a phone's width", () => {
       )
     await open(page, [])
     await visit(page, "/network/traffic")
-    await expect(page.getByLabel("Live context")).toContainText("TCP round trip")
-    await expect(page.getByLabel("Transfer budgets")).toContainText("over 80%")
+    await expect(page.getByLabel("Live context")).toContainText("TCP health")
     expect(await overflow(), "horizontal overflow on /network/traffic").toBeLessThanOrEqual(0)
     await page.screenshot({ path: testInfo.outputPath("traffic-390.png"), fullPage: true })
+    await visit(page, "/network/traffic?tab=budgets")
+    await expect(page.getByLabel("Transfer budgets")).toContainText("over 80%")
+    expect(await overflow(), "horizontal overflow on the budgets").toBeLessThanOrEqual(0)
+    await visit(page, "/network/traffic?tab=shaping")
     await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
     await expect(page.getByRole("dialog").getByLabel("Upload queue delay")).toBeVisible()
     // Settled after the sheet's entry animation, so the picture is the sheet.
