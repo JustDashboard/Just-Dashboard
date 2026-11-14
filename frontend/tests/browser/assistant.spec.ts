@@ -740,7 +740,7 @@ test("the assistant's page sets up who answers, once, for everywhere", async ({ 
   await page.goto("/assistant")
   await assistantTabs(page).getByRole("link", { name: "Settings" }).click()
   await expect(page).toHaveURL(/\/assistant\?view=settings$/)
-  await expect(page.locator("[data-slot='assistant-now']")).toContainText("Claude Opus 5.5")
+  await expect(page.locator("#assistant-model")).toContainText("Claude Opus 5.5")
   await expect(page.locator("[data-preset='anthropic']")).toContainText("In use")
   await expect(page.locator("[data-preset='openrouter']")).toContainText("deepseek/deepseek-r2")
   await page.getByRole("button", { name: "OpenAI: set up" }).click()
@@ -1177,9 +1177,9 @@ test("the server's page is a chat over the whole server, with every chat", async
   // Nothing of the settings was lost: they are the page's second tab.
   await page.goto("/assistant")
   await assistantTabs(page).getByRole("link", { name: "Settings" }).click()
-  await expect(page.locator("[data-slot='assistant-now']")).toContainText("Claude Opus 5.5")
-  await expect(page.getByText("What it may do on its own")).toBeVisible()
-  await expect(page.getByText("Where it works")).toBeVisible()
+  await expect(page.locator("#assistant-model")).toContainText("Claude Opus 5.5")
+  await expect(page.getByRole("heading", { name: "Default mode" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Where it works" })).toBeVisible()
 })
 
 test("the mode menu says plainly what each mode lets it do", async ({ page }) => {
@@ -1479,7 +1479,7 @@ test("the head of an assistant that is off reads across a phone", async ({ page 
   await page.setViewportSize({ width: 390, height: 844 })
   await mockAssistant(page, [], { settings: off })
   await page.goto("/assistant?view=settings")
-  const head = page.locator("[data-slot='assistant-now']")
+  const head = page.locator("#assistant-model")
   const title = head.getByText("The assistant is off", { exact: true })
   const command = head.getByRole("button", { name: "Set up the assistant" })
   await expect(command).toBeVisible()
