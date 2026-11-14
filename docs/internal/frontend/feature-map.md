@@ -579,7 +579,8 @@ and restores. Automatic overdue/attention recommendations were removed in 0.7.5
 ### `/databases`
 
 Routes: `/databases`, `/databases/map`, `/databases/new`, `/databases/[id]` (+ `/assistant`,
-`/data`, `/query`, `/search`, `/schema`, `/diagram`, `/generate`, `/performance`, `/logs`,
+`/data`, `/query`, `/search`, `/schema`, `/diagram`, `/generate`, `/performance`,
+`/performance/statements/[key]`, `/performance/tables/[name]`, `/performance/sessions/[pid]`, `/logs`,
 `/access`, `/access/[account]`, `/backups`, `/alerts`, `/import`, `/settings`, `/settings/network`,
 `/settings/resources`, `/settings/pooling`, `/settings/parameters`, `/settings/extensions`,
 `/settings/version`, `/settings/danger`)
@@ -759,8 +760,6 @@ list of Performance draws a bar per row: a share is a figure in its own column, 
 footnote said is a fact on its title line (`ops/performance-words.tsx`);
 `tests/browser/database-performance.spec.ts`.
 
-
-
 Data, Query, Schema and Diagram are four workbenches under one head
 (`components/database/workbench/chrome.tsx`): the database's identity and the open thing's verbs in
 the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
@@ -769,6 +768,7 @@ Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where R
 row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
 facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
 at the foot of its canvas (no minimap).
+
 Backups' dumps are one line each in a framed table (a card of two lines on a phone): when, the
 file's name with its tag and note, what it holds, its size, and Download, Restore and Delete. The
 name opens who took it, the tool that wrote it and how long that took. *Back up now* is the one
@@ -784,17 +784,6 @@ project it writes for (`generate/options.ts` `logoKeys`; its language's mark whe
 none), and before anything is written its place is that mark, "Nothing written yet" and Generate.
 Search says a limit only when one was hit, as the tail of its summary sentence, and each table's
 *Every match* is a small verb on its title line.
-
-Data, Query, Schema and Diagram are four workbenches under one head
-(`components/database/workbench/chrome.tsx`): the database's identity and the open thing's verbs in
-the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
-a bar at the foot — Tables, Rows and Details on Data, where a row is a card and its full row the
-Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where Run's menu holds the
-row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
-facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
-at the foot of its canvas (no minimap).
-
-
 
 **Implementation:** `components/database/`; backend in
 [`../backend/databases.md`](../backend/databases.md) Adding a database can limit its container from
@@ -968,14 +957,6 @@ changes. Configure retains the administrator-reviewed replacement specification 
 containers and opens the owning Compose file for Compose containers. Automatic overview findings,
 issue badges, failure/anomaly suggestions and recommendation cards were removed in 0.7.5
 
-An image is a page of its own, `/docker/images/[id]` (`image-page.tsx`; the old `?image=` address
-redirects there): its identity line with Pull or Tag and the rest in a menu, a picture of its
-registry, the image and the containers made from it, the views Layers, Containers, History and
-Configuration in `?tab=`, and from `xl` the images as a rail with the table's own filters.
-`tests/browser/docker-image-page.spec.ts`
-
-**Implementation:** `components/docker/`; see
-
 The overview, Containers, Events and Stacks open on one line (`docker-identity.tsx`, `HostIdentity`
 laid out as a project's header): Docker's mark, "Docker" and its version, the page's verdict beside
 the name, the server as the first fact, and the page's one command at the far end (Open Deployments,
@@ -1002,11 +983,11 @@ on screen filled (and drawn first when the filter does not hold it), Alt+↑ and
 arrows walking it with `?tab=` carried. Beside the rail the blocks that went side by side at 1280px
 and 1536px do so at 1600px and 1856px (`beside-rail.ts`)
 
-**Implementation:** `components/docker/`; checked by `tests/browser/docker-overview.spec.ts`,
-`stacks-ui.spec.ts`, `stack-detail.spec.ts`, `container-page.spec.ts`, `docker-events.spec.ts` and
-`docker-ui.spec.ts`; see
-[`features-terminal.md`](features-terminal.md#feature-panels) and
-[`../backend/docker-files-logs.md`](../backend/docker-files-logs.md)
+An image is a page of its own, `/docker/images/[id]` (`image-page.tsx`; the old `?image=` address
+redirects there): its identity line with Pull or Tag and the rest in a menu, a picture of its
+registry, the image and the containers made from it, the views Layers, Containers, History and
+Configuration in `?tab=`, and from `xl` the images as a rail with the table's own filters.
+`tests/browser/docker-image-page.spec.ts`
 
 A volume is a page of its own (`/docker/volumes/[name]`, `components/docker/volume-page.tsx`): its
 identity line with one command, a picture of the containers that mount it and the backup jobs that
@@ -1014,6 +995,12 @@ cover it, and its views in the address as `?tab=` — Files, Mounts, Backups, Co
 the Volumes table as a rail beside it from `xl`. `/docker/volumes?volume=<name>`, which opened the
 sheet this replaced, redirects to it. Specs: `tests/browser/docker-volumes.spec.ts`,
 `tests/browser/docker-volume-page.spec.ts`.
+
+**Implementation:** `components/docker/`; checked by `tests/browser/docker-overview.spec.ts`,
+`stacks-ui.spec.ts`, `stack-detail.spec.ts`, `container-page.spec.ts`, `docker-events.spec.ts` and
+`docker-ui.spec.ts`; see
+[`features-terminal.md`](features-terminal.md#feature-panels) and
+[`../backend/docker-files-logs.md`](../backend/docker-files-logs.md)
 
 ### `/metrics`
 
@@ -1550,6 +1537,7 @@ Connected now, and Settings (the form as a settings column with one save bar, ad
 `?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
 `stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
 the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
+
 Configuration (`/proxy/config`) opens on nginx's directory as an identity line with Test config, the
 include picture over the files by folder, and for administrators What nginx loads, Settings (one
 column, one save bar, a reload switch), Lint and History as `?tab=` views; a file's revisions and
@@ -1617,16 +1605,6 @@ check's **Watch on a schedule**; Packet captures adds bounded immutable scope, d
 progress/cleanup, original private PCAP access and separately redacted support export, each capture
 a page of its own (`/network/captures/[id]`, `components/network/capture-page.tsx`: the interface,
 filter and file as a picture, the record on a second view); reload never starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
-selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) read
-each group's policy and carrying member, every member measured through its own path (state, round
-trip, loss, a strip of recent samples, its mark, table and probe source), the rules' current advice,
-runtime readback and readiness, a decision timeline whose evidence opens on the routes before and
-after, the measurements and the connections moved, pinned and flushed, and the last simulation's
-expectations and phases; destructive confirmations guard fail over/fail back now, enable, disable,
-removal and turning automation on, which stays disabled until a passed simulation of the current
-configuration. Address planning joins held reservations with fresh overlap coverage and native owner
-progress/cleanup, original private PCAP access and separately redacted support export; reload never
-starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
 selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) are
 a list and a page a group: `/network/egress` opens on an identity line (how many of the six slots
 are used, how many carry traffic, how many switch on their own, members proven) over one card a
@@ -1664,14 +1642,6 @@ Connections opens on its identity line and picture, lists each address as a one-
 address a page of its own (`/network/connections/[address]`: its sockets, closes and layers, a past
 hour from socket history), and blocks with a reason, an end and an incident
 (`components/network/connections/`); VPN
-opts in to IPv6 addressing and separate egress with per-family evidence and translated-connection
-counts; each tunnel calls out stale always-on handshakes, captured transports and passed budgets,
-opens a record (endpoint evidence, trend, lifecycle with outcomes), and each peer's sheet adds its
-trend, endpoint history, alert-only budget, editing (a device's regenerated configuration), site
-verification and a Linux kill-switch download, with archived tunnels restorable and
-Tailscale/Headscale approval and key expiry read-only (`components/network/vpn/record.tsx`,
-Connections opens an address into its tuples, closes and layers, reads a past hour from socket
-history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
 opens on its own line and shows one kind at a time as a view in the address (`?tab=wireguard`, the
 default, `tailscale`, `headscale` where this server runs one, `log`; `components/network/vpn/views.ts`),
 each kind on its own identity line with no tile row, opts in to IPv6 addressing and separate
@@ -1725,8 +1695,8 @@ diffs and provenance (a list's standing and enforcement evidence head its editor
 naming local networks and open sessions, explicit session revocation, workload kernel profiles
 staged beside hand edits with per-interface effective values, and the connection table's band,
 charts, shares and what they point at. Private verification is available,
-and IPv4 WireGuard full tunnels explain IPv6 leak blocking. DNS, VPN and Interfaces each end on
-their service's log — the resolvers, tunnels and link daemons the page lists, read in the shared
+and IPv4 WireGuard full tunnels explain IPv6 leak blocking. DNS and VPN each keep their service's log
+as a view and Interfaces ends on its own — the resolvers, tunnels and link daemons the page lists, read in the shared
 `ServiceLogs` pane ([`docker-files-logs.md`](../backend/docker-files-logs.md)). The [complete
 inventory](../../audits/2026-10-08-network-audit/README.md) distinguishes UI, API and inspection
 limits
