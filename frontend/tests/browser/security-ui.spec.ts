@@ -649,19 +649,20 @@ test("the firewall page opens on its defaults and offers the controls that set t
   await page.goto("/network/firewall")
   await loaded(page)
 
-  const grid = page.locator("[data-slot=stat-grid]")
-  await expect(grid.getByText("Rules", { exact: true })).toBeVisible()
-  // Three rules, not four: the IPv6 twin is folded away and said so.
-  await expect(grid.locator("[data-slot=stat-tile]").first()).toContainText("3")
+  // No row of tiles: the identity line counts the rules. Three, not four:
+  // the IPv6 twin is folded away and said so.
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  const identity = page.getByRole("region", { name: "About the firewall" })
+  await expect(identity).toContainText("2 allow · 1 deny")
   await expect(page.getByText("1 IPv6 twin folded away", { exact: true })).toBeVisible()
-  await expect(page.getByRole("combobox", { name: "Inbound default" })).toBeVisible()
+  await expect(page.getByRole("radiogroup", { name: "Inbound default" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Add rule" })).toBeVisible()
   await expect(page.getByRole("switch", { name: "Firewall enabled" })).toBeChecked()
   await expect(page.getByRole("row").filter({ hasText: "repeat offender" })).toBeVisible()
 
   // The rules folded by where they lead: each port admitted, and the default
   // for everything else. The rule list ends on that default as well.
-  const inbound = page.getByRole("list", { name: "How a connection from outside is answered" })
+  const inbound = page.locator("[data-slot=firewall-picture]")
   await expect(inbound).toContainText("SSH")
   await expect(inbound).toContainText(":22")
   await expect(inbound).toContainText("HTTPS")
@@ -974,7 +975,7 @@ test("an auth.log outside the log roots is said to be, not said to be missing", 
   await expect(page.getByText(/keeps no auth\.log/)).toHaveCount(0)
 })
 
-test("the firewall page reads what its rules did, with the day's counts in its grid", async ({
+test("the firewall page reads what its rules did, with the day's counts on its picture", async ({
   page,
 }) => {
   const mutations: Mutation[] = []
@@ -984,11 +985,12 @@ test("the firewall page reads what its rules did, with the day's counts in its g
   await page.goto("/network/firewall")
   await loaded(page)
 
-  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(7)
-  await expect(tile(page, "Blocked")).toContainText("5")
-  await expect(tile(page, "Sources")).toContainText("2")
-  await expect(tile(page, "Rate-limited")).toContainText("2")
+  // The counts are said where they happened, on the default that refused
+  // them. No rule here limits a port, so what a limit turned away joins it.
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  await expect(page.getByTestId("refused-reading")).toHaveText(
+    "5 refused from 2 addresses · 2 rate-limited in 24h",
+  )
 
   const lines = page.getByLabel("Log lines")
   await expect(lines.getByText("rate limited", { exact: true }).first()).toBeVisible()
@@ -1082,9 +1084,11 @@ test("with logging off the firewall log points at the control that turns it on",
 
   await expect(page.getByText("ufw is not logging")).toBeVisible()
   // Zeroes that mean "not recorded" are not drawn as readings.
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(4)
+  await expect(page.getByTestId("refused-reading")).toHaveCount(0)
   await page.getByRole("button", { name: "Choose a logging level" }).click()
-  await expect(page.getByRole("combobox", { name: "Logging default" })).toBeFocused()
+  await expect(
+    page.getByRole("radiogroup", { name: "Logging level" }).getByRole("radio", { name: "off" }),
+  ).toBeFocused()
   expect(logs.sockets).toHaveLength(0)
   expect(logs.searches).toHaveLength(0)
 })

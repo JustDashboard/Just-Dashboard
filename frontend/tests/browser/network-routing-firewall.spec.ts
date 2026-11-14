@@ -682,7 +682,8 @@ test("the firewall page says which firewall is in charge, its zones, policy by f
   await expect(access).toBeVisible()
   await expect(page.getByText("Rule 2 admits it in zone public.")).toBeVisible()
   await expect(page.getByText(/inbound default is reject\. \(zone public\)/)).toBeVisible()
-  await page.getByRole("button", { name: "Reset", exact: true }).click()
+  await page.getByRole("button", { name: "Firewall actions" }).click()
+  await page.getByRole("menuitem", { name: "Reset" }).click()
   await expect(page.getByRole("dialog")).toContainText("Reload zone public's shipped settings")
 })
 
@@ -785,12 +786,15 @@ test("rules carry their identity, findings and history, and removal names the id
   await expect(finding).toHaveText(/shadowed by #1/i)
   await expect(finding).toHaveAttribute("title", /never applies/)
   await expect(page.getByText("Recent firewall changes")).toBeVisible()
+  // A rule's history is a glance: a popover on its row, not a sheet over the page.
   await page.getByRole("button", { name: "Rule history" }).first().click()
-  const sheet = page.getByRole("dialog")
+  const history = page.getByRole("dialog", { name: "History of rule 1" })
   await expect(
-    sheet.getByText("Only changes made from this dashboard are recorded", { exact: false }),
+    history.getByText("Only changes made from this dashboard are recorded", { exact: false }),
   ).toBeVisible()
+  await expect(history.getByText("22/tcp ALLOW IN Anywhere")).toBeVisible()
   await page.keyboard.press("Escape")
+  await expect(history).toHaveCount(0)
   await page
     .getByRole("row")
     .filter({ hasText: "203.0.113.9" })
@@ -950,8 +954,16 @@ test("with temporary apply on, a firewall change asks the host to recover it unl
   })
   await page.goto("/network/firewall")
   await loaded(page)
-  await page.getByRole("combobox", { name: "Outbound default" }).click()
-  await page.getByRole("option", { name: "deny", exact: true }).click()
+  await page
+    .getByRole("radiogroup", { name: "Outbound default" })
+    .getByRole("radio", { name: "deny", exact: true })
+    .click()
+  // Staged, not sent: the page's one Save sends it.
+  expect(headers).toEqual([])
+  await page
+    .getByRole("region", { name: "Save changes" })
+    .getByRole("button", { name: /^Save/ })
+    .click()
   await expect.poll(() => headers.length).toBe(1)
   expect(headers[0]).toBe("pending")
 })

@@ -19,10 +19,14 @@ test("read-only accounts see network state and cannot submit mutations", async (
   await expect(page.getByRole("link", { name: "Open ens3", exact: true })).toBeVisible()
   for (const command of ["New device", "New namespace"])
     await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
-  for (const [path, commands] of [
-    ["gateway", ["Forward a port", "Share a network"]],
-    ["dns?tab=lookups", ["Resolve"]],
-  ] as const) {
+  // The gateway draws no command or switch such an account cannot use.
+  await page.goto("/network/gateway")
+  await loaded(page)
+  await expect(page.getByRole("button", { name: "Edit :8080 → 10.0.4.5:80" })).toBeVisible()
+  for (const command of ["Forward a port", "Share a network"])
+    await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
+  await expect(page.getByRole("switch")).toHaveCount(0)
+  for (const [path, commands] of [["dns?tab=lookups", ["Resolve"]]] as const) {
     await page.goto(`/network/${path}`)
     await loaded(page)
     for (const command of commands)

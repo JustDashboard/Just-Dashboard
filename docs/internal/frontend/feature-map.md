@@ -1636,6 +1636,20 @@ none has a `StatGrid`:
 Every reading these pages gave as "Unknown" is still given as "Unknown": a check that expired or was
 cancelled measured nothing, a UDP row has no byte counters, and an hour with no block was not sampled.
 
+**The overview, Firewall, Gateway and Drift open on a project's line (0.8.7).** None keeps a row of
+tiles. The overview's line says whether the uplink is up and has *Run a check* as its command; In
+and Out are two reading lines, the connections are on this server's node, and Ways out is a line a
+family. Firewall draws its backend as netfilter, the filter it drives, says what its log counted on
+the picture's nodes (each a press that narrows the log), keeps its defaults as one settings section
+under the rules saved by the page's save bar with the inbound confirmation and preflight unchanged,
+opens a recorded change's request and a rule's history as popovers, and offers ufw's install where
+there is no firewall. Gateway's line carries the forwarding families, the forwards and NAT in force
+and firewall admission as a word with the policy evidence behind it; each row carries its own state
+word. Drift's boot unit is one line with its activation behind a press, and its repair plan is
+one-line rows with a checkbox column. Controls on destructive routes are drawn only for an account
+with that capability, and a reader is drawn none it cannot use. Checked by
+`tests/browser/network-overview-firewall.spec.ts`.
+
 **Implementation:** network pages, `components/network/`, shared security firewall/connection
 components; checked by `network-*.spec.ts`, `security-ui.spec.ts` and `design-system.spec.ts`
 
@@ -2057,7 +2071,8 @@ issue badges, settings comparisons and navigation marks. The database Advisor ro
 Docker, Security, project/fleet, proxy, Backups and Network overview no longer request advisory
 endpoints. PM2 details no longer add a heuristic attention panel. Editable settings, updates,
 certificate operations and requested diagnostics remain. Network read failures remain visible as
-errors; Gateway retains manual admission-rule repair under Policy evidence. See the owning backend guides for retired
+errors; Gateway retains manual admission-rule repair, behind the admission word's Policy evidence and in the
+page's menu. See the owning backend guides for retired
 routes and retained operation checks; the 2026-10-12 actionable-findings audit is historical.
 
 ## Non-network audit repairs
