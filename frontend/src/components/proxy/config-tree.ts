@@ -313,3 +313,118 @@ export function readLabel(at: number, now: number): string {
   const age = Math.max(0, (now - at) / 1000)
   return age < 5 ? "read just now" : `read ${duration(age).split(" ")[0]} ago`
 }
+
+/** The main file's place in the include map: the root every lane starts from. */
+export const MAIN_NODE = "main"
+
+/**
+ * One folder of the nginx directory as the include picture draws it: how far
+ * from the main file nginx reaches it, which folders (or the main file) reach
+ * it, and what it holds.
+ */
+export type IncludeFolder = {
+  /** Relative to the root, "" for the root's own files besides the main file. */
+  folder: string
+  /** 1 for a folder the main file includes; 0 for one nothing includes. */
+  depth: number
+  /** The folders whose files include this one's, `MAIN_NODE` for the main file. */
+  from: string[]
+  files: number
+  read: number
+  managed: number
+  /** Links that point at nothing, which nginx refuses to start over. */
+  broken: number
+  /** Backups nginx reads anyway. */
+  backups: number
+}
+
+export type IncludeMap = {
+  /** Folders nginx reads something in, nearest the main file first. */
+  reached: IncludeFolder[]
+  /** Folders it reads nothing in: a disabled site's, a snippet nothing uses. */
+  unread: IncludeFolder[]
+  /** The deepest lane, at most `MAX_DEPTH`. */
+  depth: number
+}
+
+/** Lanes past this are drawn in the last one: a picture four folders deep is already a long one. */
+export const MAX_DEPTH = 3
+
+/**
+ * The directory as nginx walks it, folder by folder: the main file includes
+ * conf.d and sites-enabled, a site's link opens its file in sites-available,
+ * and that file includes snippets. A file is reached from the folder of the
+ * link nginx opened it through when there is one, otherwise from its include's
+ * folder. Password files are read by the workers on a request, never through
+ * an include, so a folder of nothing else is left out rather than called unread.
+ */
+export function includeMap(entries: ProxyConfigEntry[], root: string, main: string): IncludeMap {
+  const folders = new Map<string, IncludeFolder>()
+  const parents = new Map<string, Set<string>>()
+  for (const entry of entries) {
+    if (entry.path === main || entry.protected) continue
+    const folder = folderOf(entry.path, root)
+    const node = folders.get(folder) ?? {
+      folder,
+      depth: 0,
+      from: [],
+      files: 0,
+      read: 0,
+      managed: 0,
+      broken: 0,
+      backups: 0,
+    }
+    node.files++
+    if (entry.included) node.read++
+    if (entry.managed && entry.kind !== "link") node.managed++
+    if (entry.missing) node.broken++
+    if (entry.backup && entry.included) node.backups++
+    folders.set(folder, node)
+    if (!entry.included) continue
+    const by = entry.includedBy?.via ?? entry.includedBy?.file
+    const parent = !by || by === main ? MAIN_NODE : folderOf(by, root)
+    if (parent === folder) continue
+    parents.set(folder, (parents.get(folder) ?? new Set()).add(parent))
+  }
+
+  // Breadth first from the main file, so a folder reached two ways sits in
+  // the nearer lane.
+  const depth = new Map<string, number>([[MAIN_NODE, 0]])
+  let frontier = [MAIN_NODE]
+  while (frontier.length > 0) {
+    const next: string[] = []
+    for (const [folder, from] of parents) {
+      if (depth.has(folder)) continue
+      if (frontier.some((parent) => from.has(parent))) {
+        depth.set(folder, Math.min(...[...from].map((p) => depth.get(p) ?? Infinity)) + 1)
+        next.push(folder)
+      }
+    }
+    frontier = next
+  }
+
+  const reached: IncludeFolder[] = []
+  const unread: IncludeFolder[] = []
+  for (const node of folders.values()) {
+    if (node.read === 0) {
+      unread.push(node)
+      continue
+    }
+    // A folder whose includer nginx never reaches itself (a loop, or an
+    // include from a file the walk could not place) hangs off the main file.
+    const own = depth.get(node.folder) ?? 1
+    node.depth = Math.min(own, MAX_DEPTH)
+    // Only the includers in an earlier lane are wired: a line back up the
+    // picture says nothing a reader could follow.
+    node.from = [...(parents.get(node.folder) ?? [])].filter(
+      (parent) => (depth.get(parent) ?? own) < own,
+    )
+    if (node.from.length === 0) node.from = [MAIN_NODE]
+    reached.push(node)
+  }
+  const byName = (a: IncludeFolder, b: IncludeFolder) =>
+    a.folder === "" ? -1 : b.folder === "" ? 1 : a.folder.localeCompare(b.folder)
+  reached.sort((a, b) => a.depth - b.depth || byName(a, b))
+  unread.sort(byName)
+  return { reached, unread, depth: Math.max(1, ...reached.map((node) => node.depth)) }
+}

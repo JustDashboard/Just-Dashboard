@@ -9,8 +9,10 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,8 +45,15 @@ func TestDomainRoutesReadCaddyEvidenceAsTheDomainsCertificate(t *testing.T) {
 			caddy.Certificate, caddy.CertificateName, caddy.CertificateRenewedBy, caddy.CertificateDaysLeft, caddy.CertificateLink, evidence)
 	}
 	if shop.Certificate != "valid" || shop.CertificateName != "shop" || shop.CertificateRenewedBy != "" ||
-		shop.CertificateDaysLeft < 84 || shop.CertificateLink != "/proxy/certificates" {
+		shop.CertificateDaysLeft < 84 {
 		t.Fatalf("shop.jd.test reads %+v", shop)
+	}
+	// The link names the file, which the Certificates page turns into the
+	// certificate's own page.
+	link, err := url.Parse(shop.CertificateLink)
+	if err != nil || link.Path != "/proxy/certificates" ||
+		!strings.HasPrefix(link.Query().Get("cert"), filepath.Join(imported, "shop")+"/") {
+		t.Fatalf("shop.jd.test links to %q, want the Certificates page naming its file under %s", shop.CertificateLink, imported)
 	}
 }
 

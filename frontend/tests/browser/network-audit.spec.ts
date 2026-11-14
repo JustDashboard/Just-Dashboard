@@ -15,9 +15,7 @@ test("read-only accounts see network state and cannot submit mutations", async (
   await mockNetwork(page, mutations, { overrides, session: reader })
   for (const [path, commands] of [
     ["interfaces", ["New device", "New namespace"]],
-    ["routing", ["Add route", "Add rule"]],
     ["gateway", ["Forward a port", "Share a network"]],
-    ["protection", ["New blocklist", "New limit"]],
     ["dns?tab=lookups", ["Resolve"]],
   ] as const) {
     await page.goto(`/network/${path}`)
@@ -25,9 +23,20 @@ test("read-only accounts see network state and cannot submit mutations", async (
     for (const command of commands)
       await expect(page.getByRole("button", { name: command, exact: true })).toBeDisabled()
   }
+  // Protection draws no command such an account cannot use, rather than a disabled one.
+  await page.goto("/network/protection")
+  await loaded(page)
+  for (const command of ["New blocklist", "New limit"])
+    await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
+  // Routing draws no control such an account cannot use, rather than a disabled one.
   await page.goto("/network/routing")
-  await expect(page.getByRole("switch", { name: "IPv4 forwarding", exact: true })).toBeDisabled()
-  await page.goto("/network/traffic")
+  await loaded(page)
+  for (const command of ["Add route", "Add rule"])
+    await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
+  await page.getByRole("tab", { name: "Forwarding" }).click()
+  await expect(page.getByText("IPv4 forwarding", { exact: true })).toBeVisible()
+  await expect(page.getByRole("switch")).toHaveCount(0)
+  await page.goto("/network/traffic?tab=shaping")
   await expect(page.getByRole("switch", { name: /BBR/ })).toBeDisabled()
   // The DNS settings draw a reader's records without the commands that change them.
   await page.goto("/network/dns?tab=settings")
