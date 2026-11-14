@@ -1,6 +1,4 @@
-import { Fragment } from "react"
 import { cn } from "@/lib/utils"
-import { FactDot } from "@/components/metrics/host-identity"
 import type { Fact } from "@/components/database/workbench/table-facts"
 
 /**
@@ -13,6 +11,12 @@ import type { Fact } from "@/components/database/workbench/table-facts"
  * reader has to turn back into a sentence; the line is the sentence. It wraps
  * between facts, never inside one, and a long run reads on to a second line
  * rather than being cut.
+ *
+ * The dot that parts two facts belongs to the second of them, and the line
+ * is drawn one dot's width to the left of its box: a fact that wraps takes
+ * its dot with it, and at the start of a line the dot is outside the box,
+ * where it is not drawn. A dot that was an item of its own was left hanging
+ * at the end of the line above.
  */
 export function FactsLine({
   facts,
@@ -23,24 +27,25 @@ export function FactsLine({
   return (
     <p
       data-slot="facts-line"
-      className={cn(
-        "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-body text-muted-foreground",
-        className,
-      )}
+      className={cn("min-w-0 overflow-hidden text-body text-muted-foreground", className)}
       {...props}
     >
-      {facts.map((fact, index) => (
-        <Fragment key={fact.key}>
-          {index > 0 && <FactDot />}
-          <span title={fact.title} className="max-w-full min-w-0 truncate">
-            {fact.lead && <span>{fact.lead} </span>}
-            <span className={cn("text-foreground", fact.mono ? "font-mono text-xs" : "numeric")}>
-              {fact.text}
+      <span className="-ml-4 flex flex-wrap items-center gap-y-0.5">
+        {facts.map((fact, index) => (
+          <span key={fact.key} title={fact.title} className="flex max-w-full min-w-0 items-center">
+            <span aria-hidden className="w-4 shrink-0 text-center text-muted-foreground/40">
+              {index > 0 && "·"}
             </span>
-            {fact.tail && <span> {fact.tail}</span>}
+            <span className="min-w-0 truncate">
+              {fact.lead && <span>{fact.lead} </span>}
+              <span className={cn("text-foreground", fact.mono ? "font-mono text-xs" : "numeric")}>
+                {fact.text}
+              </span>
+              {fact.tail && <span> {fact.tail}</span>}
+            </span>
           </span>
-        </Fragment>
-      ))}
+        ))}
+      </span>
     </p>
   )
 }
