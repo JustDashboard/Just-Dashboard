@@ -1,7 +1,7 @@
 "use client"
 
-import { Fragment, useState } from "react"
-import { ChevronDown, ChevronRight, RefreshClockwise } from "@/components/icons"
+import { useState } from "react"
+import { RefreshClockwise } from "@/components/icons"
 import { relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -15,6 +15,7 @@ import { EmptyState, LoadingPanel } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -78,6 +79,10 @@ function took(millis: number): string {
  * While the profiler is recording, the list is read every few seconds, so an
  * operation appears soon after it ran; while it is off there is nothing new
  * to read and the page asks rarely.
+ *
+ * An operation is one line, and its name opens what was recorded of it — the
+ * command, who ran it and what it cost — beside the row. Until 0.8.7 the row
+ * grew a second one under itself and pushed the list down.
  */
 export function ProfilerView({
   mongo,
@@ -286,67 +291,55 @@ export function ProfilerView({
                 const key = `${entry.time}:${index}`
                 const shown = open === key
                 return (
-                  <Fragment key={key}>
-                    <TableRow
-                      data-slot="mongo-slow-operation"
-                      data-state={shown ? "selected" : undefined}
-                      onActivate={() => setOpen(shown ? null : key)}
-                    >
-                      <TableCell className="max-w-96">
-                        <button
-                          type="button"
-                          aria-expanded={shown}
-                          className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm text-left focus-ring"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setOpen(shown ? null : key)
-                          }}
-                        >
-                          {shown ? (
-                            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-                          )}
-                          <span className="min-w-0 truncate font-mono font-medium">
+                  <TableRow
+                    key={key}
+                    data-slot="mongo-slow-operation"
+                    data-state={shown ? "selected" : undefined}
+                  >
+                    <TableCell className="max-w-96">
+                      <Popover open={shown} onOpenChange={(next) => setOpen(next ? key : null)}>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`${entry.op} ${entry.ns}: what was recorded`}
+                            className="block max-w-full min-w-0 truncate rounded-sm text-left font-mono font-medium focus-ring hover:underline"
+                          >
                             <span style={{ color: operationColor(entry.op) }}>{entry.op}</span>{" "}
                             {entry.ns}
-                          </span>
-                        </button>
-                      </TableCell>
-                      <TableCell className="numeric text-right font-medium whitespace-nowrap">
-                        {took(entry.millis)}
-                      </TableCell>
-                      <TableCell className="numeric text-right whitespace-nowrap text-muted-foreground">
-                        {grouped(entry.docsExamined)} docs · {grouped(entry.keysExamined)} keys
-                      </TableCell>
-                      <TableCell className="numeric text-right">
-                        {grouped(entry.returned)}
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "max-w-56 truncate font-mono max-lg:hidden",
-                          entry.planSummary.startsWith("COLLSCAN")
-                            ? "text-warning"
-                            : "text-muted-foreground",
-                        )}
-                      >
-                        {entry.planSummary || "—"}
-                      </TableCell>
-                      <TableCell
-                        className="text-right whitespace-nowrap text-muted-foreground"
-                        title={timestamp(entry.time)}
-                      >
-                        {relativeTime(entry.time)}
-                      </TableCell>
-                    </TableRow>
-                    {shown && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={6} className="pt-0">
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="start"
+                          className="w-[min(44rem,calc(100vw-2rem))] p-4"
+                        >
                           <SlowDetail entry={entry} />
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
+                        </PopoverContent>
+                      </Popover>
+                    </TableCell>
+                    <TableCell className="numeric text-right font-medium whitespace-nowrap">
+                      {took(entry.millis)}
+                    </TableCell>
+                    <TableCell className="numeric text-right whitespace-nowrap text-muted-foreground">
+                      {grouped(entry.docsExamined)} docs · {grouped(entry.keysExamined)} keys
+                    </TableCell>
+                    <TableCell className="numeric text-right">{grouped(entry.returned)}</TableCell>
+                    <TableCell
+                      className={cn(
+                        "max-w-56 truncate font-mono max-lg:hidden",
+                        entry.planSummary.startsWith("COLLSCAN")
+                          ? "text-warning"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {entry.planSummary || "—"}
+                    </TableCell>
+                    <TableCell
+                      className="text-right whitespace-nowrap text-muted-foreground"
+                      title={timestamp(entry.time)}
+                    >
+                      {relativeTime(entry.time)}
+                    </TableCell>
+                  </TableRow>
                 )
               })}
             </TableBody>
@@ -360,7 +353,7 @@ export function ProfilerView({
 function SlowDetail({ entry }: { entry: MongoProfilerEntry }) {
   const who = entry.appName || entry.user
   return (
-    <div className="animate-rise space-y-2 pb-1">
+    <div className="space-y-2 text-xs">
       <Well className="max-h-48 overflow-auto text-hint leading-relaxed break-all whitespace-pre-wrap">
         {entry.command}
         {entry.commandTruncated ? "…" : ""}
