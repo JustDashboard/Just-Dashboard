@@ -187,8 +187,12 @@ Read-only: every box opens its own page
 
 ### `/dashboard`
 
-The panel's own version: one identity line (the mark and the installed version, the GitHub
-repository and branch it follows, the check's verdict), the upgrade while one runs, and the release
+The panel's own version: one identity line laid out as a project's header (the mark and the
+installed version with the check's verdict beside it, the GitHub repository and branch it follows
+and how far behind it is as the facts, *Check now* and a brand-faced *Update to …* at the far end),
+what the update needs said first as a line each under it (that it wants something done by hand, with
+*Read the notes* going to that release's own note; that the checkout carries uncommitted edits the
+update keeps, with *Show* listing them in a popover), the upgrade while one runs, and the release
 history as a searchable timeline. The sidebar entry is "Settings" — inside a product called
 Dashboard, an entry called Dashboard said nothing — and this page is its "Version". It is also where
 the sidebar's update notice leads: *View patch notes*, *View progress*, *See what's new* and *See

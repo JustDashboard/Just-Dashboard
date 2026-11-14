@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { risen } from "./risen"
 
 /**
  * The dashboard's own two pages — Settings (its version) and Configuration —
@@ -304,9 +305,14 @@ test("the version page is the history, with the update in the header", async ({ 
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await expect(page.getByRole("button", { name: "Update to 0.7.0" })).toBeVisible()
-  await expect(page.getByText("0.7.0 available")).toBeVisible()
+  // What the check found stands beside the version, so the line is a project's two rows.
+  const line = page.locator("[data-slot=host-identity]")
+  await expect(line).toHaveAttribute("data-layout", "project")
+  await expect(line.getByText("0.7.0 available")).toBeVisible()
   // What is on offer is a release, and the page says how it knows.
-  await expect(page.getByText("1 release ahead of yours · tagged v0.7.0")).toBeVisible()
+  await expect(line.getByText("1 release ahead of yours · tagged v0.7.0")).toBeVisible()
+  await risen(page)
+  expect((await line.boundingBox())!.height).toBeLessThan(72)
 
   // The newest release leads the history and the running one is marked.
   const history = page.locator("section", { hasText: "Version history" })
@@ -314,9 +320,32 @@ test("the version page is the history, with the update in the header", async ({ 
   await expect(history.getByText("Installed", { exact: true })).toBeVisible()
   await expect(history.getByText("Before you update")).toBeVisible()
 
+  // What the update needs first is a line each, with its verb at the end.
+  const notices = page.locator("[data-slot=notice-lines]")
+  await expect(notices.getByRole("listitem")).toHaveCount(2)
+  await expect(notices.getByText("0.7.0 needs something done by hand")).toBeVisible()
+  await expect(notices.getByText("1 uncommitted change")).toBeVisible()
+  await expect(notices).toContainText("/opt/just-dashboard")
+  const heights = await notices
+    .getByRole("listitem")
+    .evaluateAll((items) => items.map((item) => item.getBoundingClientRect().height))
+  expect(heights[0]).toBeLessThanOrEqual(48)
+  expect(heights[1]).toBe(heights[0])
+  // The files are a press away, and nothing on the page moves to show them.
+  const before = await history.boundingBox()
+  await notices.getByRole("button", { name: "Show" }).click()
+  await expect(page.getByText("M Caddyfile")).toBeVisible()
+  await expect(page.getByText(/fast-forwards rather than resetting/)).toBeVisible()
+  expect((await history.boundingBox())!.y).toBe(before!.y)
+  await page.keyboard.press("Escape")
+
   await page.getByPlaceholder("Find a change, a version or a fix").fill("deployments")
   await expect(history.getByRole("heading", { name: "0.6.6" })).toBeVisible()
   await expect(history.getByRole("heading", { name: "0.7.0" })).toHaveCount(0)
+  // The way to the release's own note clears a search that hid it.
+  await notices.getByRole("button", { name: "Read the notes" }).click()
+  await expect(history.getByRole("heading", { name: "0.7.0" })).toBeVisible()
+  await expect(history.getByText("Before you update")).toBeInViewport()
 
   expect(await framedPanels(page)).toEqual([])
 })
