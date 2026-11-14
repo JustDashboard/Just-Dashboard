@@ -38,6 +38,7 @@ import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/nav"
 import { useNavScope, type NavScope } from "@/components/nav-scope"
 import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
+import { HostIdentity } from "@/components/metrics/host-identity"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { PullRequestPicker } from "@/components/deploy/pull-request-picker"
 import { EnvironmentSwitch } from "@/components/deploy/environment-switch"
@@ -170,91 +171,87 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
     <Page fill={fill} className={cn("pt-4 md:pt-5", fill && "gap-0 pb-0 md:gap-0 md:pb-0")}>
       <PageContext title={record.name} />
 
-      <section
-        aria-label={`About ${record.name}`}
-        data-slot="project-header"
-        className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5"
-      >
-        <ProjectMark deployment={deployment} product={project.product} className="sm:row-span-2" />
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:contents">
-          {/* A flex box, so the address sits on the row's centre rather than
-              on the baseline of a line box taller than its type. */}
-          <p className="flex max-w-full min-w-0 text-title font-semibold tracking-tight">
-            <Address deployment={deployment} url={url} domain={domain} />
-          </p>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:order-2 max-sm:col-span-3">
-            <ProjectStatus
-              summary={deployment}
-              runtime={runtime}
-              archived={project.archived}
-              live={Boolean(activeRun)}
-            />
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 max-sm:order-1 sm:row-span-2">
-          <EnvironmentSwitch className="max-sm:hidden" />
-          {/* Staging's way to production is its own button: it is the step
-              staging exists for, not one more item in the menu. On a phone
-              the row is the address's and the command's, and the menu
-              carries Promote instead. */}
-          {onStaging && canPromote && deployment.liveReleaseId && !activeRun && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="max-sm:hidden"
-              onClick={() => setPromote({ open: true, releaseId: deployment.liveReleaseId })}
-            >
-              <ArrowCircleUp className="size-3.5" />
-              Promote
-            </Button>
-          )}
-          {command &&
-            (command.key === "view" && activeRun ? (
-              <Button size="sm" asChild>
-                <Link href={`${base}/runs/${activeRun.id}`}>
-                  {command.label} <ArrowRight className="size-3.5" />
-                </Link>
-              </Button>
-            ) : (
+      <HostIdentity
+        label={`About ${record.name}`}
+        slot="project-header"
+        logo={<ProjectMark deployment={deployment} product={project.product} />}
+        title={<Address deployment={deployment} url={url} domain={domain} />}
+        state={
+          <ProjectStatus
+            summary={deployment}
+            runtime={runtime}
+            archived={project.archived}
+            live={Boolean(activeRun)}
+          />
+        }
+        command={
+          <>
+            <EnvironmentSwitch className="max-sm:hidden" />
+            {/* Staging's way to production is its own button: it is the step
+                staging exists for, not one more item in the menu. On a phone
+                the row is the address's and the command's, and the menu
+                carries Promote instead. */}
+            {onStaging && canPromote && deployment.liveReleaseId && !activeRun && (
               <Button
                 size="sm"
-                disabled={command.disabled}
-                pending={project.starting === command.key}
-                onClick={command.run}
+                variant="outline"
+                className="max-sm:hidden"
+                onClick={() => setPromote({ open: true, releaseId: deployment.liveReleaseId })}
               >
-                <command.icon className="size-3.5" />
-                {project.starting === command.key ? command.progressive : command.label}
+                <ArrowCircleUp className="size-3.5" />
+                Promote
               </Button>
-            ))}
-          {menu.length > 0 && <VerbMenu verbs={menu} label="Deployment actions" />}
-        </div>
-        <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:order-3 sm:col-span-1 sm:col-start-2">
-          <SourceFact
-            deployment={deployment}
-            record={record}
-            configuration={project.configuration}
-            blueprint={project.blueprint}
-          />
-          <BranchFact deployment={deployment} record={record} />
-          <RuntimeFact deployment={deployment} configuration={project.configuration} />
-          {project.liveRelease && (
-            <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
-              <span className="numeric shrink-0 text-foreground">
-                Release #{project.liveRelease.number}
+            )}
+            {command &&
+              (command.key === "view" && activeRun ? (
+                <Button size="sm" asChild>
+                  <Link href={`${base}/runs/${activeRun.id}`}>
+                    {command.label} <ArrowRight className="size-3.5" />
+                  </Link>
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  disabled={command.disabled}
+                  pending={project.starting === command.key}
+                  onClick={command.run}
+                >
+                  <command.icon className="size-3.5" />
+                  {project.starting === command.key ? command.progressive : command.label}
+                </Button>
+              ))}
+          </>
+        }
+        menu={menu.length > 0 && <VerbMenu verbs={menu} label="Deployment actions" />}
+        facts={
+          <>
+            <SourceFact
+              deployment={deployment}
+              record={record}
+              configuration={project.configuration}
+              blueprint={project.blueprint}
+            />
+            <BranchFact deployment={deployment} record={record} />
+            <RuntimeFact deployment={deployment} configuration={project.configuration} />
+            {project.liveRelease && (
+              <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
+                <span className="numeric shrink-0 text-foreground">
+                  Release #{project.liveRelease.number}
+                </span>
+                <ReleaseLine
+                  run={project.liveRun}
+                  activatedAt={project.liveRelease.activatedAt}
+                  promotion={project.liveRelease.promotion}
+                />
               </span>
-              <ReleaseLine
-                run={project.liveRun}
-                activatedAt={project.liveRelease.activatedAt}
-                promotion={project.liveRelease.promotion}
-              />
-            </span>
-          )}
-          <AutoDeployFact
-            reading={project.gitWatch && autoDeployReading(project.gitWatch)}
-            href={`${base}/settings/general#automatic-deployment`}
-          />
-        </div>
-      </section>
+            )}
+            <AutoDeployFact
+              reading={project.gitWatch && autoDeployReading(project.gitWatch)}
+              href={`${base}/settings/general#automatic-deployment`}
+            />
+          </>
+        }
+      />
 
       {/* On a phone the header's row has no room for the switch beside the
           command, so it takes a row of its own under the facts. */}

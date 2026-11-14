@@ -233,6 +233,24 @@ taking a frame:
   and with nothing below it the first surface the body draws — a row's hover wash, a table header —
   butted into it and the rule read as an edge of that surface rather than as the line under the title.
 
+**A picture of things wired through one hub is `WireFlow`.** Most of the pictures above have one
+shape — a column of things on the left, this server (or an engine, a tunnel, a resolver) in the middle,
+a column on the right, a line from each thing to the hub — and until 0.8.7 each drew it by hand on
+`deploy/wire`, 250 to 500 lines apiece. `components/wire-flow.tsx` draws it from data: each node is a
+mark, an eyebrow, a name and a hint, optionally a link or a button; its line is a `WireLine` whose state
+is the vocabulary above (`up` and `moving` or still, `down` dashed, `warning` amber, `danger` red, `idle`
+dashed for configured but not in use); a column has a title (and a count beside it where it is part of
+something larger), a `max` past which the rest are one "N more" tile, and what it says when it is empty;
+pointing at a node steps the rest back, keeping what `related` says travels with it. `loading` draws the
+final shape — the hub and grey rows where the nodes will go — so nothing under it moves when the data
+lands. On a phone it does one of the two things the pictures did: `stack`, the columns under their
+headings with every word and no lines, for a picture that is the only place its nodes are named (the
+Network overview, the gateway); or `marks`, the hub's words over a row of marks, the hub, and a row of
+marks with the lines running down, for a picture a list under it names again (Notifications, Backups,
+the proxy's alerts). The Network overview and the gateway draw through it since 0.8.7; a new picture of
+this shape uses it, and lays its nodes by hand only when it is not this shape (the routing decision's
+two columns, a project's Runtime lanes).
+
 **And one kind of block came back to the frame: a table.** The 2026-09-21 pass found what sweeping
 tables into the second bullet had cost. A table's container is `overflow-auto`, so at any width where
 its columns stop fitting the grid is *already* clipped — and with nothing drawn at the boundary, a row
@@ -648,7 +666,10 @@ holding Save — on the argument that things filled in one at a time read best a
 which is the wrong shape for a page that *is* a form. `settings/setting-card.tsx` draws them now.
 `SettingsPage` reads the configuration, then draws what is saved but not live yet (a strip with no
 button: the project context row already carries the one "Deploy changes", and a second brand face a
-hundred and fifty pixels under it was two commands on one surface), the page's readings, and its
+hundred and fifty pixels under it was two commands on one surface; `PendingStrip` in
+`settings/pending-strip.tsx` draws it from a headline and a list of items — a mark, a name, a word for
+what happened to it, where it is changed — and `pending-changes.tsx` feeds it the deployment's, so any
+settings form can say what it holds that is not in force yet), the page's readings, and its
 forms in one run of sections. `SettingForm` is one `<form>` and one write, and may span several
 sections, because what one PUT writes is one form — Runtime is five. `SettingSection`
 is a section's head carrying what the section currently is as data (the host and branch it builds
@@ -1729,6 +1750,15 @@ a 48px tile and the duration as a 24px figure, until the operator asked for the 
 one. A game server's three pages add one line under that header (`GameIdentity`) with what only
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
+
+**Any page can open as a project does.** The project's header was markup in `ProjectShell` and the
+other pages' line was `HostIdentity`; since 0.8.7 the header is `HostIdentity` too. Given a `state`, a
+`command` or a `menu` it takes the project's layout: a 40px tile beside two rows, the title with its
+state after it, the facts under them, the command and its `⋯` at the far end across both, 16px above the
+hairline; on a phone the tile, the title and the command keep the first row, the state takes the next
+and the facts run the full width. `label` makes the line a landmark ("About api"). Without those props
+the line is drawn as it always was — a 48px tile, the facts under the title, the `aside` at the far
+end — so a page opts in by passing them.
 
 **The Security section draws what it watches.** All eight pages use the reading register, and
 since 0.7.1 the overview, Firewall and SSH each draw a wiring picture on the page's own ground,

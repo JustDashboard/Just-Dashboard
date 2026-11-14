@@ -2,22 +2,18 @@
 
 import Link from "next/link"
 import { Heart } from "@/components/icons"
-import { cn } from "@/lib/utils"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import type {
   DeploymentPendingChange,
   DeploymentPendingState,
   DeploymentSummary,
 } from "@/lib/types"
-import { Disclosure } from "@/components/form"
 import { PROJECT_SETTINGS_NAV } from "@/components/nav"
 import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useProject } from "@/components/deploy/project-context"
-import { ChangeTag, PENDING_KIND_PAGE, sourceProduct } from "@/components/deploy/vocabulary"
-
-const SHOWN = 6
+import { PENDING_KIND_PAGE, sourceProduct } from "@/components/deploy/vocabulary"
+import { PendingStrip, type PendingItem } from "@/components/deploy/settings/pending-strip"
 
 /**
  * Saved changes the live release does not have yet, named, each one a way
@@ -36,6 +32,8 @@ const SHOWN = 6
  * `pageKinds` names the kinds the current page edits, so a change already on
  * screen is named rather than offered as a link back to where the reader is.
  *
+ * It feeds a deployment's configuration to `PendingStrip`, which draws it and
+ * takes any settings form's pending items.
  */
 export function PendingChanges({
   pending,
@@ -45,124 +43,81 @@ export function PendingChanges({
   pageKinds?: string[]
 }) {
   const project = useProject()
-  const wide = useMediaQuery("(min-width: 640px)")
   if (!pending.pending) return null
   const { deployment } = project.detail
+  const base = `/deploy/${project.projectId}`
   const firstRelease = pending.changes.some((change) => change.kind === "deployment")
   const changes = pending.changes.filter((change) => change.kind !== "deployment")
-  const shown = changes.slice(0, SHOWN)
   const count = changes.length
   const activeRun = deployment.activeRun
   const goingLive = activeRun && activeRun.planRevision >= pending.desiredRevision
-  const changeList = (
-    <ul className="flex w-full min-w-0 flex-row flex-wrap items-center gap-x-4 gap-y-1 sm:w-auto">
-      {shown.map((change, index) => (
-        <li key={`${change.kind}-${change.name}-${index}`} className="min-w-0">
-          <PendingChangeItem
-            change={change}
-            deployment={deployment}
-            base={`/deploy/${project.projectId}`}
-            current={pageKinds.includes(change.kind)}
-          />
-        </li>
-      ))}
-      {count > SHOWN && (
-        <li className="text-body text-muted-foreground">and {count - SHOWN} more</li>
-      )}
-    </ul>
-  )
 
   return (
-    <section
-      aria-label="Changes not live yet"
-      className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline pb-4"
-    >
-      {goingLive ? (
-        <Link
-          href={`/deploy/${project.projectId}/runs/${activeRun.id}`}
-          className="flex rounded-sm focus-ring hover:underline"
-        >
-          <Status
-            tone="running"
-            label={<TextShimmer>{`Going live in deployment #${activeRun.runNumber}`}</TextShimmer>}
-          />
-        </Link>
-      ) : firstRelease ? (
-        <Status tone="notice" label="Not deployed yet — the first deployment takes all of this" />
-      ) : (
-        <Status tone="warning" label={`${count} saved change${count === 1 ? "" : "s"} not live`} />
-      )}
-      {project.liveRelease && (
-        <p className="min-w-0 text-body text-muted-foreground">
-          <span className="numeric">Release #{project.liveRelease.number}</span> is live ·{" "}
-          <span className="numeric">revision {pending.desiredRevision}</span> is saved
-        </p>
-      )}
-      {count > 0 &&
-        // On a phone the changes fold under the line that counts them: each
-        // is a 36px row to press, and three of them put every settings
-        // page's first field below the fold.
-        (wide ? (
-          changeList
+    <PendingStrip
+      label="Changes not live yet"
+      fold="What will go live"
+      headline={
+        goingLive ? (
+          <Link
+            href={`${base}/runs/${activeRun.id}`}
+            className="flex rounded-sm focus-ring hover:underline"
+          >
+            <Status
+              tone="running"
+              label={
+                <TextShimmer>{`Going live in deployment #${activeRun.runNumber}`}</TextShimmer>
+              }
+            />
+          </Link>
+        ) : firstRelease ? (
+          <Status tone="notice" label="Not deployed yet — the first deployment takes all of this" />
         ) : (
-          <Disclosure quiet summary="What will go live" className="w-full">
-            {changeList}
-          </Disclosure>
-        ))}
-    </section>
+          <Status
+            tone="warning"
+            label={`${count} saved change${count === 1 ? "" : "s"} not live`}
+          />
+        )
+      }
+      detail={
+        project.liveRelease && (
+          <>
+            <span className="numeric">Release #{project.liveRelease.number}</span> is live ·{" "}
+            <span className="numeric">revision {pending.desiredRevision}</span> is saved
+          </>
+        )
+      }
+      items={changes.map((change) => pendingItem(change, deployment, base, pageKinds))}
+    />
   )
 }
 
 /**
- * One change: the glyph of the page that holds it, its name, and whether it
- * was added, changed or removed — marked as git marks a file, as the release
- * comparison marks the same change once it ships. A source change is drawn as
- * the host it comes from, because that is what changed. A health check lives
- * on the Runtime page but is its own section there, so it links to that
- * section and draws a heart rather than the page's glyph.
+ * One saved change as the strip names it: the glyph of the page that holds
+ * it, its name, and whether it was added, changed or removed. A source change
+ * is drawn as the host it comes from, because that is what changed. A health
+ * check lives on the Runtime page but is its own section there, so it links
+ * to that section and draws a heart rather than the page's glyph.
  */
-function PendingChangeItem({
-  change,
-  deployment,
-  base,
-  current,
-}: {
-  change: DeploymentPendingChange
-  deployment: DeploymentSummary
-  base: string
-  current: boolean
-}) {
+function pendingItem(
+  change: DeploymentPendingChange,
+  deployment: DeploymentSummary,
+  base: string,
+  pageKinds: string[],
+): PendingItem {
   const place = PENDING_KIND_PAGE[change.kind]
   const entry = PROJECT_SETTINGS_NAV.find((item) => item.path === place?.split("#")[0])
   const product = change.kind === "source" ? sourceProduct(deployment) : undefined
   const Glyph = change.kind === "check" ? Heart : entry?.icon
-  const body = (
-    <>
-      {product ? (
-        <ProductGlyph id={product} />
-      ) : (
-        Glyph && <Glyph className="size-3.5 shrink-0 text-muted-foreground" />
-      )}
-      <span className={cn("min-w-0 truncate", change.kind === "variable" && "font-mono")}>
-        {change.name}
-      </span>
-      <ChangeTag change={change.change} />
-    </>
-  )
-  const className = "flex min-h-9 min-w-0 items-center gap-1.5 text-body sm:min-h-0"
-  if (current || !place) {
-    return (
-      <span aria-current={current ? "page" : undefined} className={className}>
-        {body}
-      </span>
-    )
+  return {
+    mark: product ? (
+      <ProductGlyph id={product} />
+    ) : (
+      Glyph && <Glyph className="size-3.5 shrink-0 text-muted-foreground" />
+    ),
+    name: change.name,
+    mono: change.kind === "variable",
+    state: change.change,
+    href: place ? `${base}${place}` : undefined,
+    current: pageKinds.includes(change.kind),
   }
-  return (
-    <Link
-      href={`${base}${place}`}
-      className={cn(className, "rounded-sm focus-ring hover:underline")}
-    >
-      {body}
-    </Link>
-  )
 }
