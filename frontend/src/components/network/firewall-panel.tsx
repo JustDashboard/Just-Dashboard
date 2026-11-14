@@ -99,7 +99,7 @@ type PanelProps = {
  * What may reach this machine, and the controls that change it.
  *
  * The page opens on the firewall as a project's page opens on the project:
- * its own mark and name, whether it is enforcing beside it, the switch that
+ * its name on the mark of the filter it drives, whether it is enforcing beside it, the switch that
  * decides that and Add rule at the line's end, Reset and Refresh behind the
  * menu. Then the rules folded by where they lead (`firewall-picture.tsx`),
  * with what the log says the rules did on the nodes that did it; the ways in
@@ -352,7 +352,7 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
       />
 
       {/* What the page is about, laid out as a project's header: the backend
-          by its own name on its own mark, whether it is enforcing beside the
+          by its own name on netfilter's mark, whether it is enforcing beside the
           name, whether it can be told anything from here and, on firewalld,
           the zone its rules are held in. The switch that decides whether it
           enforces sits before the page's command, beside the fact it
@@ -1182,7 +1182,7 @@ function FirewallMissing({ reason, onInstalled }: { reason?: string; onInstalled
     )
   return (
     <EmptyState
-      mark={<ProductLogos ids={["netfilter", "firewalld"]} />}
+      mark={<ProductLogos ids={["netfilter"]} />}
       title="No firewall on this host"
       description={description}
     />

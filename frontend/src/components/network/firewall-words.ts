@@ -8,17 +8,17 @@ import { isAnywhere, isInbound } from "@/components/network/firewall-reading"
  */
 
 /**
- * The firewall as the product it is. firewalld has a mark of its own; ufw,
- * iptables and nftables have none, and each is a front end to netfilter, the
- * kernel's packet filter, so they are drawn as the engine they drive, the way
- * the Drift page draws the nftables files. Nothing is drawn for a backend
- * this does not know.
+ * The firewall as the product it is. None of the four backends has a mark
+ * this tree may carry (firewalld's own icon is GPL artwork, which cannot be
+ * given on the terms a contribution here is), and each is a front end to
+ * netfilter, the kernel's packet filter, so each is drawn as the engine it
+ * drives, the way the Drift page draws the nftables files. Nothing is drawn
+ * for a backend this does not know.
  */
 export function firewallProduct(backend: string | undefined) {
   switch (backend) {
-    case "firewalld":
-      return "firewalld"
     case "ufw":
+    case "firewalld":
     case "iptables":
     case "nftables":
       return "netfilter"

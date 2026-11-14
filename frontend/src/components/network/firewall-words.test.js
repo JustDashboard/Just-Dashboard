@@ -1,9 +1,8 @@
 import { expect, test } from "bun:test"
 import { firewallProduct, limitedKeys, ruleWords } from "./firewall-words"
 
-test("a firewall is drawn as its own mark, else as the packet filter it drives", () => {
-  expect(firewallProduct("firewalld")).toBe("firewalld")
-  for (const backend of ["ufw", "iptables", "nftables"])
+test("a firewall is drawn as the packet filter it drives", () => {
+  for (const backend of ["ufw", "firewalld", "iptables", "nftables"])
     expect(firewallProduct(backend)).toBe("netfilter")
   expect(firewallProduct("pf")).toBeUndefined()
   expect(firewallProduct(undefined)).toBeUndefined()

@@ -180,7 +180,6 @@ const LOGOS: Record<string, string> = {
   "firefly-iii": "firefly-iii.svg",
   firefox: "firefox.svg",
   firehol: "firehol.webp",
-  firewalld: "firewalld.webp",
   flask: "flask.svg",
   flowise: "flowise.svg",
   forgejo: "forgejo.svg",

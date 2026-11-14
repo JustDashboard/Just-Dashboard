@@ -336,14 +336,14 @@ test("the firewall's log counts are on the nodes that did the refusing, and narr
   await expect.poll(() => logs.sockets.at(-1)?.getAll("f")).toEqual(["event:block"])
 })
 
-test("the firewall is drawn as the product it is", async ({ page }) => {
+test("the firewall is drawn as the packet filter it drives", async ({ page }) => {
   await mockNetwork(page)
   await mockHostLogs(page)
   await page.goto("/network/firewall")
   await loaded(page)
   const identity = page.getByRole("region", { name: "About the firewall" })
   await expect(identity).toHaveAttribute("data-layout", "project")
-  // ufw has no mark of its own: it is drawn as netfilter, which it drives.
+  // No backend has a mark this tree carries: each is drawn as netfilter.
   await expect(identity.locator("img[src='/logos/netfilter.webp']")).toBeVisible()
   await expect(
     page.locator("[data-slot=firewall-picture] img[src='/logos/netfilter.webp']"),
@@ -356,9 +356,16 @@ test("the firewall is drawn as the product it is", async ({ page }) => {
   })
   await page.reload()
   await loaded(page)
-  await expect(identity.locator("img[src='/logos/firewalld.webp']")).toBeVisible()
-  const logo = await page.request.get("/logos/firewalld.webp")
-  expect(logo.status()).toBe(200)
+  await expect(identity).toContainText("firewalld")
+  await expect(identity.locator("img[src='/logos/netfilter.webp']")).toBeVisible()
+  await expect(
+    page.locator("[data-slot=firewall-picture] img[src='/logos/netfilter.webp']"),
+  ).toBeVisible()
+  // firewalld's own icon is GPL artwork and is not shipped: nothing draws
+  // it, and its address answers with the app's page, not a picture.
+  await expect(page.locator("img[src*='firewalld']")).toHaveCount(0)
+  const answer = await page.request.get("/logos/firewalld.webp")
+  expect(answer.headers()["content-type"] ?? "").not.toContain("image")
 })
 
 test("defaults are staged as segments and saved together by the page's one bar", async ({

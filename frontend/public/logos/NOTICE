@@ -286,10 +286,3 @@ where it has one, and otherwise its mono path filled with the brand's colour
 (openrouter's #94A3FF and lmstudio's #7B8CFF on the L 0.72 rung, groq's #F55036,
 and white for xAI's black mark), because a mono file's currentColor is black in an
 image and disappears on a dark ground.
-
-The Firewall page draws the host's firewall as the product it is. firewalld.webp
-is the firewalld project's own icon, src/icons/scalable/apps/firewall-config.svg
-from https://github.com/firewalld/firewalld (GPL-2.0-or-later), rasterised to
-96px WebP the way netfilter.webp was. ufw, iptables and nftables have no mark of
-their own and are drawn as netfilter.webp, the packet filter each is a front end
-to.

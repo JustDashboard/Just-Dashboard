@@ -3802,8 +3802,9 @@ header.
   paragraph in a cell. The page is drawn before its read with the picture grey at the rows it drew
   last time and the line of facts at the height it took (`useViewState("network.overview.shape")`).
 - **Firewall** (`network/firewall-panel.tsx`): the backend is drawn as the product it is in the
-  identity tile and the picture's centre node (`firewall-words.ts`: firewalld's own icon; ufw,
-  iptables and nftables, which have none, as netfilter, the filter each drives). *Active* is the
+  identity tile and the picture's centre node (`firewall-words.ts`: ufw, firewalld, iptables and
+  nftables each as netfilter, the filter it drives; firewalld's own icon is GPL artwork and is not
+  carried). *Active* is the
   line's state; the switch and *Add rule* are at its end, *Reset* and *Refresh* in the menu. The
   seven tiles went: the rule count is the line's allow and deny, and what the log says the rules
   did is on the picture's nodes (`firewall-picture.tsx`, a `WireFlow`): what was refused and from
