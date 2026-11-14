@@ -52,7 +52,7 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 
 | Layer | Rule | Exceptions |
 | --- | --- | --- |
-| Page | `app/<section>/…/page.tsx`; the directory path is the URL | `(project)` under `app/deploy/[id]/` is a route group and is not in the URL. `login/`, `welcome/` and `hub/enter/` are outside `(dashboard)/` |
+| Page | `app/<section>/…/page.tsx`; the directory path is the URL, and one item's page is a `[name]/` or `[id]/` directory beside its list's (`app/docker/volumes/[name]/`) | `(project)` under `app/deploy/[id]/` is a route group and is not in the URL. `login/`, `welcome/` and `hub/enter/` are outside `(dashboard)/` |
 | Components | `components/<section>/`, named as the route's first segment | `/` → `overview/`, `processes` → `procs/`, `databases` → `database/`, `excalidraw` → `boards/`, `dashboard` → `update/`, `config/`, `account-link/`, `hub-link/` |
 | Shared UI | `components/ui/` for low-level controls; single files at the top of `components/` for primitives (`panel.tsx`, `page.tsx`, `state.tsx`) | `components/workspace/` is shared page behaviour, not a section |
 | Logic | `lib/<area>.ts` or `lib/<area>-<topic>.ts`, its test beside it as `.test.js` | Many areas have none and keep pure logic beside their components. Database modules are `lib/db-*.ts` and `lib/database-*.ts` |
@@ -61,7 +61,7 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 | Handlers | `api/handlers_<area>*.go`; `mount<Area>Routes` is at the top of `handlers_<area>.go` | Databases are `handlers_db*.go`. Code that is not a handler drops the prefix: `database_*.go`, `deployment_*.go`, `boards_*.go`, `backup_*.go`, `map_*.go` |
 | Package | One package per feature under `backend/internal/` | Named for the mechanism, not the page: Security is `netsec`, Packages is `updates`, System users is `linuxusers`. Excalidraw and the Map have no package; they live in `api/` |
 | Go tests | `<file>_test.go` beside `<file>.go` | `*_live_test.go` needs a real engine or host and skips unless its environment variable is set; [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) has the variables and the exceptions |
-| Browser specs | `<area>-<topic>.spec.ts`; most sections have an `<area>-ui.spec.ts` for the page as a whole | `system-ui.spec.ts` is the Audit log, `dashboard-ui.spec.ts` is Settings, `services-ui.spec.ts`, `stacks-ui.spec.ts` and `container-page.spec.ts` are pages of Processes and Docker |
+| Browser specs | `<area>-<topic>.spec.ts`; most sections have an `<area>-ui.spec.ts` for the page as a whole | `system-ui.spec.ts` is the Audit log (beside `audit-ui.spec.ts`), `dashboard-ui.spec.ts` is Settings, `services-ui.spec.ts`, `stacks-ui.spec.ts` and `container-page.spec.ts` are pages of Processes and Docker |
 | Fixtures | `<area>-fixture.ts` beside the specs: one area's mocked API | `host-fixture.ts` and `workbench-fixture.ts` are shared; the proxy's tables are in `fixtures/proxy/` |
 | Documents | A backend feature: a guide in [`../backend/`](../backend/README.md). A deployment topic: one in [`../deployments/`](../deployments/README.md). A page's UI: [`feature-map.md`](../frontend/feature-map.md) | Several features share one backend guide; the table below names it |
 
@@ -158,7 +158,7 @@ segment under `/api/v1`.
 | **Server** | | | | | | |
 | Overview | `page.tsx` | `overview/` | `/system` → `handlers_system.go`; `/dashboard/health` → `handlers_self.go`; and one read from most sections | `sysinfo`, `metrics`, `storehealth` | `overview-ui.spec.ts` | [`feature-map.md`](../frontend/feature-map.md) |
 | Map | `map/` | `map/` | `/map` → `handlers_map.go`, `map_*.go` | none: lives in `api/` | `server-map.spec.ts` | [`server-map.md`](../server-map.md) |
-| Assistant | `assistant/` | `assistant/` | `/assistant` → `handlers_assistant*.go` | `assistant` | `assistant.spec.ts` | [`operator.md`](../deployments/operator.md) |
+| Assistant | `assistant/` | `assistant/` | `/assistant` → `handlers_assistant*.go` | `assistant` | `assistant.spec.ts`, `assistant-settings.spec.ts` | [`operator.md`](../deployments/operator.md) |
 | Metrics | `metrics/` | `metrics/` | `/system` → `handlers_system.go`, `handlers_capacity.go` | `metrics`, `sysinfo` | `metrics-ui.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | Alerts | `metrics/alerts/` | `metrics/`, `alerts/` | `/system/alerts` → `handlers_host_alerts.go`, `host_alert*.go` | `metrics` | `host-alerts.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | Processes | `processes/` | `procs/` | `/processes`, `/pm2`, `/systemd`, `/cron` → `handlers_procs*.go` | `procs` | `processes-ui.spec.ts`, `pm2-application.spec.ts`, `services-ui.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md) |
@@ -183,7 +183,7 @@ segment under `/api/v1`.
 | **Advanced** | | | | | | |
 | Packages | `packages/` | `packages/` | `/packages` → `handlers_packages.go` | `updates` | `packages-ui.spec.ts`, `package-page.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | System users | `system-users/` | `system-users/` | `/system-users`, `/system-accounts` → `handlers_linuxusers.go` | `linuxusers` | `system-users.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md) |
-| Audit log | `audit/` | `audit/` | `/audit` → mounted in `routes.go`, handled in `handlers_auth.go` | `audit` | `system-ui.spec.ts` | [`runtime-boundaries.md`](../architecture/runtime-boundaries.md) |
+| Audit log | `audit/` | `audit/` | `/audit` → mounted in `routes.go`, handled in `handlers_auth.go` | `audit` | `audit-ui.spec.ts`, `system-ui.spec.ts` | [`runtime-boundaries.md`](../architecture/runtime-boundaries.md) |
 | **System** | | | | | | |
 | Settings → Version | `dashboard/` | `update/` | `/dashboard` → `handlers_selfupdate.go`, which mounts everything under `/dashboard` | `selfupdate`, `version` | `dashboard-ui.spec.ts` | [`platform.md`](../backend/platform.md) |
 | Settings → Configuration | `dashboard/configuration/` | `config/` | `/dashboard` → `handlers_selfconfig.go`, `handlers_uninstall.go` | `selfcfg`, `uninstall`, `stackports` | `dashboard-ui.spec.ts` | [`platform.md`](../backend/platform.md) |
