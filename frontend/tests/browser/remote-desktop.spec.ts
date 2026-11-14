@@ -1,6 +1,8 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
+import { json } from "./host-fixture"
 import {
   BRIDGE,
+  computers,
   ENGINE,
   instruction,
   mockRemoteDesktop,
@@ -10,20 +12,33 @@ import {
   PAIRED,
   streamView,
 } from "./remote-desktop-fixture"
+import { risen } from "./risen"
 
-test("the overview draws the computers as the picture and cards, without tiles or a band", async ({
+/** The computers' rows, in the list under the picture. */
+const computerRows = (page: Page) =>
+  page.getByRole("list", { name: "Computers" }).locator("[data-slot=choice-row]")
+
+test("the overview draws the computers as the picture and one-line rows, without tiles, cards or a band", async ({
   page,
 }) => {
   await mockRemoteDesktop(page)
   await page.goto("/remote-desktop")
 
+  // The identity line is laid out as a project's header: the verdict beside
+  // the name, one command at the end and the rest in the menu after it.
   const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity).toHaveAttribute("data-layout", "project")
   await expect(identity).toContainText("Remote Desktop")
   await expect(identity).toContainText("4 computers")
   await expect(identity).toContainText("2 ready now")
   await expect(identity).toContainText("1 session open")
   await expect(identity).toContainText("over Tailscale")
+  await expect(identity.getByRole("link", { name: "Add a computer" })).toHaveAttribute(
+    "href",
+    "/remote-desktop/new",
+  )
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
 
   const picture = page.locator("[data-slot=computer-picture]")
   await expect(picture.getByText("This browser")).toBeVisible()
@@ -36,10 +51,31 @@ test("the overview draws the computers as the picture and cards, without tiles o
 
   await expect(page.getByRole("region", { name: "Time on each" })).toHaveCount(0)
 
-  const cards = page.locator("[data-card=computer]")
-  await expect(cards).toHaveCount(4)
-  await expect(cards.filter({ hasText: "studio-mac" })).toContainText("macOS · Screen Sharing")
-  await expect(cards.filter({ hasText: "office-pc" })).toContainText("In a session")
+  // A computer is one line: its system's mark, its name over the server on it
+  // and where the dashboard signs in, its state, and how far and how lately.
+  const rows = computerRows(page)
+  await expect(rows).toHaveCount(4)
+  const office = rows.filter({ hasText: "office-pc" })
+  await expect(office.getByRole("img", { name: "Windows" })).toBeVisible()
+  await expect(office).toContainText("Remote Desktop · wayy@office-pc:3389")
+  await expect(office.locator("[data-slot=computer-state]")).toHaveAttribute("data-state", "live")
+  await expect(office.locator("[data-slot=computer-state]")).toHaveText(
+    "In a session43 ms direct · used 10m ago",
+  )
+  const mac = rows.filter({ hasText: "studio-mac" })
+  await expect(mac.getByRole("img", { name: "macOS" })).toBeVisible()
+  await expect(mac).toContainText("Screen Sharing · studio-mac:5900")
+  await expect(mac.locator("[data-slot=computer-state]")).toHaveText("Not answeringnever used")
+  await expect(
+    rows.filter({ hasText: "kids-laptop" }).locator("[data-slot=computer-state]"),
+  ).toHaveText("Offlinenever used")
+  await expect(office.getByRole("link", { name: "Connect to office-pc" })).toHaveAttribute(
+    "href",
+    `/remote-desktop/${OFFICE}`,
+  )
+  // No card of figures is left: the three cells are one line of words.
+  await expect(page.locator("[data-card=computer]")).toHaveCount(0)
+  await expect(page.getByText("Round trip", { exact: true })).toHaveCount(0)
   // Paired with Sunshine, the Mac offers Stream beside Connect; the others do not.
   await expect(page.getByRole("link", { name: "Stream studio-mac with Sunshine" })).toHaveAttribute(
     "href",
@@ -55,6 +91,197 @@ test("the overview draws the computers as the picture and cards, without tiles o
     "/remote-desktop/new?peer=n06",
   )
   await expect(tailnet).not.toContainText("phone")
+})
+
+for (const width of [1280, 390]) {
+  test(`every computer's row is one height at ${width}px, whatever it has to say`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const [office, gaming, laptop, mac] = computers() as Record<string, unknown>[]
+    await mockRemoteDesktop(page, {
+      overview: overview({
+        computers: [
+          office,
+          // Nothing saved to sign in with, a relayed path and a long name.
+          {
+            ...gaming,
+            name: "gaming-pc-in-the-attic-with-a-very-long-name",
+            username: "",
+            hasPassword: false,
+            peer: { ...(gaming.peer as object), direct: false, relay: "fra" },
+          },
+          laptop,
+          mac,
+          // The probe's own reason, which the row keeps for its tooltip.
+          {
+            ...mac,
+            id: "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+            name: "render-box",
+            os: "linux",
+            streamHostId: 0,
+            reach: { state: "closed", error: "timeout", checkedAt: 0 },
+          },
+        ],
+      }),
+    })
+    await page.goto("/remote-desktop")
+    const rows = computerRows(page)
+    await expect(rows).toHaveCount(5)
+    await risen(page)
+    const boxes = await rows.evaluateAll((items) =>
+      items.map((item) => {
+        const box = item.getBoundingClientRect()
+        return { top: Math.round(box.top), height: Math.round(box.height) }
+      }),
+    )
+    expect(new Set(boxes.map((box) => box.height)).size).toBe(1)
+    // Each row starts where the one before it ends, a gap apart: none grew.
+    const steps = boxes.slice(1).map((box, index) => box.top - boxes[index].top)
+    expect(new Set(steps).size).toBe(1)
+
+    const unsaved = rows.filter({ hasText: "gaming-pc-in-the-attic" })
+    await expect(unsaved.getByText("no account saved, no password saved").first()).toBeAttached()
+    await expect(
+      rows.filter({ hasText: "render-box" }).getByRole("img", { name: "Linux" }),
+    ).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    )
+
+    if (width === 390) {
+      // No room for the columns: the state and the reading are the second
+      // line, what is not saved takes the reading's place, and the row is
+      // the press that opens the screen.
+      await expect(rows.first().getByRole("link", { name: "Connect to office-pc" })).toBeHidden()
+      await expect(rows.first().locator("[data-slot=computer-line]")).toHaveText(
+        "In a session· 43 ms direct · used 10m ago",
+      )
+      await expect(rows.first().locator("[data-slot=computer-line]")).toBeVisible()
+      await expect(unsaved.locator("[data-slot=computer-line]")).toHaveText(
+        "Ready· no account saved, no password saved",
+      )
+      await rows.first().getByRole("link", { name: "Open the screen of office-pc" }).click()
+      await expect(page).toHaveURL(new RegExp(`/remote-desktop/${OFFICE}$`))
+    } else {
+      await expect(unsaved.locator("[data-slot=computer-state]")).toHaveText(
+        "Ready43 ms relay fra · used 1d ago",
+      )
+      await expect(
+        rows
+          .filter({ hasText: "render-box" })
+          .locator("[data-slot=computer-state]")
+          .getByTitle("VNC is not answering (timeout)"),
+      ).toBeVisible()
+    }
+  })
+
+  test(`the identity line is in one place while the computers are read and after, at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockRemoteDesktop(page)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/remote-desktop/", async (route) => {
+      await held
+      await route.fallback()
+    })
+    await page.goto("/remote-desktop")
+    const identity = page.locator("[data-slot=host-identity]")
+    const command = identity.getByRole("link", { name: "Add a computer" })
+    await expect(page.getByRole("status", { name: "Loading Remote Desktop" })).toBeVisible()
+    await risen(page)
+    const place = async () => {
+      const [line, button] = [await identity.boundingBox(), await command.boundingBox()]
+      return { x: line!.x, y: line!.y, command: { x: button!.x, y: button!.y } }
+    }
+    const loading = await place()
+    release()
+    await expect(identity).toContainText("4 computers")
+    await risen(page)
+    expect(await place()).toEqual(loading)
+  })
+}
+
+test("Docker not answering is Docker's own screen with its step, never the client's sentence", async ({
+  page,
+}) => {
+  const said =
+    "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"
+  const { state } = await mockRemoteDesktop(page, {
+    overview: overview({
+      engine: { ...ENGINE, state: "unavailable", address: undefined, error: said },
+    }),
+  })
+  let up = false
+  let started = 0
+  await page.route("**/api/v1/docker/ping", (route) =>
+    json(route, up ? { available: true } : { available: false, error: said }),
+  )
+  await page.route("**/api/v1/systemd/docker.service", (route) =>
+    json(route, {
+      unit: {
+        name: "docker.service",
+        description: "Docker Application Container Engine",
+        loadState: "loaded",
+        activeState: up ? "active" : "inactive",
+        subState: up ? "running" : "dead",
+        unitFileState: "enabled",
+      },
+    }),
+  )
+  await page.route("**/api/v1/systemd/docker.service/start", (route) => {
+    started += 1
+    up = true
+    state.overview = overview()
+    return json(route, {})
+  })
+  await page.goto("/remote-desktop")
+
+  const docker = page.locator("[data-slot=missing-thing][data-thing=docker]")
+  await expect(docker).toHaveAttribute("data-size", "block")
+  await expect(docker).toContainText("Docker is stopped")
+  // The daemon's own words are one press away, and nowhere before that.
+  await expect(page.getByText("Is the docker daemon running?")).toBeHidden()
+  // The computers are still listed under it.
+  await expect(computerRows(page)).toHaveCount(4)
+
+  await docker.getByRole("button", { name: "Start Docker" }).click()
+  await expect.poll(() => started).toBe(1)
+  await expect(docker).toHaveCount(0)
+  await expect(page.locator("[data-slot=host-identity]")).not.toContainText("Engine not running")
+})
+
+test("an engine that is stopped starts from the page, and one shadowed by another container says where to look", async ({
+  page,
+}) => {
+  const { calls, state } = await mockRemoteDesktop(page, {
+    overview: overview({ engine: { ...ENGINE, state: "stopped", address: undefined } }),
+  })
+  await page.goto("/remote-desktop")
+  const engine = page.locator("[data-slot=missing-thing][data-thing=guacamole]")
+  await expect(engine).toContainText("The Remote Desktop engine is stopped")
+  await expect(engine).toContainText("Your computers and their sign-ins are kept.")
+  await engine.getByRole("button", { name: "Start the engine" }).click()
+  await expect.poll(() => calls.installs).toBe(1)
+  await expect(engine).toHaveCount(0)
+
+  state.overview = overview({
+    engine: {
+      ...ENGINE,
+      state: "foreign",
+      address: undefined,
+      error: "a container named just-dashboard-guacd exists that the dashboard did not create",
+    },
+  })
+  await page.reload()
+  await expect(engine).toContainText("Another container has the engine's name")
+  await expect(engine.getByRole("link", { name: "Open Containers" })).toHaveAttribute(
+    "href",
+    "/docker/containers",
+  )
+  await expect(page.getByText("exists that the dashboard did not create")).toBeHidden()
 })
 
 test("a server without the engine opens on the install, which runs as a job", async ({ page }) => {
@@ -266,6 +493,55 @@ test("removing a computer asks first and leaves the computer itself alone", asyn
     .getByRole("button", { name: "Remove" })
     .click()
   await expect.poll(() => calls.deleted).toEqual([MAC])
+})
+
+test("a computer is edited from its row's menu, and the line's menu reads every computer again", async ({
+  page,
+}) => {
+  const { calls } = await mockRemoteDesktop(page)
+  let reads = 0
+  page.on("request", (request) => {
+    if (request.method() === "GET" && new URL(request.url()).pathname.endsWith("/remote-desktop/"))
+      reads += 1
+  })
+  await page.goto("/remote-desktop")
+  await page.getByRole("button", { name: "Actions for office-pc" }).click()
+  await page.getByRole("menuitem", { name: "Edit" }).click()
+  const dialog = page.getByRole("dialog", { name: "Edit office-pc" })
+  await dialog.getByLabel("Name", { exact: true }).fill("front-desk")
+  await dialog.getByRole("button", { name: "Save" }).click()
+  await expect.poll(() => calls.updated.map((update) => update.id)).toEqual([OFFICE])
+  expect(calls.updated[0].body).toMatchObject({ name: "front-desk", host: "office-pc" })
+  await expect(dialog).toBeHidden()
+
+  // The row's menu also streams; the line's own menu holds what is not the one command.
+  await page.getByRole("button", { name: "Actions for studio-mac" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Stream with Sunshine", "Edit", "Remove"])
+  await page.keyboard.press("Escape")
+  const before = reads
+  await page
+    .locator("[data-slot=host-identity]")
+    .getByRole("button", { name: "More actions" })
+    .click()
+  await page.getByRole("menuitem", { name: "Check every computer again" }).click()
+  await expect.poll(() => reads).toBeGreaterThan(before)
+})
+
+test("an account that may not administer the server is told so, with nothing to press", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page)
+  await page.route("**/api/v1/remote-desktop/", (route) =>
+    route.fulfill({
+      status: 403,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "forbidden", message: "system.admin is required" } }),
+    }),
+  )
+  await page.goto("/remote-desktop")
+  await expect(page.locator("[data-slot=error-state]")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Add a computer" })).toHaveCount(0)
+  await expect(page.locator("[data-slot=choice-row]")).toHaveCount(0)
 })
 
 test("Stream pairs with Sunshine, keeps the PIN over Control while it is typed, then frames the stream", async ({
@@ -648,30 +924,158 @@ test("a stream takes the whole content area in the computer's own shape, its pad
   expect(loads).toBe(2)
 })
 
-for (const width of [390, 1024]) {
-  test(`session tools remain accessible at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 800 })
-    await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
-    await page.goto(`/remote-desktop/${MAC}?mode=stream`)
-    await page.getByRole("button", { name: "Show the session tools" }).click()
-    const tools = page.getByRole("dialog", { name: "Session tools" })
-    await expect(tools.getByRole("radiogroup", { name: "How the screen is drawn" })).toBeVisible()
-    await expect(tools.getByRole("radiogroup", { name: "Stream quality" })).toBeVisible()
-    await expect(
-      tools.getByRole("switch", { name: "Show this computer's pointer too" }),
-    ).toBeVisible()
-    await tools.getByRole("radio", { name: /Screen Sharing/ }).click()
-    await page.getByRole("button", { name: "Show the session tools" }).click()
-    await expect(tools.getByLabel("Text to paste on studio-mac")).toBeVisible()
-    await tools.getByRole("button", { name: "Close", exact: true }).click()
-    const trigger = page.getByRole("button", { name: "Show the session tools" })
-    await expect(trigger).toBeFocused()
-    await trigger.press("Enter")
-    await expect(tools).toBeVisible()
-    await page.keyboard.press("Escape")
-    await expect(trigger).toBeFocused()
-  })
-}
+// Between a phone and a wide screen the computers are a rail and the tools a
+// sheet: both beside the screen would leave it a strip.
+test("session tools remain accessible at 1024px", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 800 })
+  await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  await expect(page.locator("[data-slot=pane-bar]")).toBeHidden()
+  await page.getByRole("button", { name: "Show the session tools" }).click()
+  const tools = page.getByRole("dialog", { name: "Session tools" })
+  await expect(tools.getByRole("radiogroup", { name: "How the screen is drawn" })).toBeVisible()
+  await expect(tools.getByRole("radiogroup", { name: "Stream quality" })).toBeVisible()
+  await expect(
+    tools.getByRole("switch", { name: "Show this computer's pointer too" }),
+  ).toBeVisible()
+  await tools.getByRole("radio", { name: /Screen Sharing/ }).click()
+  await page.getByRole("button", { name: "Show the session tools" }).click()
+  await expect(tools.getByLabel("Text to paste on studio-mac")).toBeVisible()
+  await tools.getByRole("button", { name: "Close", exact: true }).click()
+  const trigger = page.getByRole("button", { name: "Show the session tools" })
+  await expect(trigger).toBeFocused()
+  await trigger.press("Enter")
+  await expect(tools).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(trigger).toBeFocused()
+})
+
+test("on a phone a session is one pane at a time, and the screen keeps its connection behind the others", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
+  let opened = 0
+  let closed = 0
+  const sizes: string[] = []
+  await page.routeWebSocket(
+    /\/api\/v1\/remote-desktop\/computers\/[0-9a-f]+\/session/,
+    (socket) => {
+      opened += 1
+      socket.onClose(() => (closed += 1))
+      socket.onMessage((message) => {
+        if (typeof message === "string" && message.startsWith("4.size,")) sizes.push(message)
+      })
+      socket.send(instruction("", "6b1e3b54-6f2c-4d55-a0a2-5c7cf1c4b8d9"))
+      socket.send(
+        instruction("size", "0", "1280", "720") +
+          instruction("rect", "0", "0", "0", "1280", "720") +
+          instruction("sync", "1"),
+      )
+    },
+  )
+  await page.goto(`/remote-desktop/${MAC}?mode=control`)
+  const screen = page.getByRole("application", { name: "The screen of studio-mac" })
+  await expect(screen).toBeVisible()
+
+  // The session is the whole content area on a phone too, with the bar at its foot.
+  const workspace = await page.locator("[data-slot=remote-workspace]").boundingBox()
+  const area = await page.locator("[data-workspace-shell-scroll]").boundingBox()
+  expect(workspace).toEqual(area)
+  const bar = page.getByRole("navigation", { name: "Remote session" })
+  await expect(bar.getByRole("tab")).toHaveText(["Screen", "Tools", "Computers"])
+  await expect(bar.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "true")
+  const foot = await bar.boundingBox()
+  expect(Math.round(foot!.y + foot!.height)).toBe(844)
+  // No sheet and no button for one: the bar has the stop.
+  await expect(page.getByRole("button", { name: /the session tools$/ })).toBeHidden()
+  // The strip is one row, and the name is whole in it.
+  const strip = page.locator("[data-slot=remote-screen-pane] [data-slot=pane-header]")
+  expect((await strip.boundingBox())!.height).toBeLessThanOrEqual(44)
+  const name = strip.getByText("studio-mac", { exact: true })
+  await expect(name).toBeVisible()
+  expect(await name.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  await expect(strip.getByRole("link", { name: "Disconnect" })).toBeVisible()
+
+  await expect.poll(() => sizes.length).toBeGreaterThan(0)
+  // The frame's own first measure may say the size once more.
+  await page.waitForTimeout(600)
+  const said = sizes.length
+  await bar.getByRole("tab", { name: "Tools" }).click()
+  const tools = page.getByRole("complementary", { name: "Session" })
+  await expect(tools.getByRole("radiogroup", { name: "How the screen is drawn" })).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(screen).toBeHidden()
+  // Text typed for the computer's clipboard waits there across a look at the others.
+  await tools.getByLabel("Text to paste on studio-mac").fill("from the phone")
+
+  await bar.getByRole("tab", { name: "Computers" }).click()
+  const computers = page.getByRole("navigation", { name: "Computers" })
+  await expect(computers.getByRole("link", { name: /office-pc/ })).toHaveAttribute(
+    "href",
+    `/remote-desktop/${OFFICE}`,
+  )
+  await expect(computers.getByRole("link", { name: /studio-mac/ })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  await expect(tools).toBeHidden()
+
+  await bar.getByRole("tab", { name: "Tools" }).click()
+  await expect(tools.getByLabel("Text to paste on studio-mac")).toHaveValue("from the phone")
+  // A screen that is not drawn has no size to send, and its tunnel stays up.
+  await page.waitForTimeout(600)
+  expect(sizes).toHaveLength(said)
+  expect(opened).toBe(1)
+  expect(closed).toBe(0)
+
+  // Picking the other way to draw the screen goes back to look at it.
+  await tools.getByRole("radio", { name: /Stream/ }).click()
+  await expect(bar.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator('iframe[data-slot="remote-stream"]')).toBeVisible()
+  await bar.getByRole("tab", { name: "Tools" }).click()
+  await expect(tools.getByRole("radiogroup", { name: "Stream quality" })).toBeVisible()
+  await expect(
+    tools.getByRole("switch", { name: "Show this computer's pointer too" }),
+  ).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test("the session's strip stays one row with both columns open at 1280px", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockRemoteDesktop(page)
+  await page.routeWebSocket(
+    /\/api\/v1\/remote-desktop\/computers\/[0-9a-f]+\/session/,
+    (socket) => {
+      socket.send(instruction("", "6b1e3b54-6f2c-4d55-a0a2-5c7cf1c4b8d9"))
+      socket.send(
+        instruction("size", "0", "1280", "720") +
+          instruction("rect", "0", "0", "0", "1280", "720") +
+          instruction("sync", "1"),
+      )
+    },
+  )
+  await page.goto(`/remote-desktop/${OFFICE}`)
+  await expect(page.getByRole("application", { name: "The screen of office-pc" })).toBeVisible()
+  await expect(page.getByRole("navigation", { name: "Computers" })).toBeVisible()
+  await expect(page.getByRole("complementary", { name: "Session" })).toBeVisible()
+  const strip = page.locator("[data-slot=remote-screen-pane] [data-slot=pane-header]")
+  await expect(strip.getByRole("button", { name: "Keys" })).toBeVisible()
+  // It folded Disconnect and fullscreen under the rest at this width.
+  expect((await strip.boundingBox())!.height).toBeLessThanOrEqual(44)
+  await expect(page.locator("[data-slot=pane-bar]")).toBeHidden()
+})
+
+test("a computer that is not in Remote Desktop is said with the way back", async ({ page }) => {
+  await mockRemoteDesktop(page)
+  await page.goto("/remote-desktop/0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f")
+  const state = page.locator("[data-slot=empty-state]")
+  await expect(state).toContainText("This computer is not in Remote Desktop")
+  await expect(state.getByRole("link", { name: "Back to the computers" })).toHaveAttribute(
+    "href",
+    "/remote-desktop",
+  )
+})
 
 for (const path of ["/remote-desktop/new", `/remote-desktop/${MAC}?mode=control`]) {
   test(`inventory failures show their reason and retry on ${path}`, async ({ page }) => {

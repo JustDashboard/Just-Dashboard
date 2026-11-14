@@ -89,7 +89,11 @@ export function ComputerRow({
           {/* A phone has no room for the columns: the state and the reading
               are the second line, and what is not saved takes the reading's
               place because it is what the session will stop to ask for. */}
-          <span className="flex min-w-0 items-center gap-1.5 sm:hidden" title={reach.label}>
+          <span
+            data-slot="computer-line"
+            className="flex min-w-0 items-center gap-1.5 sm:hidden"
+            title={reach.label}
+          >
             {status}
             <span className={cn("min-w-0 truncate", gap && "text-warning")}>
               · {gap ?? reading}
