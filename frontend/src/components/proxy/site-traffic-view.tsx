@@ -201,6 +201,7 @@ function TrafficPage() {
         <HostIdentity
           fallback={ChartActivity}
           title="Traffic"
+          state={<Status tone="stopped" label="Not installed" />}
           facts={<span>No reverse proxy on this host</span>}
         />
         <EngineSetup status={status} admin={admin} onInstalled={refreshStatus} />
@@ -227,12 +228,21 @@ function TrafficPage() {
             observedAt={summary.data?.observedAt}
           />
         }
-        aside={
-          <span className="flex items-center gap-3">
-            {hour && !empty && <HourVerdict hour={hour} />}
-            <VerbMenu verbs={verbs} label="More actions for traffic" />
-          </span>
+        // Laid out as a project's header: how the hour is answering beside
+        // the name, the page's verbs behind `⋯`. Always a state, so the line
+        // is one height on a phone before the hour is read and after.
+        state={
+          summary.error ? (
+            <Status tone="danger" label="Not read" />
+          ) : !hour || !sites ? (
+            <Status tone="unknown" label="Reading" />
+          ) : empty ? (
+            <Status tone="stopped" label="Nothing to count" />
+          ) : (
+            <HourVerdict hour={hour} />
+          )
         }
+        menu={<VerbMenu verbs={verbs} label="More actions for traffic" />}
       />
 
       {summary.error ? (

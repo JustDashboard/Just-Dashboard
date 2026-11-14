@@ -88,11 +88,15 @@ describe("addresses", () => {
     expect(trafficTab(q("tab=nonsense"))).toBe("sites")
   })
 
-  test("a site's old requests address goes to its page; its error log stays here", () => {
+  test("a site's old requests address goes to its page's Logs view; its error log stays here", () => {
     expect(legacySiteTarget(q(""))).toBeUndefined()
-    expect(legacySiteTarget(q("site=shop.example.com"))).toBe("/proxy/sites/shop.example.com")
+    expect(legacySiteTarget(q("site=shop.example.com"))).toBe(
+      "/proxy/sites/shop.example.com?tab=logs",
+    )
     expect(legacySiteTarget(q("site=shop.example.com&view=errors"))).toBeUndefined()
-    expect(legacySiteTarget(q("site=docker-caddy:a b"))).toBe("/proxy/sites/docker-caddy%3Aa%20b")
+    expect(legacySiteTarget(q("site=docker-caddy:a b"))).toBe(
+      "/proxy/sites/docker-caddy%3Aa%20b?tab=logs",
+    )
   })
 
   test("every reading opens its site's page, an ingress route's included", () => {
