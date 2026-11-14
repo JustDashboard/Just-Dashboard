@@ -292,7 +292,18 @@ export function ErDiagram() {
                   <ReadFailed error={read.error} onRetry={read.refresh} />
                 </div>
               ) : !graph || !doc || doc.legacy ? (
-                <CanvasSkeleton />
+                <>
+                  {/* The head has its final shape while the picture is read:
+                      on a phone the verbs are a line of their own, and one
+                      that arrived with the tables pushed the canvas down. */}
+                  <HeadVerbs>
+                    <Button size="sm" variant="outline" disabled>
+                      <Download />
+                      Export
+                    </Button>
+                  </HeadVerbs>
+                  <CanvasSkeleton />
+                </>
               ) : (
                 <div className="flex min-h-0 flex-1 items-center justify-center p-6">
                   <EmptyState

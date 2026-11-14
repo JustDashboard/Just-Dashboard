@@ -1203,14 +1203,18 @@ test.describe("documents", () => {
       await page.goto(collection("users"))
       await expect(documents(page)).toHaveCount(2)
       const main = page.locator("[data-slot=mongo-documents]")
-      for (const name of ["Insert", "Import", "Edit", "Clone"]) {
+      // The collection's commands are in the frame's head, a document's on the document.
+      for (const name of ["Insert", "Import"]) {
+        await expect(head(page).getByRole("button", { name, exact: true })).toHaveCount(0)
+      }
+      for (const name of ["Edit", "Clone"]) {
         await expect(main.getByRole("button", { name, exact: true })).toHaveCount(0)
       }
       await expect(main.getByRole("button", { name: /^Edit /, includeHidden: true })).toHaveCount(0)
       await expect(rail(page).getByRole("button", { name: "New collection" })).toHaveCount(0)
       // The document can still be opened and copied.
       await expect(main.getByRole("button", { name: "Open", exact: true }).first()).toBeVisible()
-      await expect(main.getByRole("button", { name: "Export" })).toBeVisible()
+      await expect(head(page).getByRole("button", { name: "Export" })).toBeVisible()
       await page.unrouteAll({ behavior: "ignoreErrors" })
     }
   })

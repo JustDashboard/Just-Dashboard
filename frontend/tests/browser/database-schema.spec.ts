@@ -1479,7 +1479,8 @@ test("a function is read as its definition and handed to Query; an overload is t
   await expect(page.getByRole("heading", { name: /public\.armor/ })).toBeVisible()
   expect(sent.objects.at(-1)?.searchParams.get("signature")).toBe("bytea, text[], text[]")
   await expect(page.locator("[data-slot=code-view]")).toBeVisible()
-  await expect(page.getByText("Arguments", { exact: true })).toBeVisible()
+  // What the function takes is a fact in the line under its name.
+  await expect(page.locator("[data-slot=facts-line]")).toContainText("arguments cid bigint")
 
   await page.getByRole("button", { name: "Open in Query" }).click()
   await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
@@ -2171,7 +2172,10 @@ for (const [label, viewport] of [
 
     for (const view of ["columns", "indexes", "keys", "triggers", "definition", "statistics"]) {
       await page.goto(`${TABLE}&view=${view}`)
-      await expect(page.getByRole("tab", { selected: true })).toBeVisible()
+      // The table's own reading: a phone's bar at the foot has a selected stop too.
+      await expect(
+        page.locator("[data-slot=workbench-columns]").getByRole("tab", { selected: true }),
+      ).toBeVisible()
       await keepsTheRules(page, `a table's ${view}`)
     }
 
@@ -2314,9 +2318,10 @@ test("on a phone the diagram and its inspector are two panes of one frame", asyn
   await showPane(page, "Tables")
   await expect(inspector).toBeVisible()
   await expect(page.locator(".react-flow")).toBeHidden()
-  const canvasTop = (await head(page).boundingBox())!
+  // It had 42% of what the canvas had; it has the pane now.
   const panel = (await inspector.boundingBox())!
-  expect(panel.height).toBeGreaterThan(844 - canvasTop.height - 56 - 120)
+  expect(panel.height).toBeGreaterThan(500)
+  expect(Math.round(panel.y + panel.height)).toBe(Math.round(foot.y))
   await showPane(page, "Diagram")
   await expect(inspector).toBeHidden()
   await expect(tableNode(page, "public.orders")).toBeVisible()
@@ -2344,7 +2349,8 @@ test("the schema and the diagram, state by state @shots", async ({ page }) => {
     await expect(page.getByRole("region", { name: "Largest in public" })).toBeVisible()
     await shot("schema-landing")
     await page.goto(TABLE)
-    await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
+    // A phone draws the columns as cards, not cells.
+    await expect(page.getByText("customer_id", { exact: true }).first()).toBeVisible()
     await shot("schema-full")
     await page.getByRole("tab", { name: /Statistics/ }).click()
     await expect(page.locator("[data-slot=stat-sentences]")).toBeVisible()
@@ -2370,7 +2376,7 @@ test("the schema and the diagram, state by state @shots", async ({ page }) => {
       rows: { 1: { environment: "production", readOnly: true } },
     })
     await page.goto(TABLE)
-    await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
+    await expect(page.getByText("customer_id", { exact: true }).first()).toBeVisible()
     await shot("schema-readonly")
   }
 })

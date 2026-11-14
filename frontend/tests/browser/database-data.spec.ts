@@ -2199,7 +2199,15 @@ test("the table editor, state by state @shots", async ({ page }) => {
     await expect(page.getByRole("region", { name: "Columns" })).toBeVisible()
     await shot("structure")
 
-    // Empty, loading, failed and read-only.
+    // Empty, loading, failed and read-only, with the row put away: beside the
+    // grid the panel is a column the tab remembers.
+    if (!phone) {
+      await page.goto(ITEMS)
+      await page
+        .getByRole("complementary", { name: "Row" })
+        .getByRole("button", { name: "Hide the row" })
+        .click()
+    }
     await page.unrouteAll({ behavior: "ignoreErrors" })
     await mockEditor(page, { held: [] })
     await page.goto(ITEMS)

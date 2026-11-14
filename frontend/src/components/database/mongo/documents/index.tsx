@@ -622,11 +622,12 @@ function Documents({
         <span className="min-w-0 flex-1" />
         <VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />
       </WorkbenchHead>
-      {/* The collection's commands, in the frame's head: the one that writes
-          wears the brand face, and reading again is a word in its menu. */}
+      {/* The collection's commands, in the frame's head; reading again is a
+          word in its menu. */}
       <HeadVerbs>
+        {/* Outlined: Find, in the bar under this, is the page's one command. */}
         {canWrite && !view_ && (
-          <Button size="sm" onClick={() => setInserting({})}>
+          <Button size="sm" variant="outline" onClick={() => setInserting({})}>
             <Plus />
             Insert
           </Button>

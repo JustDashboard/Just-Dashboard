@@ -2490,6 +2490,8 @@ async function explained(page: Page, sql = ADVICE_SQL) {
 /** The Plan view of a tab that has not been explained: its empty state offers the tools that need no plan. */
 async function openPlanTab(page: Page, sql: string) {
   await write(page, sql)
+  // On a phone what a statement returned is a pane of its own, and so are its tabs.
+  if (await paneBar(page).isVisible()) await showPane(page, "Results")
   await results(page).getByRole("tab", { name: /^Plan/ }).click()
   await expect(results(page)).toContainText("No plan yet")
 }
@@ -3033,6 +3035,11 @@ test("the query page, state by state @shots", async ({ page }) => {
     await page.keyboard.press("Escape")
     await editor(page).click()
     await page.keyboard.press("ControlOrMeta+Shift+Enter")
+    await results(page)
+      .getByRole("group", { name: "Statements of this run" })
+      .getByRole("button")
+      .nth(1)
+      .click()
     await expect(results(page).locator("[data-slot=result-truncated]")).toBeVisible()
     await shot("full")
     await head(page)

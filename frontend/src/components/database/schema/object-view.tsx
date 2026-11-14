@@ -291,11 +291,11 @@ export function ObjectView({
                 <p className="max-w-3xl text-body text-muted-foreground">{data.comment}</p>
               )}
               <FactsLine
-                facts={facts.map((fact) => ({
-                  key: fact.name,
-                  lead: fact.name.toLowerCase(),
-                  text: fact.value,
-                }))}
+                facts={facts.map((fact) =>
+                  fact.name === "Owner"
+                    ? { key: "owner", lead: "owned by", text: fact.value, mono: true }
+                    : { key: fact.name, lead: fact.name.toLowerCase(), text: fact.value },
+                )}
               />
               {selected.kind === "trigger" && data.table && (
                 <p className="text-xs text-muted-foreground">
