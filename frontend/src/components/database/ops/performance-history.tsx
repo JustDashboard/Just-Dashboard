@@ -1,20 +1,20 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Clock, CodeBracket } from "@/components/icons"
+import { useRouter } from "next/navigation"
+import { Clock } from "@/components/icons"
+import { ApiError } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
-import { latencyHead } from "@/lib/latency-words"
-import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
-import { useViewState } from "@/lib/view-state"
+import { LATENCY_SHARE, latencyHead } from "@/lib/latency-words"
+import { usePoll, type PollState } from "@/hooks/use-poll"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { FormNote } from "@/components/form"
+import { InfoTip } from "@/components/form"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import type { Series } from "@/components/metrics/metric-chart"
 import { Sparkline } from "@/components/metrics/sparkline"
-import { Metric, MetricStrip, SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, LoadingPanel, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,12 +30,10 @@ import { highest, roundTicks } from "@/components/database/home/charts"
 import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
 import { DEFAULT_RETENTION_HOURS, HISTORY_RANGES } from "@/components/database/home/use-samples"
-import { CodeView } from "@/components/database/kit"
+import { EngineMark } from "@/components/database/kit"
 import { oneLine } from "@/components/database/ops/queries"
-import {
-  readStatementHistory,
-  readStatementHistoryOf,
-} from "@/components/database/ops/performance-api"
+import { statementHref } from "@/components/database/ops/performance-address"
+import { readStatementHistory } from "@/components/database/ops/performance-api"
 import { millis, shareWords } from "@/components/database/ops/performance-figures"
 import {
   firstPointWords,
@@ -57,11 +55,12 @@ import {
   Stale,
   StatementLine,
   ViewRead,
-  useReturnFocus,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
+import { Fig, FigureLine, TitleFact } from "@/components/database/ops/performance-words"
 import type {
   DbStatementHistory,
+  DbStatementHistoryDetail,
   DbStatementHistoryEntry,
   DbStatementHistoryFacts,
   DbStatementHistorySort,
@@ -71,8 +70,15 @@ import { useDatabase } from "@/components/database/shell/database-context"
 /** How many statements the list asks for. The server's cap is 200. */
 const TOP = 50
 
-/** The recorder writes every five minutes; the list is read again each minute. */
-const HISTORY_EVERY_MS = 60_000
+/** The recorder writes every five minutes; a statement's own history is read again each minute. */
+export const HISTORY_EVERY_MS = 60_000
+
+/** The window the history is read over, held for the database: the Overview's charts and a statement's page read the same hours. */
+export function useHistoryHours(id: number) {
+  const [chosen, setHours] = useViewState(`databases.${id}.history.hours`, 1)
+  const hours = HISTORY_RANGES.some((range) => range.hours === chosen) ? chosen : 1
+  return [hours, setHours] as const
+}
 
 /**
  * The statement list over time: what each statement cost over the last hour,
@@ -86,16 +92,17 @@ const HISTORY_EVERY_MS = 60_000
  * the top of the last hour's, and its trend shows when it started.
  *
  * The window is the one the Overview's charts are drawn over, held for the
- * database, so the two views read the same hours. A row opens the statement's
- * own charts. The text is a shape, as the Statements view shows it.
+ * database, so the two views read the same hours. A row is one line: its
+ * trend is a column beside its text, where it hung under it until 0.8.7, and
+ * it opens the statement's own page on its history. The text is a shape, as
+ * the Statements view shows it.
  */
 export function StatementHistoryView() {
   const { id, engine, param, select } = useDatabase()
-  const focus = useReturnFocus()
+  const router = useRouter()
   const [frame, width] = useColumnWidth<HTMLDivElement>()
-  const [filter, setFilter] = useState("")
-  const [chosen, setHours] = useViewState(`databases.${id}.history.hours`, 1)
-  const hours = HISTORY_RANGES.some((range) => range.hours === chosen) ? chosen : 1
+  const [filter, setFilter] = useSessionState(`databases.${id}.performance.history.filter`, "")
+  const [hours, setHours] = useHistoryHours(id)
   const asked = param("sort")
   const sort: DbStatementHistorySort = isHistorySort(asked) ? asked : "total"
   const history = usePoll(
@@ -104,8 +111,6 @@ export function StatementHistoryView() {
     [id, hours, sort],
   )
   const data = history.data
-  const openId = param("statement")
-  const listed = openId ? data?.statements.find((entry) => entry.id === openId) : undefined
 
   const rows = useMemo(() => {
     const list = data?.statements ?? []
@@ -114,10 +119,13 @@ export function StatementHistoryView() {
       ? list.filter((entry) => oneLine(entry.query).toLowerCase().includes(needle))
       : list
   }, [data, filter])
-  const counted = width >= 520
-  const percentiles = width >= 600 && Boolean(data?.percentiles)
-  const returned = width >= 680
-  const read = width >= 780 && Boolean(data?.rowsRead)
+  // The trend has a column of its own now, so each figure gives way a little
+  // sooner than it did.
+  const roomy = width >= 520
+  const counted = width >= 600
+  const percentiles = width >= 700 && Boolean(data?.percentiles)
+  const returned = width >= 780
+  const read = width >= 880 && Boolean(data?.rowsRead)
   const sorts = historySorts(data)
   const head = (of: DbStatementHistorySort, className?: string) => {
     const entry = sorts.find((sort) => sort.id === of)
@@ -132,6 +140,7 @@ export function StatementHistoryView() {
       />
     ) : null
   }
+  const listed = data?.supported && data.intervals > 0 ? data : undefined
 
   return (
     <Panel
@@ -145,6 +154,22 @@ export function StatementHistoryView() {
         title="Statement history"
         actions={
           <>
+            {listed && (
+              <>
+                <TitleFact>
+                  <Fig>{millis(listed.totalMs)}</Fig> recorded over {windowWords(listed.hours)}
+                  {partlyRecorded(listed) && listed.firstAt && (
+                    <span title={timestamp(listed.firstAt)}>
+                      , from {relativeTime(listed.firstAt)}
+                    </span>
+                  )}
+                </TitleFact>
+                <InfoTip label="How these figures are made">
+                  A row&apos;s trend is its time across the window, and its share is of all the
+                  statement time recorded in it. {historyMethod(engine, listed).join(" ")}
+                </InfoTip>
+              </>
+            )}
             <Stale poll={history} />
             {data?.supported && data.statements.length > 0 && (
               <SearchInput
@@ -190,17 +215,6 @@ export function StatementHistoryView() {
                   <p>The history below ends at the last reading that worked.</p>
                 </Notice>
               )}
-              <p className="text-hint text-muted-foreground">
-                <span className="numeric font-medium text-foreground">
-                  {millis(answer.totalMs)}
-                </span>{" "}
-                of statement time recorded over {windowWords(answer.hours)}
-                {partlyRecorded(answer) && answer.firstAt && (
-                  <span title={timestamp(answer.firstAt)}>
-                    , from its first reading {relativeTime(answer.firstAt)}
-                  </span>
-                )}
-              </p>
               <PanelBody flush className="group-data-[plain]/panel:-mx-4">
                 {answer.statements.length === 0 ? (
                   <EmptyNote className="px-4">
@@ -213,6 +227,7 @@ export function StatementHistoryView() {
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
                         <TableHead>Statement</TableHead>
+                        <TableHead className="px-2">Trend</TableHead>
                         {head("total", "px-2")}
                         {counted && head("calls", "px-2")}
                         {head("mean", "px-2")}
@@ -225,21 +240,21 @@ export function StatementHistoryView() {
                       {rows.map((entry) => (
                         <TableRow
                           key={entry.id}
-                          data-state={entry.id === openId ? "selected" : undefined}
-                          onActivate={() => {
-                            focus.remember()
-                            select({ statement: entry.id })
-                          }}
+                          onActivate={() =>
+                            router.push(statementHref(id, entry.id, { tab: "history" }))
+                          }
                           aria-label={`Open the history of the statement: ${oneLine(entry.query).slice(0, 80)}`}
                         >
                           <TableCell className="w-full max-w-0 py-2">
                             <StatementLine text={entry.query} />
+                          </TableCell>
+                          <TableCell className="px-2 py-2">
                             <Sparkline
                               values={trendValues(entry.trend)}
                               color={statementVerb(entry.query)?.color}
-                              width={240}
+                              width={roomy ? 96 : 56}
                               height={20}
-                              className="mt-1 block h-5 w-full"
+                              className={roomy ? "block h-5 w-24" : "block h-5 w-14"}
                               label={`Its time over ${windowWords(answer.hours)}`}
                             />
                           </TableCell>
@@ -279,34 +294,10 @@ export function StatementHistoryView() {
                   </Table>
                 )}
               </PanelBody>
-              <div className="space-y-1">
-                <FormNote>
-                  The trend under a statement is its time across the window, and the share is of all
-                  the statement time recorded in it.
-                </FormNote>
-                {historyMethod(engine, answer).map((line) => (
-                  <FormNote key={line}>{line}</FormNote>
-                ))}
-              </div>
             </div>
           )
         }
       </ViewRead>
-
-      {openId && (
-        <HistoryPanel
-          // One statement's panel: what was read for another is not carried over.
-          key={openId}
-          statement={openId}
-          listed={listed}
-          hours={hours}
-          onHours={setHours}
-          onClose={() => {
-            select({ statement: null })
-            focus.restore()
-          }}
-        />
-      )}
     </Panel>
   )
 }
@@ -368,108 +359,81 @@ const timeTick = (value: number) => (value === 0 ? "0" : millis(value))
 const AXIS_WIDTH = 56
 
 /**
- * One statement's history over the window: its figures across it, and a
- * chart each of its time, its calls, its time per call and its rows, a point
- * for every bucket of the window.
+ * One statement's history over the window, as the History view of its page:
+ * its figures across the window as one line, and a chart each of its time,
+ * its calls, its time per call and its rows, a point for every bucket of the
+ * window. It was a sheet of nine tiles over the list until 0.8.7.
+ *
+ * The read is the page's, since the page draws its trends from the same
+ * points; the window is the database's (`useHistoryHours`).
  */
-function HistoryPanel({
-  statement,
+export function StatementRecorded({
+  detail,
   listed,
   hours,
   onHours,
-  onClose,
 }: {
-  statement: string
-  /** The list's row for it, drawn while its own read is on its way. */
+  detail: PollState<DbStatementHistoryDetail>
+  /** A row already in hand for it, drawn while its own read is on its way. */
   listed?: DbStatementHistoryEntry
   hours: number
   onHours: (hours: number) => void
-  onClose: () => void
 }) {
-  const { id, engine, goto } = useDatabase()
-  const { can } = useAuth()
-  const detail = usePoll(
-    (signal) => readStatementHistoryOf(id, statement, { hours }, signal),
-    HISTORY_EVERY_MS,
-    [id, statement, hours],
-  )
+  const { engine } = useDatabase()
   const data = detail.data
   const entry = data?.statement ?? listed
   const rows = useMemo(() => historyRows(data?.points ?? []), [data])
   const events = useMemo(() => historyEvents(data?.resets ?? []), [data])
-  const mayQuery = engine.has("query") && can("service.control")
-  const lines = entry ? entry.query.split("\n").length : 1
+  // The recorder keeps the statements that took the most time in each
+  // reading: one it never kept has no history, which is an answer and not a
+  // failure.
+  const unrecorded =
+    !data && detail.error instanceof ApiError && detail.error.status === 404 ? detail.error : null
 
   return (
-    <SidePanel
-      open
-      onOpenChange={(open) => !open && onClose()}
-      width="lg"
-      initialFocus="body"
-      title="Statement history"
-      description="One statement's figures over the recorded window, and its charts."
-    >
-      <div className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <p className="text-body text-muted-foreground">Over {windowWords(hours)}</p>
-          <HistoryRange
-            hours={hours}
-            onHours={onHours}
-            retentionHours={DEFAULT_RETENTION_HOURS}
-            label="Statement history range"
-          />
-        </div>
-        {entry && <Figures entry={entry} facts={data} />}
-        <ViewRead
-          poll={detail}
-          what="the statement's history"
-          skeleton={<LoadingPanel plain rows={4} />}
-        >
-          {(answer) => (
-            <div className="space-y-5">
-              <p className="text-hint text-muted-foreground">
-                A point for every {spanWords(answer.bucketSeconds)}.
-                {answer.resets.length > 0 &&
-                  " A mark on the time axis is where the statistics were reset."}
-              </p>
-              <Charts rows={rows} facts={answer} events={events} />
-              <div className="space-y-1">
-                {historyMethod(engine, answer)
-                  .slice(0, 1)
-                  .map((line) => (
-                    <FormNote key={line}>{line}</FormNote>
-                  ))}
-              </div>
-            </div>
+    <div className="space-y-5" data-slot="statement-recorded">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className="flex min-w-0 items-center gap-1.5 text-body text-muted-foreground">
+          <span className="truncate">
+            Over {windowWords(hours)}
+            {data && `, a point for every ${spanWords(data.bucketSeconds)}`}
+            {data && data.resets.length > 0 && ". A mark on the time axis is a reset"}
+          </span>
+          {data && (
+            <InfoTip label="How these figures are made">{historyMethod(engine, data)[0]}</InfoTip>
           )}
-        </ViewRead>
-        {entry && (
-          <CodeView
-            code={entry.query}
-            language={engine.editor}
-            label="The statement, as a shape"
-            className={lines <= 2 ? "h-28" : lines <= 5 ? "h-44" : lines <= 12 ? "h-72" : "h-96"}
-            actions={
-              mayQuery && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => goto("query", { sql: entry.query })}
-                >
-                  <CodeBracket />
-                  Open in Query
-                </Button>
-              )
-            }
-          />
-        )}
+        </p>
+        <HistoryRange
+          hours={hours}
+          onHours={onHours}
+          retentionHours={DEFAULT_RETENTION_HOURS}
+          label="Statement history range"
+        />
       </div>
-    </SidePanel>
+      {unrecorded ? (
+        <EmptyState
+          mark={<EngineMark engine={engine} size="md" />}
+          title="No history is recorded for this statement"
+          description="The recorder keeps the statements that took the most time in each reading. This one has not been among them."
+        />
+      ) : (
+        <>
+          {entry && <RecordedFigures entry={entry} facts={data} />}
+          <ViewRead
+            poll={detail}
+            what="the statement's history"
+            skeleton={<LoadingPanel plain rows={4} />}
+          >
+            {(answer) => <Charts rows={rows} facts={answer} events={events} />}
+          </ViewRead>
+        </>
+      )}
+    </div>
   )
 }
 
-/** A statement's figures over the window, with the percentiles and rows read where the engine has them. */
-function Figures({
+/** A statement's figures over the window as one line, with the percentiles and rows read where the engine has them. */
+function RecordedFigures({
   entry,
   facts,
 }: {
@@ -479,42 +443,44 @@ function Figures({
   const each = entry.calls > 0 ? entry.rows / entry.calls : undefined
   const examined =
     entry.rowsRead !== undefined && entry.rows > 0 ? entry.rowsRead / entry.rows : undefined
+  const ratio = (value: number) => (value >= 10 ? compact(value) : value.toFixed(1))
   return (
-    <MetricStrip>
-      <Metric label="Share" value={shareWords(entry.share)} />
-      <Metric label="Calls" value={entry.calls.toLocaleString()} />
-      <Metric label="Total" value={millis(entry.totalMs)} />
-      <Metric label="Mean" value={millis(entry.meanMs)} />
-      {entry.p50Ms !== undefined && (
-        <Metric label={latencyHead("p50")} value={millis(entry.p50Ms)} />
-      )}
-      {entry.p95Ms !== undefined && (
-        <Metric label={latencyHead("p95")} value={millis(entry.p95Ms)} />
-      )}
-      {entry.p99Ms !== undefined && (
-        <Metric label={latencyHead("p99")} value={millis(entry.p99Ms)} />
-      )}
-      <Metric
-        label="Rows"
-        value={entry.rows.toLocaleString()}
-        hint={
-          each === undefined ? undefined : `${each >= 10 ? compact(each) : each.toFixed(1)} a call`
-        }
-      />
+    <FigureLine>
+      <span>
+        <Fig>{shareWords(entry.share)}</Fig> of the window&apos;s statement time
+      </span>
+      <span>
+        <Fig>{entry.calls.toLocaleString()}</Fig> {entry.calls === 1 ? "call" : "calls"}
+      </span>
+      <span>
+        <Fig>{millis(entry.totalMs)}</Fig> in all
+      </span>
+      <span>
+        <Fig>{millis(entry.meanMs)}</Fig> a call
+      </span>
+      {(["p50", "p95", "p99"] as const).map((key) => {
+        const value = entry[`${key}Ms`]
+        return value === undefined ? null : (
+          <span key={key}>
+            {LATENCY_SHARE[key].toLowerCase()} inside <Fig>{millis(value)}</Fig>
+          </span>
+        )
+      })}
+      <span>
+        <Fig>{entry.rows.toLocaleString()}</Fig> {entry.rows === 1 ? "row" : "rows"}
+        {each !== undefined && `, ${ratio(each)} a call`}
+      </span>
       {entry.rowsRead !== undefined && (
-        <Metric
-          label="Rows examined"
-          value={entry.rowsRead.toLocaleString()}
-          hint={
-            examined === undefined
-              ? facts?.rowsRead
-                ? "none returned"
-                : undefined
-              : `${examined >= 10 ? compact(examined) : examined.toFixed(1)} for each returned`
-          }
-        />
+        <span>
+          <Fig>{entry.rowsRead.toLocaleString()}</Fig> examined
+          {examined !== undefined
+            ? `, ${ratio(examined)} for each returned`
+            : facts?.rowsRead
+              ? ", none returned"
+              : ""}
+        </span>
       )}
-    </MetricStrip>
+    </FigureLine>
   )
 }
 
@@ -543,65 +509,69 @@ function Charts({
   const read = useAxis(rows, ROWS, true)
   const note = "Nothing was recorded for this statement in the window."
   return (
-    <div className="space-y-6">
-      <ChartPanel
-        plain
-        title="Time spent"
-        rows={rows}
-        series={TIME}
-        format={millis}
-        axisFormat={timeTick}
-        axisWidth={AXIS_WIDTH}
-        domain={time.domain}
-        yTicks={time.ticks}
-        events={events}
-        height={150}
-        showPeaks={false}
-        note={note}
-      />
-      <ChartPanel
-        plain
-        title="Calls"
-        rows={rows}
-        series={CALLS}
-        format={count}
-        axisWidth={AXIS_WIDTH}
-        domain={calls.domain}
-        yTicks={calls.ticks}
-        events={events}
-        height={150}
-        showPeaks={false}
-        note={note}
-      />
-      <ChartPanel
-        plain
-        title="Time per call"
-        rows={rows}
-        series={spread}
-        format={millis}
-        axisFormat={timeTick}
-        axisWidth={AXIS_WIDTH}
-        domain={perCall.domain}
-        yTicks={perCall.ticks}
-        events={events}
-        height={150}
-        showPeaks={false}
-        note={note}
-      />
-      <ChartPanel
-        plain
-        title="Rows"
-        rows={rows}
-        series={ROWS}
-        format={count}
-        axisWidth={AXIS_WIDTH}
-        domain={read.domain}
-        yTicks={read.ticks}
-        events={events}
-        height={150}
-        showPeaks={false}
-        note={note}
-      />
+    // Two across where the view has the width for two, by its own measure:
+    // the rail beside the page takes a fifth of a laptop.
+    <div className="@container">
+      <div className="grid gap-x-8 gap-y-6 @3xl:grid-cols-2 [&>*]:min-w-0">
+        <ChartPanel
+          plain
+          title="Time spent"
+          rows={rows}
+          series={TIME}
+          format={millis}
+          axisFormat={timeTick}
+          axisWidth={AXIS_WIDTH}
+          domain={time.domain}
+          yTicks={time.ticks}
+          events={events}
+          height={150}
+          showPeaks={false}
+          note={note}
+        />
+        <ChartPanel
+          plain
+          title="Calls"
+          rows={rows}
+          series={CALLS}
+          format={count}
+          axisWidth={AXIS_WIDTH}
+          domain={calls.domain}
+          yTicks={calls.ticks}
+          events={events}
+          height={150}
+          showPeaks={false}
+          note={note}
+        />
+        <ChartPanel
+          plain
+          title="Time per call"
+          rows={rows}
+          series={spread}
+          format={millis}
+          axisFormat={timeTick}
+          axisWidth={AXIS_WIDTH}
+          domain={perCall.domain}
+          yTicks={perCall.ticks}
+          events={events}
+          height={150}
+          showPeaks={false}
+          note={note}
+        />
+        <ChartPanel
+          plain
+          title="Rows"
+          rows={rows}
+          series={ROWS}
+          format={count}
+          axisWidth={AXIS_WIDTH}
+          domain={read.domain}
+          yTicks={read.ticks}
+          events={events}
+          height={150}
+          showPeaks={false}
+          note={note}
+        />
+      </div>
     </div>
   )
 }
