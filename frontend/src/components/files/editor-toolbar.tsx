@@ -163,24 +163,27 @@ export function EditorToolbar({
         )}
       </StripGroup>
 
-      <StripGroup aria-label="History">
-        <IconAction
-          label="Undo"
-          className={STRIP_SEGMENT}
-          disabled={!commands || !canEdit}
-          onClick={() => commands?.undo()}
-        >
-          <CornerUpLeft />
-        </IconAction>
-        <IconAction
-          label="Redo"
-          className={STRIP_SEGMENT}
-          disabled={!commands || !canEdit}
-          onClick={() => commands?.redo()}
-        >
-          <CornerUpRight />
-        </IconAction>
-      </StripGroup>
+      {/* A reader has nothing to take back, so is not shown two dead arrows. */}
+      {canEdit && (
+        <StripGroup aria-label="History">
+          <IconAction
+            label="Undo"
+            className={STRIP_SEGMENT}
+            disabled={!commands}
+            onClick={() => commands?.undo()}
+          >
+            <CornerUpLeft />
+          </IconAction>
+          <IconAction
+            label="Redo"
+            className={STRIP_SEGMENT}
+            disabled={!commands}
+            onClick={() => commands?.redo()}
+          >
+            <CornerUpRight />
+          </IconAction>
+        </StripGroup>
+      )}
 
       <StripGroup aria-label="How the text is drawn" className="max-lg:hidden">
         <IconAction
