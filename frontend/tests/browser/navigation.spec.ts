@@ -416,6 +416,8 @@ const ITEM_PAGES: [path: string, row: string][] = [
 ]
 
 test("an item's page lights the row it was opened from, and only that row", async ({ page }) => {
+  // One test walks every page of the list, so its budget grows with it.
+  test.setTimeout(ITEM_PAGES.length * 10_000)
   await mockShell(page)
   for (const [path, row] of ITEM_PAGES) {
     await page.goto(path)

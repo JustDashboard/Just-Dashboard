@@ -1477,20 +1477,27 @@ test("on a phone the strip names the server and opens the same menu", async ({ p
   expect(box!.x + box!.width).toBeLessThanOrEqual(390)
   await page.keyboard.press("Escape")
   expect(await scrollsSideways(page)).toBe(false)
+})
 
-  for (const [name, state] of [
-    ["unlinked", unlinked],
-    ["pending", pending("maintain")],
-    ["linked", linked("maintain", { notices: notices() })],
-    ["idle", idleLink("the hub's machine changed")],
-  ] as const) {
+// Every state of the page at three widths, with a picture of each. They were
+// twelve loads and twelve full-page pictures at the end of the test above,
+// which took 28.9s and 31.7s of its thirty seconds alone and went over under
+// load. A state is a test of its own now: three loads, and four run side by
+// side.
+for (const [name, state] of [
+  ["unlinked", () => unlinked],
+  ["pending", () => pending("maintain")],
+  ["linked", () => linked("maintain", { notices: notices() })],
+  ["idle", () => idleLink("the hub's machine changed")],
+] as const) {
+  test(`the ${name} page scrolls sideways at no width`, async ({ page }) => {
     for (const width of [390, 1280, 1720]) {
       await page.setViewportSize({ width, height: 1600 })
-      await mock(page, state)
+      await mock(page, state())
       await page.goto("/dashboard/hub")
       await expect(page.locator("[data-slot=page]")).toHaveClass(/animate-rise/)
       expect(await scrollsSideways(page), `${name} at ${width}`).toBe(false)
       await page.screenshot({ path: `test-results/hub-link-${name}-${width}.png`, fullPage: true })
     }
-  }
-})
+  })
+}
