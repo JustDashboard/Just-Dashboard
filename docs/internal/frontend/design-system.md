@@ -1436,6 +1436,10 @@ containers made: eleven networks are compared down their columns — which is bu
 on it, which subnet each holds — far more often than one is opened, and the cards were eleven grey
 copies of one line. It is a table of fixed columns from `xl` whose name is the button and whose row
 takes Enter, without the lit edge, drawn down the row below `xl` (`components/docker/network-table.tsx`).
+Since 0.8.7 the name is a link to the network's own page (`/docker/networks/[name]`) rather than the
+button of a sheet, and a row is one height in the table and in the list it becomes: what a network
+or a container has more or less of (a second network, a second name, traffic) is drawn inside the
+row's two lines or counted, never added under them.
 
 **The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
 (`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
@@ -2745,6 +2749,14 @@ The passes, in order. Each one is a diff you can review on its own.
    "can the API reach the database" is whether two rows share a colour. The sheet became a live
    readout: four readings over the bridge's two minutes, the bridge wired to each member in the
    wiring vocabulary with a pulse while that member moves bytes, the members as a table, the settings.
+   In 0.8.7 the sheet became a page (`components/docker/network-page.tsx`), on the process page's
+   shape: the identity line as a project's header, the views in the address, the networks as a rail
+   from `xl`. Its four tiles went the way every tile row has: members to the identity line, and
+   received, sent and addresses taken to reading lines (`components/reading-line.tsx`) under the
+   picture, with a fourth that says whether members answer by name. The picture grew a left side,
+   where the network leads: out through this server, onto a card, nowhere, and to each other
+   network a member is also on, which is what the members table's "also on" line was saying one
+   member at a time. The members are one-line cards that open the container.
    Docker's Stacks page took the same exit in 0.7.1 at the operator's request, because it was the
    still page of the section: a title over six cards, each a stack's name with its services as a line
    of 6px dots under it, so "is the database up" was a dot, an Alertmanager killed for memory read as

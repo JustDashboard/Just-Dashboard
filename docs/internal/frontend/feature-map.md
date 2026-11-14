@@ -819,18 +819,20 @@ match replaces the socket's; an exit right after a kill is read as the stop it w
 
 ### `/docker/networks`
 
-Docker's networks, who is on each and what they carry. The engine's identity line (Docker as its
-mark and version, the host, how many networks and how many were made here, the containers on them,
-how many join two or more) with the verdict at its end: the address pool nearly or wholly spent,
-else — where the container listing failed — that who is on them is unread, since then no network is
-called unused or in use; else the unused networks — a press narrows the table to them — else every
-network in use. A band of bar readings (`network-band.tsx`, design system §10): **Traffic**, the
+Docker's networks, who is on each and what they carry. The engine's identity line, laid out as a
+project's header (Docker as its mark and version, how many networks and how many were made here, the
+containers on them; from `sm` the host and how many join two or more) with the verdict beside the
+name: the address pool nearly or wholly spent, else — where the container listing failed — that who
+is on them is unread, since then no network is called unused or in use; else the unused networks — a
+press narrows the table to them — else every network in use. Create network is the line's one
+command. A band of bar readings (`network-band.tsx`, design system §10): **Traffic**, the
 five busiest networks by their bridge's two-second counters (`useLiveTraffic`) as spans of one bar
 in each network's colour, with in and out gliding on its line; **Addresses**, Docker's address pools
 (`default-address-pools` from `/docker/info`, else the built-in thirty-one) as a span per network in
 its colour sized by the blocks it holds, the first free block at the strip's end and any subnet
 outside the pools in the figure's tooltip; **Recent**, Docker's network events followed live as
-ticks on the last day, each naming the container that joined or left. Then the networks as a framed
+ticks on the last day, each naming the container that joined or left. A press in Traffic or Recent
+opens that network's page. Then the networks as a framed
 table — the network's lane colour down its edge, who made it as counted chips that narrow (compose
 project, this dashboard, standalone, Docker's own; the backend's reading of the labels where it has
 one, so a deployment's network and a database link are the dashboard's and name the deployment,
@@ -842,14 +844,14 @@ two minutes of shape, and Attach and Remove drawn disabled with the reason where
 private network) — and every container as a second table: each network it is on in that network's
 colour with its address there, the names it answers to (none on the default bridge, in amber), its
 traffic, chips for the containers that join networks, the default bridge and the stopped ones, and a
-network's chip narrowing the table to it. A network's sheet (`?network=`) is a live readout: in and
-out with their trend, members running, addresses taken of the subnet, the bridge wired to each
-member with a pulse while it moves bytes, the members as a table of both families' addresses, the
-other networks each also joins, and aliases with Detach (the dashboard's own containers and the
-shared ingress are marked and given a locked control with the reason instead, a member whose inspect
-failed says aliases unread), and its settings with what acts on the network next (Compose recreates
-it, its deployment reconciles it, nothing recreates one made by hand). Create network and Remove
-unused sit in the networks table's toolbar. Attach a container, Detach, Remove and Remove unused
+network's chip narrowing the table to it. A network's name is the link to its own page
+(`/docker/networks/[name]`, below) and the row is the pointer's larger target for it;
+`/docker/networks?network=<id>`, the address of the sheet that page replaced, redirects there on the
+server. A row is one height in both tables and in the lists they become below `xl`: a container on
+more than two networks names the first and counts the rest, its names stay on one line with the rest
+behind a count, and a network's traffic below `xl` has its place whether or not it carries any. On a
+phone the two strips of chips wrap rather than run off the panel's edge. Remove
+unused sits in the networks table's toolbar. Attach a container, Remove and Remove unused
 each read what they would disturb first (`network-dialogs.tsx`, `network-conflicts.tsx`; the
 previews' types and ordering in `lib/docker-networks.ts`, unit-tested): refusals are the server's
 too and leave the confirmation off, warnings are confirmed, the attach dialog keeps its container
@@ -864,10 +866,72 @@ catalogue (a missing or refused driver and option keys Docker would ignore are n
 creation](../backend/docker-files-logs.md#network-creation)
 
 **Implementation:** `components/docker/networks-page.tsx`, `network-band.tsx`, `network-table.tsx`,
-`network-members.tsx`, `network-sheet.tsx`, `network-dialogs.tsx`, `network-conflicts.tsx`,
+`network-members.tsx`, `network-live.ts`, `network-dialogs.tsx`, `network-conflicts.tsx`,
 `network-create.tsx`, `networks.ts` (unit-tested), `lib/docker-networks.ts` (unit-tested); checked
 by `tests/browser/docker-networks.spec.ts`, `docker-network-maturity.spec.ts` and
 `docker-network-create.spec.ts`
+
+### `/docker/networks/[name]`
+
+One network, as a place of its own; it was a sheet over the Networks table until 0.8.7. The address
+names the network, and an id opens it too (the Engine resolves either, and a deployment's removal
+plan names one by id): the address is then put right to the name. A way back and Previous / Next;
+the identity line as a project's header — Docker's mark for a bridge or an overlay, the kind of
+device otherwise, the name behind the network's own colour, where it stands beside it (**in use**,
+**N of M running**, **unused** in amber for a network somebody made that nothing is on, **nothing
+attached** for Docker's own, **members unread**) with **no internet** and **IPv6**, then who made it
+(a compose project's is a link to its stack), its driver and device on this server, its subnet and
+how many are on it. **Attach a container** is its one command, offered where Docker would take one;
+the menu holds Open the stack, Copy name, Copy ID and Remove, which is drawn disabled with the
+reason where Docker would refuse, as is the reason the dashboard's own network or a swarm network
+without `--attachable` takes no container. Removing goes back to the list.
+
+Views in the address as `?tab=` (Overview carries none), remembered between networks:
+
+- **Overview**: the wiring picture (`network-picture.tsx`, on `WireFlow`) — where it leads on the
+  left, the network in the middle (its bridge device and subnet), its members on the right as the
+  products they run with their address and what each is moving. Where it leads is how its members
+  leave it (out through this server at its gateway address; straight onto a network card for a
+  macvlan or ipvlan, a link to that card on Interfaces; no way out for an internal one; nothing for
+  `host` and `none`, said in a sentence) and then the other networks its members are also on, each
+  a link to that network and saying through whom, since a container on two networks is the only
+  thing that joins them. A member's line pulses while it moves more than a kilobyte a second, faster
+  the busier, and is dashed while it is stopped; pointing at a member lights the networks it joins
+  this one to. Five members a side and three leads are drawn and the rest counted, the count opening
+  Members. Under it four reading lines: received and sent on its bridge with their last two minutes,
+  addresses taken of the subnet with its gateway, and whether its members answer by name (not on the
+  default bridge, in amber).
+- **Members**: every member as a one-line card (`ChoiceRow`) that opens the container — its product,
+  name, **This dashboard** / **Shared ingress**, its address (both families from a wide column) and
+  the other networks it is on, the names the others reach it by (two and a count, all in the tooltip;
+  **aliases unread** where its inspect failed; folded away with the column on a phone), its state
+  and rate — one height whatever it has. Detach reads what it disturbs first; the dashboard's own
+  containers and the shared ingress get a locked control with the reason. Nothing attached is an
+  empty state with Attach a container. The notices for members unread, members' details unread and
+  the default bridge's lack of names are here.
+- **Configuration**: subnets, gateway and IPv6; who made it and what acts on it next (Compose
+  recreates it, its deployment reconciles it, nothing recreates one made by hand), driver and
+  device, whether it reaches the internet and accepts new members, scope, created, id; then the
+  driver's options and the labels as written.
+
+From `xl` the networks stand beside it as a rail (`network-rail.tsx`): the table's own search, owner
+chip and order (the same session keys), a caption ("11 networks", "3 of 11 · Compose"), Clear
+filters, the network on screen filled and kept in view and drawn first when the filter does not hold
+it. Alt+↑ / Alt+↓ and the two arrows walk it and the open view goes along. Below `xl` the page is
+one pane that scrolls as a whole, the picture's columns stacked with every word kept.
+
+The list is read every ten seconds, for the rail and for who is on the network now; the inspect once,
+and again when the list says its members changed (it inspects every member for its aliases). So the
+page draws from the list before the inspect lands, and when the inspect fails. It has its shape
+while both are on their way (the identity line with the name from the address, the three views, the
+picture waiting); a name that is no network is an empty state with the way back and the rail still
+listing the rest; a network removed while its page is open goes back to the list.
+
+**Implementation:** `components/docker/network-page.tsx`, `network-picture.tsx`, `network-views.tsx`,
+`network-rail.tsx`, `network-live.ts` (the containers socket's listing and rates, shared with the
+table), `networks.ts` (the page's address, standing, members, joined networks and way out,
+unit-tested); checked by `tests/browser/docker-network-page.spec.ts` and
+`docker-network-maturity.spec.ts`
 
 ### `/files`
 
