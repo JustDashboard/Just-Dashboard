@@ -1,8 +1,8 @@
 "use client"
 
-import { useId } from "react"
+import { useId, useState } from "react"
 import Link from "next/link"
-import { ArrowDown, ArrowUp, Key, Plus, Trash } from "@/components/icons"
+import { ArrowDown, ArrowUp, Key, Plus, Terminal, Trash } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useArrivals } from "@/hooks/use-arrivals"
@@ -13,10 +13,11 @@ import type {
   DeploymentRunSnapshot,
   DeploymentVariable,
 } from "@/lib/types"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
-import { Group } from "@/components/panel"
-import { ProductGlyph, programProduct } from "@/components/product-logo"
+import { DimActions, IconAction } from "@/components/icon-action"
+import { ProductGlyph, ProductLogo, programProduct } from "@/components/product-logo"
+import { SidePanel } from "@/components/side-panel"
 import { Status } from "@/components/status-dot"
 import { FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -97,14 +98,18 @@ function runnerHint(runner: ReleaseTask["runner"], buildMethod?: DeploymentBuild
  *
  * Above them, where in the release they run: the release path's seven stages
  * with Release lit, because "before activation" is only a sentence until it
- * is seen as a place on the same path the run page draws. Each task is a
- * fenced group of labelled fields — a name, a timeout in seconds, the command,
- * the directory it runs in folded away until it matters — because a placeholder
- * that vanishes once typed into is not a label, least of all on a phone with
- * the keyboard up. The order is the order they run in, so it can be changed,
- * and each task says how it went the last time it ran — in a release that
- * failed on it, if one has since the live one, since that release never went
- * live and the live one would still say every task passed.
+ * is seen as a place on the same path the run page draws. Each task is one
+ * line — the program it runs drawn as itself, its name over its command, how
+ * it went the last time it ran and how long it may take — and the line opens
+ * the task's small form, as a variable's does. Every task used to be a framed
+ * box of its fields, open all the time: a box inside the form, and three of
+ * them a page of their own. The form edits the page's draft like any field on
+ * it, so closing it saves nothing and the page's one Save sends the tasks.
+ *
+ * The order is the order they run in, so it can be changed on the line, and
+ * each task says how it went the last time it ran — in a release that failed
+ * on it, if one has since the live one, since that release never went live
+ * and the live one would still say every task passed.
  *
  * A task's `env` is drawn only from variables already scoped to Release task,
  * so a task can never reach a value nobody granted it.
@@ -156,6 +161,13 @@ export function ReleaseTasks({
   // Drawn by position, so a task added is a position that was not there: it
   // rises, and one moved or typed into does not.
   const arrived = useArrivals(tasks.map((_, index) => String(index)))
+  // The task whose form is open, by its place in the list.
+  const [open, setOpen] = useState<number>()
+  const editing = open !== undefined ? tasks[open] : undefined
+  const remove = (index: number) => {
+    setOpen(undefined)
+    onChange(tasks.filter((_, i) => i !== index))
+  }
 
   const update = (index: number, patch: Partial<ReleaseTask>) =>
     onChange(tasks.map((task, i) => (i === index ? { ...task, ...patch } : task)))
@@ -173,9 +185,8 @@ export function ReleaseTasks({
     requestAnimationFrame(() => document.getElementById(`${id}-task-${to}-${arrow}`)?.focus())
   }
 
-  // A task just added takes the keyboard at the field it cannot do without
-  // — its name, or its command when a starter already named it — once it has
-  // been drawn.
+  // A task just added opens its form, where the keyboard lands on the field
+  // it cannot do without: its name, or its command when a starter named it.
   function add(name = "") {
     onChange([
       ...tasks,
@@ -188,8 +199,11 @@ export function ReleaseTasks({
         runner: defaultReleaseTaskRunner(buildMethod),
       },
     ])
-    const added = `${id}-task-${tasks.length}-${name ? "command" : "name"}`
-    requestAnimationFrame(() => document.getElementById(added)?.focus())
+    setOpen(tasks.length)
+    if (name) {
+      const command = `${id}-task-${tasks.length}-command`
+      requestAnimationFrame(() => document.getElementById(command)?.focus())
+    }
   }
 
   return (
@@ -223,241 +237,356 @@ export function ReleaseTasks({
           )}
         </div>
       ) : (
-        <ol className="space-y-3">
+        <ChoiceList aria-label="Release tasks, in the order they run">
           {tasks.map((task, index) => {
             const n = index + 1
             const error = rowError?.(index)
             const last = evidence?.find((one) => one.name === task.name)
-            const titleId = `${id}-task-${index}-title`
-            // What an empty directory falls back to, said the same shut and
-            // open: the field read "Source root" while the facts above it
-            // said the image's own.
-            const workdir = task.runner === "image" ? "the image's own" : "source root"
+            const name = task.name.trim() || `Task ${n}`
             return (
-              <li key={index} className={cn(arrived.has(String(index)) && "animate-rise")}>
-                <Group
-                  role="group"
-                  aria-labelledby={titleId}
-                  tone={error ? "danger" : "default"}
-                  className="space-y-3"
-                >
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                    <p id={titleId} className="flex min-w-0 flex-1 items-baseline gap-2">
-                      <span className="eyebrow shrink-0">Task {n}</span>
-                      <span
-                        className={cn(
-                          "truncate text-sm font-medium",
-                          !task.name.trim() && "text-muted-foreground",
-                        )}
-                      >
-                        {task.name.trim() || "Unnamed"}
-                      </span>
-                    </p>
-                    {last && lastRun && (
-                      <Status
-                        tone={last.exitCode === 0 ? "running" : "danger"}
-                        label={`${
-                          last.exitCode === 0
-                            ? `passed in ${(last.durationMs / 1000).toFixed(1)} s`
-                            : `exit ${last.exitCode}`
-                        } · #${lastRun.runNumber}`}
-                        className="animate-rise"
-                      />
-                    )}
-                    {!disabled && (
-                      <span className="ml-auto flex shrink-0 items-center gap-0.5">
-                        <IconAction
-                          id={`${id}-task-${index}-up`}
-                          label="Move up"
-                          disabled={index === 0}
-                          onClick={() => move(index, -1)}
-                        >
-                          <ArrowUp />
-                        </IconAction>
-                        <IconAction
-                          id={`${id}-task-${index}-down`}
-                          label="Move down"
-                          disabled={index === tasks.length - 1}
-                          onClick={() => move(index, 1)}
-                        >
-                          <ArrowDown />
-                        </IconAction>
-                        <IconAction
-                          label={`Remove release task ${task.name || n}`}
-                          className="text-destructive"
-                          onClick={() => onChange(tasks.filter((_, i) => i !== index))}
-                        >
-                          <Trash />
-                        </IconAction>
-                      </span>
-                    )}
-                  </div>
-                  <FieldRow className="sm:grid-cols-[minmax(0,1fr)_11rem]">
-                    <Field label="Name" htmlFor={`${id}-task-${index}-name`}>
-                      <Input
-                        id={`${id}-task-${index}-name`}
-                        aria-label={`Release task ${n} name`}
-                        value={task.name}
-                        onChange={(event) => update(index, { name: event.target.value })}
-                        placeholder="Database migration"
-                        readOnly={disabled}
-                      />
-                    </Field>
-                    <Field
-                      label="Timeout"
-                      htmlFor={`${id}-task-${index}-timeout`}
-                      hint={`${spoken(task.timeoutSeconds)} · at most 1 h`}
-                    >
-                      <InputGroup>
-                        <InputGroupInput
-                          id={`${id}-task-${index}-timeout`}
-                          aria-label={`Release task ${n} timeout seconds`}
-                          type="number"
-                          inputMode="numeric"
-                          min={1}
-                          max={3600}
-                          value={task.timeoutSeconds}
-                          onChange={(event) =>
-                            update(index, { timeoutSeconds: Number(event.target.value) })
-                          }
-                          readOnly={disabled}
-                          className="numeric"
-                        />
-                        <InputGroupAddon align="inline-end">
-                          <InputGroupText>seconds</InputGroupText>
-                        </InputGroupAddon>
-                      </InputGroup>
-                    </Field>
-                  </FieldRow>
-                  <Field
-                    label="Runs in"
-                    // Keyed on the place, so pressing the other chip brings its
-                    // line in rather than repainting the words under the pointer.
-                    hint={
-                      <span key={task.runner ?? "shell"} className="block animate-rise">
-                        {runnerHint(task.runner, buildMethod)}
-                      </span>
-                    }
-                  >
-                    <div className="flex flex-wrap gap-1.5">
-                      {RUNNERS.map((option) => (
-                        <FilterChip
-                          key={option.label}
-                          selected={task.runner === option.runner}
-                          disabled={
-                            disabled ||
-                            (option.runner === "image" && !buildsReleaseImage(buildMethod))
-                          }
-                          onClick={() => update(index, { runner: option.runner })}
-                          className={cn(
-                            "h-8 font-normal disabled:opacity-60 sm:h-7",
-                            task.runner !== option.runner && "border-border",
-                          )}
-                        >
-                          {option.product && <ProductGlyph id={option.product} />}
-                          {option.label}
-                        </FilterChip>
-                      ))}
-                    </div>
-                  </Field>
-                  <Field
-                    label="Command"
-                    htmlFor={`${id}-task-${index}-command`}
-                    // A textarea has no addon to carry the program's mark, so
-                    // it rides the label's edge, where it cannot move the words.
-                    trailing={<ProgramGlyph command={task.command} />}
-                  >
-                    <Textarea
-                      id={`${id}-task-${index}-command`}
-                      aria-label={`Release task ${n} command`}
-                      value={task.command}
-                      onChange={(event) => update(index, { command: event.target.value })}
-                      placeholder="./bin/migrate"
-                      readOnly={disabled}
-                      rows={3}
-                      className="font-mono sm:text-xs"
-                      spellCheck={false}
-                    />
-                  </Field>
-                  <Disclosure
-                    quiet
-                    summary="Working directory"
-                    facts={task.workingDirectory?.trim() || workdir}
-                  >
-                    <Input
-                      aria-label={`Release task ${n} working directory`}
-                      value={task.workingDirectory ?? ""}
-                      onChange={(event) => update(index, { workingDirectory: event.target.value })}
-                      placeholder={workdir}
-                      readOnly={disabled}
-                      className="font-mono sm:text-xs"
-                      spellCheck={false}
-                    />
-                  </Disclosure>
-                  <Field label="Environment">
-                    {releaseVariables.length === 0 ? (
-                      <FormNote>
-                        No variable reaches release tasks yet.{" "}
-                        <Link
-                          href={`/deploy/${project.projectId}/settings/variables`}
-                          className="text-foreground underline-offset-2 hover:underline"
-                        >
-                          Give one the Release task scope
-                        </Link>
-                      </FormNote>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {releaseVariables.map((variable) => {
-                          const on = task.env.includes(variable.name)
-                          return (
-                            <FilterChip
-                              key={variable.name}
-                              selected={on}
-                              disabled={disabled}
-                              onClick={() =>
-                                update(index, {
-                                  env: on
-                                    ? task.env.filter((name) => name !== variable.name)
-                                    : [...new Set([...task.env, variable.name])],
-                                })
-                              }
-                              // In a form an unpressed chip keeps an edge, or a
-                              // lone one reads as a caption rather than a control.
-                              className={cn(
-                                "h-8 font-mono font-normal disabled:opacity-60 sm:h-7",
-                                !on && "border-border",
-                              )}
-                            >
-                              <Key
-                                aria-hidden
-                                className={cn(
-                                  "size-3 shrink-0 transition-colors",
-                                  on && "text-brand",
-                                )}
-                              />
-                              {variable.name}
-                            </FilterChip>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </Field>
-                  {error && (
-                    <p role="alert" className="animate-rise text-hint text-destructive">
+              <ChoiceRow
+                key={index}
+                className={cn(arrived.has(String(index)) && "animate-rise")}
+                verb={`${disabled ? "Open" : "Edit"} release task ${name}`}
+                onSelect={() => setOpen(index)}
+                leading={
+                  <ProductLogo size="sm" id={programProduct(task.command)} fallback={Terminal} />
+                }
+                title={
+                  <span className={cn(!task.name.trim() && "text-muted-foreground")}>
+                    <span className="numeric mr-1.5 text-muted-foreground">{n}</span>
+                    {task.name.trim() || "Unnamed"}
+                  </span>
+                }
+                // A refusal takes the line the command was on, so a refused
+                // task is the height of every other.
+                description={
+                  error ? (
+                    <span role="alert" className="text-destructive">
                       {error}
-                    </p>
-                  )}
-                </Group>
-              </li>
+                    </span>
+                  ) : task.command.trim() ? (
+                    <span className="font-mono">{task.command.split("\n")[0]}</span>
+                  ) : (
+                    "No command yet"
+                  )
+                }
+                trailing={
+                  <>
+                    {error ? (
+                      <Status tone="danger" label="Not saved" />
+                    ) : (
+                      last &&
+                      lastRun && (
+                        <TaskOutcome
+                          last={last}
+                          runNumber={lastRun.runNumber}
+                          className="max-sm:hidden"
+                        />
+                      )
+                    )}
+                    <span className="numeric w-14 text-right text-hint whitespace-nowrap text-muted-foreground">
+                      {spoken(task.timeoutSeconds)}
+                    </span>
+                  </>
+                }
+                actions={
+                  // One task has no order to change, and two arrows that can
+                  // do nothing stood beside the one that opens it.
+                  !disabled &&
+                  tasks.length > 1 && (
+                    <DimActions>
+                      <IconAction
+                        id={`${id}-task-${index}-up`}
+                        label="Move up"
+                        disabled={index === 0}
+                        onClick={() => move(index, -1)}
+                      >
+                        <ArrowUp />
+                      </IconAction>
+                      <IconAction
+                        id={`${id}-task-${index}-down`}
+                        label="Move down"
+                        disabled={index === tasks.length - 1}
+                        onClick={() => move(index, 1)}
+                      >
+                        <ArrowDown />
+                      </IconAction>
+                    </DimActions>
+                  )
+                }
+              />
             )
           })}
-        </ol>
+        </ChoiceList>
       )}
       {!disabled && (
         <Button type="button" size="sm" variant="outline" onClick={() => add()}>
           <Plus className="size-3.5" />
           Add release task
         </Button>
+      )}
+      <SidePanel
+        open={editing !== undefined}
+        onOpenChange={(next) => !next && setOpen(undefined)}
+        title={editing ? editing.name.trim() || `Release task ${(open ?? 0) + 1}` : "Release task"}
+        description="What this task runs, where, and how long it may take."
+        width="sm"
+        // A named task's name is not what the reader came to change, and
+        // landing in it would select it.
+        initialFocus={editing?.name.trim() ? "body" : "first"}
+        footer={
+          <>
+            {!disabled && open !== undefined && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="mr-auto text-destructive"
+                onClick={() => remove(open)}
+              >
+                <Trash className="size-3.5" />
+                Remove
+              </Button>
+            )}
+            {!disabled && <FormNote className="max-sm:hidden">Saved with the page</FormNote>}
+            <Button type="button" onClick={() => setOpen(undefined)}>
+              Done
+            </Button>
+          </>
+        }
+      >
+        {editing && open !== undefined && (
+          <TaskEditor
+            id={id}
+            task={editing}
+            index={open}
+            disabled={disabled}
+            buildMethod={buildMethod}
+            releaseVariables={releaseVariables}
+            variablesHref={`/deploy/${project.projectId}/settings/variables`}
+            last={evidence?.find((one) => one.name === editing.name)}
+            runNumber={lastRun?.runNumber}
+            error={rowError?.(open)}
+            onChange={(patch) => update(open, patch)}
+          />
+        )}
+      </SidePanel>
+    </div>
+  )
+}
+
+/** How a task went the last time it ran, and in which deployment. */
+function TaskOutcome({
+  last,
+  runNumber,
+  className,
+}: {
+  last: TaskEvidence
+  runNumber: number
+  className?: string
+}) {
+  return (
+    <Status
+      tone={last.exitCode === 0 ? "running" : "danger"}
+      label={`${
+        last.exitCode === 0
+          ? `passed in ${(last.durationMs / 1000).toFixed(1)} s`
+          : `exit ${last.exitCode}`
+      } · #${runNumber}`}
+      className={cn("animate-rise", className)}
+    />
+  )
+}
+
+/**
+ * One task's form: labelled fields — a name, a timeout in seconds, where it
+ * runs, the command, the directory it runs in folded away until it matters —
+ * because a placeholder that vanishes once typed into is not a label, least of
+ * all on a phone with the keyboard up.
+ */
+function TaskEditor({
+  id,
+  task,
+  index,
+  disabled,
+  buildMethod,
+  releaseVariables,
+  variablesHref,
+  last,
+  runNumber,
+  error,
+  onChange,
+}: {
+  id: string
+  task: ReleaseTask
+  index: number
+  disabled?: boolean
+  buildMethod?: DeploymentBuildMethod
+  releaseVariables: DeploymentVariable[]
+  variablesHref: string
+  last?: TaskEvidence
+  runNumber?: number
+  error?: string
+  onChange: (patch: Partial<ReleaseTask>) => void
+}) {
+  const n = index + 1
+  const update = (_: number, patch: Partial<ReleaseTask>) => onChange(patch)
+  // What an empty directory falls back to, said the same shut and open: the
+  // field read "Source root" while the facts above it said the image's own.
+  const workdir = task.runner === "image" ? "the image's own" : "source root"
+  return (
+    <div className="space-y-4">
+      {last && runNumber !== undefined && (
+        <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
+          Last run <TaskOutcome last={last} runNumber={runNumber} />
+        </p>
+      )}
+      <FieldRow className="sm:grid-cols-[minmax(0,1fr)_11rem]">
+        <Field label="Name" htmlFor={`${id}-task-${index}-name`}>
+          <Input
+            id={`${id}-task-${index}-name`}
+            aria-label={`Release task ${n} name`}
+            value={task.name}
+            onChange={(event) => update(index, { name: event.target.value })}
+            placeholder="Database migration"
+            readOnly={disabled}
+          />
+        </Field>
+        <Field
+          label="Timeout"
+          htmlFor={`${id}-task-${index}-timeout`}
+          hint={`${spoken(task.timeoutSeconds)} · at most 1 h`}
+        >
+          <InputGroup>
+            <InputGroupInput
+              id={`${id}-task-${index}-timeout`}
+              aria-label={`Release task ${n} timeout seconds`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={3600}
+              value={task.timeoutSeconds}
+              onChange={(event) => update(index, { timeoutSeconds: Number(event.target.value) })}
+              readOnly={disabled}
+              className="numeric"
+            />
+            <InputGroupAddon align="inline-end">
+              <InputGroupText>seconds</InputGroupText>
+            </InputGroupAddon>
+          </InputGroup>
+        </Field>
+      </FieldRow>
+      <Field
+        label="Runs in"
+        // Keyed on the place, so pressing the other chip brings its
+        // line in rather than repainting the words under the pointer.
+        hint={
+          <span key={task.runner ?? "shell"} className="block animate-rise">
+            {runnerHint(task.runner, buildMethod)}
+          </span>
+        }
+      >
+        <div className="flex flex-wrap gap-1.5">
+          {RUNNERS.map((option) => (
+            <FilterChip
+              key={option.label}
+              selected={task.runner === option.runner}
+              disabled={disabled || (option.runner === "image" && !buildsReleaseImage(buildMethod))}
+              onClick={() => update(index, { runner: option.runner })}
+              className={cn(
+                "h-8 font-normal disabled:opacity-60 sm:h-7",
+                task.runner !== option.runner && "border-border",
+              )}
+            >
+              {option.product && <ProductGlyph id={option.product} />}
+              {option.label}
+            </FilterChip>
+          ))}
+        </div>
+      </Field>
+      <Field
+        label="Command"
+        htmlFor={`${id}-task-${index}-command`}
+        // A textarea has no addon to carry the program's mark, so
+        // it rides the label's edge, where it cannot move the words.
+        trailing={<ProgramGlyph command={task.command} />}
+      >
+        <Textarea
+          id={`${id}-task-${index}-command`}
+          aria-label={`Release task ${n} command`}
+          value={task.command}
+          onChange={(event) => update(index, { command: event.target.value })}
+          placeholder="./bin/migrate"
+          readOnly={disabled}
+          rows={3}
+          className="font-mono sm:text-xs"
+          spellCheck={false}
+        />
+      </Field>
+      <Disclosure
+        quiet
+        summary="Working directory"
+        facts={task.workingDirectory?.trim() || workdir}
+      >
+        <Input
+          aria-label={`Release task ${n} working directory`}
+          value={task.workingDirectory ?? ""}
+          onChange={(event) => update(index, { workingDirectory: event.target.value })}
+          placeholder={workdir}
+          readOnly={disabled}
+          className="font-mono sm:text-xs"
+          spellCheck={false}
+        />
+      </Disclosure>
+      <Field label="Environment">
+        {releaseVariables.length === 0 ? (
+          <FormNote>
+            No variable reaches release tasks yet.{" "}
+            <Link
+              href={variablesHref}
+              className="text-foreground underline-offset-2 hover:underline"
+            >
+              Give one the Release task scope
+            </Link>
+          </FormNote>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {releaseVariables.map((variable) => {
+              const on = task.env.includes(variable.name)
+              return (
+                <FilterChip
+                  key={variable.name}
+                  selected={on}
+                  disabled={disabled}
+                  onClick={() =>
+                    update(index, {
+                      env: on
+                        ? task.env.filter((name) => name !== variable.name)
+                        : [...new Set([...task.env, variable.name])],
+                    })
+                  }
+                  // In a form an unpressed chip keeps an edge, or a
+                  // lone one reads as a caption rather than a control.
+                  className={cn(
+                    "h-8 font-mono font-normal disabled:opacity-60 sm:h-7",
+                    !on && "border-border",
+                  )}
+                >
+                  <Key
+                    aria-hidden
+                    className={cn("size-3 shrink-0 transition-colors", on && "text-brand")}
+                  />
+                  {variable.name}
+                </FilterChip>
+              )
+            })}
+          </div>
+        )}
+      </Field>
+      {error && (
+        <p role="alert" className="animate-rise text-hint text-destructive">
+          {error}
+        </p>
       )}
     </div>
   )
