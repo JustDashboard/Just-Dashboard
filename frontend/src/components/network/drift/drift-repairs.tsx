@@ -1,13 +1,13 @@
 "use client"
 
-import { Disclosure } from "@/components/form"
+import { InfoTip } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyNote, Notice } from "@/components/state"
-import { Tag } from "@/components/tag"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { SpotlightBorder } from "@/components/ui/spotlight-border"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DiffCount } from "@/components/docker/stack-diff"
 import { diffCounts, lineDiff } from "@/components/docker/stack-views"
 import { plural } from "@/lib/format"
@@ -21,11 +21,17 @@ function actionWords(action: string) {
 }
 
 /**
- * The owned repairs the inspection can propose. Each is a thing you pick, so
- * it is a card whose edge answers the pointer (§16), drawn as the product
- * that owns it with its action in words, what the repair would change and —
- * where it can only be reviewed — the reason, in amber, that it cannot be
- * applied from here.
+ * The owned repairs the inspection can propose, one line each under one
+ * sentence: a checkbox, the product that owns the resource, the resource over
+ * why it is proposed, then in columns of their own what the repair does and
+ * to what, how much of it changes, and whether it can be applied from here or
+ * only reviewed. The reason a repair is review-only is the ⓘ beside that
+ * word.
+ *
+ * It was a framed notice over half-width cards four lines tall, each a
+ * different height by what it had to say. A row is one height now whatever
+ * it carries, and the resources the plan leaves alone open from the title
+ * line rather than folding out under the list.
  */
 export function DriftRepairs({
   plan,
@@ -51,31 +57,56 @@ export function DriftRepairs({
       <PanelHeader
         title="Owned repair plan"
         actions={
-          <Button
-            size="sm"
-            variant={picked.length ? "default" : "outline"}
-            disabled={busy || blocked || !picked.length}
-            onClick={onReview}
-          >
-            Review selected ({picked.length})
-          </Button>
+          <>
+            {plan.excluded.length > 0 && (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button size="sm" variant="ghost" className="text-muted-foreground">
+                    {plural(plan.excluded.length, "excluded resource")}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-96">
+                  <ul aria-label="Excluded resources" className="space-y-2.5">
+                    {plan.excluded.map((item) => (
+                      <li key={item.observationId} className="min-w-0">
+                        <span className="block font-mono text-hint break-all">
+                          {byObservation.get(item.observationId)?.label ?? item.observationId}
+                        </span>
+                        <span className="block text-hint text-muted-foreground">{item.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </PopoverContent>
+              </Popover>
+            )}
+            <Button
+              size="sm"
+              variant={picked.length ? "default" : "outline"}
+              disabled={busy || blocked || !picked.length}
+              onClick={onReview}
+            >
+              Review selected ({picked.length})
+            </Button>
+          </>
         }
       />
       <PanelBody className="space-y-3">
-        <Notice title={plan.executable ? "Selected repairs available" : "Review only"}>
-          {plan.executable
-            ? "Reviewed boot files and owned admission rules can be repaired individually. Other proposals remain available for review."
-            : "This plan cannot execute repairs. It proposes owned resources for review and preserves foreign resources."}
-        </Notice>
+        {plan.items.length > 0 && (
+          <p className="text-hint text-muted-foreground">
+            {plan.executable
+              ? "Pick what to review. Boot files and owned admission rules can be applied one by one; the rest are proposals."
+              : "Pick what to review. This plan applies nothing: it proposes owned resources and leaves foreign ones alone."}
+          </p>
+        )}
         {plan.blockers.map((reason) => (
           <p key={reason} className="text-body text-warning">
             {reason}
           </p>
         ))}
         {plan.items.length ? (
-          <ul className="grid gap-2.5 lg:grid-cols-2">
+          <ul data-slot="repair-list" className="min-w-0 space-y-2">
             {plan.items.map((item) => (
-              <RepairCard
+              <RepairRow
                 key={item.id}
                 item={item}
                 row={byObservation.get(item.observationId)}
@@ -88,26 +119,12 @@ export function DriftRepairs({
         ) : (
           <EmptyNote>No known owned repair can be proposed from this evidence.</EmptyNote>
         )}
-        {plan.excluded.length > 0 && (
-          <Disclosure quiet summary={plural(plan.excluded.length, "excluded resource")}>
-            <ul className="space-y-2 text-body">
-              {plan.excluded.map((item) => (
-                <li key={item.observationId} className="min-w-0">
-                  <span className="font-mono text-hint break-all">
-                    {byObservation.get(item.observationId)?.label ?? item.observationId}
-                  </span>
-                  <span className="block text-hint text-muted-foreground">{item.reason}</span>
-                </li>
-              ))}
-            </ul>
-          </Disclosure>
-        )}
       </PanelBody>
     </Panel>
   )
 }
 
-function RepairCard({
+function RepairRow({
   item,
   row,
   checked,
@@ -122,45 +139,65 @@ function RepairCard({
 }) {
   const id = `repair-${item.id}`
   const changes = item.after ? diffCounts(lineDiff(item.before ?? "", item.after)) : undefined
+  // A route or a rule is saved under a number; it is named by where it goes.
+  const named = row && (row.kind === "route" || row.kind === "rule")
+  const name = named ? row.label : item.resource
   return (
-    <li className="min-w-0">
-      <SpotlightBorder resting={checked ? "brand" : "border"} className="h-full">
-        <label htmlFor={id} className="flex h-full min-w-0 cursor-pointer gap-3 p-3.5">
-          <Checkbox
-            id={id}
-            aria-label={`Select repair for ${item.resource}`}
-            disabled={disabled}
-            checked={checked}
-            onCheckedChange={(value) => onChange(value === true)}
-            className="mt-2"
-          />
-          {row && <DriftMark row={row} />}
-          <span className="min-w-0 flex-1 space-y-1">
-            {/* A route or a rule is saved under a number; it is named by where it goes. */}
-            {row && (row.kind === "route" || row.kind === "rule") ? (
-              <span className="block font-mono text-body break-all">
-                {row.label}
-                <span className="ml-2 font-sans text-hint text-muted-foreground">{row.detail}</span>
+    <li
+      data-slot="repair-row"
+      data-checked={checked || undefined}
+      className={cn(
+        "flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border bg-choice-surface px-3 py-2.5 transition-colors sm:min-h-14 sm:flex-nowrap",
+        checked && "border-rule-brand",
+      )}
+    >
+      <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
+        <Checkbox
+          id={id}
+          aria-label={`Select repair for ${item.resource}`}
+          disabled={disabled}
+          checked={checked}
+          onCheckedChange={(value) => onChange(value === true)}
+        />
+        {row && <DriftMark row={row} />}
+        <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
+          <span className="block truncate font-mono text-body font-medium" title={name}>
+            {name}
+            {named && (
+              <span className="ml-2 font-sans text-hint font-normal text-muted-foreground">
+                {row.detail}
               </span>
-            ) : (
-              <span className="block font-mono text-body break-all">{item.resource}</span>
-            )}
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <Tag tone={item.executable ? "success" : "default"}>{actionWords(item.action)}</Tag>
-              {item.effect && (
-                <span className="text-hint text-muted-foreground">
-                  {item.effect === "boot_files" ? "saved boot input" : "rule in the kernel"}
-                </span>
-              )}
-              {changes && <DiffCount {...changes} />}
-            </span>
-            <span className="block text-hint text-muted-foreground">{item.reason}</span>
-            {item.blocker && (
-              <span className="block text-hint text-warning">Review only: {item.blocker}</span>
             )}
           </span>
+          <span className="block truncate text-hint text-muted-foreground" title={item.reason}>
+            {item.reason}
+          </span>
         </label>
-      </SpotlightBorder>
+      </div>
+      <div className="min-w-0 max-sm:pl-7 sm:w-48 sm:shrink-0">
+        <p className="truncate text-xs font-medium first-letter:uppercase">
+          {actionWords(item.action)}
+        </p>
+        <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
+          <span className="truncate">
+            {item.effect === "boot_files"
+              ? "saved boot input"
+              : item.effect
+                ? "rule in the kernel"
+                : "a proposal"}
+          </span>
+          {changes && <DiffCount {...changes} />}
+        </p>
+      </div>
+      <p className="flex shrink-0 items-center gap-1.5 sm:w-28">
+        <Status
+          tone={item.executable ? "running" : "stopped"}
+          label={item.executable ? "Can apply" : "Review only"}
+        />
+        {item.blocker && (
+          <InfoTip label={`Why ${item.resource} is review only`}>{item.blocker}</InfoTip>
+        )}
+      </p>
     </li>
   )
 }

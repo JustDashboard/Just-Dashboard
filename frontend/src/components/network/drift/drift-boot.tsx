@@ -1,12 +1,13 @@
 "use client"
 
 import { useNow } from "@/components/deploy/vocabulary"
-import { Disclosure } from "@/components/form"
+import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
-import { Notice } from "@/components/state"
 import { LogoGlyph } from "@/components/logo"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { duration } from "@/lib/format"
 import { driftReading, systemdInstant, type DriftReport } from "@/lib/network-drift"
 import { cn } from "@/lib/utils"
@@ -37,18 +38,24 @@ const COMMAND_RULE: Record<string, string> = {
 }
 
 /**
- * The boot unit and what systemd measured of its last activation in this
- * boot. The activation is drawn as its run: each `ExecStart` command in the
- * order the unit runs it, as the tool it is — `ip`, `bridge`, `tc` and
- * `sysctl` as Linux, `nft` as netfilter — over a rule in the colour of its
- * exit: green for 0, amber for a failure the unit ignores so the other
+ * The boot unit as one line: systemd's mark, the unit over its four facts,
+ * what systemd measured of its last activation in this boot, and its state.
+ * It was a stack: the unit, a sentence in amber, a heading, another sentence,
+ * a framed notice about reboot attribution and a fold of evidence. The reason
+ * the unit differs is the line under its state now, and the caveat is the ⓘ
+ * beside it.
+ *
+ * The activation's detail is a glance, so it opens from the line's end rather
+ * than hanging under it: the run of the unit's `ExecStart` commands in the
+ * order it runs them, each as the tool it is (`ip`, `bridge`, `tc` and
+ * `sysctl` as Linux, `nft` as netfilter) over a rule in the colour of its
+ * exit (green for 0, amber for a failure the unit ignores so the other
  * domains still restore, red for one it does not, grey where systemd kept no
- * outcome. It is the deploy page's run pipeline, read from a boot.
+ * outcome), then the evidence the reading rests on.
  *
  * The finish is said as how long ago, ticking with the page, wherever the
- * timestamp's zone can be read without guessing; the raw strings stay under
- * the evidence fold either way. A measured activation still says nothing
- * about whether it ran at boot, and the page says so.
+ * timestamp's zone can be read without guessing; the raw strings stay in the
+ * evidence either way.
  */
 export function DriftBoot({ boot }: { boot: DriftReport["boot"] }) {
   const now = useNow(1000)
@@ -64,100 +71,126 @@ export function DriftBoot({ boot }: { boot: DriftReport["boot"] }) {
     ["active", boot.activeState],
     ["needs reload", boot.needDaemonReload],
   ] as const
+  const when = [
+    finished !== undefined ? `${duration(Math.max(0, (now - finished) / 1000))} ago` : undefined,
+    took !== undefined
+      ? `ran ${took < 1 ? `${Math.round(took * 1000)} ms` : `${took.toFixed(1)} s`}`
+      : undefined,
+  ].filter(Boolean)
   return (
     <Panel plain aria-label="Boot unit">
-      <PanelHeader title="Boot unit" actions={<Status {...driftReading(boot.status)} />} />
-      <PanelBody className="space-y-5">
-        <div className="flex min-w-0 items-center gap-3.5">
-          <ProductLogo id="systemd" />
-          <div className="min-w-0">
-            <p className="font-mono text-body break-all">{boot.unit}</p>
-            <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-hint text-muted-foreground">
-              {facts.map(([label, value]) => (
-                <span key={label}>
-                  {label}{" "}
-                  <span
-                    className={cn(
-                      "text-foreground",
-                      !value && "text-muted-foreground",
-                      (value === "disabled" || value === "masked" || value === "yes") &&
-                        "text-warning",
-                    )}
-                  >
-                    {value || "unknown"}
+      <PanelHeader title="Boot unit" />
+      <PanelBody>
+        <div
+          data-slot="boot-unit"
+          className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-choice-surface px-3 py-2.5 sm:min-h-14 sm:flex-nowrap"
+        >
+          <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
+            <ProductLogo id="systemd" size="sm" />
+            <div className="min-w-0">
+              <p className="truncate font-mono text-body font-medium" title={boot.unit}>
+                {boot.unit}
+              </p>
+              <p className="flex flex-wrap gap-x-3 text-hint text-muted-foreground sm:flex-nowrap sm:truncate">
+                {facts.map(([label, value]) => (
+                  <span key={label} className="shrink-0">
+                    {label}{" "}
+                    <span
+                      className={cn(
+                        "text-foreground",
+                        !value && "text-muted-foreground",
+                        (value === "disabled" || value === "masked" || value === "yes") &&
+                          "text-warning",
+                      )}
+                    >
+                      {value || "unknown"}
+                    </span>
                   </span>
-                </span>
-              ))}
-            </p>
+                ))}
+              </p>
+            </div>
           </div>
-        </div>
-        {boot.reason && <p className="text-body text-warning">{boot.reason}</p>}
 
-        <section aria-label="Last activation" className="space-y-3">
-          <p className="flex flex-wrap items-baseline gap-x-2 text-body">
-            <span className="font-medium">
+          <div aria-label="Last activation" role="group" className="min-w-0 sm:w-52 sm:shrink-0">
+            <p className="truncate text-xs font-medium">
               {activation.status === "unrecorded"
                 ? "No recorded activation"
                 : `Last activation ${activation.status}`}
-            </span>
-            {finished !== undefined && (
-              <time
-                dateTime={new Date(finished).toISOString()}
-                className="numeric text-hint text-muted-foreground"
-              >
-                {duration(Math.max(0, (now - finished) / 1000))} ago
-              </time>
-            )}
-            {took !== undefined && (
-              <span className="numeric text-hint text-muted-foreground">
-                · ran {took < 1 ? `${Math.round(took * 1000)} ms` : `${took.toFixed(1)} s`}
-              </span>
-            )}
-          </p>
-          {activation.commands.length > 0 ? (
-            <ol
-              aria-label="Commands the unit ran"
-              className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(3.75rem,1fr))] gap-1.5"
-            >
-              {activation.commands.map((command, index) => (
-                <CommandStep key={index} command={command} />
-              ))}
-            </ol>
-          ) : (
-            <p className="text-hint text-muted-foreground">
-              {activation.reason ?? "No per-command execution outcomes are available."}
             </p>
-          )}
-        </section>
+            <p
+              className="numeric truncate text-hint text-muted-foreground"
+              title={when.length === 0 ? activation.reason : undefined}
+            >
+              {finished !== undefined ? (
+                <time dateTime={new Date(finished).toISOString()}>{when.join(" · ")}</time>
+              ) : when.length > 0 ? (
+                when.join(" · ")
+              ) : (
+                (activation.reason ?? "no outcome kept")
+              )}
+            </p>
+          </div>
 
-        <Notice title="Reboot attribution is unknown">
-          A measured unit activation does not establish that it ran at boot or that reboot
-          restoration succeeded.
-        </Notice>
-        <Disclosure quiet summary="Execution evidence">
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-body">
-            <dt className="text-muted-foreground">Current boot</dt>
-            <dd>
-              <ShortDigest value={activation.bootId} />
-            </dd>
-            <dt className="text-muted-foreground">Invocation</dt>
-            <dd>
-              <ShortDigest value={activation.invocationId} />
-            </dd>
-            <dt className="text-muted-foreground">Measured start</dt>
-            <dd className="font-mono text-hint break-words">{activation.startedAt || "unknown"}</dd>
-            <dt className="text-muted-foreground">Measured finish</dt>
-            <dd className="font-mono text-hint break-words">
-              {activation.finishedAt || "unknown"}
-            </dd>
-            {activation.reason && (
-              <>
-                <dt className="text-muted-foreground">Reading</dt>
-                <dd className="text-muted-foreground">{activation.reason}</dd>
-              </>
-            )}
-          </dl>
-        </Disclosure>
+          <div className="min-w-0 sm:w-44 sm:shrink-0">
+            <p className="flex items-center gap-1.5">
+              <Status {...driftReading(boot.status)} />
+              <InfoTip label="What an activation does not establish">
+                Reboot attribution is unknown: a measured unit activation does not establish that it
+                ran at boot or that reboot restoration succeeded.
+              </InfoTip>
+            </p>
+            <p className="truncate text-hint text-warning" title={boot.reason}>
+              {boot.reason ?? "\u00a0"}
+            </p>
+          </div>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="xs" variant="outline" className="shrink-0">
+                Activation
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-96 space-y-4">
+              <section aria-label="Commands the unit ran" className="space-y-2">
+                <p className="text-xs font-medium">Commands the unit ran</p>
+                {activation.commands.length > 0 ? (
+                  <ol className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(3.75rem,1fr))] gap-1.5">
+                    {activation.commands.map((command, index) => (
+                      <CommandStep key={index} command={command} />
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="text-hint text-muted-foreground">
+                    {activation.reason ?? "No per-command execution outcomes are available."}
+                  </p>
+                )}
+              </section>
+              <section aria-label="Execution evidence" className="space-y-2">
+                <p className="text-xs font-medium">Execution evidence</p>
+                <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-hint">
+                  <dt className="text-muted-foreground">Current boot</dt>
+                  <dd>
+                    <ShortDigest value={activation.bootId} />
+                  </dd>
+                  <dt className="text-muted-foreground">Invocation</dt>
+                  <dd>
+                    <ShortDigest value={activation.invocationId} />
+                  </dd>
+                  <dt className="text-muted-foreground">Measured start</dt>
+                  <dd className="font-mono break-words">{activation.startedAt || "unknown"}</dd>
+                  <dt className="text-muted-foreground">Measured finish</dt>
+                  <dd className="font-mono break-words">{activation.finishedAt || "unknown"}</dd>
+                  {activation.reason && (
+                    <>
+                      <dt className="text-muted-foreground">Reading</dt>
+                      <dd className="text-muted-foreground">{activation.reason}</dd>
+                    </>
+                  )}
+                </dl>
+              </section>
+            </PopoverContent>
+          </Popover>
+        </div>
       </PanelBody>
     </Panel>
   )
