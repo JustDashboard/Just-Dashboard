@@ -34,13 +34,7 @@ import { EngineSetup } from "@/components/proxy/engine-setup"
 import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import type { ConfigTest } from "@/components/proxy/test-result"
 import { testedLabel, warningCount } from "@/components/proxy/config-test"
-import {
-  authorship,
-  folderOf,
-  includeMap,
-  readCount,
-  unreadCount,
-} from "@/components/proxy/config-tree"
+import { folderOf, includeMap, readCount, unreadCount } from "@/components/proxy/config-tree"
 
 const VIEWS = [
   { key: "files", label: "Files" },
@@ -173,16 +167,9 @@ function ConfigurationPage() {
   // the list to it.
   const [query, setQuery] = useSessionState("proxy.config.query", "")
 
-  const header = (
-    <PageContext
-      eyebrow={
-        <Link href="/proxy" className="rounded-sm focus-ring hover:underline">
-          Proxy & TLS
-        </Link>
-      }
-      title="Configuration"
-    />
-  )
+  // No way back above the line: the rail lists the section's pages, and
+  // none of the others draws one.
+  const header = <PageContext title="Configuration" />
 
   if (!status) {
     if (statusError) {
@@ -393,7 +380,6 @@ function ConfigIdentity({
       folders: new Set(tree.files.map((f) => folderOf(f.path, tree.root))).size,
       read: readCount(tree.files),
       unread: unreadCount(tree.files),
-      ...authorship(tree.files),
     }
   }, [tree])
 
@@ -418,6 +404,9 @@ function ConfigIdentity({
 
   return (
     <HostIdentity
+      // The view strip under the line draws the rule: the line's own under it
+      // made two.
+      className="border-b-0 pb-0"
       mark="nginx"
       title={<span className="font-mono">{tree?.root ?? root ?? "nginx configuration"}</span>}
       facts={
@@ -444,36 +433,33 @@ function ConfigIdentity({
                 ", every file"
               )}
             </HostFact>
-            <FactDot />
-            <span title={`${counts.hand} written by hand`}>
-              <span className="numeric font-medium text-foreground">{counts.managed}</span> by the
-              dashboard
-            </span>
-            {admin && (
-              <>
-                <FactDot />
-                <TestFact test={test} now={now} />
-              </>
-            )}
           </>
         )
       }
-      aside={
-        <div className="flex flex-wrap items-center gap-2">
-          {admin && (
-            <Button
-              size="sm"
-              onClick={test.run}
-              pending={test.running}
-              disabled={loading || test.running}
-            >
-              <Play />
-              {test.running ? "Testing…" : "Test config"}
-            </Button>
-          )}
-          {verbs.length > 0 && <VerbMenu verbs={verbs} label="More configuration actions" />}
-        </div>
+      // Laid out as a project's header: the last test beside the directory,
+      // Test config at the end, the rest behind `⋯`. An account that only
+      // reads is not asked about the test, and has no state to show.
+      state={
+        admin ? (
+          <span className="text-xs text-muted-foreground">
+            <TestFact test={test} now={now} />
+          </span>
+        ) : null
       }
+      command={
+        admin && (
+          <Button
+            size="sm"
+            onClick={test.run}
+            pending={test.running}
+            disabled={loading || test.running}
+          >
+            <Play />
+            {test.running ? "Testing…" : "Test config"}
+          </Button>
+        )
+      }
+      menu={verbs.length > 0 && <VerbMenu verbs={verbs} label="More configuration actions" />}
     />
   )
 }

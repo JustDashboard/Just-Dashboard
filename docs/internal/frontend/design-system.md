@@ -2007,8 +2007,9 @@ the reader has to act on first — a failed read, nginx not running, changes on 
 loaded, with Test config and Reload nginx — stands under the line as a `Notice`. The other pages but
 the overview begin with four `StatTile` readings, two per row on phones. The overview took §15's exit
 in 0.7.1 (pass 2 has the paragraph): it opens on the engine identity, its facts ending on the sites,
-certificates, streams and internet-facing ports, each a link, and its right end on the routes' verdict
-beside the service commands; then the route picture, Live traffic, the band of traffic, certificates
+certificates, streams and internet-facing ports, each a link, the routes' verdict beside the name
+with the engine's state, and its one command at the end with the rest behind `⋯` (pass 2's fifth
+pass); then the route picture, Live traffic, the band of traffic, certificates
 and recent errors, and the routes in the main column with attention in a narrower one. Live traffic
 is the edge's hour added up from every site's access record — nginx's files and the Docker Caddy
 ingress's routes alike, so a host where the ingress holds 80 and 443 is not drawn as idle — as four
@@ -2027,13 +2028,14 @@ stands beside. A source the overview could not read is never drawn as an empty o
 healthy one: its fact in the engine line reads "couldn't read sites" with the reason as its tooltip,
 its panel shows the `ErrorState`, the picture is not drawn from sites it cannot read, and attention
 carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
-overview's context control is one ghost Refresh whose tooltip carries the age ("Updated 14s ago", the
-oldest reading on the page, or "Refreshing…" while a refresh is out); only a source that has not
-answered after twenty seconds is said in the bar ("No answer from sites"), and Refresh can be pressed
-again. A status that fails after answering keeps its age in the line, since the engine
+overview's Refresh is in the line's `⋯`, the page's age beside it ("updated 14s ago", the
+oldest reading on the page, or "reading…" while a refresh is out, when it cannot be pressed); only a source that has not
+answered after twenty seconds is said on the line ("No answer from sites"), and Refresh can be pressed
+again. A status that fails after answering keeps its age, since the engine
 identity still draws it. The engine line's one brand command follows the unit: Reload while it
-runs, Start once it is stopped or failed, with Reload beside it disabled and its reason on a tooltip
-(a disabled button takes no hover, so the reason hangs on a focusable wrapper). Whether it starts at
+runs, Start once it is stopped or failed, with Reload greyed in the menu and the state beside the
+name saying why (a masked unit's Start keeps its reason on a focusable wrapper, since a disabled
+button takes no hover). Whether it starts at
 boot is said only when it does not: a warning with an inline Start at boot where `systemctl enable`
 would fix it. A failed unit is the one `Notice` the overview draws under the line — the reader has to act on it
 — holding systemd's reason in words, a fold that reads the journal when opened and opens scrolled to
@@ -2104,8 +2106,8 @@ port and the handshake, the failed step red and the rest not reached. The row is
 before anything is asked and while the first answer is on its way, at its loaded height, with a
 pulse down its lines while a scan is in flight and once when the answer lands. The four tiles that
 opened the report ("—" before a scan) are gone: each reading stands on its step. Every site is an
-identity line saying the names, how many are below A, expiring or unreachable and how old the newest
-report is, with Scan all sites and an Export CSV menu, over one-line cards (the engine's mark with
+identity line saying the names, how many are scanned, the worst of the reports as its state and how old the newest
+report is (how many are below A, expiring or unreachable are the chips over the list), with Scan all sites and an Export CSV menu, over one-line cards (the engine's mark with
 the report's verdict in its corner, the name, its days, protocol, issues and age in aligned columns
 and the grade last) that open the report. The request tester's line is the request: the URL, then
 the answer's status in its colour, protocol, first byte, total and bytes read; its redirect chain
@@ -2170,9 +2172,11 @@ report keeps findings, protocol checks and HTTP readings beside the live certifi
 vertical chain; long header values wrap instead of hiding the verdict. Its scan field is one input
 group, the address and its port, with a hint naming what will be scanned and a native datalist of
 known names; a scan in flight is a line with its elapsed time and an outline Cancel. The Ports page (0.8.7) opens on
-its identity line — "9 listening · 7 TCP, 2 UDP · 5 internet-facing · 2 on private networks · 2
-dangerous services exposed", each count's make-up its tooltip, then how old the list is, Refresh,
-Pause, a `⋯` with the two exports and Find a free port at the end — where four tiles stood; then
+its identity line — "9 listening · 5 internet-facing", the count's make-up its tooltip, the dangerous
+exposure ("2 dangerous services exposed") beside the name as the page's state, then how old the list
+is (the protocols and the private networks are the chips over the list, which networks the chip's
+tooltip), with Find a free port as the line's command and
+Refresh, Pause and the two exports in its `⋯` — where four tiles stood; then
 `ports-picture.tsx`, who reaches what: the networks a socket answers on (the internet, the tailnet,
 a VPN, a private network, Docker's networks, only this server) wired to the programs listening
 there, a wire red where the posture calls the exposure critical and moving only while somebody is
@@ -2224,10 +2228,11 @@ log is turned on, or Sites) rather than four zeros; a host with no reverse proxy
 `EngineSetup`. One site's requests were a second, older copy of that site's own page here
 (`?site=`); that address now lands on the site's page, and `?site=…&view=errors` is the Errors view
 narrowed to it. `proxy-traffic.spec.ts` covers every state at 1280 and 390.
-**Configuration and Tunnel open on what they are about.** Configuration (`/proxy/config`) is an
+**Configuration and Tunnel open on what they are about.** Neither draws a way back over its line,
+as no page of the section does. Configuration (`/proxy/config`) is an
 identity line — nginx's mark, its directory in mono, how many files in how many folders, how many
-nginx reads, how many the dashboard wrote, and for an administrator the last config test as a
-coloured word — with Test config as the line's brand command and a `⋯` of Read again, the main
+nginx reads, and for an administrator the last config test as a
+coloured word beside the directory (who wrote the files is the chips over the list) — with Test config as the line's brand command and a `⋯` of Read again, the main
 file, the last test and the engine overview. Under it the views are an underlined strip in the
 address (`?tab=effective`, `settings`, `lint`, `history`; Files has none), administrators only as
 before. Files opens on the directory as nginx walks it (`config-picture.tsx`, its lanes from
@@ -3104,6 +3109,31 @@ The passes, in order. Each one is a diff you can review on its own.
    and filesystems as their glyphs, containers as Docker, backups as an archive — and draws its
    channels, all-clear, subject cards and history from the parts the two share
    (`components/alerts/alert-parts.tsx`) rather than a second copy of them.
+
+   A fifth pass in 0.8.7 made the section's pages open alike. The overview's bar held five controls
+   of one weight (a refresh glyph, Alerts, Test config, Reload, a menu) in a frame; six pages
+   overhauled after it kept their verdict and commands in a cluster at the line's far end; and two
+   of those stood under a "Proxy & TLS" link the others did not draw. Every one is
+   `HostIdentity`'s project layout now (`state`, `command`, `menu`): a 40px tile, the name with its
+   state beside it, the facts under them, one brand command at the end and the rest behind `⋯`, on
+   the page's own ground with a rule under it — and no rule where a view strip follows, which draws
+   its own. The overview's command is the one the service calls for; its menu (`EngineMenu`) leads
+   with Test config and Alerts, then Refresh with the page's age beside it, counted only while the
+   menu is open, then Service details and, last, Restart and Stop. What fires is a red link on the
+   line ("1 alert firing"), since a way to the Alerts page with nothing beside it said nothing. A
+   route is one line in every state: its upstream's reading is a word on the line (`UpstreamWord`,
+   every address in its tooltip, shown at a phone's width only when something is down) where a
+   list hung under the row; the rows are a plain `ChoiceRow`, the size Streams, Sites and
+   Certificates draw; and the engine's log is the height every service's log takes. Each line has
+   a state in every reading (reading, not read, nothing yet), so it is one height on a phone, where
+   the state has a row of its own, before the read lands and after. `/proxy/alerts` opens on such a
+   line — how many rules are on, what fires or holds, who is told — with Add rule as its command;
+   the server in its picture says how often the rules are checked, which a paragraph under Rules
+   used to; a catalogue card is a name over a few words with the sentence in its tooltip; and an
+   account that only reads is told the page is an administrator's rather than shown the refusal.
+   The Streams form's field help is behind each label (`Field`'s `info`), a line staying under a
+   field only where it says what is wrong with what was entered. `proxy-opening-lines.spec.ts`
+   walks the section at 1280 and 390.
 
    Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
    still page of the section: a column of grey cards, each a name, a subnet and a count, with the

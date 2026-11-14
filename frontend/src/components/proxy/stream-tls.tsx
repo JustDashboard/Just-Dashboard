@@ -98,10 +98,11 @@ export function StreamTLS({
         <FieldRow>
           <Field
             label="Certificate"
+            info="From the Certificates list."
             hint={
               spec.certPath && certs.data && !listed
                 ? "Not in the Certificates list. If the file does not exist, nginx refuses the stream."
-                : "From the Certificates list."
+                : undefined
             }
           >
             <Select value={spec.certPath ?? ""} onValueChange={pickCert}>
@@ -152,7 +153,7 @@ export function StreamTLS({
           <Field
             label="Backend's name"
             htmlFor="stream-upstream-name"
-            hint="Sent as SNI, and the name its certificate must carry. Empty sends no SNI."
+            info="Sent as SNI, and the name its certificate must carry. Empty sends no SNI."
           >
             <Input
               id="stream-upstream-name"
@@ -180,9 +181,10 @@ export function StreamTLS({
             <Field
               label="Trusted CAs"
               htmlFor="stream-upstream-ca"
+              info="A PEM file of the CAs to trust: the system's for a public certificate, your own CA's for a private one."
               hint={
                 spec.upstreamName
-                  ? "A PEM file of the CAs to trust: the system's for a public certificate, your own CA's for a private one."
+                  ? undefined
                   : "Needs the backend's name above to check the certificate against."
               }
             >

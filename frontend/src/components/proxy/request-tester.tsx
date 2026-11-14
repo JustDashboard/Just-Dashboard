@@ -176,6 +176,9 @@ export function RequestTester() {
     <Page className="animate-rise">
       <PageContext eyebrow="Proxy" title="Request tester" />
       <HostIdentity
+        // The view strip under the line draws the rule: the line's own under
+        // it made two.
+        className="border-b-0 pb-0"
         mark="nginx"
         fallback={PaperAirplane}
         title={
@@ -187,11 +190,30 @@ export function RequestTester() {
             {hop?.url ?? (url || "Request tester")}
           </span>
         }
+        // Laid out as a project's header: how the last request was answered
+        // beside the address, its figures under it. Send is the form's.
+        state={
+          busy ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Spinner className="size-3" /> sending
+            </span>
+          ) : hop ? (
+            <Status
+              verdict={hopVerdict(hop)}
+              label={hop.status === undefined ? "failed" : `answered ${hop.status}`}
+            />
+          ) : missing ? (
+            <Status tone="stopped" label="Not installed" />
+          ) : error !== undefined ? (
+            <Status tone="danger" label="not answered" />
+          ) : (
+            <Status tone="stopped" label="Nothing sent" />
+          )
+        }
         facts={
           <TesterFacts
             hop={hop}
             busy={busy}
-            failed={error !== undefined}
             connectTo={result?.connectTo ?? fields.connectTo}
             admin={admin}
             missing={missing}
@@ -417,34 +439,19 @@ export function RequestTester() {
 function TesterFacts({
   hop,
   busy,
-  failed,
   connectTo,
   admin,
   missing,
 }: {
   hop?: RequestHop
   busy: boolean
-  failed: boolean
   connectTo: string
   admin: boolean
   missing: boolean
 }) {
   const facts: React.ReactNode[] = []
-  if (busy) {
-    facts.push(
-      <span key="busy" className="inline-flex items-center gap-1.5">
-        <Spinner className="size-3" /> sending
-      </span>,
-    )
-  } else if (hop) {
-    facts.push(
-      <Status
-        key="status"
-        verdict={hopVerdict(hop)}
-        label={hop.status === undefined ? "failed" : `answered ${hop.status}`}
-        className="font-medium"
-      />,
-    )
+  // How it was answered is the line's state; these are the answer's figures.
+  if (hop && !busy) {
     if (hop.proto) facts.push(<span key="proto">{hop.proto}</span>)
     if (hop.tls)
       facts.push(
@@ -466,12 +473,6 @@ function TesterFacts({
       </HostFact>,
       <span key="dns">DNS not asked</span>,
     )
-    if (failed)
-      facts.push(
-        <span key="failed" className="text-destructive">
-          not answered
-        </span>,
-      )
   }
   if (!admin)
     facts.push(

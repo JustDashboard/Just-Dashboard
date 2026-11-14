@@ -219,9 +219,10 @@ function CertificateRow({
       verb={`Open ${cert.name}`}
       busy={replacing}
       workspaceItem={{ id: cert.path, name: cert.name }}
-      className="gap-3 px-3.5 py-3"
-      leading={<ProductLogo id={certificateProduct(cert)} size="md" fallback={ShieldCheck} />}
-      title={<span className="text-title">{cert.name}</span>}
+      // The row every other page of the section draws: its tile and its
+      // name were a size up, and the list stood out from the lists beside it.
+      leading={<ProductLogo id={certificateProduct(cert)} size="sm" fallback={ShieldCheck} />}
+      title={cert.name}
       description={
         <span className="font-mono" title={cert.error ?? names}>
           {cert.error ? "could not be read" : names || "no names reported"}

@@ -2,7 +2,8 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Bell, Globe, RefreshClockwise } from "@/components/icons"
+import { useRouter } from "next/navigation"
+import { ArrowRight, Bell, Globe } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -13,6 +14,7 @@ import type {
   ProxyAlerts,
   SiteTrafficSummary,
   UpstreamReport,
+  UpstreamTarget,
 } from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -23,15 +25,16 @@ import { FactDot } from "@/components/metrics/host-identity"
 import { Status, type DotTone } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/components/deploy/vocabulary"
+import type { Verb } from "@/components/verbs"
 import { useProxy } from "@/components/proxy/proxy-context"
 import {
-  EngineActions,
   EngineExtras,
   EngineIdentity,
+  EngineMenu,
   ModulesFact,
+  useEngineCommands,
   usePackageInstall,
   useEngineUnit,
 } from "@/components/proxy/engine"
@@ -62,7 +65,12 @@ import {
   routeNames,
   routeTarget,
 } from "@/components/proxy/overview-routes"
-import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/upstream-health"
+import {
+  isDown,
+  upstreamLabel,
+  upstreamsOf,
+  upstreamTone,
+} from "@/components/proxy/upstream-health"
 import { trafficLabel } from "@/components/proxy/site-traffic"
 import { RecentChanges } from "@/components/proxy/activity"
 import { frontDoorLine, frontDoors } from "@/components/proxy/front-door"
@@ -99,8 +107,9 @@ const RUN_TONE: Record<ReturnType<typeof engineRun>, DotTone> = {
 }
 
 /**
- * The engine first, as the line every reading page opens on, then the proxy
- * drawn as what it does: the domains it answers for wired through it to the
+ * The engine first, as the line a project opens on — its mark, its name, its
+ * state, one command and the rest behind `⋯` — then the proxy drawn as what
+ * it does: the domains it answers for wired through it to the
  * applications behind them, each the product it is, the wires carrying the
  * hour's traffic. Under the picture the readings — where the hour's requests
  * went, how long every certificate has left, what nginx complained about, and
@@ -127,6 +136,7 @@ export default function ProxyOverviewPage() {
     configTest,
   } = useProxy()
   const { can } = useAuth()
+  const router = useRouter()
   const admin = can("system.admin")
   const engine = useEngineUnit(status)
   // What is firing, for the Alerts link's count: the rules themselves are
@@ -193,6 +203,17 @@ export default function ProxyOverviewPage() {
   }
   const control = useEngineControl({ status, unit: engine, onChanged: refreshAll })
   const installer = usePackageInstall(refreshAll)
+  const commands = useEngineCommands({
+    status,
+    enabled: admin && Boolean(status?.nginx || status?.caddy),
+    unitName: engine.name,
+    unit: engine.unit,
+    control,
+    testing: configTest.running,
+    onTest: configTest.run,
+    onReloadTested: configTest.showReload,
+    onChanged: refreshAll,
+  })
 
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
@@ -393,6 +414,11 @@ export default function ProxyOverviewPage() {
   const inventory = facts
     .filter((fact) => hasEngine || fact.key === "ports")
     .filter((fact) => fact.error || (fact.text && !none(fact)))
+  // The way to the Alerts page, which is a rule's own page now; what fires
+  // is said on the line itself, where it is seen without opening the menu.
+  const alertVerbs: Verb[] = admin
+    ? [{ key: "alerts", label: "Alerts", icon: Bell, run: () => router.push("/proxy/alerts") }]
+    : []
   // A route's file name is the dashboard's; the name its visitors type is
   // what the Traffic and Errors rows lead with.
   const labelOf = (site: string) => hosts.find((v) => v.name === site)?.serverNames[0] ?? site
@@ -414,55 +440,44 @@ export default function ProxyOverviewPage() {
         serviceBusy={control.pending}
         certbotVersion={renewal?.version}
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
-        inventory={inventory.map((fact) => (
-          <Fragment key={fact.key}>
-            <FactDot />
-            {fact.error ? (
-              <span className="font-medium text-warning" title={errorMessage(fact.error)}>
-                {`couldn't read ${fact.key}`}
-              </span>
-            ) : (
-              <Link
-                href={fact.href}
-                title={fact.title}
-                className={cn(
-                  "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
-                  fact.tone === "danger" && "font-medium text-destructive",
-                  fact.tone === "warning" && "font-medium text-warning",
-                )}
-              >
-                {fact.text}
-              </Link>
-            )}
-          </Fragment>
-        ))}
-        modules={status.nginx && <ModulesFact admin={admin} installer={installer} />}
-        verdict={verdict && <Status verdict={verdict.tone} label={verdict.label} />}
-        controls={
+        inventory={
           <>
-            <Freshness
-              at={updatedAt}
-              refreshing={refreshing}
-              late={late}
-              onRefresh={refreshEverything}
-            />
-            {admin && <AlertsLink alerts={alerts.error ? undefined : alerts.data} />}
+            {inventory.map((fact) => (
+              <Fragment key={fact.key}>
+                <FactDot />
+                {fact.error ? (
+                  <span className="font-medium text-warning" title={errorMessage(fact.error)}>
+                    {`couldn't read ${fact.key}`}
+                  </span>
+                ) : (
+                  <Link
+                    href={fact.href}
+                    title={fact.title}
+                    className={cn(
+                      "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+                      fact.tone === "danger" && "font-medium text-destructive",
+                      fact.tone === "warning" && "font-medium text-warning",
+                    )}
+                  >
+                    {fact.text}
+                  </Link>
+                )}
+              </Fragment>
+            ))}
+            <Firing alerts={admin && !alerts.error ? alerts.data : undefined} />
+            <Freshness at={updatedAt} refreshing={refreshing} late={late} />
           </>
         }
-        actions={
-          admin &&
-          hasEngine && (
-            <EngineActions
-              status={status}
-              unitName={engine.name}
-              unit={engine.unit}
-              control={control}
-              testing={configTest.running}
-              onTest={configTest.run}
-              onReloadTested={configTest.showReload}
-              onChanged={refreshAll}
-            />
-          )
+        modules={status.nginx && <ModulesFact admin={admin} installer={installer} />}
+        verdict={verdict && <Status verdict={verdict.tone} label={verdict.label} />}
+        command={commands.command}
+        menu={
+          <EngineMenu
+            label={hasEngine ? `More ${control.engine} actions` : "More actions"}
+            lead={[...commands.test, ...alertVerbs]}
+            refresh={{ at: updatedAt, refreshing, run: refreshEverything }}
+            service={commands.service}
+          />
         }
       />
 
@@ -536,7 +551,10 @@ export default function ProxyOverviewPage() {
                 title="Routes"
                 actions={
                   hosts.length > 0 && (
-                    <div className="flex items-center gap-3">
+                    // As tall as the button the upstream check brings with it:
+                    // the head grew when the check answered, and the rows
+                    // under it stepped down.
+                    <div className="flex min-h-6 items-center gap-3">
                       {admin && upstreamReport && (
                         <Button
                           size="xs"
@@ -565,9 +583,13 @@ export default function ProxyOverviewPage() {
               />
               <PanelBody flush>
                 {vhosts.loading ? (
-                  <div className="space-y-3 py-1">
-                    <Skeleton className="h-4 w-64" />
-                    <Skeleton className="h-4 w-48" />
+                  // Rows of a route's own height, so the log under the list
+                  // moves by the difference in their number and not by a list
+                  // arriving where two lines of text stood.
+                  <div className="space-y-2">
+                    {[0, 1, 2].map((row) => (
+                      <Skeleton key={row} className="h-[3.875rem] w-full rounded-xl" />
+                    ))}
                   </div>
                 ) : vhosts.error ? (
                   <ErrorState error={vhosts.error} onRetry={vhosts.refresh} className="mt-2" />
@@ -616,9 +638,8 @@ export default function ProxyOverviewPage() {
                           key={`${vhost.kind}:${vhost.name}:${vhost.path}`}
                           href={target.href}
                           verb={target.verb}
-                          className="gap-3 px-3.5 py-3"
                           leading={<RouteMark vhost={vhost} backend={backend} />}
-                          title={<span className="text-title">{vhost.name}</span>}
+                          title={vhost.name}
                           description={
                             // One line: what serves it, then the way a request
                             // goes. The route sat on a second line of its own
@@ -666,6 +687,7 @@ export default function ProxyOverviewPage() {
                                   {trafficLabel(load)}
                                 </span>
                               )}
+                              <UpstreamWord targets={reached} />
                               {ports.length > 0 && (
                                 <span
                                   className="font-mono text-hint text-muted-foreground max-lg:hidden"
@@ -680,26 +702,7 @@ export default function ProxyOverviewPage() {
                               <ServingStatus vhost={vhost} />
                             </span>
                           }
-                        >
-                          {reached.length > 0 && (
-                            <ul aria-label="Upstreams" className="space-y-1 text-hint">
-                              {reached.map((t) => (
-                                <li
-                                  key={`${t.line}:${t.address}`}
-                                  className="flex flex-wrap items-center gap-x-2"
-                                >
-                                  <span className="font-mono text-muted-foreground">
-                                    {t.address}
-                                  </span>
-                                  <Status tone={upstreamTone(t.state)} label={upstreamLabel(t)} />
-                                  {t.owner && (
-                                    <span className="text-muted-foreground">{t.owner}</span>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </ChoiceRow>
+                        />
                       )
                     })}
                   </ChoiceList>
@@ -720,100 +723,101 @@ export default function ProxyOverviewPage() {
         </>
       )}
       {control.dialog}
+      {commands.dialog}
     </Page>
   )
 }
 
 /**
- * How old the page is, and the one press that reads every source again. The
- * age is the oldest reading's, so a five-minute-old certificate list is not
- * vouched for by a sites list read a moment ago; while a refresh is out it
- * says so instead, until the last source answers. A source still out once
- * the wait runs out is named, and Refresh can be pressed again to ask it
- * afresh.
+ * Whether what a route forwards to answers, on the route's own line: the
+ * one address's reading, or how many of several are down, each of them in
+ * the tooltip. They were a list under the row, so a route nginx forwards
+ * stood a line taller than one a folder or the ingress serves, and the rows
+ * under it moved when the check answered.
+ */
+function UpstreamWord({ targets }: { targets: UpstreamTarget[] }) {
+  if (targets.length === 0) return null
+  const down = targets.filter(isDown)
+  // Worst first, so the first is the one to say.
+  const worst = targets[0]
+  const label =
+    targets.length === 1
+      ? upstreamLabel(worst)
+      : down.length > 0
+        ? `${down.length} of ${targets.length} down`
+        : `${targets.length} up`
+  return (
+    <span
+      // On a phone the line has room for what is wrong, not for what is fine.
+      className={down.length === 0 ? "max-sm:hidden" : undefined}
+      title={targets
+        .map((t) => [t.address, upstreamLabel(t), t.owner].filter(Boolean).join(" "))
+        .join("\n")}
+    >
+      <Status tone={upstreamTone(worst.state)} label={label} />
+    </span>
+  )
+}
+
+/**
+ * How old the page is, for a reader who cannot see the menu that says it, and
+ * the sources that have not answered a refresh in time, by name. The age is
+ * the oldest reading's, so a five-minute-old certificate list is not vouched
+ * for by a sites list read a moment ago; while a refresh is out it says so
+ * instead, until the last source answers. A source still out once the wait
+ * runs out is named, and Refresh can be pressed again to ask it afresh.
  */
 function Freshness({
   at,
   refreshing,
   late,
-  onRefresh,
 }: {
   at: number | undefined
   refreshing: boolean
   /** The sources that have not answered a refresh in time, by name. */
   late: string[]
-  onRefresh: () => void
 }) {
   const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
-  return (
-    <>
-      {/* The age is the button's tooltip: "Updated just now" spent the bar's
-          width on the one reading that is nearly always fine. A source that
-          has not answered is not fine, and says so. */}
-      {late.length > 0 ? (
-        <span className="px-1 text-hint font-medium text-warning" title={late.join(", ")}>
+  if (late.length > 0)
+    return (
+      <>
+        <FactDot />
+        <span className="font-medium text-warning" title={late.join(", ")}>
           {noAnswerLabel(late)}
         </span>
-      ) : (
-        // Still read out, so a screen reader hears how old the page is.
-        <span className="sr-only">
-          {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
-        </span>
-      )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Refresh"
-            onClick={onRefresh}
-            pending={refreshing}
-          >
-            <RefreshClockwise className="size-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          {refreshing
-            ? "Refreshing…"
-            : at !== undefined
-              ? `${updatedLabel(at, now)}. Read every source again`
-              : "Read every source again"}
-        </TooltipContent>
-      </Tooltip>
-    </>
+      </>
+    )
+  // "Updated just now" would spend the line's width on the one reading that
+  // is nearly always fine; the menu says it beside Refresh.
+  return (
+    <span className="sr-only">
+      {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
+    </span>
   )
 }
 
 /**
- * The way to the Alerts page, with what is firing counted in its tone: a
- * bell with nothing beside it said nothing about whether anybody was being
- * told something right now.
+ * What is firing, said on the engine's line and leading to the Alerts page: a
+ * way to that page with nothing beside it said nothing about whether anybody
+ * was being told something right now. Nothing firing is nothing to say.
  */
-function AlertsLink({ alerts }: { alerts?: ProxyAlerts }) {
+function Firing({ alerts }: { alerts?: ProxyAlerts }) {
   const subjects = alerts?.subjects ?? []
   const firing = subjects.filter((s) => s.state === "firing").length
   const holding = subjects.filter((s) => s.state === "pending").length
+  if (firing === 0 && holding === 0) return null
   return (
-    <Button asChild size="sm" variant="ghost">
+    <>
+      <FactDot />
       <Link
         href="/proxy/alerts"
-        aria-label={firing > 0 ? `Alerts, ${firing} firing` : "Alerts"}
-        className="gap-1.5"
+        className={cn(
+          "numeric rounded-sm font-medium focus-ring hover:underline",
+          firing > 0 ? "text-destructive" : "text-warning",
+        )}
       >
-        <Bell className="size-3.5" />
-        Alerts
-        {firing > 0 ? (
-          <span className="numeric flex items-center gap-1 text-hint font-medium text-destructive">
-            <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-destructive" />
-            {firing}
-          </span>
-        ) : holding > 0 ? (
-          <span className="numeric flex items-center gap-1 text-hint font-medium text-warning">
-            <span aria-hidden className="size-1.5 rounded-full bg-warning" />
-            {holding}
-          </span>
-        ) : null}
+        {firing > 0 ? `${plural(firing, "alert")} firing` : `${plural(holding, "alert")} holding`}
       </Link>
-    </Button>
+    </>
   )
 }

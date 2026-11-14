@@ -294,7 +294,7 @@ export function StreamsPage() {
       className="animate-rise"
       logo={
         products.length > 0 ? (
-          <span className="flex h-12 shrink-0 items-center">
+          <span className="flex h-10 shrink-0 items-center">
             <ProductLogos ids={products.slice(0, 4)} size="md" />
           </span>
         ) : undefined
@@ -302,6 +302,34 @@ export function StreamsPage() {
       mark="nginx"
       fallback={Connection}
       title="Port forwarding"
+      // Laid out as a project's header, as the overview's line is: what needs
+      // the reader beside the name, one command at the end, the rest in `⋯`.
+      state={
+        verdict ? (
+          <Verdict
+            verdict={verdict}
+            pressed={verdict.chip !== undefined && chip === verdict.chip}
+            onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
+          />
+        ) : noNginx ? (
+          <Status tone="stopped" label="Not installed" />
+        ) : !data ? (
+          error ? (
+            <Status tone="danger" label="Not read" />
+          ) : (
+            <Status tone="unknown" label="Reading" />
+          )
+        ) : (
+          <Status tone="stopped" label="No forwards" />
+        )
+      }
+      // An empty list carries the command in its own empty state.
+      command={listed.length > 0 ? newStream : undefined}
+      menu={
+        directoryVerbs.length > 0 ? (
+          <VerbMenu verbs={directoryVerbs} label="More stream directory actions" />
+        ) : undefined
+      }
       facts={
         noNginx ? (
           <span>nginx is not installed on this host</span>
@@ -314,8 +342,13 @@ export function StreamsPage() {
                 stream module {moduleLabel(data.module)}
               </span>
             </HostFact>
-            <FactDot />
-            <span className="numeric">{plural(data.streams.length, "forward")}</span>
+            {/* None is the state beside the name; a count of nothing under it said it twice. */}
+            {data.streams.length > 0 && (
+              <>
+                <FactDot />
+                <span className="numeric">{plural(data.streams.length, "forward")}</span>
+              </>
+            )}
             {open > 0 && (
               <>
                 <FactDot />
@@ -335,26 +368,6 @@ export function StreamsPage() {
               </>
             )}
           </>
-        )
-      }
-      aside={
-        (verdict || newStream || directoryVerbs.length > 0) && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            {verdict && (
-              <Verdict
-                verdict={verdict}
-                pressed={verdict.chip !== undefined && chip === verdict.chip}
-                onPress={() =>
-                  verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)
-                }
-              />
-            )}
-            {/* An empty list carries the command in its own empty state. */}
-            {listed.length > 0 && newStream}
-            {directoryVerbs.length > 0 && (
-              <VerbMenu verbs={directoryVerbs} label="More stream directory actions" />
-            )}
-          </div>
         )
       }
     />

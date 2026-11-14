@@ -1415,8 +1415,8 @@ two share a name (`certificate-page.tsx`, its rail and picture; the shared conso
 in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are
-`components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's identity bar
-links there with the firing count. Ports (`/proxy/ports`) opens on its counts, a picture of which
+`components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's line says what
+fires and leads there, and its menu has Alerts. Ports (`/proxy/ports`) opens on its counts, a picture of which
 networks reach which listening programs and the list of sockets; each listening port has its own page
 (`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
 reach, owner, clients and history, and the list as a rail; the old `?socket=` sheet address opens
@@ -1465,6 +1465,15 @@ of one, is still made in a sheet over the list (`SiteForm`, the same fields). `?
 the site's Settings for an administrator and a file the form owns, and opens the config viewer
 otherwise. Checked by `tests/browser/proxy-site-page.spec.ts`, `proxy-site-builder.spec.ts`,
 `proxy-sites-list.spec.ts` and `proxy-sites-tools.spec.ts`.
+
+Every page of the section opens on an identity line laid out as a project's header (0.8.7): the
+name with its state beside it, the facts under them, one command at the end and the rest behind
+`⋯`. The overview's command is Reload (Start while the engine is stopped), and Test config, Alerts,
+Refresh, Service details, Restart and Stop are in its menu (`useEngineCommands` and `EngineMenu` in
+`engine.tsx`); Alerts' is Add rule, Streams' New stream, Ports' Find a free port, Certificates'
+Issue certificate, the TLS fleet's Scan all sites, Configuration's Test config and Tunnel's Check
+now. Traffic's old `?site=<name>` lands on that site's page at its Logs view; checked by
+`tests/browser/proxy-opening-lines.spec.ts`
 
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)

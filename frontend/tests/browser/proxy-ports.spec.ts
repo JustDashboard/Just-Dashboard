@@ -33,6 +33,21 @@ async function mockHost(page: Page, listeners: unknown[] = hostPorts) {
   )
 }
 
+/**
+ * A verb behind the `⋯` at the end of the page's line, the menu left open on
+ * it: the line has one command, and the refresh, its pause and the exports
+ * are here.
+ */
+async function listVerb(page: Page, name: string) {
+  await page.getByRole("button", { name: "More actions for the list" }).click()
+  return page.getByRole("menuitem", { name })
+}
+
+/** One of the chips over the list, by its name: its count follows the name. */
+function chip(page: Page, name: string) {
+  return page.getByRole("button", { name: new RegExp(`^${name} \\d+$`) })
+}
+
 /** One of the identity line's facts, which the four tiles became. */
 function fact(page: Page, text: string) {
   return page.locator("[data-slot='host-identity']").getByText(text, { exact: true })
@@ -117,13 +132,18 @@ test("the identity line counts services and says what each count is made of", as
   await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
   await expect(page.locator('[data-slot="stat-tile"]')).toHaveCount(0)
   await expect(fact(page, "7 listening")).toBeVisible()
-  await expect(fact(page, "5 TCP, 2 UDP")).toBeVisible()
+  // The protocols and the private networks are the chips over the list, not
+  // counted a second time on the line.
+  await expect(fact(page, "5 TCP, 2 UDP")).toHaveCount(0)
+  await expect(chip(page, "TCP")).toContainText("5")
+  await expect(chip(page, "UDP")).toContainText("2")
   await expect(fact(page, "3 internet-facing")).toHaveAttribute(
     "title",
     "1 on all · 2 on a public IP",
   )
   await expect(fact(page, "3 internet-facing")).toHaveClass(/text-warning/)
-  await expect(fact(page, "2 on private networks")).toHaveAttribute("title", "tailnet · Docker")
+  await expect(chip(page, "Private networks")).toContainText("2")
+  await expect(chip(page, "Private networks")).toHaveAttribute("title", "tailnet · Docker")
   await expect(fact(page, "1 dangerous service exposed")).toHaveClass(/text-destructive/)
 })
 
@@ -174,7 +194,7 @@ test("the overview counts observed internet-facing services without advisory fin
   await expect(page).toHaveURL(/\/proxy\/ports\?reach=internet$/)
   await expect(rowsOf(page)).toHaveCount(3)
   await expect(fact(page, "3 internet-facing")).toBeVisible()
-  await expect(fact(page, "2 on private networks")).toBeVisible()
+  await expect(chip(page, "Private networks")).toContainText("2")
 })
 
 test("a port Docker publishes in both families is one row and one count", async ({ page }) => {
@@ -264,7 +284,7 @@ test("a socket on the private uplink is not said to be out of the internet's rea
   ).toHaveCount(1)
   await expect(row.getByText("enp0s31f6", { exact: true })).toBeVisible()
   // It is counted with the private networks, which the internet may not reach.
-  await expect(fact(page, "3 on private networks")).toBeVisible()
+  await expect(chip(page, "Private networks")).toContainText("3")
 })
 
 test("a folded pair's addresses and protocol hold one line, whole on its page", async ({
@@ -357,7 +377,6 @@ test("the identity line's facts and the longest reach fit a phone", async ({ pag
   // Every fact is whole and on the screen, with what it is made of as its tooltip.
   for (const [text, title] of [
     ["3 internet-facing", "1 on all · 2 on a public IP"],
-    ["4 on private networks", "tailnet · Docker +2"],
     [/^\d+ dangerous services? exposed$/, "Counted once per port"],
   ] as const) {
     const hint = page.locator("[data-slot='host-identity']").getByText(text)
@@ -629,9 +648,12 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   const initialRequests = requests
   expect(initialRequests).toBe(1)
 
-  await page.getByRole("button", { name: "Pause refreshing" }).click()
+  await (await listVerb(page, "Pause refreshing")).click()
   await expect(page.getByText("Paused · updated just now")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Refresh now" })).toHaveCount(0)
+  // Paused, there is nothing to refresh: the menu offers the way back.
+  await expect(await listVerb(page, "Resume refreshing")).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Refresh now" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
   // Polling schedules its next timer after the response settles. A single minute jump
   // can outrun network responses and skip the remaining timers on a busy runner.
   for (let interval = 0; interval < 4; interval++) {
@@ -649,10 +671,10 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   expect(requests).toBeLessThanOrEqual(initialRequests + 4)
   const pausedRequests = requests
 
-  await page.getByRole("button", { name: "Resume refreshing" }).click()
+  await (await listVerb(page, "Resume refreshing")).click()
   await expect(page.getByText("Updated just now")).toBeVisible()
   await expect.poll(() => requests).toBe(pausedRequests + 1)
-  await page.getByRole("button", { name: "Refresh now" }).click()
+  await (await listVerb(page, "Refresh now")).click()
   await expect.poll(() => requests).toBe(pausedRequests + 2)
   await expect(page.getByText("Updated just now")).toBeVisible()
   await page.clock.runFor(15_001)
@@ -1024,7 +1046,7 @@ for (const width of [1280, 390]) {
     const second = rows.nth(1)
     const before = await second.boundingBox()
     listeners = [...withClients, ...ownedPorts]
-    await page.getByRole("button", { name: "Refresh now" }).click()
+    await (await listVerb(page, "Refresh now")).click()
     if (width === 1280) {
       await expect(rowsOf(page).filter({ hasText: "sshd" }).locator("td").nth(4)).toHaveText("3")
     }
@@ -1081,6 +1103,42 @@ test("the picture wires each network to what listens there, a database the inter
   // A program's port opens its page.
   await listens.getByRole("link", { name: ":6379" }).click()
   await expect(page).toHaveURL(/\/proxy\/ports\/tcp-6379$/)
+})
+
+test("a port pressed straight after a filter still opens its page", async ({ page }) => {
+  await mockHost(page)
+  // The port's page as a busy server gives it: nothing fetched ahead, and the
+  // navigation most of a second on its way.
+  await page.route(/\/proxy\/ports\/tcp-6379/, async (route) => {
+    if (route.request().headers()["next-router-prefetch"]) return route.abort()
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await route.continue()
+  })
+  await page.goto("/proxy/ports")
+  const picture = page.locator("[data-slot='ports-picture']")
+  await picture.getByRole("button", { name: "The tailnet" }).click()
+  await expect(rowsOf(page)).toHaveCount(2)
+  await expect(page).toHaveURL(/reach=private/)
+
+  // The filter let go and the port pressed inside the quarter-second the page
+  // waits before it writes its view to the address. That write, landing while
+  // the navigation was on its way, used to cancel it.
+  await expect(picture.getByRole("link", { name: ":6379" })).toBeVisible()
+  await page.evaluate(async () => {
+    const picture = document.querySelector("[data-slot='ports-picture']")!
+    const press = (selector: string, text: string) =>
+      [...picture.querySelectorAll<HTMLElement>(selector)]
+        .find((el) => el.textContent?.includes(text))!
+        .click()
+    press("button", "The tailnet")
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    press("a", ":6379")
+  })
+  await expect(page).toHaveURL(/\/proxy\/ports\/tcp-6379$/)
+  // The view was written before the page was left, so Back finds it let go.
+  await page.goBack()
+  await expect(page).toHaveURL(/\/proxy\/ports$/)
+  await expect(rowsOf(page)).toHaveCount(7)
 })
 
 test("the old sheet addresses, the page's and the host diagnostic's, open the port's page", async ({
