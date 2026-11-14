@@ -2,17 +2,17 @@
 
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useFilterHistory } from "@/components/workspace/history"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   FirewallCheck,
-  ClockRewind,
   ListOrdered,
   NetworkDevice,
   SecureConnection,
   LockClosed,
   Logs,
   Pencil,
+  RefreshClockwise,
   RotateCounterClockwise,
   Shield,
   Trash,
@@ -21,21 +21,26 @@ import {
 import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { lensFor } from "@/lib/log-lenses"
+import { lensFor, type LensReading } from "@/lib/log-lenses"
 import type { FirewallRule, FirewallStatus, LogLine } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { useConfirm } from "@/components/confirm-dialog"
-import { Field } from "@/components/form"
+import { ConfirmDialog, useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
+import { InfoTip } from "@/components/form"
 import { Address } from "@/components/security/marks"
-import { ProductLogo, portProduct } from "@/components/product-logo"
+import { ProductLogo, ProductLogos, portProduct } from "@/components/product-logo"
 import { PageContext, SearchInput } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
 import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
 import { NetworkReadWarning } from "@/components/network/read-warning"
-import { FirewallPicture } from "@/components/network/firewall-picture"
+import {
+  FirewallPicture,
+  FirewallPictureLoading,
+  firewallProduct,
+  type FirewallCounts,
+} from "@/components/network/firewall-picture"
+import { InstallHandoff, usePackageKnown } from "@/components/network/install"
 import {
   FirewallAccessPanel,
   FirewallEnforcement,
@@ -44,7 +49,7 @@ import {
 import {
   FirewallHistoryPanel,
   FirewallPlanTray,
-  RuleHistorySheet,
+  RuleHistoryPopover,
 } from "@/components/network/firewall-changes"
 import { findingsByRule, rulePath, type StagedChange } from "@/components/network/firewall-reading"
 import { FIREWALL_LOG } from "@/components/security/host-logs"
@@ -54,19 +59,22 @@ import {
   useHostLog,
   useReadingPress,
 } from "@/components/security/log-section"
-import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
+import { useLensReadings, type LensReadingsState } from "@/components/logs/lens-readings"
+import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
+import { Segments } from "@/components/deploy/settings/segments"
+import {
+  SettingForm,
+  SettingSection,
+  settingStatus,
+} from "@/components/deploy/settings/setting-card"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { IconAction, DimActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import {
   stickyTableHeader,
   Table,
@@ -77,22 +85,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-/**
- * Rules occupy the working column; the policy those rules fall through to stays beside them.
- *
- * Then what the rules did: the firewall's log, read through its lens — each drop and rate limit as
- * the address, the port and the protocol it was — with the day's counts as a second row of the
- * readings. A firewall that is not logging has no such log, and the section says so and points at
- * the control that changes it rather than drawing an empty pane.
- */
-export function FirewallPanel({
-  status,
-  loading,
-  error,
-  lastSuccess,
-  refresh,
-  handoff,
-}: {
+type PanelProps = {
   /** A rule a link into the page asked for, from the ports page's hand-offs. */
   handoff?: RuleHandoff
   status: FirewallStatus | undefined
@@ -100,7 +93,39 @@ export function FirewallPanel({
   error: Error | undefined
   lastSuccess?: number
   refresh: () => void
-}) {
+}
+
+/**
+ * What may reach this machine, and the controls that change it.
+ *
+ * The page opens on the firewall as a project's page opens on the project:
+ * its own mark and name, whether it is enforcing beside it, the switch that
+ * decides that and Add rule at the line's end, Reset and Refresh behind the
+ * menu. Then the rules folded by where they lead (`firewall-picture.tsx`),
+ * with what the log says the rules did on the nodes that did it; the ways in
+ * a change may never take away; the rules in the order the firewall reads
+ * them; the defaults they fall through to, as one settings section whose
+ * edits are staged and saved together by the page's one save bar; how the
+ * host is filtered; what was changed from here; and the firewall's own log.
+ *
+ * Seven tiles stood under the picture. The rule count is the identity's
+ * allow and deny; the three defaults are the Defaults section and the
+ * picture's last node; and the three counts from the log are on the picture.
+ * The defaults were four selects in a column beside the rules, each sending
+ * its change the moment it was picked.
+ *
+ * A firewall that is not logging has no log, and the section says so and
+ * points at the control that changes it rather than drawing an empty pane.
+ */
+export function FirewallPanel(props: PanelProps) {
+  return (
+    <SaveBarProvider>
+      <FirewallWorkspace {...props} />
+    </SaveBarProvider>
+  )
+}
+
+function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, handoff }: PanelProps) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useSessionState<FirewallRule | null>(
@@ -111,9 +136,12 @@ export function FirewallPanel({
   const query = filters.q
   const setQuery = (q: string) => setFilters({ q })
   const admin = can("system.admin")
+  // Switching the firewall off, a default, a reset, a removal and a plan are
+  // the server's destructive routes: an administrator's account without that
+  // capability is refused them, so it is not offered them.
+  const mayDestroy = can("destructive")
   const [handoffEdit, setHandoffEdit] = useState(handoff?.edit)
   const [staged, setStaged] = useState<StagedChange[]>([])
-  const [historyRule, setHistoryRule] = useState<FirewallRule | null>(null)
   const findings = useMemo(() => findingsByRule(status), [status])
 
   // ufw and firewalld both say "off" in words; iptables says nothing, and its
@@ -179,71 +207,54 @@ export function FirewallPanel({
       : undefined
 
   const header = <PageContext eyebrow="Network" title="Firewall" />
-  // Whether the firewall is enforcing, and the switch that decides it, at the
-  // right end of the identity line: the control beside the fact it changes.
-  // The page's shortcuts sit there too, rather than on a line of their own
-  // above the page with nothing else on it.
-  const enforcing = status?.available && (
-    <span className="flex flex-wrap items-center gap-3">
-      <WorkspaceHelp compact />
-      <Status
-        verdict={status.enabled ? "ok" : "warning"}
-        label={status.enabled ? "Active" : "Inactive"}
-        className="text-body"
-      />
-      {writable && caps.toggle && (
-        <Switch
-          id="firewall-enabled"
-          aria-label="Firewall enabled"
-          checked={status.enabled}
-          onCheckedChange={(enabled) =>
-            confirm({
-              title: enabled ? "Enable firewall" : "Disable firewall",
-              confirmLabel: enabled ? "Enable" : "Disable",
-              description: (
-                <div className="space-y-3">
-                  {enabled ? (
-                    <p className="text-destructive">
-                      {status.backend} applies its default policy immediately. The server checks
-                      first that your connection, SSH and public ingress stay admitted, and puts the
-                      firewall back if the enforced rules say otherwise.
-                    </p>
-                  ) : (
-                    <p className="text-destructive">
-                      Every rule stops being enforced and the host is left unfiltered.
-                    </p>
-                  )}
-                  <FirewallPreflightCheck change={{ op: enabled ? "enable" : "disable" }} />
-                </div>
-              ),
-              action: async (c) => {
-                await post("/firewall/enabled", { enabled }, { confirm: c })
-                refresh()
-              },
-            })
-          }
-        />
-      )}
-    </span>
-  )
+  const refreshVerb: Verb = {
+    key: "refresh",
+    label: "Refresh",
+    icon: RefreshClockwise,
+    run: refresh,
+  }
 
-  if (loading && !status) {
+  if (!status) {
+    const failed = Boolean(error) && !loading
     return (
       <>
         {header}
-        <LoadingPanel />
+        <HostIdentity
+          label="About the firewall"
+          fallback={FirewallCheck}
+          title="Firewall"
+          state={
+            failed ? (
+              <Status tone="danger" label="Not read" />
+            ) : (
+              <span className="text-xs font-medium">
+                <TextShimmer>Reading the firewall…</TextShimmer>
+              </span>
+            )
+          }
+          facts={
+            failed ? (
+              <span>The firewall could not be read.</span>
+            ) : (
+              <Skeleton className="my-0.5 h-3 w-56 max-w-full" />
+            )
+          }
+          menu={<VerbMenu verbs={[refreshVerb]} label="Firewall actions" />}
+        />
+        {failed && error ? (
+          <ErrorState error={error} onRetry={refresh} />
+        ) : (
+          <Panel plain>
+            <PanelHeader title="Inbound" />
+            <PanelBody>
+              <FirewallPictureLoading />
+            </PanelBody>
+          </Panel>
+        )}
       </>
     )
   }
-  if (error && !status) {
-    return (
-      <>
-        {header}
-        <ErrorState error={error} onRetry={refresh} />
-      </>
-    )
-  }
-  if (!status?.available) {
+  if (!status.available) {
     return (
       <>
         {header}
@@ -253,14 +264,7 @@ export function FirewallPanel({
           lastSuccess={lastSuccess}
           reading="firewall state"
         />
-        <EmptyState
-          icon={Shield}
-          title="No firewall on this host"
-          description={
-            status?.error ??
-            "Neither ufw, firewalld nor iptables answered. Install one — without it, every port anything on this machine opens is reachable from wherever the machine is."
-          }
-        />
+        <FirewallMissing reason={status.error} onInstalled={refresh} />
       </>
     )
   }
@@ -269,40 +273,64 @@ export function FirewallPanel({
   const allows = rules.filter((r) => r.action === "ALLOW" || r.action === "LIMIT").length
   const dangerous = rules.filter((r) => r.danger).length
   const inbound = policyLabel(status.policy?.incoming, status.defaultPolicy)
-  const logging = loggingLevel(status.logging)
 
-  const setPolicy = (direction: string, policy: string) => {
-    const risky = direction === "incoming" && policy !== "allow"
-    const send = (c?: string) =>
-      post("/firewall/policy", { direction, policy }, c ? { confirm: c } : undefined)
-    if (!risky) {
-      send()
-        .then(() => {
-          notify.success(`Default ${direction} set to ${policy}`)
-          refresh()
-        })
-        .catch((err) => notify.error("Not applied", err))
-      return
-    }
+  const reset = () =>
     confirm({
-      title: "Deny inbound by default",
-      confirmLabel: "Apply",
+      title:
+        status.backend === "firewalld"
+          ? `Reload zone ${status.zone ?? ""}'s shipped settings`
+          : "Reset the firewall",
+      confirmLabel: "Reset",
       description: (
         <div className="space-y-3">
           <p className="text-destructive">
-            Everything not covered by an allow rule stops being reachable. The server refuses a
-            default that would refuse your connection, SSH or public ingress where they are admitted
-            now.
+            {status.backend === "firewalld"
+              ? `Every change made to zone ${status.zone ?? ""} is replaced by the definition firewalld ships for it. Zones firewalld does not ship have nothing to reload.`
+              : `Every rule is removed and ${status.backend} is disabled. The host is left unfiltered until you configure it again.`}
           </p>
-          <FirewallPreflightCheck change={{ op: "policy", direction, policy }} />
+          <FirewallPreflightCheck change={{ op: "reset" }} />
         </div>
       ),
       action: async (c) => {
-        await send(c)
+        await post("/firewall/reset", {}, { confirm: c })
         refresh()
       },
     })
-  }
+  const verbs: Verb[] = [
+    refreshVerb,
+    ...(writable && caps.reset && mayDestroy
+      ? [{ key: "reset", label: "Reset", icon: RotateCounterClockwise, run: reset, danger: true }]
+      : []),
+  ]
+  const toggle = (enabled: boolean) =>
+    confirm({
+      title: enabled ? "Enable firewall" : "Disable firewall",
+      confirmLabel: enabled ? "Enable" : "Disable",
+      description: (
+        <div className="space-y-3">
+          {enabled ? (
+            <p className="text-destructive">
+              {status.backend} applies its default policy immediately. The server checks first that
+              your connection, SSH and public ingress stay admitted, and puts the firewall back if
+              the enforced rules say otherwise.
+            </p>
+          ) : (
+            <p className="text-destructive">
+              Every rule stops being enforced and the host is left unfiltered.
+            </p>
+          )}
+          <FirewallPreflightCheck change={{ op: enabled ? "enable" : "disable" }} />
+        </div>
+      ),
+      action: async (c) => {
+        await post("/firewall/enabled", { enabled }, { confirm: c })
+        refresh()
+      },
+    })
+  // What the log says the rules did, for the nodes that did it. Not while
+  // logging is off, when every figure would be a zero that means "not
+  // recorded" rather than "nothing happened".
+  const counts = silent ? undefined : firewallCounts(readings, firewallLog.error, press)
 
   return (
     <Workspace
@@ -323,14 +351,23 @@ export function FirewallPanel({
         reading="firewall state"
       />
 
-      {/* What the page is about, as its own row (§15 pass 8): the backend by
-          its own name, on the tile a product's mark takes — none of the three
-          has one, so it keeps the section's glyph — with whether it can be
-          told anything from here and, on firewalld, the zone its rules are
-          held in. */}
+      {/* What the page is about, laid out as a project's header: the backend
+          by its own name on its own mark, whether it is enforcing beside the
+          name, whether it can be told anything from here and, on firewalld,
+          the zone its rules are held in. The switch that decides whether it
+          enforces sits before the page's command, beside the fact it
+          changes. */}
       <HostIdentity
+        label="About the firewall"
+        mark={firewallProduct(status.backend)}
         fallback={FirewallCheck}
         title={status.backend}
+        state={
+          <Status
+            verdict={status.enabled ? "ok" : "warning"}
+            label={status.enabled ? "Active" : "Inactive"}
+          />
+        }
         facts={
           <>
             <span>{caps.editable ? "managed from here" : "read only from here"}</span>
@@ -347,6 +384,14 @@ export function FirewallPanel({
               <span style={{ color: ACTION_HUE.ALLOW }}>{allows} allow</span> ·{" "}
               <span style={{ color: ACTION_HUE.DENY }}>{rules.length - allows} deny</span>
             </span>
+            {dangerous > 0 && (
+              <>
+                <FactDot />
+                <span className="numeric text-destructive">
+                  {dangerous} open{dangerous === 1 ? "s" : ""} a sensitive port to everyone
+                </span>
+              </>
+            )}
             {hidden > 0 && (
               <>
                 <FactDot />
@@ -357,7 +402,34 @@ export function FirewallPanel({
             )}
           </>
         }
-        aside={enforcing}
+        command={
+          <>
+            <span className="max-sm:hidden">
+              <WorkspaceHelp compact />
+            </span>
+            {writable && caps.toggle && mayDestroy && (
+              <Switch
+                id="firewall-enabled"
+                aria-label="Firewall enabled"
+                checked={status.enabled}
+                onCheckedChange={toggle}
+              />
+            )}
+            {writable && (
+              <AddRuleDialog
+                onDone={refresh}
+                hasProfiles={caps.profiles}
+                arrival={handoff?.add}
+                onStage={
+                  mayDestroy
+                    ? (rule, label) => setStaged([...staged, { op: "add", rule, label }])
+                    : undefined
+                }
+              />
+            )}
+          </>
+        }
+        menu={<VerbMenu verbs={verbs} label="Firewall actions" />}
       />
 
       {/* The rules folded by where they lead, before the rules in the order
@@ -366,7 +438,7 @@ export function FirewallPanel({
       <Panel plain>
         <PanelHeader title="Inbound" />
         <PanelBody>
-          <FirewallPicture status={status} />
+          <FirewallPicture status={status} counts={counts} />
         </PanelBody>
       </Panel>
 
@@ -389,84 +461,9 @@ export function FirewallPanel({
         </Notice>
       )}
 
-      {/* The four readings the rule list is an explanation of. Read-only
-          backends (iptables) used to show none of this — a "·"-joined string
-          in a description — so the same facts now read the same way on every
-          host. Amber only where the reading is the finding: an inbound default
-          of allow makes the deny rules a blocklist rather than a fence. Under
-          them, what the log says the rules did over the last day, in the same
-          grid — and not while logging is off, when every one of them would be
-          a zero that means "not recorded" rather than "nothing happened".
-          Two-up on a phone: seven short figures one-up are a screen and a
-          half before the controls they describe. Seven across four columns
-          let the last reading take the row's end rather than leave a hole
-          beside it, as the phone's odd one does. */}
-      <StatGrid columns={4} dense className="xl:[&>*:last-child:nth-child(4n+3)]:col-span-2">
-        <StatTile
-          label="Rules"
-          value={rules.length}
-          tone={dangerous > 0 ? "danger" : "default"}
-          hint={
-            dangerous > 0
-              ? `${dangerous} open${dangerous === 1 ? "s" : ""} a sensitive port to everyone`
-              : rules.length === 0
-                ? "everything is answered by the default"
-                : "one line each, read in order"
-          }
-        />
-        <StatTile
-          label="Inbound default"
-          value={inbound}
-          tone={inbound === "allow" ? "warning" : "default"}
-          hint={
-            inbound === "allow"
-              ? "the deny rules are a blocklist, not a fence"
-              : "a connection no rule matched"
-          }
-        />
-        {status.backend === "ufw" ? (
-          <StatTile
-            label="Outbound default"
-            value={policyLabel(status.policy?.outgoing)}
-            hint="what this host may reach"
-          />
-        ) : status.zone ? (
-          <StatTile label="Zone" value={status.zone} hint="where the rules are held" />
-        ) : (
-          <StatTile
-            label="Backend"
-            value={status.backend}
-            hint={caps.editable ? "managed from here" : "read only from here"}
-          />
-        )}
-        {/* iptables names no level: what it logs is whatever its LOG rules
-            write, which "off" would misstate beside the drops counted next
-            to it. */}
-        <StatTile
-          label="Logging"
-          value={status.logging ? logging : "—"}
-          hint={
-            !status.logging
-              ? "set by its own LOG rules"
-              : logging === "off"
-                ? "a silent drop leaves no record"
-                : "every drop is recorded"
-          }
-        />
-        {!silent &&
-          readings.tiles.map((tile) => (
-            <ReadingTile
-              key={tile.reading.id}
-              tile={tile}
-              window={readings.window}
-              onPick={() => press(tile.reading)}
-            />
-          ))}
-      </StatGrid>
-
       <FirewallAccessPanel />
 
-      {writable && (
+      {writable && mayDestroy && (
         <FirewallPlanTray
           staged={staged}
           onUnstage={(index) => setStaged(staged.filter((_, i) => i !== index))}
@@ -475,361 +472,264 @@ export function FirewallPanel({
         />
       )}
 
-      <div
-        className={cn(
-          "grid min-w-0 items-start gap-6",
-          writable && (caps.defaultPolicy || caps.logging) && "xl:grid-cols-[minmax(0,1fr)_15rem]",
-        )}
-      >
-        <Panel>
-          <PanelHeader
-            title="Rules"
-            actions={
-              writable && (
-                <AddRuleDialog
-                  onDone={refresh}
-                  hasProfiles={caps.profiles}
-                  arrival={handoff?.add}
-                  onStage={(rule, label) => setStaged([...staged, { op: "add", rule, label }])}
-                />
-              )
-            }
+      <Panel id="rules" className="scroll-mt-6">
+        <PanelHeader
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              Rules
+              {/* The guard, stated once and where it applies. It never
+                  changes and it is never the reason somebody opened this
+                  page, so it is the note on the list it protects. */}
+              {writable && (
+                <InfoTip label="About the lock-out guard">
+                  Your current address is protected from lockout. Address-specific deny rules take
+                  priority over allow rules.
+                </InfoTip>
+              )}
+            </span>
+          }
+          actions={
+            <span className="numeric text-hint text-muted-foreground">
+              {query.trim() ? `${shown.length} of ${rules.length}` : rules.length}
+            </span>
+          }
+        />
+        <PanelToolbar>
+          <SearchInput
+            dense
+            data-workspace-search
+            aria-label="Filter rules"
+            placeholder="Filter rules"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            containerClassName="sm:w-64"
           />
-          <PanelToolbar>
-            <SearchInput
-              dense
-              data-workspace-search
-              aria-label="Filter rules"
-              placeholder="Filter rules"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              containerClassName="sm:w-64"
+        </PanelToolbar>
+        <PanelBody flush>
+          {rules.length === 0 ? (
+            <EmptyState
+              icon={Shield}
+              title="No rules configured"
+              description={
+                status.enabled
+                  ? `Everything is answered by the inbound default of ${inbound}.`
+                  : undefined
+              }
+              className="mt-4"
             />
-            <span className="flex-1" />
-            {writable && caps.reset && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive"
-                onClick={() =>
-                  confirm({
-                    title:
-                      status.backend === "firewalld"
-                        ? `Reload zone ${status.zone ?? ""}'s shipped settings`
-                        : "Reset the firewall",
-                    confirmLabel: "Reset",
-                    description: (
-                      <div className="space-y-3">
-                        <p className="text-destructive">
-                          {status.backend === "firewalld"
-                            ? `Every change made to zone ${status.zone ?? ""} is replaced by the definition firewalld ships for it. Zones firewalld does not ship have nothing to reload.`
-                            : `Every rule is removed and ${status.backend} is disabled. The host is left unfiltered until you configure it again.`}
-                        </p>
-                        <FirewallPreflightCheck change={{ op: "reset" }} />
-                      </div>
-                    ),
-                    action: async (c) => {
-                      await post("/firewall/reset", {}, { confirm: c })
-                      refresh()
-                    },
-                  })
-                }
-              >
-                <RotateCounterClockwise className="size-3.5" />
-                Reset
-              </Button>
-            )}
-          </PanelToolbar>
-          <PanelBody flush>
-            {rules.length === 0 ? (
-              <EmptyState
-                icon={Shield}
-                title="No rules configured"
-                description={
-                  status.enabled
-                    ? `Everything is answered by the inbound default of ${inbound}.`
-                    : undefined
-                }
-                className="mt-4"
-              />
-            ) : shown.length === 0 ? (
-              <EmptyNote>
-                Nothing in these {rules.length} rules contains &ldquo;{query.trim()}&rdquo;.
-              </EmptyNote>
-            ) : (
-              <div className="min-w-0 group-data-[plain]/panel:-mx-4">
-                <Table containerClassName="max-h-[36rem]">
-                  <TableHeader className={stickyTableHeader}>
-                    <TableRow>
-                      <TableHead>Rule</TableHead>
-                      <TableHead className="w-full">Destination</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead className="w-px">
-                        <span className="sr-only">Actions</span>
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {shown.map((rule, i) => (
-                      <TableRow
-                        key={`${rule.number}-${i}`}
-                        data-workspace-item={String(rule.number)}
-                        data-workspace-name={`${rule.to} ${rule.comment}`}
-                        tabIndex={0}
-                        className="group focus-ring-inset"
-                      >
-                        <TableCell className="relative py-4">
-                          {/* The action's hue down the row's edge, so a
+          ) : shown.length === 0 ? (
+            <EmptyNote>
+              Nothing in these {rules.length} rules contains &ldquo;{query.trim()}&rdquo;.
+            </EmptyNote>
+          ) : (
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
+              <Table containerClassName="max-h-[36rem]">
+                <TableHeader className={stickyTableHeader}>
+                  <TableRow>
+                    <TableHead>Rule</TableHead>
+                    <TableHead className="w-full">Destination</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead className="w-px">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {shown.map((rule, i) => (
+                    <TableRow
+                      key={`${rule.number}-${i}`}
+                      data-workspace-item={String(rule.number)}
+                      data-workspace-name={`${rule.to} ${rule.comment}`}
+                      tabIndex={0}
+                      className="group focus-ring-inset"
+                    >
+                      <TableCell className="relative py-4">
+                        {/* The action's hue down the row's edge, so a
                               column of thirty rules reads as where the
                               fence opens and where it shuts before a word
                               of it is. */}
-                          <span
-                            aria-hidden
-                            className="absolute inset-y-3 left-0 w-0.5 rounded-full"
-                            style={{ background: actionHue(rule.action) }}
+                        <span
+                          aria-hidden
+                          className="absolute inset-y-3 left-0 w-0.5 rounded-full"
+                          style={{ background: actionHue(rule.action) }}
+                        />
+                        <div className="space-y-1.5">
+                          <Tag style={{ color: actionHue(rule.action) }}>{rule.action}</Tag>
+                          <span className="block font-mono text-hint text-muted-foreground">
+                            {rule.number !== undefined ? `#${rule.number}` : "configured"} ·{" "}
+                            {rule.direction || "IN"}
+                            {rule.interface ? ` · on ${rule.interface}` : ""}
+                          </span>
+                          {rule.id && findings.get(rule.id) && (
+                            <Tag
+                              tone="warning"
+                              title={findings.get(rule.id)!.reason}
+                              data-testid="rule-finding"
+                            >
+                              {findings.get(rule.id)!.kind} by #{findings.get(rule.id)!.byNumber}
+                            </Tag>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="min-w-40 whitespace-normal">
+                        <div className="flex items-center gap-3">
+                          <ProductLogo
+                            id={portProduct(Number(rule.port))}
+                            fallback={rule.port === "22" ? SecureConnection : NetworkDevice}
+                            size="sm"
+                            className="hidden sm:flex"
                           />
-                          <div className="space-y-1.5">
-                            <Tag style={{ color: actionHue(rule.action) }}>{rule.action}</Tag>
-                            <span className="block font-mono text-hint text-muted-foreground">
-                              {rule.number !== undefined ? `#${rule.number}` : "configured"} ·{" "}
-                              {rule.direction || "IN"}
-                              {rule.interface ? ` · on ${rule.interface}` : ""}
+                          <div className="min-w-0 space-y-1">
+                            <span className="block text-body font-medium">
+                              {rule.service || <Destination to={rule.to} />}
                             </span>
-                            {rule.id && findings.get(rule.id) && (
-                              <Tag
-                                tone="warning"
-                                title={findings.get(rule.id)!.reason}
-                                data-testid="rule-finding"
-                              >
-                                {findings.get(rule.id)!.kind} by #{findings.get(rule.id)!.byNumber}
-                              </Tag>
+                            {(rule.service || rule.comment) && (
+                              <span className="block font-mono text-hint break-words text-muted-foreground">
+                                {rule.service ? <Destination to={rule.to} /> : rule.comment}
+                              </span>
+                            )}
+                            {rule.service && rule.comment && (
+                              <span className="block text-hint text-muted-foreground">
+                                {rule.comment}
+                              </span>
+                            )}
+                            {rule.danger && (
+                              <span className="flex items-start gap-1 text-hint text-destructive">
+                                <Warning aria-hidden className="mt-px size-3 shrink-0" />
+                                {rule.danger}
+                              </span>
                             )}
                           </div>
-                        </TableCell>
-                        <TableCell className="min-w-40 whitespace-normal">
-                          <div className="flex items-center gap-3">
-                            <ProductLogo
-                              id={portProduct(Number(rule.port))}
-                              fallback={rule.port === "22" ? SecureConnection : NetworkDevice}
-                              size="sm"
-                              className="hidden sm:flex"
-                            />
-                            <div className="min-w-0 space-y-1">
-                              <span className="block text-body font-medium">
-                                {rule.service || <Destination to={rule.to} />}
-                              </span>
-                              {(rule.service || rule.comment) && (
-                                <span className="block font-mono text-hint break-words text-muted-foreground">
-                                  {rule.service ? <Destination to={rule.to} /> : rule.comment}
-                                </span>
-                              )}
-                              {rule.service && rule.comment && (
-                                <span className="block text-hint text-muted-foreground">
-                                  {rule.comment}
-                                </span>
-                              )}
-                              {rule.danger && (
-                                <span className="flex items-start gap-1 text-hint text-destructive">
-                                  <Warning aria-hidden className="mt-px size-3 shrink-0" />
-                                  {rule.danger}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Address ip={rule.from || "Anywhere"} />
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          <DimActions className="justify-end">
-                            {/* A forwarding rule (ufw route, which is what
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Address ip={rule.from || "Anywhere"} />
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <DimActions className="justify-end">
+                          {/* A forwarding rule (ufw route, which is what
                               ufw-docker writes) has no representation in this
                               form: it is neither inbound nor outbound, and
                               reopening it here would offer to save it back as an
                               inbound rule. The server refuses that too; not
                               offering the button is the half the reader can
                               see. */}
-                            {admin && rule.id && (
-                              <IconAction label="Rule history" onClick={() => setHistoryRule(rule)}>
-                                <ClockRewind />
+                          {admin && rule.id && <RuleHistoryPopover rule={rule} />}
+                          {writable &&
+                            rule.number !== undefined &&
+                            rule.direction !== "FWD" &&
+                            !rule.interface && (
+                              <IconAction label="Edit rule" onClick={() => setEditing(rule)}>
+                                <Pencil />
                               </IconAction>
                             )}
-                            {writable &&
-                              rule.number !== undefined &&
-                              rule.direction !== "FWD" &&
-                              !rule.interface && (
-                                <IconAction label="Edit rule" onClick={() => setEditing(rule)}>
-                                  <Pencil />
-                                </IconAction>
-                              )}
-                            {writable &&
-                              rule.id &&
-                              rule.number !== undefined &&
-                              !staged.some((c) => c.op === "delete" && c.ruleId === rule.id) && (
-                                <IconAction
-                                  label="Remove in a plan"
-                                  onClick={() =>
-                                    setStaged([
-                                      ...staged,
-                                      {
-                                        op: "delete",
-                                        ruleId: rule.id!,
-                                        label: `#${rule.number} ${rule.raw}`,
-                                      },
-                                    ])
-                                  }
-                                >
-                                  <ListOrdered />
-                                </IconAction>
-                              )}
-                            {writable && rule.number !== undefined && (
+                          {writable &&
+                            mayDestroy &&
+                            rule.id &&
+                            rule.number !== undefined &&
+                            !staged.some((c) => c.op === "delete" && c.ruleId === rule.id) && (
                               <IconAction
-                                label="Delete rule"
-                                className="text-destructive"
+                                label="Remove in a plan"
                                 onClick={() =>
-                                  confirm({
-                                    title: "Delete firewall rule",
-                                    confirmLabel: "Delete",
-                                    description: (
-                                      <div className="space-y-3">
-                                        <p className="font-mono text-xs">{rule.raw}</p>
-                                        {rule.id && (
-                                          <FirewallPreflightCheck
-                                            change={{ op: "delete", ruleId: rule.id }}
-                                          />
-                                        )}
-                                      </div>
-                                    ),
-                                    action: async (c) => {
-                                      await del(rulePath(rule), { confirm: c })
-                                      refresh()
+                                  setStaged([
+                                    ...staged,
+                                    {
+                                      op: "delete",
+                                      ruleId: rule.id!,
+                                      label: `#${rule.number} ${rule.raw}`,
                                     },
-                                  })
+                                  ])
                                 }
                               >
-                                <Trash />
+                                <ListOrdered />
                               </IconAction>
                             )}
-                          </DimActions>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {/* Where a connection goes that no rule above matched:
+                          {writable && mayDestroy && rule.number !== undefined && (
+                            <IconAction
+                              label="Delete rule"
+                              className="text-destructive"
+                              onClick={() =>
+                                confirm({
+                                  title: "Delete firewall rule",
+                                  confirmLabel: "Delete",
+                                  description: (
+                                    <div className="space-y-3">
+                                      <p className="font-mono text-xs">{rule.raw}</p>
+                                      {rule.id && (
+                                        <FirewallPreflightCheck
+                                          change={{ op: "delete", ruleId: rule.id }}
+                                        />
+                                      )}
+                                    </div>
+                                  ),
+                                  action: async (c) => {
+                                    await del(rulePath(rule), { confirm: c })
+                                    refresh()
+                                  },
+                                })
+                              }
+                            >
+                              <Trash />
+                            </IconAction>
+                          )}
+                        </DimActions>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {/* Where a connection goes that no rule above matched:
                         the end of the list the firewall reads, so it is the
                         list's last row rather than a tile a screen away. */}
-                    {!query.trim() && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell className="relative py-4">
-                          <span
-                            aria-hidden
-                            className="absolute inset-y-3 left-0 w-0.5 rounded-full border-l border-dashed border-border-strong"
-                          />
-                          <div className="space-y-1.5">
-                            <Tag style={{ color: actionHue(inbound) }}>{inbound}</Tag>
-                            <span className="block font-mono text-hint text-muted-foreground">
-                              default · IN
+                  {!query.trim() && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell className="relative py-4">
+                        <span
+                          aria-hidden
+                          className="absolute inset-y-3 left-0 w-0.5 rounded-full border-l border-dashed border-border-strong"
+                        />
+                        <div className="space-y-1.5">
+                          <Tag style={{ color: actionHue(inbound) }}>{inbound}</Tag>
+                          <span className="block font-mono text-hint text-muted-foreground">
+                            default · IN
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-normal">
+                        <div className="flex items-center gap-3">
+                          <ProductLogo fallback={Shield} size="sm" className="hidden sm:flex" />
+                          <div className="min-w-0 space-y-1">
+                            <span className="block text-body font-medium">Everything else</span>
+                            <span
+                              className={cn(
+                                "block text-hint",
+                                inbound === "allow" ? "text-warning" : "text-muted-foreground",
+                              )}
+                            >
+                              {inbound === "allow"
+                                ? "let in: the deny rules above are a blocklist, not a fence"
+                                : "a connection no rule above matched"}
                             </span>
                           </div>
-                        </TableCell>
-                        <TableCell className="whitespace-normal">
-                          <div className="flex items-center gap-3">
-                            <ProductLogo fallback={Shield} size="sm" className="hidden sm:flex" />
-                            <div className="min-w-0 space-y-1">
-                              <span className="block text-body font-medium">Everything else</span>
-                              <span
-                                className={cn(
-                                  "block text-hint",
-                                  inbound === "allow" ? "text-warning" : "text-muted-foreground",
-                                )}
-                              >
-                                {inbound === "allow"
-                                  ? "let in: the deny rules above are a blocklist, not a fence"
-                                  : "a connection no rule above matched"}
-                              </span>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-muted-foreground">Anyone</span>
-                        </TableCell>
-                        <TableCell />
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </PanelBody>
-          {/* The guard, stated once and where it applies, instead of a
-            permanent banner above the page. It never changes and it is never
-            the reason somebody opened this page, so it reads as a footnote to
-            the rule list it protects. */}
-          {writable && (
-            <PanelFooter className="text-hint leading-relaxed text-muted-foreground">
-              <span className="min-w-0">
-                Your current address is protected from lockout. Address-specific deny rules take
-                priority over allow rules.
-              </span>
-            </PanelFooter>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-muted-foreground">Anyone</span>
+                      </TableCell>
+                      <TableCell />
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           )}
-        </Panel>
+        </PanelBody>
+      </Panel>
 
-        {writable && (caps.defaultPolicy || caps.logging) && (
-          <Panel plain className="xl:sticky xl:top-6">
-            <PanelHeader title="Defaults" />
-            <PanelBody className="grid gap-5 sm:grid-cols-3 xl:grid-cols-1">
-              {caps.defaultPolicy && (
-                <PolicyField
-                  label="Inbound"
-                  hint="A connection no rule matched"
-                  value={inbound}
-                  options={POLICIES}
-                  fallback="allow"
-                  onChange={(v) => setPolicy("incoming", v)}
-                />
-              )}
-              {caps.defaultPolicy && status.backend === "ufw" && (
-                <PolicyField
-                  label="Outbound"
-                  hint="What this host may reach"
-                  value={policyLabel(status.policy?.outgoing)}
-                  options={POLICIES}
-                  fallback="allow"
-                  onChange={(v) => setPolicy("outgoing", v)}
-                />
-              )}
-              {caps.defaultPolicy && status.backend === "ufw" && (
-                <PolicyField
-                  label="Routed"
-                  hint="Traffic this host forwards between networks"
-                  value={policyLabel(status.policy?.routed)}
-                  options={POLICIES}
-                  fallback="deny"
-                  onChange={(v) => setPolicy("routed", v)}
-                />
-              )}
-              {caps.logging && (
-                <PolicyField
-                  id={LOGGING_CONTROL}
-                  label="Logging"
-                  hint="How much is written about what was dropped"
-                  value={logging}
-                  options={status.backend === "firewalld" ? FIREWALLD_LOG_LEVELS : LOG_LEVELS}
-                  fallback="off"
-                  onChange={(level) =>
-                    post("/firewall/logging", { level })
-                      .then(() => {
-                        notify.success(`Logging set to ${level}`)
-                        refresh()
-                      })
-                      .catch((err) => notify.error("Not applied", err))
-                  }
-                />
-              )}
-            </PanelBody>
-          </Panel>
-        )}
-      </div>
+      <FirewallDefaults
+        status={status}
+        mayPolicy={writable && caps.defaultPolicy && mayDestroy}
+        mayLog={writable && caps.logging}
+        refresh={refresh}
+      />
 
       <FirewallEnforcement status={status} />
       {admin && <FirewallHistoryPanel />}
@@ -896,12 +796,6 @@ export function FirewallPanel({
           }}
           onDone={refresh}
           hasProfiles={caps.profiles}
-        />
-      )}
-      {historyRule && (
-        <RuleHistorySheet
-          rule={historyRule}
-          onOpenChange={(open) => !open && setHistoryRule(null)}
         />
       )}
       {editing && !handoffRule && (
@@ -975,55 +869,323 @@ const LOGGING_COMMAND: Record<string, string> = {
 const LOGGING_CONTROL = "firewall-logging-level"
 
 function pointAtLogging() {
-  const control = document.getElementById(LOGGING_CONTROL)
-  control?.scrollIntoView({ block: "center" })
-  control?.focus({ preventScroll: true })
+  const group = document.getElementById(LOGGING_CONTROL)
+  group?.scrollIntoView({ block: "center" })
+  // The group is not a stop of its own: the level in force is.
+  const level =
+    group?.querySelector<HTMLElement>('[data-state="on"]') ?? group?.querySelector("button")
+  level?.focus({ preventScroll: true })
 }
 
-const POLICIES = ["deny", "reject", "allow"]
+const POLICIES = ["deny", "allow", "reject"]
 const LOG_LEVELS = ["off", "low", "medium", "high", "full"]
 // firewalld distinguishes three levels, not five; offering ufw's ladder would
 // let somebody pick "medium" and read back "full".
 const FIREWALLD_LOG_LEVELS = ["off", "low", "full"]
 
 /**
- * One default in the block under the tiles: its name, and the control that
- * sets it. Only drawn where the backend can take the instruction, so a
- * read-only host has the tiles and nothing that looks like a dead control.
+ * The firewall log's three counts over its window, as the picture's nodes say
+ * them: what was refused and from how many addresses, and what a rate limit
+ * turned away. A press on either narrows the log to the lines it counts. A
+ * log that could not be read has no figures, and says so in their place.
  */
-function PolicyField({
-  id,
-  label,
-  hint,
-  value,
-  options,
-  fallback,
-  onChange,
-}: {
-  id?: string
+function firewallCounts(
+  readings: LensReadingsState,
+  unread: Error | undefined,
+  press: (reading: LensReading) => void,
+): FirewallCounts | undefined {
+  const tile = (id: string) => readings.tiles.find((t) => t.reading.id === id)
+  const blocked = tile("blocked")
+  const limited = tile("limited")
+  if (unread || !blocked || !limited) return undefined
+  return {
+    blocked: blocked.figure?.value,
+    sources: tile("sources")?.figure?.value,
+    limited: limited.figure?.value,
+    window: readings.window.short,
+    onBlocked: () => press(blocked.reading),
+    onLimited: () => press(limited.reading),
+  }
+}
+
+type DefaultKey = "incoming" | "outgoing" | "routed" | "logging"
+
+type DefaultRow = {
+  key: DefaultKey
   label: string
-  hint: string
-  value: string
+  /** The control's accessible name. */
+  name: string
+  why: string
   options: string[]
-  /** ufw's verbose line is not always one of the words the control offers. */
-  fallback: string
-  onChange: (value: string) => void
+  /** What is in force, as one of the options: ufw's line is not always one of the words offered. */
+  current: string
+  /** What a reader who cannot change it is told, where it is not one of the options. */
+  word?: string
+  editable: boolean
+}
+
+/**
+ * What a connection meets when no rule matched it, and how much the firewall
+ * writes down: one settings section under the rules it finishes. Each default
+ * is a row, a name with its note behind the ⓘ and its few choices as
+ * segments; an edit is staged, marked down the row's edge, and saved with the
+ * rest by the page's one save bar.
+ *
+ * Saving sends what each row sent when it was a select that applied on
+ * change: `POST /firewall/policy` a direction at a time and `POST
+ * /firewall/logging`. An inbound default that turns traffic away is still
+ * asked about first, with the server's own check of the ways in it must keep;
+ * the bar's Save waits on that answer, and closing the dialog sends nothing.
+ *
+ * A reader who cannot change a default is shown it in words in the same
+ * rows. The backend decides which rows there are: ufw has all four,
+ * firewalld its zone's target and its log, and iptables' log is whatever its
+ * own LOG rules write.
+ */
+function FirewallDefaults({
+  status,
+  mayPolicy,
+  mayLog,
+  refresh,
+}: {
+  status: FirewallStatus
+  mayPolicy: boolean
+  mayLog: boolean
+  refresh: () => void
 }) {
+  const [draft, setDraft] = useState<Partial<Record<DefaultKey, string>>>({})
+  const [busy, setBusy] = useState(false)
+  // The bar's Save waits on the confirmation: it resolves when the default was
+  // applied, or when the reader closed the dialog without applying.
+  const [review, setReview] = useState<ConfirmRequest | null>(null)
+  const settle = useRef<((applied: boolean) => void) | undefined>(undefined)
+  const answer = (applied: boolean) => {
+    settle.current?.(applied)
+    settle.current = undefined
+  }
+
+  const ufw = status.backend === "ufw"
+  const among = (options: string[], value: string, fallback: string) =>
+    options.includes(value) ? value : fallback
+  const levels = status.backend === "firewalld" ? FIREWALLD_LOG_LEVELS : LOG_LEVELS
+  const rows: DefaultRow[] = [
+    {
+      key: "incoming",
+      label: "Inbound",
+      name: "Inbound default",
+      why: "A connection no rule matched.",
+      options: POLICIES,
+      current: among(POLICIES, policyLabel(status.policy?.incoming, status.defaultPolicy), "allow"),
+      word: policyLabel(status.policy?.incoming, status.defaultPolicy),
+      editable: mayPolicy,
+    },
+    ...(ufw || status.policy?.outgoing
+      ? [
+          {
+            key: "outgoing" as const,
+            label: "Outbound",
+            name: "Outbound default",
+            why: "What this host may reach.",
+            options: POLICIES,
+            current: among(POLICIES, policyLabel(status.policy?.outgoing), "allow"),
+            word: policyLabel(status.policy?.outgoing),
+            editable: mayPolicy && ufw,
+          },
+        ]
+      : []),
+    ...(ufw || status.policy?.routed
+      ? [
+          {
+            key: "routed" as const,
+            label: "Routed",
+            name: "Routed default",
+            why: "Traffic this host forwards between networks.",
+            options: POLICIES,
+            current: among(POLICIES, policyLabel(status.policy?.routed), "deny"),
+            word: policyLabel(status.policy?.routed),
+            editable: mayPolicy && ufw,
+          },
+        ]
+      : []),
+    {
+      key: "logging",
+      label: "Logging",
+      name: "Logging level",
+      why: "How much is written about what was dropped.",
+      options: levels,
+      current: among(levels, loggingLevel(status.logging), "off"),
+      // iptables names no level: what it logs is whatever its LOG rules write.
+      word: status.logging ? loggingLevel(status.logging) : "set by its own LOG rules",
+      editable: mayLog,
+    },
+  ]
+  const staged = rows.filter(
+    (row) => row.editable && draft[row.key] !== undefined && draft[row.key] !== row.current,
+  )
+  const editable = rows.some((row) => row.editable)
+
+  const forget = (key: DefaultKey) =>
+    setDraft((held) => Object.fromEntries(Object.entries(held).filter(([k]) => k !== key)))
+  const sendPolicy = (direction: string, policy: string, c?: string) =>
+    post("/firewall/policy", { direction, policy }, c ? { confirm: c } : undefined)
+  /** The inbound default that turns traffic away, asked about first as it always was. */
+  const askInbound = (policy: string) =>
+    new Promise<boolean>((resolve) => {
+      settle.current = resolve
+      setReview({
+        title: "Deny inbound by default",
+        confirmLabel: "Apply",
+        description: (
+          <div className="space-y-3">
+            <p className="text-destructive">
+              Everything not covered by an allow rule stops being reachable. The server refuses a
+              default that would refuse your connection, SSH or public ingress where they are
+              admitted now.
+            </p>
+            <FirewallPreflightCheck change={{ op: "policy", direction: "incoming", policy }} />
+          </div>
+        ),
+        action: async (c) => {
+          await sendPolicy("incoming", policy, c)
+          forget("incoming")
+          refresh()
+          answer(true)
+        },
+      })
+    })
+  const save = async () => {
+    setBusy(true)
+    let everything = true
+    try {
+      // The one that can cost access goes first, behind its confirmation: a
+      // reader who backs out of it has changed nothing.
+      const inbound = staged.find((row) => row.key === "incoming")
+      const risky = inbound && draft.incoming !== "allow"
+      if (risky && !(await askInbound(draft.incoming!))) return false
+      for (const row of staged) {
+        const value = draft[row.key]!
+        if (row.key === "incoming" && risky) continue
+        try {
+          if (row.key === "logging") {
+            await post("/firewall/logging", { level: value })
+            notify.success(`Logging set to ${value}`)
+          } else {
+            await sendPolicy(row.key, value)
+            notify.success(`Default ${row.key} set to ${value}`)
+          }
+          forget(row.key)
+        } catch (err) {
+          everything = false
+          notify.error("Not applied", err)
+        }
+      }
+      refresh()
+      return everything
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <Field label={label} hint={hint}>
-      <Select value={options.includes(value) ? value : fallback} onValueChange={onChange}>
-        <SelectTrigger id={id} size="sm" className="w-full" aria-label={`${label} default`}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option} value={option}>
-              {option}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
+    <div className="min-w-0">
+      <SettingForm
+        name="Defaults"
+        canEdit={editable}
+        dirty={staged.length > 0}
+        changes={staged.length}
+        saving={busy}
+        applies="immediately"
+        onSave={save}
+        onDiscard={() => setDraft({})}
+      >
+        <SettingSection title="Defaults" status={settingStatus({ dirty: staged.length > 0 })}>
+          <div className="divide-y divide-hairline">
+            {rows.map((row) => {
+              const value = draft[row.key] ?? row.current
+              const edited = row.editable && value !== row.current
+              return (
+                <div
+                  key={row.key}
+                  data-slot="firewall-default"
+                  data-edited={edited || undefined}
+                  className="relative flex min-h-12 min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2"
+                >
+                  {/* A staged change is marked down the row's edge in git's
+                      modified hue, the colour of a change not applied yet. */}
+                  {edited && (
+                    <span
+                      aria-hidden
+                      className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-[var(--git-modified)]"
+                    />
+                  )}
+                  <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                    {row.label}
+                    <InfoTip label={`About the ${row.label.toLowerCase()} default`}>
+                      {row.why}
+                    </InfoTip>
+                  </span>
+                  {row.editable ? (
+                    <Segments
+                      id={row.key === "logging" ? LOGGING_CONTROL : undefined}
+                      label={row.name}
+                      value={value}
+                      options={row.options.map((option) => ({ value: option, label: option }))}
+                      onChange={(next) => setDraft((held) => ({ ...held, [row.key]: next }))}
+                      disabled={busy}
+                    />
+                  ) : (
+                    <span className="text-body font-medium" data-testid={`default-${row.key}`}>
+                      {row.word}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </SettingSection>
+      </SettingForm>
+      <ConfirmDialog
+        request={review}
+        onOpenChange={(open) => {
+          if (open) return
+          setReview(null)
+          answer(false)
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * No firewall answered. Where this server's package manager carries ufw it is
+ * installed from here, as WireGuard and Tailscale are from the VPN page: it
+ * goes in switched off, so nothing is filtered until the reader turns it on
+ * behind the page's own check of the ways in. Elsewhere the page says what is
+ * missing and why it matters.
+ */
+function FirewallMissing({ reason, onInstalled }: { reason?: string; onInstalled: () => void }) {
+  const known = usePackageKnown("ufw")
+  const description =
+    reason ??
+    "Neither ufw, firewalld nor iptables answered. Without one, every port anything on this machine opens is reachable from wherever the machine is."
+  if (known === "known")
+    return (
+      <InstallHandoff
+        pkg="ufw"
+        products={["netfilter"]}
+        icon={Shield}
+        title="No firewall on this host"
+        description={`${description} ufw goes in switched off: nothing is filtered until you turn it on here.`}
+        onInstalled={onInstalled}
+        phases={false}
+      />
+    )
+  return (
+    <EmptyState
+      mark={<ProductLogos ids={["netfilter", "firewalld"]} />}
+      title="No firewall on this host"
+      description={description}
+    />
   )
 }
 
