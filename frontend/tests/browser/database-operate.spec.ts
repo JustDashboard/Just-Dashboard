@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Page } from "@playwright/test"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { risen } from "./risen"
 
 /**
  * A database's Access, Backups and Settings pages, and the verbs its menu
@@ -1353,6 +1354,9 @@ test("protecting a connection is one switch of the same form", async ({ page }) 
     })
 })
 
+/** The address, as the form the page's bar saves. */
+const address = (page: Page) => page.getByRole("form", { name: "Address" })
+
 test("a new password keeps every option the saved string carried, and is tested before it is saved", async ({
   page,
 }) => {
@@ -1372,35 +1376,43 @@ test("a new password keeps every option the saved string carried, and is tested 
     },
   })
   await visit(page, "/databases/1/settings")
-  await section(page, "address").getByRole("button", { name: "Edit", exact: true }).click()
 
-  // The saved string is read from the server, and what the fields do not cover is listed as kept.
-  const kept = dialog(page).locator("[data-slot=kept-options]")
+  // The fields are on the page, showing what the connection's row says, and the
+  // sealed string has not been asked for to draw them.
+  await expect(address(page).getByLabel("Host")).toHaveValue("127.0.0.1")
+  await expect(address(page).getByLabel("Port")).toHaveValue("5432")
+  await expect(address(page).getByLabel("Account")).toHaveValue("app")
+  await expect(address(page).getByLabel("shop_main", { exact: false })).toHaveCount(0)
+  // The password is not put into the page.
+  await expect(address(page).getByLabel("Password")).toHaveValue("")
+  await expect(saveBar(page)).toHaveCount(0)
+  expect(server.seen).not.toContain("GET 1/url")
+
+  // The first change reads it, and what the fields do not cover is listed as kept.
+  await address(page).getByLabel("Password").fill("wrong")
+  const kept = address(page).locator("[data-slot=kept-options]")
   await expect(kept).toContainText("sslmode=verify-full")
   await expect(kept).toContainText("connect_timeout=5")
-  await expect(dialog(page).getByLabel("Host")).toHaveValue("127.0.0.1")
-  await expect(dialog(page).getByLabel("Account")).toHaveValue("app")
-  // The password is not put back into the page.
-  await expect(dialog(page).getByLabel("Password")).toHaveValue("")
+  expect(server.seen.filter((one) => one === "GET 1/url")).toHaveLength(1)
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await expect(saveBar(page)).toContainText("Address · Applies immediately")
 
-  const save = dialog(page).getByRole("button", { name: "Save", exact: true })
-  await expect(save).toBeDisabled()
-  await dialog(page).getByLabel("Password").fill("wrong")
-  await dialog(page).getByRole("button", { name: "Test" }).click()
-  await expect(dialog(page)).toContainText("It refused the connection")
-  await expect(dialog(page)).toContainText("password authentication failed")
-  await expect(save).toBeDisabled()
+  // Test is the section's own verb, and dials what is typed.
+  const test = section(page, "address").getByRole("button", { name: "Test" })
+  await test.click()
+  await expect(address(page)).toContainText("It refused the connection")
+  await expect(address(page)).toContainText("password authentication failed")
 
-  await dialog(page).getByLabel("Password").fill("n3w p@ss")
+  await address(page).getByLabel("Password").fill("n3w p@ss")
   // What will be saved, with the password hidden.
-  await expect(dialog(page).locator("[data-slot=connection-preview]")).toHaveText(
+  await expect(address(page).locator("[data-slot=connection-preview]")).toHaveText(
     "postgres://app:••••••@127.0.0.1:5432/shop_main?sslmode=verify-full&connect_timeout=5",
   )
-  await dialog(page).getByRole("button", { name: "Test" }).click()
-  await expect(dialog(page).locator("[data-slot=test-result]")).toContainText(
+  await test.click()
+  await expect(address(page).locator("[data-slot=test-result]")).toContainText(
     "Answered: PostgreSQL 16.4",
   )
-  await save.click()
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
 
   const patched =
     "postgres://app:n3w%20p%40ss@127.0.0.1:5432/shop_main?sslmode=verify-full&connect_timeout=5"
@@ -1409,71 +1421,102 @@ test("a new password keeps every option the saved string carried, and is tested 
     .toEqual({
       dsn: patched,
     })
-  expect(server.sent.filter((one) => one.request === "POST /databases/test").at(-1)?.body).toEqual({
-    driver: "postgres",
-    dsn: patched,
-  })
+  // A string that has just answered is not dialled a second time to be saved.
+  const dialled = server.sent.filter((one) => one.request === "POST /databases/test")
+  expect(dialled.map((one) => one.body)).toEqual([
+    { driver: "postgres", dsn: patched.replace("n3w%20p%40ss", "wrong") },
+    { driver: "postgres", dsn: patched },
+  ])
+  // Saved, the page is clean again, and the string is not read a second time.
+  await expect(saveBar(page).getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
+  await expect(address(page).getByLabel("Password")).toHaveValue("")
+  expect(server.seen.filter((one) => one === "GET 1/url")).toHaveLength(1)
 })
 
-test("typed work in a dialog is not lost to Escape, and a save without a test is the reader's to say", async ({
+test("a save dials the new address first, and one that does not answer is saved only when the reader says so", async ({
   page,
 }) => {
-  const server = await mockOperate(page, { answers: { "PUT 1": { id: 1 } } })
+  const server = await mockOperate(page, {
+    answers: {
+      "POST /databases/test": { ok: false, error: "dial tcp 10.0.0.9:5432: connection refused" },
+      "PUT 1": { id: 1 },
+    },
+  })
   await visit(page, "/databases/1/settings")
-  await section(page, "address").getByRole("button", { name: "Edit", exact: true }).click()
-  await expect(dialog(page).getByLabel("Host")).toHaveValue("127.0.0.1")
-  await dialog(page).getByLabel("Host").fill("db.internal")
+  await address(page).getByLabel("Host").fill("db.internal")
+  await expect(section(page, "address")).toContainText("Unsaved changes")
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
 
-  await page.keyboard.press("Escape")
-  await expect(dialog(page)).toContainText("Close and lose what you entered?")
-  await dialog(page).getByRole("button", { name: "Keep editing" }).click()
-  await expect(dialog(page).getByLabel("Host")).toHaveValue("db.internal")
+  // It was dialled, it refused, and nothing was written.
+  await expect(address(page)).toContainText("It refused the connection")
+  await expect(address(page)).toContainText("connection refused")
+  const moved =
+    "postgres://app:s3cret@db.internal:5432/shop_main?sslmode=verify-full&connect_timeout=5"
+  expect(server.sent.map((one) => [one.request, one.body])).toEqual([
+    ["POST /databases/test", { driver: "postgres", dsn: moved }],
+  ])
+  // The form is as the reader left it, and still to be saved.
+  await expect(address(page).getByLabel("Host")).toHaveValue("db.internal")
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await expect(section(page, "address")).toContainText("Not saved")
 
-  const save = dialog(page).getByRole("button", { name: "Save", exact: true })
-  await expect(save).toBeDisabled()
-  await dialog(page)
-    .getByRole("switch", { name: /Save it without testing/ })
-    .click()
-  await save.click()
+  await address(page).getByRole("button", { name: "Save it untested" }).click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "PUT 1")?.body)
-    .toEqual({
-      dsn: "postgres://app:s3cret@db.internal:5432/shop_main?sslmode=verify-full&connect_timeout=5",
-    })
+    .toEqual({ dsn: moved })
+  await expect(saveBar(page).getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
 })
 
-test("the two editors of the address are one string, and a closed dialog gives the keyboard back", async ({
+test("a refused save of the address keeps what was typed, with the server's words", async ({
   page,
 }) => {
-  await mockOperate(page)
+  await mockOperate(page, {
+    answers: {
+      "POST /databases/test": { ok: true, version: "PostgreSQL 16.4" },
+      "PUT 1": refusal("invalid_input", "the connection string names no database"),
+    },
+  })
   await visit(page, "/databases/1/settings")
-  const edit = section(page, "address").getByRole("button", { name: "Edit", exact: true })
-  await edit.click()
-  const fields = dialog(page).getByRole("radio", { name: "Fields" })
-  const whole = dialog(page).getByRole("radio", { name: "Whole string" })
-  const string = dialog(page).getByLabel("Connection string")
+  await address(page).getByLabel("Port").fill("5433")
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
+  await expect(address(page).getByRole("alert")).toContainText(
+    "It was not saved. the connection string names no database",
+  )
+  await expect(address(page).getByLabel("Port")).toHaveValue("5433")
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+})
+
+test("the two editors of the address are one string, and Discard puts the saved one back", async ({
+  page,
+}) => {
+  const server = await mockOperate(page)
+  await visit(page, "/databases/1/settings")
+  const fields = address(page).getByRole("radio", { name: "Fields" })
+  const whole = address(page).getByRole("radio", { name: "Whole string" })
+  const string = address(page).getByLabel("Connection string")
   const options = "?sslmode=verify-full&connect_timeout=5"
 
-  await expect(dialog(page).getByLabel("Host")).toHaveValue("127.0.0.1")
-  await dialog(page).getByLabel("Host").fill("localhost")
+  await address(page).getByLabel("Host").fill("localhost")
   await whole.click()
   await expect(string).toHaveValue(`postgres://app:s3cret@localhost:5432/shop_main${options}`)
+  // It is drawn as a password is: a connection string is one with an address round it.
+  await expect(string).toHaveAttribute("type", "password")
   // Back to the fields and on: the whole string follows every field, not only the first visit.
   await fields.click()
-  await dialog(page).getByLabel("Port").fill("5433")
+  await address(page).getByLabel("Port").fill("5433")
   await whole.click()
   await expect(string).toHaveValue(`postgres://app:s3cret@localhost:5433/shop_main${options}`)
 
   // A string retyped whole is what the fields are then laid over.
   await string.fill("postgres://app:s3cret@db.internal:6000/shop_main?sslmode=require")
   await fields.click()
-  await expect(dialog(page).getByLabel("Host")).toHaveValue("db.internal")
-  await expect(dialog(page).getByLabel("Port")).toHaveValue("6000")
-  await expect(dialog(page).locator("[data-slot=kept-options]")).toContainText("sslmode=require")
-  await expect(dialog(page).locator("[data-slot=kept-options]")).not.toContainText(
+  await expect(address(page).getByLabel("Host")).toHaveValue("db.internal")
+  await expect(address(page).getByLabel("Port")).toHaveValue("6000")
+  await expect(address(page).locator("[data-slot=kept-options]")).toContainText("sslmode=require")
+  await expect(address(page).locator("[data-slot=kept-options]")).not.toContainText(
     "connect_timeout",
   )
-  await expect(dialog(page).locator("[data-slot=connection-preview]")).toHaveText(
+  await expect(address(page).locator("[data-slot=connection-preview]")).toHaveText(
     "postgres://app:••••••@db.internal:6000/shop_main?sslmode=require",
   )
 
@@ -1482,15 +1525,38 @@ test("the two editors of the address are one string, and a closed dialog gives t
   await string.fill("not an address")
   await fields.click()
   await expect(whole).toBeChecked()
-  await expect(dialog(page)).toContainText("The fields cannot take this string apart")
+  await expect(address(page)).toContainText("The fields cannot take this string apart")
 
-  await page.keyboard.press("Escape")
-  await dialog(page).getByRole("button", { name: "Discard" }).click()
-  await expect(dialog(page)).toHaveCount(0)
-  await expect(edit).toBeFocused()
+  await saveBar(page).getByRole("button", { name: "Discard" }).click()
+  await expect(saveBar(page).getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
+  await expect(fields).toBeChecked()
+  await expect(address(page).getByLabel("Host")).toHaveValue("127.0.0.1")
+  await expect(address(page).getByLabel("Port")).toHaveValue("5432")
+  // Nothing was sent by any of it.
+  expect(server.sent).toEqual([])
 })
 
-test("publishing a server is two answers with their consequences, confirmed with the rule named", async ({
+test("a row that cannot be opened is repaired by typing its string whole", async ({ page }) => {
+  const server = await mockOperate(page, {
+    rows: { 1: { broken: true, brokenReason: "The saved string cannot be unsealed." } },
+    answers: {
+      "POST /databases/test": { ok: true, version: "PostgreSQL 16.4" },
+      "PUT 1": { id: 1 },
+    },
+  })
+  await visit(page, "/databases/1/settings")
+  await expect(section(page, "address")).toContainText("The saved string cannot be unsealed.")
+  await expect(address(page).getByRole("radio", { name: "Whole string" })).toBeChecked()
+  await address(page).getByLabel("Connection string").fill("postgres://app:pw@127.0.0.1:5432/shop")
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
+  await expect
+    .poll(() => server.sent.find((one) => one.request === "PUT 1")?.body)
+    .toEqual({ dsn: "postgres://app:pw@127.0.0.1:5432/shop" })
+  // There was no string to read, and none was asked for.
+  expect(server.seen).not.toContain("GET 1/url")
+})
+
+test("publishing a server is an answer saved by the bar, confirmed with the rule named", async ({
   page,
 }) => {
   const server = await mockOperate(page, {
@@ -1503,13 +1569,19 @@ test("publishing a server is two answers with their consequences, confirmed with
   })
   await visit(page, "/databases/1/settings/network")
   const reach = section(page, "reachability")
-  await expect(reach).toContainText("ufw is on, and port 5432 is closed.")
-  const group = reach.getByRole("group", { name: "Where it is reachable from" })
-  await expect(group.getByRole("button", { name: /This server only/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
+  // What the firewall does about the port is the caption of whoever it keeps out.
+  await expect(reach.getByRole("list", { name: "Who can reach it" })).toContainText(
+    "ufw keeps port 5432 closed",
   )
-  await group.getByRole("button", { name: /Anywhere/ }).click()
+  const group = reach.getByRole("radiogroup", { name: "Where it is reachable from" })
+  await expect(group.getByRole("radio", { name: "This server" })).toBeChecked()
+  await group.getByRole("radio", { name: "Anywhere" }).click()
+
+  // Choosing is an edit: nothing is asked and nothing is sent until it is saved.
+  await expect(dialog(page)).toHaveCount(0)
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  expect(server.sent).toEqual([])
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
 
   await expect(dialog(page)).toContainText("shop-db")
   await expect(dialog(page)).toContainText("adds a rule to ufw that allows port 5432 from anywhere")
@@ -1541,12 +1613,20 @@ test("a binding that is not the dashboard's to change says whose it is, and offe
   await expect(reach.locator("[data-slot=reach-refusal]")).toContainText(
     "belongs to the compose project stack",
   )
-  await expect(reach.getByRole("group", { name: "Where it is reachable from" })).toHaveCount(0)
-  // A published port is a reading of state, said as one.
-  await expect(reach).toContainText("Anything that can reach this machine can try it")
+  await expect(reach.getByRole("radiogroup", { name: "Where it is reachable from" })).toHaveCount(0)
+  // A published port is a reading of state, said on the picture in amber.
+  await expect(reach.locator("[data-slot=reach-warning]")).toContainText(
+    "only this machine's networks get through, for now",
+  )
+  await expect(reach.getByRole("list", { name: "Who can reach it" })).toContainText(
+    "compose project stack",
+  )
 })
 
-test("parameters are grouped, searchable, and changed with what ran shown afterwards", async ({
+/** The strip at the head of a settings column: what the server has stored and not yet read. */
+const strip = (page: Page) => page.getByRole("region", { name: "Waiting for a restart" })
+
+test("parameters are grouped, searchable, and changed in their rows with what ran shown afterwards", async ({
   page,
 }) => {
   const server = await mockOperate(page, {
@@ -1570,23 +1650,30 @@ test("parameters are grouped, searchable, and changed with what ran shown afterw
   // Its headings are the engine's own, each with how many it holds.
   await expect(parameters.getByRole("button", { name: /Resource Usage/ })).toBeVisible()
   await expect(parameters.getByRole("button", { name: /Write-Ahead Log/ })).toBeVisible()
-  // What waits for a restart is said at the top, as something to act on.
-  await expect(parameters).toContainText("1 parameter is stored and not yet in effect")
+  // What waits for a restart is said once, at the head of the column, by name.
+  await expect(strip(page)).toContainText("1 waiting for a restart")
+  await expect(strip(page)).toContainText("shared_buffers")
+  await expect(parameters).not.toContainText("stored and not yet in effect")
 
   await parameters.getByLabel("Filter the parameters").fill("bgwriter")
   const row = parameters.locator("[data-parameter=bgwriter_delay]")
-  await expect(row).toContainText("210")
+  const value = row.getByLabel("Change bgwriter_delay")
+  await expect(value).toHaveValue("210")
   await expect(row).toContainText("changed")
+  await expect(row).toContainText("default 200")
   await expect(parameters.locator("[data-parameter]")).toHaveCount(1)
   // The search is in the address, so a link can name a parameter.
   await expect.poll(() => where(page)).toBe("/databases/1/settings/parameters?q=bgwriter")
 
-  await row.getByRole("button", { name: "Change bgwriter_delay" }).click()
-  const save = dialog(page).getByRole("button", { name: "Save", exact: true })
-  await dialog(page).getByLabel("Value").fill("5")
-  await expect(dialog(page)).toContainText("Between 10 and 10000 ms.")
+  // The value is the control. One out of range is said under it, and holds Save.
+  const save = saveBar(page).getByRole("button", { name: "Save", exact: true })
+  await value.fill("5")
+  await expect(row.getByRole("alert")).toHaveText(/Between 10 and 10000 ms\./)
   await expect(save).toBeDisabled()
-  await dialog(page).getByLabel("Value").fill("250")
+  await value.fill("250")
+  await expect(row).toContainText("unsaved")
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await expect(saveBar(page)).toContainText("Server parameters · Applies immediately")
   await save.click()
   await expect(parameters.locator("[data-slot=parameter-change]")).toContainText(
     `ALTER SYSTEM SET "bgwriter_delay" = '250'`,
@@ -1596,14 +1683,16 @@ test("parameters are grouped, searchable, and changed with what ran shown afterw
     name: "bgwriter_delay",
     value: "250",
   })
-  // An engine with a default to reset to offers that, in the dialog, and no second way back.
+  // An engine with a default to reset to offers that, in the row, and no second way back.
   await expect(
     parameters.locator("[data-slot=parameter-change]").getByRole("button", { name: /^Put back/ }),
   ).toHaveCount(0)
 
-  // One that is not the default can be put back to it.
-  await row.getByRole("button", { name: "Change bgwriter_delay" }).click()
-  await dialog(page).getByRole("button", { name: "Reset to default" }).click()
+  // One that is not the default can be put back to it, by the same Save.
+  await row.getByRole("button", { name: "Reset bgwriter_delay to its default" }).click()
+  await expect(value).toHaveValue("200")
+  await expect(row).toContainText("resets")
+  await save.click()
   await expect(parameters.locator("[data-slot=parameter-change]")).toContainText(
     'ALTER SYSTEM RESET "bgwriter_delay"',
   )
@@ -1611,6 +1700,130 @@ test("parameters are grouped, searchable, and changed with what ran shown afterw
     name: "bgwriter_delay",
     reset: true,
   })
+})
+
+test("several parameters are saved by one press, one request each, and a refused one keeps its value", async ({
+  page,
+}) => {
+  const server = await mockOperate(page, {
+    answers: {
+      "PUT 1/settings": (_call: number, _url: URL, body: unknown) => {
+        const sent = body as { name: string; value: string }
+        if (sent.name === "work_mem") {
+          return refusal("invalid_input", "work_mem is outside the range the server takes")
+        }
+        return {
+          name: sent.name,
+          value: sent.value,
+          statements: [`ALTER SYSTEM SET "${sent.name}" = '${sent.value}'`],
+          persisted: true,
+          restartRequired: sent.name === "wal_level",
+        }
+      },
+    },
+  })
+  await visit(page, "/databases/1/settings/parameters")
+  const parameters = section(page, "parameters")
+  const search = parameters.getByLabel("Filter the parameters")
+  // Each is edited where it is listed; the edits are kept while the list is searched.
+  await search.fill("bgwriter")
+  await parameters.getByLabel("Change bgwriter_delay").fill("250")
+  await search.fill("work_mem")
+  await parameters.getByLabel("Change work_mem").fill("8192")
+  await search.fill("wal_level")
+  await parameters
+    .locator("[data-parameter=wal_level]")
+    .getByRole("radio", { name: "logical" })
+    .click()
+  await expect(saveBar(page)).toContainText("3 unsaved changes")
+  // What is typed joins what waits, on the strip, by name.
+  await expect(strip(page)).toContainText("1 waiting for a restart · 3 unsaved changes")
+  await expect(strip(page)).toContainText("wal_level")
+
+  await search.fill("")
+  // A closed heading says it holds unsaved work.
+  await expect(parameters.getByRole("button", { name: /Resource Usage/ })).toContainText(
+    "2 unsaved",
+  )
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
+  await expect
+    .poll(() => server.sent.filter((one) => one.request === "PUT 1/settings").length)
+    .toBe(3)
+  // In the order the server lists them, each with only its own name and value.
+  expect(
+    server.sent.filter((one) => one.request === "PUT 1/settings").map((one) => one.body),
+  ).toEqual([
+    { name: "work_mem", value: "8192" },
+    { name: "bgwriter_delay", value: "250" },
+    { name: "wal_level", value: "logical" },
+  ])
+  const change = parameters.locator("[data-slot=parameter-change]")
+  await expect(change).toContainText("bgwriter_delay: Now 250 ms. In effect now.")
+  await expect(change).toContainText(
+    "wal_level: Now logical. Stored. It takes effect when the server is restarted.",
+  )
+  // The one the server refused is still to be saved, as it was typed, with the server's words.
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await expect(parameters).toContainText("Not saved")
+  await search.fill("work_mem")
+  const refused = parameters.locator("[data-parameter=work_mem]")
+  await expect(refused.getByLabel("Change work_mem")).toHaveValue("8192")
+  await expect(refused.getByRole("alert")).toContainText("outside the range the server takes")
+  // Discard puts it back.
+  await saveBar(page).getByRole("button", { name: "Discard" }).click()
+  await expect(refused.getByLabel("Change work_mem")).toHaveValue("4096")
+})
+
+test("what waits for a restart is restarted from the head of the page, after being asked", async ({
+  page,
+}) => {
+  const server = await mockOperate(page, {
+    answers: {
+      "POST 1/power": { action: "restart", via: "docker", target: "shop-db", state: "running" },
+    },
+  })
+  await visit(page, "/databases/1/settings/parameters")
+  await strip(page).locator("xpath=..").getByRole("button", { name: "Restart" }).click()
+  await expect(dialog(page)).toContainText("Restart shop")
+  await expect(dialog(page)).toContainText("Every session on it is disconnected")
+  expect(server.sent).toEqual([])
+  await dialog(page).getByRole("button", { name: "Restart", exact: true }).click()
+  await expect
+    .poll(() => server.sent.find((one) => one.request === "POST 1/power")?.body)
+    .toEqual({ action: "restart" })
+
+  // The same strip is at the head of every settings page, with the way to the parameter.
+  await visit(page, "/databases/1/settings")
+  await expect(strip(page)).toContainText("1 waiting for a restart")
+  await strip(page)
+    .getByRole("link", { name: /shared_buffers/ })
+    .click()
+  await expect.poll(() => where(page)).toBe("/databases/1/settings/parameters?q=shared_buffers")
+})
+
+test("an edit never makes the strip arrive, and a server with nothing waiting has none", async ({
+  page,
+}) => {
+  await mockOperate(page, {
+    answers: {
+      "GET 1/settings": {
+        ...SETTINGS,
+        settings: SETTINGS.settings.map((one) => ({ ...one, pendingRestart: false })),
+      },
+    },
+  })
+  // Tall enough that typing in the field scrolls nothing.
+  await page.setViewportSize({ width: 1280, height: 1400 })
+  await visit(page, "/databases/1/settings")
+  const name = page.getByRole("form", { name: "Connection labels" }).getByLabel("Name")
+  await expect(name).toHaveValue("shop")
+  await risen(page)
+  const before = await name.boundingBox()
+  await name.fill("shop two")
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await expect(strip(page)).toHaveCount(0)
+  // The field being typed in is where it was.
+  expect((await name.boundingBox())?.y).toBe(before?.y)
 })
 
 test("a chip pressed right after typing keeps the search that was typed", async ({ page }) => {
@@ -1647,10 +1860,31 @@ test("a parameter says what it is: waiting for a restart, withheld, or not the r
   await parameters.getByLabel("Filter the parameters").fill("conninfo")
   // A withheld value is said to be hidden: it is never drawn as empty.
   await expect(parameters.locator("[data-parameter=primary_conninfo]")).toContainText("hidden")
-  await expect(parameters.getByRole("button", { name: "Change primary_conninfo" })).toHaveCount(0)
+  await expect(parameters.getByLabel("Change primary_conninfo")).toHaveCount(0)
   await parameters.getByLabel("Filter the parameters").fill("server_version")
   await expect(parameters.locator("[data-parameter=server_version]")).toBeVisible()
-  await expect(parameters.getByRole("button", { name: "Change server_version" })).toHaveCount(0)
+  await expect(parameters.getByLabel("Change server_version")).toHaveCount(0)
+})
+
+test("a parameter's row is one height, whatever it has to say", async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await mockOperate(page)
+    await visit(page, "/databases/1/settings/parameters?q=e")
+    const rows = section(page, "parameters").locator("[data-parameter]")
+    await expect(rows.first()).toBeVisible()
+    await risen(page)
+    // One with a description, a unit, a default and a tag beside one with none of them.
+    // Inside its hairline, which the last row under a heading does not have.
+    const heights = await rows.evaluateAll((all) => all.map((row) => row.clientHeight))
+    expect(heights.length).toBeGreaterThan(4)
+    expect(new Set(heights).size, `rows at ${width}: ${heights.join(", ")}`).toBe(1)
+    // Editing one, and its value being out of range, moves nothing under it.
+    const next = await rows.nth(1).boundingBox()
+    await rows.first().getByRole("textbox").first().fill("not a number")
+    await expect(rows.first().getByRole("alert")).toBeVisible()
+    expect((await rows.nth(1).boundingBox())?.y).toBe(next?.y)
+  }
 })
 
 test("a closed set and a yes/no are set by their own words", async ({ page }) => {
@@ -1667,10 +1901,12 @@ test("a closed set and a yes/no are set by their own words", async ({ page }) =>
   })
   await visit(page, "/databases/1/settings/parameters?q=wal_level")
   const parameters = section(page, "parameters")
-  await parameters.getByRole("button", { name: "Change wal_level" }).click()
-  await expect(dialog(page)).toContainText("takes effect only when the server is restarted")
-  await dialog(page).getByRole("radio", { name: "logical" }).click()
-  await dialog(page).getByRole("button", { name: "Save", exact: true }).click()
+  const row = parameters.locator("[data-parameter=wal_level]")
+  // That it waits for a restart is said on the row before anything is changed.
+  await expect(row).toContainText("restart to apply")
+  await expect(row.getByRole("radio", { name: "replica" })).toBeChecked()
+  await row.getByRole("radio", { name: "logical" }).click()
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
   await expect(parameters.locator("[data-slot=parameter-change]")).toContainText(
     "It takes effect when the server is restarted.",
   )
@@ -1678,6 +1914,11 @@ test("a closed set and a yes/no are set by their own words", async ({ page }) =>
     name: "wal_level",
     value: "logical",
   })
+  // A yes/no is the engine's own two words.
+  await parameters.getByLabel("Filter the parameters").fill("fsync")
+  const fsync = parameters.locator("[data-parameter=fsync]")
+  await expect(fsync.getByRole("radio", { name: "on" })).toBeChecked()
+  await expect(fsync.getByRole("radio", { name: "off" })).toBeVisible()
 })
 
 test("a key–value server's parameters are its own configuration, and a secret is write-only", async ({
@@ -1696,11 +1937,18 @@ test("a key–value server's parameters are its own configuration, and a secret 
   expect(server.seen).not.toContain("GET 4/settings")
 
   await parameters.getByLabel("Filter the parameters").fill("requirepass")
-  await expect(parameters.locator("[data-parameter=requirepass]")).toContainText("set")
+  // A secret is never sent back: its field is empty and says only that one is set.
+  const secret = parameters.getByLabel("Change requirepass")
+  await expect(secret).toHaveValue("")
+  await expect(secret).toHaveAttribute("placeholder", "set")
+  await expect(secret).toHaveAttribute("type", "password")
   await parameters.getByLabel("Filter the parameters").fill("slowlog")
-  await parameters.getByRole("button", { name: "Change slowlog-max-len" }).click()
-  await dialog(page).getByLabel("Value").fill("256")
-  await dialog(page).getByRole("button", { name: "Save", exact: true }).click()
+  await parameters.getByLabel("Change slowlog-max-len").fill("256")
+  // Written to the configuration file too, unless the reader says otherwise.
+  await expect(
+    parameters.getByRole("switch", { name: /Write changes to the configuration file/ }),
+  ).toBeChecked()
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "PUT 4/redis/config")?.body)
     .toEqual({
@@ -1848,21 +2096,27 @@ test("a role that may not administer reads the settings and changes none of them
   await visit(page, "/databases/1/settings")
   await expect(section(page, "connection")).toContainText("shop")
   await expect(page.getByRole("form", { name: "Connection labels" })).toHaveCount(0)
-  await expect(
-    section(page, "address").getByRole("button", { name: "Edit", exact: true }),
-  ).toHaveCount(0)
+  // The address is read as its picture and tested; its fields are not drawn.
+  await expect(page.getByRole("form", { name: "Address" })).toHaveCount(0)
+  await expect(section(page, "address").getByRole("textbox")).toHaveCount(0)
+  await expect(section(page, "address").getByRole("button", { name: "Test" })).toBeVisible()
   await expect(rail(page).getByRole("link", { name: "Danger zone" })).toHaveCount(0)
   await visit(page, "/databases/1/settings/danger")
   await expect(section(page, "danger")).toHaveCount(0)
   await expect(page.getByText("The danger zone is an administrator's")).toBeVisible()
   await visit(page, "/databases/1/settings/extensions")
   await expect(
-    section(page, "extensions").getByRole("button", { name: /^(Enable|Disable) / }),
+    section(page, "extensions").getByRole("button", { name: /^(Enable|Update|More for) / }),
   ).toHaveCount(0)
   await visit(page, "/databases/1/settings/parameters")
   await section(page, "parameters").getByLabel("Filter the parameters").fill("work_mem")
-  await expect(section(page, "parameters").locator("[data-parameter=work_mem]")).toBeVisible()
-  await expect(section(page, "parameters").getByRole("button", { name: /^Change / })).toHaveCount(0)
+  await expect(section(page, "parameters").locator("[data-parameter=work_mem]")).toContainText(
+    "4096",
+  )
+  await expect(section(page, "parameters").getByLabel(/^Change /)).toHaveCount(0)
+  // What waits is said to every role; restarting is for one that may interrupt the server.
+  await expect(strip(page)).toContainText("1 waiting for a restart")
+  await expect(page.getByRole("button", { name: "Restart", exact: true })).toHaveCount(0)
   // The addresses and the firewall are an administrator's read: it is not asked.
   await visit(page, "/databases/1/settings/network")
   await expect(section(page, "reachability")).toContainText("an administrator")
@@ -1883,10 +2137,11 @@ test("a protected connection keeps its labels editable and offers nothing that c
   ).toBeChecked()
   await visit(page, "/databases/1/settings/parameters")
   await section(page, "parameters").getByLabel("Filter the parameters").fill("work_mem")
-  await expect(section(page, "parameters").getByRole("button", { name: /^Change / })).toHaveCount(0)
+  await expect(section(page, "parameters").locator("[data-parameter=work_mem]")).toBeVisible()
+  await expect(section(page, "parameters").getByLabel(/^Change /)).toHaveCount(0)
   await visit(page, "/databases/1/settings/extensions")
   await expect(
-    section(page, "extensions").getByRole("button", { name: /^(Enable|Disable) / }),
+    section(page, "extensions").getByRole("button", { name: /^(Enable|Update|More for) / }),
   ).toHaveCount(0)
   await visit(page, "/databases/1/settings/danger")
   await expect(section(page, "danger")).toContainText("This connection is protected")
@@ -2798,7 +3053,7 @@ for (const [label, viewport] of [
   })
 }
 
-test("the restore dialog and the address editor keep the rules", async ({ page }) => {
+test("the restore dialog and the settings forms mid-edit keep the rules", async ({ page }) => {
   await mockOperate(page)
   await visit(page, "/databases/1/backups")
   await dumpRow(page, "shop_main-new.dump")
@@ -2811,14 +3066,135 @@ test("the restore dialog and the address editor keep the rules", async ({ page }
   await expect(dialog(page).getByLabel("Note")).toBeVisible()
   await keepsTheRules(page, "the dump dialog", true)
 
-  await visit(page, "/databases/1/settings")
-  await section(page, "address").getByRole("button", { name: "Edit", exact: true }).click()
-  await expect(dialog(page).locator("[data-slot=kept-options]")).toBeVisible()
-  await keepsTheRules(page, "the address editor", true)
-  await page.keyboard.press("Escape")
-  await visit(page, "/databases/1/settings/parameters")
-  await section(page, "parameters").getByLabel("Filter the parameters").fill("wal_level")
-  await section(page, "parameters").getByRole("button", { name: "Change wal_level" }).click()
-  await expect(dialog(page).getByRole("radio", { name: "logical" })).toBeVisible()
-  await keepsTheRules(page, "the parameter dialog", true)
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    // The address with its string read, an edit held and the bar up.
+    await visit(page, "/databases/1/settings")
+    await address(page).getByLabel("Host").fill("db.internal")
+    await expect(address(page).locator("[data-slot=connection-preview]")).toBeVisible()
+    await expect(saveBar(page)).toBeVisible()
+    await keepsTheRules(page, `the address being edited at ${width}`)
+    // A parameter being changed, with one out of range.
+    await visit(page, "/databases/1/settings/parameters?q=e")
+    await section(page, "parameters").getByLabel("Change work_mem").fill("1")
+    await expect(
+      section(page, "parameters").locator("[data-parameter=work_mem]").getByRole("alert"),
+    ).toBeVisible()
+    await keepsTheRules(page, `a parameter being edited at ${width}`)
+  }
+})
+
+test("the settings pages, for the record @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to take the screenshots")
+  test.setTimeout(300_000)
+  const shots = process.env.JD_SHOTS
+  const shot = async (name: string, width: number) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await risen(page)
+    await page.screenshot({ path: `${shots}/after-${name}-${width}.png`, fullPage: true })
+  }
+  const calm = {
+    ...SETTINGS,
+    settings: SETTINGS.settings.map((one) => ({ ...one, pendingRestart: false })),
+  }
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+
+    // General, with nothing waiting: the address as fields under its picture.
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockOperate(page, {
+      answers: {
+        "GET 1/settings": calm,
+        "POST /databases/test": { ok: false, error: "dial tcp 10.0.0.9:5432: connection refused" },
+      },
+    })
+    await visit(page, "/databases/1/settings")
+    await expect(address(page).getByLabel("Host")).toHaveValue("127.0.0.1")
+    await shot("general-full", width)
+    // An edit held: the string read, what is kept listed, the bar up.
+    await address(page).getByLabel("Host").fill("db.internal")
+    await page.getByRole("form", { name: "Connection labels" }).getByLabel("Notes").fill("Orders")
+    await expect(address(page).locator("[data-slot=connection-preview]")).toBeVisible()
+    await shot("general-unsaved", width)
+    await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
+    await expect(address(page)).toContainText("It refused the connection")
+    await shot("general-refused", width)
+
+    // The same page on a server with a value waiting for a restart, and for a role that reads.
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockOperate(page)
+    await visit(page, "/databases/1/settings")
+    await expect(strip(page)).toBeVisible()
+    await shot("general-waiting", width)
+    await visit(page, "/databases/7/settings")
+    await expect(section(page, "address")).toBeVisible()
+    await shot("general-file", width)
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockOperate(page, { capabilities: LIMITED })
+    await visit(page, "/databases/1/settings")
+    await expect(section(page, "connection")).toContainText("shop")
+    await shot("general-readonly", width)
+
+    // Parameters: the headings, the rows, an edit, and what ran.
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockOperate(page, {
+      answers: {
+        "PUT 1/settings": (_call: number, _url: URL, body: unknown) => {
+          const sent = body as { name: string; value: string }
+          return {
+            name: sent.name,
+            value: sent.value,
+            statements: [`ALTER SYSTEM SET "${sent.name}" = '${sent.value}'`],
+            persisted: true,
+            restartRequired: sent.name === "wal_level",
+          }
+        },
+      },
+    })
+    await visit(page, "/databases/1/settings/parameters")
+    const parameters = section(page, "parameters")
+    await expect(parameters.getByRole("button", { name: /Resource Usage/ })).toBeVisible()
+    await shot("parameters-full", width)
+    await visit(page, "/databases/1/settings/parameters?q=e")
+    await expect(parameters.locator("[data-parameter]").first()).toBeVisible()
+    await shot("parameters-rows", width)
+    await parameters.getByLabel("Change bgwriter_delay").fill("250")
+    await parameters.getByLabel("Change work_mem").fill("1")
+    await parameters
+      .locator("[data-parameter=wal_level]")
+      .getByRole("radio", { name: "logical" })
+      .click()
+    await expect(saveBar(page)).toContainText("3 unsaved changes")
+    await shot("parameters-unsaved", width)
+    await parameters.getByLabel("Change work_mem").fill("8192")
+    await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
+    await expect(parameters.locator("[data-slot=parameter-change]")).toBeVisible()
+    await expect(saveBar(page).getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
+    await shot("parameters-saved", width)
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockOperate(page, { capabilities: LIMITED })
+    await visit(page, "/databases/1/settings/parameters?q=e")
+    await expect(parameters.locator("[data-parameter]").first()).toBeVisible()
+    await shot("parameters-readonly", width)
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockOperate(page, {
+      answers: {
+        "GET 1/settings": refusal("query_failed", "permission denied for view pg_settings", 502),
+      },
+    })
+    await visit(page, "/databases/1/settings/parameters")
+    await expect(parameters).toContainText("Could not read the parameters")
+    await shot("parameters-failed", width)
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockOperate(page)
+    await visit(page, "/databases/4/settings/parameters?q=m")
+    await expect(parameters.locator("[data-parameter]").first()).toBeVisible()
+    await shot("parameters-keyvalue", width)
+
+    // The two pages with nothing of their own: under the same strip.
+    await visit(page, "/databases/1/settings/danger")
+    await expect(section(page, "danger")).toBeVisible()
+    await shot("danger-full", width)
+  }
 })
