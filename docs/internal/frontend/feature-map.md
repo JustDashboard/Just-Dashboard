@@ -1095,32 +1095,83 @@ unit-tested); checked by `tests/browser/processes-ui.spec.ts` and
 ### `/proxy/*`
 
 Proxy overview, Sites and site details, Certificates, Streams, Ports, Configuration, TLS tools and
-Traffic show observed inventories and records. Alerts (`/proxy/alerts`, administrators) is its own
+Traffic show observed inventories and records. Certificates keeps its views in the address
+(`?tab=`: certificates, renewal, DNS challenge, ACME accounts, local CA, signing requests, watched
+domains), and a certificate is a page of its own, `/proxy/certificates/<name>` with `?path=` where
+two share a name (`certificate-page.tsx`, its rail and picture; the shared console, forms and verbs
+in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are
 `components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's identity bar
-links there with the firing count. Site/stream configuration, certificate issuance/renewal,
+links there with the firing count. Ports (`/proxy/ports`) opens on its counts, a picture of which
+networks reach which listening programs and the list of sockets; each listening port has its own page
+(`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
+reach, owner, clients and history, and the list as a rail; the old `?socket=` sheet address opens
+it. Site/stream configuration, certificate issuance/renewal,
 requested TLS scans, nginx tests/lint and traffic diagnostics keep their own controls and
 authorization. The overview has no automatic attention list or domain suggestions. Certificate
 hygiene and finding snoozes are removed; nginx Settings exposes current values and edit constraints
 without advice or recommended values
 
+Streams (`/proxy/streams`, 0.8.7) opens on its identity line — the forwards as the services their
+ports are, the stream module's state, how many forward and how many are open to anyone, the hour's
+sessions, the verdict (a press narrows the list to what it counts) and New stream — then the wiring
+picture of the host's ports through nginx to where they go (`stream-picture.tsx`), the module and
+include steps where they are still to do (`stream-setup.tsx`), and the forwards as one-line rows,
+each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`).
+A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a rail from `xl`,
+`stream-rail.tsx`) holds what the traffic sheet and the edit form did: Overview (the forward drawn,
+what it carried as reading lines and its sessions and outcomes), Clients (with Deny or Allow),
+Connected now, and Settings (the form as a settings column with one save bar, administrators only),
+`?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
+`stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
+the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
+Configuration (`/proxy/config`) opens on nginx's directory as an identity line with Test config, the
+include picture over the files by folder, and for administrators What nginx loads, Settings (one
+column, one save bar, a reload switch), Lint and History as `?tab=` views; a file's revisions and
+restore are the config editor's History view (`?view=history`, the old `?history=` link lands
+there). Tunnel (`/proxy/tunnel`) opens on the tunnel's identity line with Check now, the picture of
+hostname → Cloudflare's edge → connector → this server, and the hostnames as one-line cards; not
+connected, the dashed picture, a choice of token or API and one form (administrators only).
+
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)
 
+Traffic (`/proxy/traffic`, every account) is the last hour across every site from
+`GET /proxy/traffic`: requests a minute, the failing share, the slowest site's response time in
+words and bytes sent, the hour by the minute, the sites busiest first (each opening its site page,
+where its requests are read), and nginx's error log grouped from `GET /proxy/errors` over a window,
+for every site or one (`?tab=errors&site=`). The old one-site address `?site=<name>` redirects to
+`/proxy/sites/<name>`. Checked by `tests/browser/proxy-traffic.spec.ts`; the logic is
+`components/proxy/site-traffic.ts` (unit-tested)
+
 ### `/network/*`
 
-Nineteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
+Eighteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
 rules, monitored egress groups, firewall, gateway/NAT, protections/blocklists,
 WireGuard/Tailscale/Headscale, resolver/hosts/lookup and private retained native DNS policy/trust
-evidence, traffic/shaping/eBPF, connections and tools. Connection path adds source/container
+evidence, traffic/shaping/eBPF, connections and tools. Connection path (a tool of the Tools
+workbench since 0.8.7; `/network/investigate` redirects to it) adds source/container
 evidence with explicit basis and scope, the native nginx stream on the destination port as observed
 evidence with the backend leg nginx logged for a measured connection, and each forwarding site's
 service policy; Saved runs adds bounded durable lifecycle, retention, export and compatible
-comparison, and lists the **Watched probes** beside them: TCP endpoints the proxy watch list's own
+comparison, each run a page of its own (`/network/runs/[id]`, `components/network/run-page.tsx`:
+Result, Compare, History and Details, with the list as a rail), and lists the **Watched probes**
+under them: TCP endpoints the proxy watch list's own
 monitor connects to on its schedule, with each connect time, check-now and stop for administrators
 (`components/network/watched-probes.tsx`, `lib/watched-probes.ts`), started from the TCP port
 check's **Watch on a schedule**; Packet captures adds bounded immutable scope, dated native
+progress/cleanup, original private PCAP access and separately redacted support export, each capture
+a page of its own (`/network/captures/[id]`, `components/network/capture-page.tsx`: the interface,
+filter and file as a picture, the record on a second view); reload never starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
+selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) read
+each group's policy and carrying member, every member measured through its own path (state, round
+trip, loss, a strip of recent samples, its mark, table and probe source), the rules' current advice,
+runtime readback and readiness, a decision timeline whose evidence opens on the routes before and
+after, the measurements and the connections moved, pinned and flushed, and the last simulation's
+expectations and phases; destructive confirmations guard fail over/fail back now, enable, disable,
+removal and turning automation on, which stays disabled until a passed simulation of the current
+configuration. Address planning joins held reservations with fresh overlap coverage and native owner
 progress/cleanup, original private PCAP access and separately redacted support export; reload never
 starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
 selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) are
@@ -1150,8 +1201,10 @@ tree) and drift names parameters changed in place, CAKE shows its measured per-c
 an upload profile, congestion control is compared on live sockets before and after a switch, eBPF
 programs open into maps, attachments and cost with the dashboard's observer marked, and an install
 is followed by configured/active/verified phases (`components/network/traffic/`, `install.tsx`);
-Connections opens an address into its tuples, closes and layers, reads a past hour from socket
-history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
+Connections opens on its identity line and picture, lists each address as a one-line card, gives an
+address a page of its own (`/network/connections/[address]`: its sockets, closes and layers, a past
+hour from socket history), and blocks with a reason, an end and an incident
+(`components/network/connections/`); VPN
 opts in to IPv6 addressing and separate egress with per-family evidence and translated-connection
 counts; each tunnel calls out stale always-on handshakes, captured transports and passed budgets,
 opens a record (endpoint evidence, trend, lifecycle with outcomes), and each peer's sheet adds its
