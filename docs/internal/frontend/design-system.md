@@ -601,7 +601,7 @@ exactly as it did and can be carried on. One another tab is answering is followe
 box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
 *Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
 read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot
-(`phone-panes.tsx`, which Git, Logs and the network tools share: `workspace-interactions.md`).
+(`phone-panes.tsx`, which Git, Logs, a project's Logs and the network tools share: `workspace-interactions.md`).
 
 A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
 on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in
