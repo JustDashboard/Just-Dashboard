@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils"
 import { Check, Globe, ListUnordered, LockOpen, Plus, ShieldCheck } from "@/components/icons"
 import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
-import { Skeleton } from "@/components/ui/skeleton"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
 import { fitColumn } from "@/components/wire-flow-model"
 import { compact, grown } from "@/components/network/gateway/reading"
@@ -34,8 +33,8 @@ export const PICTURE_ROWS = LISTS_DRAWN + 1
 
 // Four rows of a mark beside three lines, their gaps and the picture's own
 // padding. Wide only: a phone's picture is rows of marks, one height already.
-// The same frame holds the grey picture (`grey`), whose nodes are drawn on
-// the lines of real ones.
+// The same frame holds the waiting picture (`WireFlow`'s `loading`), whose
+// rows are drawn on the lines of real ones.
 const FRAME = "lg:grid lg:min-h-[18rem] lg:items-center"
 
 /** A list's mark on a wire: its first country's flag, else the glyph of its kind. */
@@ -142,25 +141,14 @@ export function ProtectionPicture({
     return (
       <div data-slot="protection-picture" data-loading aria-busy>
         <WireFlow
+          loading
           phone="marks"
           className={FRAME}
-          start={{ title: "Refused", nodes: grey("start", rows?.start ?? 3) }}
-          end={{ title: "Gets through", nodes: grey("end", rows?.end ?? 4) }}
-          hub={{
-            mark: <WireHost />,
-            eyebrow: "This server",
-            title: <Skeleton className="inline-block h-3 w-24 align-middle" />,
-            hint: (
-              <>
-                <span className="block">
-                  <Skeleton className="inline-block h-2.5 w-32 align-middle" />
-                </span>
-                <span className="block">
-                  <Skeleton className="inline-block h-2.5 w-20 align-middle" />
-                </span>
-              </>
-            ),
-          }}
+          start={{ title: "Refused", nodes: [], loadingRows: rows?.start ?? 3 }}
+          end={{ title: "Gets through", nodes: [], loadingRows: rows?.end ?? 4 }}
+          // Both lines the hub says under its name, on a phone too: its rows
+          // of marks stand where the drawn picture's will.
+          hub={{ mark: <WireHost />, eyebrow: "This server", loadingLines: { hint: 2 } }}
         />
       </div>
     )
@@ -382,29 +370,6 @@ export function ProtectionPicture({
       />
     </div>
   )
-}
-
-/**
- * The picture before its read: grey nodes on the lines of drawn ones, and a
- * hub with both of its hint's lines. They are nodes rather than `WireFlow`'s
- * own `loading` because on a phone that draws the hub's name and not the
- * lines under it, so the rows of marks stood two lines higher until the read
- * landed, and this picture is held to the drawn one's shape at both widths.
- */
-function grey(side: string, count: number): WireFlowNode[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `${side}:grey:${i}`,
-    placeholder: true,
-    mark: (size) => <Skeleton className={cn("rounded-xl", size === "sm" ? "size-9" : "size-11")} />,
-    eyebrow: <Skeleton className="inline-block h-2 w-14 align-middle" />,
-    title: <Skeleton className="inline-block h-3 w-28 align-middle" />,
-    hint: (
-      <span className="block">
-        <Skeleton className="inline-block h-2.5 w-24 align-middle" />
-      </span>
-    ),
-    line: { state: "up" },
-  }))
 }
 
 /** The rows each side of the picture holds for so many lists and limits, for the grey one. */

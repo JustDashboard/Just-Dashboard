@@ -352,6 +352,8 @@ for (const width of [1280, 390]) {
     const picture = page.locator('[data-slot="wire-flow"]')
     const table = page.getByRole("region", { name: "Checks", exact: true })
     await expect(picture.locator('[data-slot="skeleton"]').first()).toBeVisible()
+    // The waiting picture is the shared one's own, not grey nodes of this page's.
+    await expect(picture).toHaveAttribute("data-loading", "true")
     const before = {
       identity: await top(page, identity),
       picture: await top(page, picture),
