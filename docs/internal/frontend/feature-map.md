@@ -1344,6 +1344,16 @@ each row's menu; an address the firewall already denies reads "blocked"), and th
 "N new logins · Show"). Checked by `security-logins.spec.ts` and `security-ui.spec.ts`; captures of
 every state with `JD_SECURITY_SHOTS=<folder>` and `security-logins-shots.spec.ts`
 
+Intrusion (0.8.7) is an identity line, a picture of the internet, this server and the three
+engines, and one engine at a time as a view in the address: `?tab=fail2ban`, `crowdsec`, `suricata`
+or `blocked` (every engine's refused addresses folded by address). Without `tab` it opens on the
+first engine that is installed. A jail is a page, `/security/intrusion/jails/[jail]`: what it holds
+with Unban and Never ban again on each address, its policy, and Ban an address, Tune and Release
+every ban as its verbs. One form bans through CrowdSec or a jail. A stopped fail2ban is started
+from the page (`POST /systemd/fail2ban.service/start`, `service.control`) and an absent one is
+installed from it. SSH (0.8.7) stages its directives in one column and applies them through the
+shared save bar and a review dialog; `?setting=<key>` still lands on a directive.
+
 **Implementation:** `app/(dashboard)/security/`, `components/security/`; backend in
 [`../backend/observability-security.md`](../backend/observability-security.md)
 
