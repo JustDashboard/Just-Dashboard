@@ -66,7 +66,7 @@ function CopyList({ values, label }: { values: string[]; label: string }) {
   )
 }
 
-function Identity({ facts }: { facts: CertificateFacts }) {
+export function IdentityFacts({ facts }: { facts: CertificateFacts }) {
   const names = [...facts.dnsNames, ...facts.ipAddresses, ...facts.emails, ...facts.uris]
   return (
     <DetailList>
@@ -118,7 +118,7 @@ function Identity({ facts }: { facts: CertificateFacts }) {
   )
 }
 
-function KeyFacts({ keyInfo }: { keyInfo: CertificateKey }) {
+export function KeyFacts({ keyInfo }: { keyInfo: CertificateKey }) {
   return (
     <div className="space-y-3">
       {keyInfo.worldReadable ? (
@@ -192,7 +192,7 @@ export function ChainView({ chain }: { chain: CertificateChain }) {
   )
 }
 
-function Timeline({ name }: { name: string }) {
+export function CertificateTimeline({ name }: { name: string }) {
   const history = usePoll<CertificateHistory>(
     (signal) => get("/certificates/history", { name }, signal),
     0,
@@ -262,7 +262,7 @@ function saveFile(blob: Blob, filename: string) {
  * The public parts as downloads anyone signed in may take, and for an administrator the
  * key, which is behind an explicit export dialog.
  */
-function CertificateFiles({
+export function CertificateFiles({
   cert,
   hasChain,
   canExport,
@@ -403,67 +403,20 @@ function ExportDialog({ cert, onClose }: { cert: Certificate; onClose: () => voi
 }
 
 /**
- * The sections of a certificate's sheet read from its file: identity, key, chain and,
- * for an administrator, its timeline. Fetched when the sheet opens, not with the list.
+ * What a certificate's file says beyond the inventory's line — its identity,
+ * its key, its chain — read on the server when its page opens, not with the
+ * list. Caddy's certificates live inside its container, where this host
+ * cannot read them, and an unreadable file has nothing more to say.
  */
-export function CertificateDetails({
-  cert,
-  canReadHistory,
-  canExport,
-}: {
-  cert: Certificate
-  /** The timeline reads the audit trail, which only administrators may. */
-  canReadHistory: boolean
-  /** Exporting the key is an administrator's. */
-  canExport: boolean
-}) {
-  // Caddy's certificates live inside its container, where this host cannot read them.
-  const readable = cert.source !== "caddy" && !cert.error
+export function useCertificateDetail(cert: Certificate | undefined) {
+  const readable = Boolean(cert) && cert?.source !== "caddy" && !cert?.error
   const detail = usePoll<CertificateDetail>(
-    (signal) => get("/certificates/detail", { path: cert.path }, signal),
+    (signal) => get("/certificates/detail", { path: cert?.path ?? "" }, signal),
     0,
-    [cert.path],
+    [cert?.path],
     { enabled: readable },
   )
-  if (!readable) return null
-  const leaf = detail.data?.chain.certificates[0]
-  return (
-    <div className="space-y-8">
-      {detail.loading && !detail.data ? (
-        <LoadingRows rows={4} />
-      ) : detail.error ? (
-        <ErrorState error={detail.error} />
-      ) : detail.data && leaf ? (
-        <>
-          <Section title="Identity">
-            <Identity facts={leaf} />
-          </Section>
-          <Section title="Key">
-            {detail.data.key ? (
-              <KeyFacts keyInfo={detail.data.key} />
-            ) : (
-              <EmptyNote>No site names a key for this file and none is kept beside it.</EmptyNote>
-            )}
-          </Section>
-          <Section title="Chain">
-            <ChainView chain={detail.data.chain} />
-          </Section>
-          <Section title="Files">
-            <CertificateFiles
-              cert={cert}
-              hasChain={detail.data.chain.certificates.length > 1}
-              canExport={canExport && detail.data.key?.matches === true}
-            />
-          </Section>
-        </>
-      ) : null}
-      {canReadHistory && (
-        <Section title="Timeline">
-          <Timeline name={cert.name} />
-        </Section>
-      )}
-    </div>
-  )
+  return { ...detail, readable, leaf: detail.data?.chain.certificates[0] }
 }
 
 /** Decodes a pasted certificate, chain or signing request on the server, fetching nothing. */
@@ -530,7 +483,7 @@ export function PemDecoder({
         {result?.chain && (
           <>
             <Section title="Certificate">
-              <Identity facts={result.chain.certificates[0]} />
+              <IdentityFacts facts={result.chain.certificates[0]} />
             </Section>
             <Section title="Chain">
               <ChainView chain={result.chain} />

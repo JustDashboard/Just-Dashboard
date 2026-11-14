@@ -13,11 +13,13 @@ import {
   RefreshClockwise,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes, relativeTime } from "@/lib/format"
+import { bytes, plural, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
 import { lensFor } from "@/lib/log-lenses"
 import { journalIdSource, kernelSource } from "@/lib/log-sources"
 import type { RequestRecord } from "@/components/logs/service-views-model"
+import { MissingLine } from "@/components/missing-thing"
+import { logKindMissing } from "@/components/missing-thing-model"
 import { SearchInput } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
@@ -138,7 +140,12 @@ const JOURNAL_READINGS: {
  * draws is a row a link can open.
  */
 export function railSources(index: LogSourceIndex | undefined, admin: boolean): LogSource[] {
-  const listed = index?.sources ?? []
+  // The whole journal is said by what it holds: the server words it as an
+  // instruction ("pick one below to narrow it") the rail has no "below" for.
+  const units = index?.units.length ?? 0
+  const listed = (index?.sources ?? []).map((s) =>
+    s.kind === "journal" && units > 0 ? { ...s, detail: plural(units, "unit") } : s,
+  )
   if (!listed.some((s) => s.kind === "journal")) return listed
   const hasFile = ({ lens, names }: { lens: string; names: string[] }) =>
     listed.some(
@@ -247,9 +254,7 @@ export function SourceRail({
         // An absent kind explains itself rather than simply not being
         // there: "no containers" and "no Docker on this host" call for
         // completely different next moves.
-        <p className="px-2 pb-1 text-hint leading-snug text-muted-foreground">
-          {index?.missing[group.kind]}
-        </p>
+        <MissingKind kind={group.kind} said={index?.missing[group.kind]} />
       ) : (
         <div className="space-y-px">
           {group.items.map((source) => (
@@ -336,6 +341,20 @@ export function SourceRail({
 }
 
 /**
+ * An absent kind as one sentence, the thing's own mark and the page that
+ * says more. It was whatever the subsystem said, which for a stopped Docker
+ * is the client's question to the reader: "Is the docker daemon running?".
+ */
+function MissingKind({ kind, said }: { kind: string; said: string | undefined }) {
+  const line = logKindMissing(kind, said)
+  return (
+    <MissingLine thing={line.thing} href={line.href} label={line.label} className="px-2 pb-1.5">
+      {line.sentence}
+    </MissingLine>
+  )
+}
+
+/**
  * What wrote a source, as the product it is: a container as its image, the
  * web server as nginx, a PM2 process as PM2, and the system's own files as
  * the distribution that writes them (§14). The journal and a stray
@@ -363,6 +382,10 @@ export function sourceProduct(source: LogSource, platform: string | undefined) {
       return "linux"
     case "system":
       return platformProduct(platform)
+    case "journal":
+      // The whole journal is systemd's own. Its readings by program
+      // (`journal-id`) are not, and keep the group's glyph.
+      return "systemd"
     default:
       return undefined
   }

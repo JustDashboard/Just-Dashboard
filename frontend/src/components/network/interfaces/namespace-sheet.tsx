@@ -24,14 +24,19 @@ import { Cidr } from "@/components/network/address"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { ReadingWords } from "./device-detail"
 
-export type NamespaceTarget = { kind: "named" | "container"; name: string }
+export type NamespaceTarget = {
+  kind: "named" | "container"
+  name: string
+  /** Why the list could not read its devices, said at the top of its sheet. */
+  readError?: string
+}
 
 /**
  * One namespace read as the separate network it is: its devices, its own
  * routes in both families, the resolver its processes are told to use and
  * what listens inside it — and the question routing pages are opened with,
  * asked of its kernel rather than the host's. The host end of each pair that
- * leads into it opens that device's sheet. Nothing here changes it.
+ * leads into it opens that device's page. Nothing here changes it.
  */
 export function NamespaceSheet({
   target,
@@ -77,6 +82,11 @@ export function NamespaceSheet({
       description={`The ${target?.name ?? ""} network namespace: devices, routes, resolver and listeners`}
     >
       <div className="flex flex-col gap-6">
+        {target?.readError && (
+          <Notice tone="warning" title="Its devices could not be read">
+            {target.readError}
+          </Notice>
+        )}
         {d && (
           <NetworkReadWarning
             error={detail.error}
@@ -267,7 +277,7 @@ function RouteQuestion({ target }: { target: NamespaceTarget }) {
         <Field
           label="Route to"
           htmlFor={`${target.name}-lookup`}
-          hint="A literal address; the kernel is asked, nothing is sent"
+          info="A literal address; the kernel is asked, nothing is sent."
         >
           <Input
             id={`${target.name}-lookup`}

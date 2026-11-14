@@ -14,7 +14,7 @@ A verdict on how exposed the host is, and a map of everything that is not backed
 <table>
 <tr>
 <td width="50%" valign="top">
-<a href="../readme/security-intrusion.png"><img src="../readme/security-intrusion.png" alt="Addresses blocked across engines with fail2ban's jails and readings"></a>
+<a href="../readme/security-intrusion.png"><img src="../readme/security-intrusion.png" alt="Intrusion prevention drawn as the internet, this server and its three engines, with fail2ban's readings and jails"></a>
 <p align="center"><b>Intrusion</b><br><sub>What is blocked, by which engine, and why</sub></p>
 </td>
 <td width="50%" valign="top">

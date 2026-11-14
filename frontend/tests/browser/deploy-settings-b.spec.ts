@@ -1955,8 +1955,10 @@ test.describe("One Save writes every edited form on the page", () => {
     await buildCard.getByRole("textbox", { name: "Root directory" }).fill("apps/api")
     const tasks = page.getByRole("form", { name: "Release tasks" })
     await tasks.getByRole("button", { name: "Add release task", exact: true }).click()
-    await tasks.getByLabel("Release task 1 name").fill("Migrate")
-    await tasks.getByLabel("Release task 1 command").fill("./bin/migrate --force")
+    const sheet = page.getByRole("dialog")
+    await sheet.getByLabel("Release task 1 name").fill("Migrate")
+    await sheet.getByLabel("Release task 1 command").fill("./bin/migrate --force")
+    await sheet.getByRole("button", { name: "Done", exact: true }).click()
 
     // The bar counts both and names where they are.
     await expect(saveBar(page).getByText(/Build and Release tasks/)).toBeVisible()
@@ -1987,6 +1989,7 @@ test.describe("One Save writes every edited form on the page", () => {
     await page.getByRole("form", { name: "Runtime" }).getByLabel("Memory limit").fill("768")
     const checks = page.getByRole("form", { name: "Health checks" })
     await checks.getByRole("button", { name: "Add check", exact: true }).click()
+    await page.getByRole("dialog").getByRole("button", { name: "Done", exact: true }).click()
     await saveSettings(page)
     await expectSaved(page)
     await expect.poll(() => puts.length).toBe(2)
@@ -2015,6 +2018,7 @@ test.describe("One Save writes every edited form on the page", () => {
         exact: true,
       })
       .click()
+    await page.getByRole("dialog").getByRole("button", { name: "Done", exact: true }).click()
     await expect(
       saveBar(page).getByText("Runtime and Health checks", { exact: false }),
     ).toBeVisible()

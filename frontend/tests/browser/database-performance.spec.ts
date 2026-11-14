@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Page } from "@playwright/test"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { risen } from "./risen"
 
 /**
  * A SQL server's Performance page, its Advisor, and its Logs.
@@ -1218,6 +1219,22 @@ const region = (page: Page, name: string) => page.getByRole("region", { name, ex
 const sessionRow = (page: Page, pid: string) =>
   page.getByRole("row", { name: `Session ${pid}`, exact: true })
 const dialog = (page: Page) => page.getByRole("dialog")
+/** The identity line a page of one thing opens on: "About session 52". */
+const about = (page: Page, name: string) => page.getByRole("region", { name, exact: true })
+const aboutStatement = (page: Page) => about(page, "About this statement")
+/** The open view of such a page, and the strip that picks it. */
+const detailView = (page: Page) => page.locator("[data-slot=detail-view]")
+const tab = (page: Page, name: string | RegExp) => page.getByRole("tab", { name })
+/** The list a page was opened from, folded beside it from `xl`. */
+const rail = (page: Page, name: string) => page.getByRole("navigation", { name, exact: true })
+/** The way back to the list, over the identity line. */
+const back = (page: Page, name: string) =>
+  page.locator("[data-slot=page-context]").getByRole("link", { name, exact: true })
+/** What a fact on a title line explains, read from its tooltip. */
+async function explained(page: Page, scope: ReturnType<typeof region>, label: string) {
+  await scope.getByRole("button", { name: label, exact: true }).hover()
+  return page.getByRole("tooltip")
+}
 
 // ---------------------------------------------------------------------------
 // Performance
@@ -1247,10 +1264,10 @@ test("the page opens on recorded activity and offers the views its engine has", 
   ])
   await expect(view(page, /^Overview$/)).toHaveAttribute("aria-pressed", "true")
   // The charts show saved activity as soon as the page opens.
-  await expect(page.getByText(/Recorded activity/)).toBeVisible()
+  await expect(region(page, "Activity")).toContainText(/recorded, kept for 7 days/)
   await expect(page.getByRole("heading", { name: "Sessions", level: 2 })).toBeVisible()
   // A chart with nothing above zero in the window is named, not drawn flat.
-  await expect(page.getByText(/Nothing else has moved\./)).toBeVisible()
+  await expect(page.getByText("Lock waits and deadlocks stayed at zero.")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Lock waits and deadlocks" })).toHaveCount(0)
   // The snapshot and the session list are the page's, and what uses the database, which draws
   // each client as itself; a view's own read waits for the view.
@@ -1407,17 +1424,23 @@ test("a blocked session names the one it is behind, whole, and each opens the ot
   await expect(behind).toHaveText("12,3301")
   await behind.click()
 
-  const panel = dialog(page)
-  await expect(panel).toContainText("Session 12,3301")
-  await expect(panel).toContainText("checkout-api")
-  await expect(panel.getByText("Transaction open for")).toBeVisible()
+  // The blocker is a page of its own, and its id is one segment of the address.
+  await expect(page).toHaveURL(/\/performance\/sessions\/12~2C3301$/)
+  const blocker = about(page, "About session 12,3301")
+  await expect(blocker).toContainText("Session 12,3301")
+  await expect(blocker).toContainText("checkout-api")
+  await expect(detailView(page).getByText("Transaction open for")).toBeVisible()
   // It is idle inside a transaction: there is no statement to cancel.
-  await expect(panel.getByRole("button", { name: "Terminate session" })).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Cancel statement" })).toHaveCount(0)
-  // And from the blocker to the one it holds.
-  await panel.getByRole("button", { name: "40,77" }).click()
-  await expect(dialog(page)).toContainText("Session 40,77")
-  await expect(dialog(page).getByText("Waiting for")).toBeVisible()
+  await expect(blocker.getByRole("button", { name: "Terminate session" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Cancel statement" })).toHaveCount(0)
+  // And from the blocker to the one it holds, on the view that says who waits on whom.
+  await tab(page, /^Waits/).click()
+  await expect(page).toHaveURL(/tab=waits/)
+  await detailView(page).getByRole("link", { name: "Open session 40,77" }).click()
+  await expect(about(page, "About session 40,77")).toContainText("Session 40,77")
+  await expect(detailView(page).getByRole("link", { name: "Open session 12,3301" })).toBeVisible()
+  await tab(page, "Activity").click()
+  await expect(detailView(page).getByText("Waiting for")).toBeVisible()
 })
 
 test("cancelling and terminating are confirmed with the session named, and sent for it", async ({
@@ -1483,8 +1506,10 @@ test("a viewer reads everything and is offered nothing that changes anything", a
   await region(page, "Statements")
     .getByRole("row", { name: /UPDATE carts/ })
     .click()
-  await expect(dialog(page)).toContainText("Of runtime")
-  await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+  await expect(aboutStatement(page)).toContainText("30% of runtime")
+  await tab(page, "Text").click()
+  await expect(detailView(page).locator("[data-slot=code-view]")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open in Query" })).toHaveCount(0)
 })
 
 test("who waits on whom is a tree, with a queue drawn once", async ({ page }) => {
@@ -1547,7 +1572,7 @@ test("locks an account may not read say which grant, and nothing waiting says so
   await expect(page.getByText(/SELECT command denied to user 'app'/)).toBeVisible()
 })
 
-test("statements are ranked by their share, ordered by the server, and one opens with its plan", async ({
+test("statements are ranked by their share, ordered by the server, and one opens on its page with its plan", async ({
   page,
 }) => {
   const ops = await mockOps(page, {
@@ -1577,36 +1602,49 @@ test("statements are ranked by their share, ordered by the server, and one opens
   await asked
   await expect(page).toHaveURL(/sort=mean/)
 
+  // A row opens the statement's own page, and the order the list was in goes with it.
+  await rows.nth(1).click()
+  await expect(page).toHaveURL(/\/performance\/statements\/s1\?sort=mean$/)
+  await expect(aboutStatement(page)).toContainText("SELECT * FROM orders WHERE customer_id = $1")
+  await expect(aboutStatement(page)).toContainText("60% of runtime")
+  await expect(aboutStatement(page)).toContainText("50% of its reads miss the cache")
+  // Its figures are readings, not a strip of tiles.
+  await expect(detailView(page).locator("[data-slot=reading-line]")).toHaveCount(4)
+  await expect(detailView(page)).toContainText("60% of all statement time")
+  await expect(detailView(page)).toContainText("24 ms at its slowest")
+  await expect(page.locator("[data-slot=metric-strip], [data-slot=stat-grid]")).toHaveCount(0)
+
   // A shape is planned with values put where its placeholders stand: one
   // field for each, named by the words before it.
-  await rows.nth(1).click()
-  await expect(page).toHaveURL(/statement=s1/)
-  const panel = dialog(page)
-  await expect(panel).toContainText("an engine plans values")
-  const value = panel.getByRole("textbox", { name: "The value for $1, after customer_id =" })
+  await tab(page, "Plan").click()
+  await expect(page).toHaveURL(/tab=plan/)
+  const plan = detailView(page)
+  await expect(plan).toContainText("an engine plans values")
+  const value = plan.getByRole("textbox", { name: "The value for $1, after customer_id =" })
   await value.fill("42")
-  await panel.getByRole("button", { name: "Explain with these values" }).click()
-  await expect(panel).toContainText("Seq Scan on order_items")
+  await plan.getByRole("button", { name: "Explain with these values" }).click()
+  await expect(plan).toContainText("Seq Scan on order_items")
   expect(ops.sent.find((sent) => sent.request === "POST 1/explain")?.body).toEqual({
     query: "SELECT *\n  FROM orders\n WHERE customer_id = 42",
     format: "text",
   })
-  await page.keyboard.press("Escape")
-  await expect(page).not.toHaveURL(/statement=/)
-  // The keyboard goes back to the row that opened it.
-  await expect(rows.nth(1)).toBeFocused()
+  // The way back is the list, in the order it was left in.
+  await back(page, "Statements").click()
+  await expect(page).toHaveURL(/view=statements/)
+  await expect(page).toHaveURL(/sort=mean/)
   ops.sent.length = 0
 
   // One with no values in it is planned as it stands. Nothing is executed.
   await rows.nth(3).click()
-  await dialog(page).getByRole("button", { name: "Explain" }).click()
-  await expect(dialog(page)).toContainText("Seq Scan on order_items")
+  await tab(page, "Plan").click()
+  await detailView(page).getByRole("button", { name: "Explain", exact: true }).click()
+  await expect(detailView(page)).toContainText("Seq Scan on order_items")
   expect(ops.sent.find((sent) => sent.request === "POST 1/explain")?.body).toEqual({
     query: "SELECT count(*) FROM order_items",
     format: "text",
   })
 
-  await dialog(page).getByRole("button", { name: "Open in Query" }).click()
+  await aboutStatement(page).getByRole("button", { name: "Open in Query" }).click()
   await expect(page).toHaveURL(/\/databases\/1\/query\?/)
   expect(new URL(page.url()).searchParams.get("sql")).toBe("SELECT count(*) FROM order_items")
 })
@@ -1732,19 +1770,13 @@ const ORDERS_PLAN = {
   rolledBack: false,
 }
 
-/**
- * The statement's panel once it has slid in and its editor holds the text.
- * Caught on the way in, the panel stood half off the window's edge with an
- * empty editor in it.
- */
+/** A statement's page on its Text view, once its editor holds the text. */
 async function openedStatement(page: Page, text: string) {
-  const panel = dialog(page)
-  await expect(panel.locator("[data-slot=code-view]")).toContainText(text, { timeout: 15_000 })
-  await panel.evaluate(async (el) => {
-    await Promise.all(el.getAnimations().map((animation) => animation.finished))
-  })
-  await expect(panel).toBeInViewport({ ratio: 1 })
-  return panel
+  await expect(aboutStatement(page)).toBeVisible()
+  await tab(page, "Text").click()
+  const view = detailView(page)
+  await expect(view.locator("[data-slot=code-view]")).toContainText(text, { timeout: 15_000 })
+  return view
 }
 
 test("a PostgreSQL statement is listed as its shape, with a ? where a password or a setting was", async ({
@@ -1757,27 +1789,31 @@ test("a PostgreSQL statement is listed as its shape, with a ? where a password o
   await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
   await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("NOCREATEROLE PASSWORD ?")
   await expect(shapeRow(page, /SET statement_timeout/)).toContainText("SET statement_timeout = ?")
-  await expect(region(page, "Statements")).toContainText(
-    "every value in it is replaced before it leaves the server",
-  )
+  // What a shape is was a paragraph under the table: it is said by the fact on the title line.
+  await expect(
+    await explained(page, region(page, "Statements"), "What a statement's text is"),
+  ).toContainText("every value in it is replaced before it leaves the server")
 
   // A statement the extension kept whole is still a shape, and has no plan.
   await shapeRow(page, /CREATE ROLE app_reader/).click()
-  const panel = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
-  await expect(panel).toContainText("The statement, as a shape")
-  await expect(panel).toContainText("Only a statement that reads or changes rows has a plan")
-  // The editor's own input is a textbox too; what counts is that no value is asked for.
-  await expect(panel.getByRole("textbox", { name: /^The value for/ })).toHaveCount(0)
-  await page.keyboard.press("Escape")
-  await expect(page).not.toHaveURL(/statement=/)
+  const text = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
+  await expect(text).toContainText("The statement, as a shape")
+  await tab(page, "Plan").click()
+  const plan = detailView(page)
+  await expect(plan).toContainText("Only a statement that reads or changes rows has a plan")
+  await expect(plan.getByRole("textbox")).toHaveCount(0)
+  // A view is not a place Back steps through: Back from the page is the list.
+  await page.goBack()
+  await expect(page).toHaveURL(/view=statements/)
 
   // One that was planned asks for the extension's $1 and for the ? beside it.
   await shapeRow(page, /SELECT id, total/).click()
   await openedStatement(page, "customer_id = $1")
-  await panel.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
-  await panel.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
-  await panel.getByRole("button", { name: "Explain with these values" }).click()
-  await expect(panel).toContainText("Index Scan using orders_customer_id_idx on orders")
+  await tab(page, "Plan").click()
+  await plan.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
+  await plan.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
+  await plan.getByRole("button", { name: "Explain with these values" }).click()
+  await expect(plan).toContainText("Index Scan using orders_customer_id_idx on orders")
   expect(ops.sent.find((sent) => sent.request === "POST 1/explain")?.body).toEqual({
     query: "SELECT id, total\n  FROM orders\n WHERE customer_id = 42\n ORDER BY 2",
     format: "text",
@@ -1792,9 +1828,9 @@ test("an account that may only read is shown the shapes and offered nothing that
   await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("PASSWORD ?")
   await expect(page.getByRole("button", { name: "Reset statistics" })).toHaveCount(0)
   await shapeRow(page, /ALTER ROLE app_reader/).click()
-  const panel = await openedStatement(page, "SET search_path = ?, ?")
-  await expect(panel).toContainText("The statement, as a shape")
-  await expect(panel.getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+  const text = await openedStatement(page, "SET search_path = ?, ?")
+  await expect(text).toContainText("The statement, as a shape")
+  await expect(page.getByRole("button", { name: "Open in Query" })).toHaveCount(0)
 })
 
 test("a PostgreSQL list with nothing counted yet says so", async ({ page }) => {
@@ -1826,64 +1862,21 @@ test("a PostgreSQL list that cannot be read says why, and can be asked for again
   await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("PASSWORD ?")
 })
 
-test("the shapes keep to a phone's width, with a statement open over them", async ({ page }) => {
+test("the shapes keep to a phone's width, and so does a statement's page", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockOps(page, { answers: { "GET 1/statements": PG_SHAPES } })
   await visit(page, "/databases/1/performance?view=statements")
   await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
   await keepsTheRules(page, "a PostgreSQL server's statements at a phone's width")
-  await visit(page, "/databases/1/performance?view=statements&statement=p3")
-  await expect(dialog(page)).toContainText("The statement, as a shape")
-  await keepsTheRules(page, "a statement's shape open at a phone's width", true)
-})
-
-test("a PostgreSQL server's statements as shapes, for the record @shots", async ({ page }) => {
-  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the screenshots go to")
-  const shots = process.env.JD_SHOTS
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await mockOps(page, {
-    answers: { "GET 1/statements": PG_SHAPES, "POST 1/explain": ORDERS_PLAN },
-  })
-  await visit(page, "/databases/1/performance?view=statements")
-  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
-  await page.screenshot({ path: `${shots}/statements-shapes-1440.png` })
-
-  await shapeRow(page, /CREATE ROLE app_reader/).click()
-  const password = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
-  await expect(password).toContainText("Only a statement that reads or changes rows has a plan")
-  await page.screenshot({ path: `${shots}/statement-password-1440.png` })
-  await page.keyboard.press("Escape")
-  await expect(page).not.toHaveURL(/statement=/)
-
-  await shapeRow(page, /SELECT id, total/).click()
-  const panel = await openedStatement(page, "customer_id = $1")
-  await panel.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
-  await panel.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
-  await panel.getByRole("button", { name: "Explain with these values" }).click()
-  await expect(panel).toContainText("Index Scan using orders_customer_id_idx on orders")
-  await page.screenshot({ path: `${shots}/statement-planned-1440.png` })
-
-  await page.unrouteAll({ behavior: "ignoreErrors" })
-  await mockOps(page, { viewer: true, answers: { "GET 1/statements": PG_SHAPES } })
-  await visit(page, "/databases/1/performance?view=statements&statement=p4")
-  const viewer = await openedStatement(page, "SET search_path = ?, ?")
-  await expect(viewer).toContainText("The statement, as a shape")
-  await page.screenshot({ path: `${shots}/statements-viewer-1440.png` })
-
-  await page.unrouteAll({ behavior: "ignoreErrors" })
-  await mockOps(page, {
-    answers: { "GET 1/statements": { ...PG_SHAPES, totalMs: 0, statements: [] } },
-  })
-  await visit(page, "/databases/1/performance?view=statements")
-  await expect(page.getByText("No statement has been counted yet.", { exact: false })).toBeVisible()
-  await page.screenshot({ path: `${shots}/statements-empty-1440.png` })
-
-  await page.unrouteAll({ behavior: "ignoreErrors" })
-  await mockOps(page, { answers: { "GET 1/statements": PG_SHAPES } })
-  await page.setViewportSize({ width: 390, height: 844 })
-  await visit(page, "/databases/1/performance?view=statements")
-  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
-  await page.screenshot({ path: `${shots}/statements-shapes-390.png` })
+  await visit(page, "/databases/1/performance/statements/p3")
+  await expect(await openedStatement(page, "NOCREATEROLE PASSWORD ?")).toContainText(
+    "The statement, as a shape",
+  )
+  await keepsTheRules(page, "a statement's page at a phone's width")
+  // There is no rail on a phone: the page is the one pane, and the arrows walk the list.
+  await expect(rail(page, "Statements")).toBeHidden()
+  await page.getByRole("button", { name: "Next statement" }).click()
+  await expect(page).toHaveURL(/\/statements\/p6\?tab=text$/)
 })
 
 test("a view that could not be read says so and is tried again; one that stops updating keeps what it had", async ({
@@ -2040,21 +2033,34 @@ test("tables show what the engine keeps, flag what is overdue, and run its maint
     })
   await dialog(page).getByRole("button", { name: "Close" }).first().click()
 
-  // A table opens on everything the engine keeps about it; the address holds which.
+  // A table opens as a page on everything the engine keeps about it; the address is which.
   await tables.getByRole("button", { name: "Open public.orders" }).click()
-  await expect(page).toHaveURL(/object=public%2Forders/)
-  await expect(dialog(page)).toContainText("Sequential scans")
-  await expect(dialog(page).getByRole("link", { name: "Open in Data" })).toHaveAttribute(
+  await expect(page).toHaveURL(/\/performance\/tables\/public\.orders$/)
+  const orders = about(page, "About public.orders")
+  await expect(orders).toContainText("3.2 MB")
+  await expect(orders).toContainText("11% of the database")
+  await expect(detailView(page)).toContainText("Sequential scans")
+  // What its bytes are is one strip, where each row of the list drew its own.
+  await expect(
+    detailView(page).getByRole("img", {
+      name: "Rows 2.2 MB, Indexes 976.6 KB, Large values 8.0 KB",
+    }),
+  ).toBeVisible()
+  await expect(orders.getByRole("link", { name: "Open in Data" })).toHaveAttribute(
     "href",
     "/databases/1/data?schema=public&table=orders",
   )
   // The choice inside an action is one control on its row, and the answer
   // already chosen is the one that does not stop the table.
-  await expect(dialog(page).getByRole("radio", { name: "concurrently" })).toHaveAttribute(
+  await tab(page, "Maintenance").click()
+  await expect(page).toHaveURL(/tab=maintenance/)
+  await expect(detailView(page).getByRole("radio", { name: "concurrently" })).toHaveAttribute(
     "aria-checked",
     "true",
   )
-  await dialog(page).getByRole("button", { name: "Reindex concurrently: public.orders" }).click()
+  await detailView(page)
+    .getByRole("button", { name: "Reindex concurrently: public.orders" })
+    .click()
   await dialog(page).getByRole("button", { name: "Reindex concurrently" }).click()
   await expect
     .poll(() => ops.sent.at(-1)?.body)
@@ -2127,15 +2133,14 @@ test("indexes are read by what is wrong with them, and a reason narrows the list
   await expect(indexes.getByRole("row")).toHaveCount(4)
   await expect(indexes).toContainText("3 indexes have never been scanned, holding 2.8 MB.")
 
-  // Its table opens in the Tables view.
+  // Its table opens as the table's own page, and the way back from it is Tables.
   await indexes
     .getByRole("row", { name: /events_occurred_idx/ })
     .getByRole("button", { name: "Open the table analytics.events" })
     .click()
-  // The table's panel is open over the Tables view: the address says both.
-  await expect(page).toHaveURL(/view=tables&object=analytics%2Fevents/)
-  await expect(dialog(page)).toContainText("analytics.events")
-  await page.keyboard.press("Escape")
+  await expect(page).toHaveURL(/\/performance\/tables\/analytics\.events$/)
+  await expect(about(page, "About analytics.events")).toContainText("analytics.events")
+  await back(page, "Tables").click()
   await expect(view(page, /^Tables$/)).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -2350,9 +2355,7 @@ test("a blocker is a session if the server says who it is, and is cancelled only
   await expect(page.getByRole("button", { name: /session prepared-9$/ })).toHaveCount(0)
 })
 
-test("two statements with one digest are two rows, each opening its own figures", async ({
-  page,
-}) => {
+test("two statements with one digest are two rows, each opening its own page", async ({ page }) => {
   const keyed: string[] = []
   page.on("console", (message) => {
     if (/same key/.test(message.text())) keyed.push(message.text())
@@ -2373,16 +2376,20 @@ test("two statements with one digest are two rows, each opening its own figures"
   const rows = region(page, "Statements").getByRole("row")
   await expect(rows).toHaveCount(4)
   await rows.nth(2).click()
-  await expect(page).toHaveURL(/statement=d1(~|%7E)1/)
-  await expect(dialog(page)).toContainText("30%")
+  // The second is told apart by its place, written where no layer between
+  // the address bar and the page reads it as anything.
+  await expect(page).toHaveURL(/\/performance\/statements\/d1~7E1$/)
+  await expect(aboutStatement(page)).toContainText("30% of runtime")
   // Calls: the second row's five, not the first's six.
-  await expect(dialog(page).getByText("5", { exact: true })).toBeVisible()
-  await expect(dialog(page).getByText("6", { exact: true })).toHaveCount(0)
-  await page.keyboard.press("Escape")
+  await expect(aboutStatement(page)).toContainText("5 calls")
+  await expect(aboutStatement(page)).not.toContainText("6 calls")
+  // Both are in the list beside it, and one of them is the one on screen.
+  await expect(rail(page, "Statements").getByRole("link")).toHaveCount(3)
+  await expect(rail(page, "Statements").locator("[aria-current=page]")).toHaveCount(1)
+  await page.goBack()
   await rows.nth(1).click()
-  await expect(dialog(page).getByText("6", { exact: true })).toBeVisible()
-  // One row is the open one. (The page under a panel is out of the accessibility tree.)
-  await expect(page.locator("[data-slot=page] tr[data-state=selected]")).toHaveCount(1)
+  await expect(page).toHaveURL(/\/performance\/statements\/d1$/)
+  await expect(aboutStatement(page)).toContainText("6 calls")
   expect(keyed).toEqual([])
 })
 
@@ -2395,10 +2402,10 @@ test("a statement with more placeholders than a form is quick for is handed to Q
       "GET 1/statements": { ...STATEMENTS, statements: [statement("m1", many, 1)] },
     },
   })
-  await visit(page, "/databases/1/performance?view=statements&statement=m1")
-  await expect(dialog(page)).toContainText("This shape has 20 placeholders")
-  await expect(dialog(page).getByRole("textbox")).toHaveCount(0)
-  await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toBeVisible()
+  await visit(page, "/databases/1/performance/statements/m1?tab=plan")
+  await expect(detailView(page)).toContainText("This shape has 20 placeholders")
+  await expect(detailView(page).getByRole("textbox")).toHaveCount(0)
+  await expect(aboutStatement(page).getByRole("button", { name: "Open in Query" })).toBeVisible()
 })
 
 // ---------------------------------------------------------------------------
@@ -2406,20 +2413,6 @@ test("a statement with more placeholders than a form is quick for is handed to Q
 // ---------------------------------------------------------------------------
 
 const historyView = (page: Page) => region(page, "Statement history")
-
-/** Waits for a sheet to finish opening, so what is read or drawn is the sheet at rest. */
-async function settled(page: Page) {
-  const sheet = dialog(page)
-  await expect(sheet).toBeVisible()
-  await sheet.evaluate((el) =>
-    Promise.all(
-      el
-        .getAnimations({ subtree: true })
-        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
-        .map((animation) => animation.finished),
-    ),
-  )
-}
 
 test("statement history ranks a window's statements by the column pressed, each with its trend, and one opens its charts", async ({
   page,
@@ -2435,10 +2428,17 @@ test("statement history ranks a window's statements by the column pressed, each 
   await expect(history.getByRole("img", { name: "Its time over the last hour" })).toHaveCount(
     SHOP_HISTORY.length,
   )
-  await expect(history).toContainText("of statement time recorded over the last hour")
-  // What the figures are made from, in the engine's own terms.
-  await expect(history).toContainText("pg_stat_statements keeps running totals for each statement")
-  await expect(history).toContainText("so there are no percentiles")
+  // A row is one line: its trend is a column beside its text, not a band under it.
+  const heights = await rows.evaluateAll((all) =>
+    all.slice(1).map((row) => Math.round(row.getBoundingClientRect().height)),
+  )
+  expect(new Set(heights).size).toBe(1)
+  expect(heights[0]).toBeLessThan(44)
+  await expect(history).toContainText("recorded over the last hour")
+  // What the figures are made from, in the engine's own terms, is behind the fact on the title line.
+  await expect(await explained(page, history, "How these figures are made")).toContainText(
+    /pg_stat_statements keeps running totals for each statement[\s\S]*so there are no percentiles/,
+  )
   // PostgreSQL keeps no run times and counts no rows read: neither column is drawn.
   await expect(history.getByRole("columnheader", { name: "19 in 20" })).toHaveCount(0)
   await expect(history.getByRole("columnheader", { name: "Examined" })).toHaveCount(0)
@@ -2464,20 +2464,30 @@ test("statement history ranks a window's statements by the column pressed, each 
   await expect(rows).toHaveCount(2)
   await history.getByRole("textbox", { name: "Filter the statement history" }).fill("")
 
+  // A recorded statement opens the statement's page, on its History view.
   await history.getByRole("row", { name: /UPDATE inventory/ }).click()
-  await expect(page).toHaveURL(/statement=7731904/)
-  await settled(page)
-  const panel = dialog(page)
+  await expect(page).toHaveURL(/\/performance\/statements\/7731904\?tab=history$/)
+  const recorded = detailView(page)
   for (const chart of ["Time spent", "Calls", "Time per call", "Rows"]) {
-    await expect(panel.getByRole("heading", { name: chart, exact: true })).toBeVisible()
+    await expect(recorded.getByRole("heading", { name: chart, exact: true })).toBeVisible()
   }
-  await expect(panel).toContainText("A point for every 5 minutes.")
-  await expect(panel).toContainText("A mark on the time axis is where the statistics were reset.")
-  await expect(panel).toContainText("UPDATE inventory SET reserved = reserved + $1 WHERE sku = $2")
-  await expect(panel.getByRole("button", { name: "Open in Query" })).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(page).not.toHaveURL(/statement=/)
-  await expect(history.getByRole("row", { name: /UPDATE inventory/ })).toBeFocused()
+  await expect(recorded).toContainText("a point for every 5 minutes")
+  await expect(recorded).toContainText("A mark on the time axis is a reset")
+  // Its figures over the window read as one line, not a strip of tiles.
+  await expect(recorded.locator("[data-slot=figure-line]")).toContainText(
+    "26% of the window's statement time",
+  )
+  await expect(page.locator("[data-slot=metric-strip]")).toHaveCount(0)
+  await expect(aboutStatement(page)).toContainText(
+    "UPDATE inventory SET reserved = reserved + $1 WHERE sku = $2",
+  )
+  // The server no longer lists it among its top statements: said, with its recorded share.
+  await expect(aboutStatement(page)).toContainText("No longer among the top statements")
+  await expect(aboutStatement(page).getByRole("button", { name: "Open in Query" })).toBeVisible()
+  // The way back is the list it was opened from.
+  await back(page, "Statement history").click()
+  await expect(page).toHaveURL(/view=history/)
+  await expect(history.getByRole("row", { name: /UPDATE inventory/ })).toBeVisible()
 })
 
 test("statement history is read over the Overview's window, and a range pressed in it is asked for", async ({
@@ -2492,7 +2502,7 @@ test("statement history is read over the Overview's window, and a range pressed 
   )
   await history.getByRole("radio", { name: "24 hours" }).click()
   await asked
-  await expect(history).toContainText("of statement time recorded over the last 24 hours")
+  await expect(history).toContainText("recorded over the last 24 hours")
   await view(page, /^Overview$/).click()
   await expect(page.getByRole("radio", { name: "24 hours" })).toBeChecked()
 })
@@ -2549,11 +2559,12 @@ test("a role that may only read reads the statement history and is offered nothi
   page,
 }) => {
   await mockOps(page, { viewer: true })
-  await visit(page, `/databases/1/performance?view=history&statement=${SHOP_HISTORY[0].id}`)
-  await settled(page)
-  await expect(dialog(page).getByRole("heading", { name: "Time spent", exact: true })).toBeVisible()
-  await expect(dialog(page)).toContainText("SELECT o.id, o.total, o.status FROM orders o")
-  await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+  await visit(page, `/databases/1/performance/statements/${SHOP_HISTORY[0].id}?tab=history`)
+  await expect(
+    detailView(page).getByRole("heading", { name: "Time spent", exact: true }),
+  ).toBeVisible()
+  await expect(aboutStatement(page)).toContainText("SELECT o.id, o.total, o.status FROM orders o")
+  await expect(page.getByRole("button", { name: "Open in Query" })).toHaveCount(0)
 })
 
 test("an engine that keeps run times gives the history its percentiles and the rows each query read", async ({
@@ -2566,13 +2577,15 @@ test("an engine that keeps run times gives the history its percentiles and the r
   await expect(history.getByRole("columnheader", { name: "19 in 20" })).toBeVisible()
   await expect(history.getByRole("columnheader", { name: "Examined" })).toBeVisible()
   await expect(history.getByRole("row").nth(1)).toContainText("212 ms")
-  await expect(history).toContainText("ClickHouse's query log holds every finished query")
+  await expect(await explained(page, history, "How these figures are made")).toContainText(
+    "ClickHouse's query log holds every finished query",
+  )
   await history.getByRole("row").nth(1).click()
-  await settled(page)
-  const panel = dialog(page)
-  await expect(panel.getByText("99 in 100 within", { exact: true }).first()).toBeVisible()
-  await expect(panel).toContainText("487 ms")
-  await expect(panel).toContainText("40K for each returned")
+  const recorded = detailView(page)
+  await expect(recorded.getByText("99 in 100 within", { exact: true }).first()).toBeVisible()
+  // The percentiles are said in words on the line of its figures.
+  await expect(recorded.locator("[data-slot=figure-line]")).toContainText("99 in 100 inside 487 ms")
+  await expect(recorded).toContainText("40K for each returned")
 })
 
 test("a file has no statement history to offer", async ({ page }) => {
@@ -2592,68 +2605,10 @@ test("statement history fits a phone, its list and its charts", async ({ page })
     page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
   expect(await sideways()).toBe(false)
   await historyView(page).getByRole("row").nth(1).click()
-  await settled(page)
-  await expect(dialog(page).getByRole("heading", { name: "Rows", exact: true })).toBeVisible()
+  await expect(detailView(page).getByRole("heading", { name: "Rows", exact: true })).toBeVisible()
   expect(await sideways()).toBe(false)
-  const wide = await dialog(page).evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+  const wide = await detailView(page).evaluate((el) => el.scrollWidth > el.clientWidth + 1)
   expect(wide).toBe(false)
-})
-
-test("statement history screenshots @shots", async ({ page }) => {
-  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names where the screenshots go")
-  test.setTimeout(120_000)
-  const dir = process.env.JD_SHOTS
-  const shot = (name: string) => page.screenshot({ path: `${dir}/${name}.png` })
-  let empty = false
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await mockOps(page, {
-    ...AS_CLICKHOUSE,
-    answers: {
-      "GET 1/statements/history": (call: number, url: URL) =>
-        empty ? NO_HISTORY_YET(call, url) : statementHistory(SHOP_HISTORY)(call, url),
-    },
-  })
-
-  await visit(page, "/databases/1/performance?view=history")
-  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
-  await page.waitForLoadState("networkidle")
-  await shot("history-list-1440")
-
-  await historyView(page)
-    .getByRole("row", { name: /UPDATE inventory/ })
-    .click()
-  await settled(page)
-  await expect(
-    dialog(page).getByRole("heading", { name: "Time per call", exact: true }),
-  ).toBeVisible()
-  await shot("history-statement-1440")
-  await dialog(page).getByRole("heading", { name: "Rows", exact: true }).scrollIntoViewIfNeeded()
-  await shot("history-statement-charts-1440")
-  await page.keyboard.press("Escape")
-
-  await visit(page, "/databases/2/performance?view=history")
-  await expect(historyView(page).getByRole("columnheader", { name: "19 in 20" })).toBeVisible()
-  await page.waitForLoadState("networkidle")
-  await shot("history-percentiles-1440")
-  await historyView(page).getByRole("row").nth(1).click()
-  await settled(page)
-  await dialog(page)
-    .getByRole("heading", { name: "Time per call", exact: true })
-    .scrollIntoViewIfNeeded()
-  await shot("history-percentiles-statement-1440")
-  await page.keyboard.press("Escape")
-
-  empty = true
-  await visit(page, "/databases/1/performance?view=history")
-  await expect(page.getByText("No statement history yet")).toBeVisible()
-  await shot("history-empty-1440")
-
-  empty = false
-  await page.setViewportSize({ width: 390, height: 844 })
-  await visit(page, "/databases/1/performance?view=history")
-  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
-  await page.waitForLoadState("networkidle")
-  await shot("history-list-390")
 })
 
 test("a read that does not come back says what it is waiting for, and a failure after a long silence says it was one", async ({
@@ -2703,22 +2658,19 @@ test("a refusal that came at once is not called a wait", async ({ page }) => {
   await expect(page.getByText(/The read was given up/)).toHaveCount(0)
 })
 
-test("the keyboard goes back to where it was when a panel or a question closes", async ({
+test("a row opens its page from the keyboard, and the keyboard goes back to where it was when a question or a run closes", async ({
   page,
 }) => {
   await mockOps(page)
   await visit(page, "/databases/1/performance?view=sessions")
 
-  // A session's panel, opened from its row and closed with Escape.
+  // A session's page, opened from its row with the keyboard; Back is the list.
   await sessionRow(page, "52").focus()
   await page.keyboard.press("Enter")
-  await expect(dialog(page)).toContainText("Session 52")
-  // The panel is in the address: a link to one session opens on it.
-  await expect(page).toHaveURL(/session=52/)
-  await page.keyboard.press("Escape")
-  await expect(dialog(page)).toHaveCount(0)
-  await expect(sessionRow(page, "52")).toBeFocused()
-  await expect(page).not.toHaveURL(/session=/)
+  await expect(page).toHaveURL(/\/performance\/sessions\/52$/)
+  await expect(about(page, "About session 52")).toContainText("Session 52")
+  await page.goBack()
+  await expect(sessionRow(page, "52")).toBeVisible()
 
   // A confirmation refused.
   const cancel = page.getByRole("button", { name: "Cancel the statement of session 52" })
@@ -2728,22 +2680,23 @@ test("the keyboard goes back to where it was when a panel or a question closes",
   await page.keyboard.press("Escape")
   await expect(cancel).toBeFocused()
 
-  // A table's panel, a run from a list in it, and a question from a row's menu.
+  // A table's page, a run from the list on it, and a question from a row's menu.
   await view(page, /^Tables$/).click()
   const open = region(page, "Tables").getByRole("button", { name: "Open public.orders" })
   await open.focus()
   await page.keyboard.press("Enter")
-  await expect(dialog(page)).toContainText("Sequential scans")
-  const analyze = dialog(page).getByRole("button", {
+  await expect(detailView(page)).toContainText("Sequential scans")
+  await tab(page, "Maintenance").click()
+  const analyze = detailView(page).getByRole("button", {
     name: "Analyze: public.orders",
     exact: true,
   })
   await analyze.click()
-  await expect(dialog(page).last()).toContainText("Finished")
-  await dialog(page).last().getByRole("button", { name: "Close" }).first().click()
+  await expect(dialog(page)).toContainText("Finished")
+  await dialog(page).getByRole("button", { name: "Close" }).first().click()
   await expect(analyze).toBeFocused()
-  await page.keyboard.press("Escape")
-  await expect(open).toBeFocused()
+  await page.goBack()
+  await expect(open).toBeVisible()
 
   const menu = page.getByRole("button", { name: "Maintain public.orders" })
   await menu.focus()
@@ -2756,18 +2709,24 @@ test("the keyboard goes back to where it was when a panel or a question closes",
 
 test("a session by its address, and one the list does not hold", async ({ page }) => {
   await mockOps(page)
-  await visit(page, "/databases/1/performance?view=sessions&session=40%2C77")
-  await expect(dialog(page)).toContainText("Session 40,77")
-  await expect(dialog(page)).toContainText("billing-worker")
-  // The engine's word for what a held-up session waits on is in its panel…
-  await expect(dialog(page)).toContainText("Lock:transactionid")
-  await page.keyboard.press("Escape")
+  await visit(page, "/databases/1/performance/sessions/40~2C77")
+  const session = about(page, "About session 40,77")
+  await expect(session).toContainText("Session 40,77")
+  await expect(session).toContainText("billing-worker")
+  await expect(session).toContainText("Blocked")
+  // The engine's word for what a held-up session waits on is on its page…
+  await expect(detailView(page)).toContainText("Lock:transactionid")
+  await back(page, "Sessions").click()
   // …and the list's "Waiting on" is only what a reader can act on: who it is behind.
   await expect(sessionRow(page, "40,77")).toContainText("behind")
   await expect(sessionRow(page, "52")).not.toContainText("ClientRead")
 
-  await visit(page, "/databases/1/performance?view=sessions&session=nope")
-  await expect(dialog(page)).toContainText("Not in the session list")
+  // A session can wait on something the list does not hold, and its address says so.
+  await visit(page, "/databases/1/performance/sessions/nope")
+  await expect(page.getByText("Session nope is not in the session list")).toBeVisible()
+  await expect(page.getByText(/It may be a prepared transaction/)).toBeVisible()
+  await page.getByRole("link", { name: "Back to sessions" }).click()
+  await expect(sessionRow(page, "52")).toBeVisible()
 })
 
 test("a session that is not waiting has nothing under Waiting on", async ({ page }) => {
@@ -2789,10 +2748,10 @@ test("a session that is not waiting has nothing under Waiting on", async ({ page
   await expect(sessionRow(page, "52")).toBeVisible()
   await expect(region(page, "Sessions")).not.toContainText("PgSleep")
   await expect(region(page, "Sessions")).not.toContainText("ClientRead")
-  // It is the engine's word for what the thread is doing, and is in the panel as that.
+  // It is the engine's word for what the thread is doing, and is on the session's page as that.
   await sessionRow(page, "52").click()
-  await expect(dialog(page).getByText("Doing", { exact: true })).toBeVisible()
-  await expect(dialog(page)).toContainText("Timeout:PgSleep")
+  await expect(detailView(page).getByText("Doing", { exact: true })).toBeVisible()
+  await expect(detailView(page)).toContainText("Timeout:PgSleep")
 })
 
 test("the idle sessions stand in the same columns as the ones above them", async ({ page }) => {
@@ -2841,11 +2800,11 @@ test("a view is a place: Back from one is the one before", async ({ page }) => {
   await expect(page).toHaveURL(/view=sessions&state=blocked|state=blocked&view=sessions/)
 })
 
-test("an address that names a schema or a table the database does not hold narrows and opens nothing", async ({
+test("an address that names a schema the database does not hold narrows nothing, and a table it does not hold says so", async ({
   page,
 }) => {
   await mockOps(page)
-  await visit(page, "/databases/1/performance?view=tables&scope=nope&object=public%2Fgone")
+  await visit(page, "/databases/1/performance?view=tables&scope=nope")
   const tables = region(page, "Tables")
   await expect(tables.getByRole("row")).toHaveCount(5)
   await expect(
@@ -2853,8 +2812,13 @@ test("an address that names a schema or a table the database does not hold narro
       .getByRole("group", { name: "Narrow to one of the schemas" })
       .getByRole("button", { name: /All schemas/ }),
   ).toHaveAttribute("aria-pressed", "true")
-  await expect(dialog(page)).toHaveCount(0)
-  await expect(page).not.toHaveURL(/scope=|object=/)
+  await expect(page).not.toHaveURL(/scope=/)
+
+  // A table the database no longer holds has a page that says so, with the way back.
+  await visit(page, "/databases/1/performance/tables/public.gone")
+  await expect(page.getByText("This database holds no table named public.gone")).toBeVisible()
+  await page.getByRole("link", { name: "Back to tables" }).click()
+  await expect(tables.getByRole("row")).toHaveCount(5)
 })
 
 test("the engine's maintenance that could not be read is said, not left out", async ({ page }) => {
@@ -2895,6 +2859,7 @@ test("a table gives up its columns one at a time as the view narrows, and is row
     "Table",
     "Rows",
     "Size",
+    "Share",
     "Dead rows",
     "Unused space",
     "Sequential scans",
@@ -2906,9 +2871,11 @@ test("a table gives up its columns one at a time as the view narrows, and is row
   await page.setViewportSize({ width: 1152, height: 900 })
   await expect
     .poll(heads)
-    .toEqual(["Table", "Rows", "Size", "Dead rows", "Vacuumed", "Analysed", "Actions"])
+    .toEqual(["Table", "Rows", "Size", "Share", "Dead rows", "Vacuumed", "Analysed", "Actions"])
   await page.setViewportSize({ width: 1024, height: 900 })
-  await expect.poll(heads).toEqual(["Table", "Rows", "Size", "Dead rows", "Vacuumed", "Actions"])
+  await expect
+    .poll(heads)
+    .toEqual(["Table", "Rows", "Size", "Share", "Dead rows", "Vacuumed", "Actions"])
   // What its own column said is said on the row.
   await expect(tables.getByRole("row", { name: /import_staging/ })).toContainText("never analysed")
   // The menu is on screen at every one of them.
@@ -3250,23 +3217,606 @@ for (const [label, viewport] of [
       await keepsTheRules(page, `an analytic engine's ${name || "overview"} view`)
     }
 
-    // With the sheets open over their lists.
+    // With a confirmation open over a list.
     await visit(page, "/databases/1/performance?view=sessions")
     await page.getByRole("button", { name: "Terminate session 12,3301" }).first().click()
     await expect(dialog(page)).toContainText("Terminate session")
     await keepsTheRules(page, "the sessions with a confirmation open", true)
-    await visit(page, "/databases/1/performance?view=tables&object=public%2Forders")
-    await expect(dialog(page)).toContainText("Maintenance")
-    await keepsTheRules(page, "a table's panel", true)
-    await visit(page, "/databases/1/performance?view=statements&statement=s2")
-    await expect(dialog(page)).toContainText("Of runtime")
-    await expect(dialog(page).getByRole("textbox")).toHaveCount(2)
-    await keepsTheRules(page, "a statement's panel", true)
-    await visit(page, `/databases/1/performance?view=history&statement=${SHOP_HISTORY[1].id}`)
-    await expect(dialog(page)).toContainText("Time per call")
-    await keepsTheRules(page, "a statement's history", true)
-    await visit(page, "/databases/1/performance?view=sessions&session=40%2C77")
-    await expect(dialog(page)).toContainText("Session 40,77")
-    await keepsTheRules(page, "a session's panel", true)
+
+    // The pages a list opens for one thing, on each of their views.
+    await visit(page, "/databases/1/performance/tables/public.orders")
+    await expect(detailView(page)).toContainText("Sequential scans")
+    await keepsTheRules(page, "a table's page")
+    await visit(page, "/databases/1/performance/tables/public.orders?tab=maintenance")
+    await expect(detailView(page)).toContainText("Housekeeping")
+    await keepsTheRules(page, "a table's maintenance")
+    await visit(page, "/databases/1/performance/statements/s2")
+    await expect(detailView(page).locator("[data-slot=reading-line]")).toHaveCount(4)
+    await keepsTheRules(page, "a statement's page")
+    await visit(page, "/databases/1/performance/statements/s2?tab=plan")
+    await expect(detailView(page).getByRole("textbox")).toHaveCount(2)
+    await keepsTheRules(page, "a statement's plan")
+    await visit(page, `/databases/1/performance/statements/${SHOP_HISTORY[1].id}?tab=history`)
+    await expect(detailView(page)).toContainText("Time per call")
+    await keepsTheRules(page, "a statement's history")
+    await visit(page, "/databases/1/performance/sessions/40~2C77")
+    await expect(about(page, "About session 40,77")).toContainText("Session 40,77")
+    await keepsTheRules(page, "a session's page")
+    await visit(page, "/databases/1/performance/sessions/40~2C77?tab=waits")
+    await expect(detailView(page).getByRole("link", { name: "Open session 12,3301" })).toBeVisible()
+    await keepsTheRules(page, "a session's waits")
   })
 }
+
+// ---------------------------------------------------------------------------
+// The pages a list opens for one thing
+// ---------------------------------------------------------------------------
+
+/** The top edge of something, once the page's arrival has finished. */
+async function topOf(page: Page, selector: string) {
+  await risen(page)
+  return page
+    .locator(selector)
+    .first()
+    .evaluate((el) => Math.round(el.getBoundingClientRect().top))
+}
+
+/**
+ * How far each row of a list stands from the one before it, in whichever
+ * shape the width gives the list. The pitch rather than the height: a list's
+ * first row has no rule over it, so it is a pixel shorter and stands where
+ * the rest do.
+ */
+const rowPitches = (page: Page, selector: string) =>
+  page.locator(selector).evaluateAll((rows) => {
+    const tops = rows.map((row) => row.getBoundingClientRect().top)
+    return tops.slice(1).map((top, at) => top - tops[at])
+  })
+
+/** One pitch down the list, to within the half pixel a line box can come to. */
+function expectOnePitch(pitches: number[]) {
+  expect(pitches.length).toBeGreaterThan(1)
+  expect(Math.max(...pitches) - Math.min(...pitches)).toBeLessThan(1)
+}
+
+test("the addresses that opened the sheets land on the pages they named", async ({ page }) => {
+  await mockOps(page)
+  // A statement, with the order its list was in.
+  await visit(page, "/databases/1/performance?view=statements&statement=s2&sort=calls")
+  await expect(page).toHaveURL(/\/performance\/statements\/s2\?sort=calls$/)
+  await expect(aboutStatement(page)).toContainText("UPDATE carts SET total = $1 WHERE id = $2")
+  // A recorded statement, on its history.
+  await visit(page, "/databases/1/performance?view=history&statement=7731904")
+  await expect(page).toHaveURL(/\/performance\/statements\/7731904\?tab=history$/)
+  await expect(tab(page, "History")).toHaveAttribute("aria-selected", "true")
+  // A table, by the key that held its schema and name escaped.
+  await visit(
+    page,
+    "/databases/1/performance?view=tables&scope=analytics&object=analytics%2Fevents",
+  )
+  await expect(page).toHaveURL(/\/performance\/tables\/analytics\.events\?scope=analytics$/)
+  await expect(about(page, "About analytics.events")).toBeVisible()
+  // The schema the list was narrowed to goes with it: the rail is that list.
+  await expect(rail(page, "Tables").getByRole("link")).toHaveCount(1)
+  // A session, with the state its list was narrowed to.
+  await visit(page, "/databases/1/performance?view=sessions&state=blocked&session=40%2C77")
+  await expect(page).toHaveURL(/\/performance\/sessions\/40~2C77\?state=blocked$/)
+  await expect(about(page, "About session 40,77")).toBeVisible()
+  await expect(rail(page, "Sessions").getByRole("link")).toHaveCount(1)
+  // The sheet is not what Back returns to.
+  await visit(page, "/databases/1/performance?view=statements")
+  await page.goto("/databases/1/performance?view=statements&statement=s1")
+  await expect(aboutStatement(page)).toBeVisible()
+  await page.goBack()
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(4)
+})
+
+test("a name with a dot and one with a slash are each one segment of an address, and open", async ({
+  page,
+}) => {
+  await mockOps(page, {
+    answers: {
+      "GET 1/tablestats": {
+        ...TABLESTATS,
+        tables: [
+          table("reports.2026", "q1/q2", { totalBytes: 6_000_000 }),
+          table("public", "orders.archive"),
+          ...TABLESTATS.tables,
+        ],
+      },
+      "GET 1/statements": {
+        ...STATEMENTS,
+        statements: [
+          statement("a/b.c", "SELECT 1 FROM slashed", 0.7),
+          statement("", "SELECT 2 FROM unnamed", 0.2),
+          statement("s3", "SELECT count(*) FROM order_items", 0.1),
+        ],
+      },
+    },
+  })
+  await visit(page, "/databases/1/performance?view=tables")
+  await region(page, "Tables").getByRole("button", { name: "Open reports.2026.q1/q2" }).click()
+  // The one dot left in the segment is the one between the schema and the name.
+  await expect(page).toHaveURL(/\/performance\/tables\/reports~2E2026\.q1~2Fq2$/)
+  await expect(about(page, "About reports.2026.q1/q2")).toContainText("q1/q2")
+  // The address alone opens it: nothing between the bar and the page reads it as a path.
+  await visit(page, "/databases/1/performance/tables/public.orders~2Earchive")
+  await expect(about(page, "About public.orders.archive")).toContainText("orders.archive")
+  await expect(page.locator("[data-slot=database-strip]")).toBeVisible()
+
+  await visit(page, "/databases/1/performance?view=statements")
+  await region(page, "Statements")
+    .getByRole("row", { name: /SELECT 1 FROM slashed/ })
+    .click()
+  await expect(page).toHaveURL(/\/performance\/statements\/a~2Fb~2Ec$/)
+  await expect(aboutStatement(page)).toContainText("SELECT 1 FROM slashed")
+  // A statement another role ran has no id, and still has a page.
+  await page.getByRole("button", { name: "Next statement" }).click()
+  await expect(page).toHaveURL(/\/performance\/statements\/~$/)
+  await expect(aboutStatement(page)).toContainText("SELECT 2 FROM unnamed")
+  // A percent-escape is the spelling that does not arrive whole: it is not read as a name.
+  await visit(page, "/databases/1/performance/statements/a%2Fb.c")
+  await expect(page.getByText(/not among the ones the server lists/)).toBeVisible()
+})
+
+test("a statement's page walks its list: the rail, the arrows, Alt and the arrow keys, with the view kept", async ({
+  page,
+}) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=statements")
+  // The list's own filter is the rail's.
+  await region(page, "Statements").getByLabel("Filter the statements").fill("SELECT")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(3)
+  await region(page, "Statements")
+    .getByRole("row", { name: /SELECT \* FROM orders/ })
+    .click()
+  const list = rail(page, "Statements")
+  await expect(list.getByLabel("Filter the statements")).toHaveValue("SELECT")
+  await expect(list.getByRole("link")).toHaveCount(2)
+  await expect(list).toContainText("2 of 3 statements · by total time")
+  await expect(list.locator("[aria-current=page]")).toContainText("SELECT * FROM orders")
+
+  // The view on screen goes with the reader to the next statement.
+  await tab(page, "Text").click()
+  await page.keyboard.press("Alt+ArrowDown")
+  await expect(page).toHaveURL(/\/statements\/s3\?tab=text$/)
+  await expect(detailView(page).locator("[data-slot=code-view]")).toContainText("order_items")
+  await expect(page.getByRole("button", { name: "Next statement" })).toBeDisabled()
+  await page.getByRole("button", { name: "Previous statement" }).click()
+  await expect(page).toHaveURL(/\/statements\/s1\?tab=text$/)
+  // The filter cleared in the rail is cleared in the list it came from.
+  await list.getByLabel("Filter the statements").fill("")
+  await expect(list.getByRole("link")).toHaveCount(3)
+  await list.getByRole("link", { name: /UPDATE carts/ }).click()
+  await expect(aboutStatement(page)).toContainText("UPDATE carts SET total")
+  await back(page, "Statements").click()
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(4)
+})
+
+test("a session that ends while its page is open is said to have ended, and offers nothing to stop", async ({
+  page,
+}) => {
+  let gone = false
+  const ops = await mockOps(page, {
+    answers: {
+      "GET 1/activity": () =>
+        gone
+          ? { ...ACTIVITY, sessions: ACTIVITY.sessions.filter((entry) => entry.pid !== "52") }
+          : ACTIVITY,
+    },
+  })
+  await visit(page, "/databases/1/performance/sessions/52")
+  const session = about(page, "About session 52")
+  await expect(session).toContainText("Active")
+  await expect(detailView(page)).toContainText("SELECT count(*) FROM order_items")
+
+  // Its statement is cancelled from the page, behind the same question the list asks.
+  await session.getByRole("button", { name: "Cancel statement" }).click()
+  await expect(dialog(page)).toContainText("Session 52")
+  gone = true
+  await dialog(page).getByRole("button", { name: "Stop the statement" }).click()
+  await expect.poll(() => ops.sent.map((sent) => sent.request)).toEqual(["POST 1/activity/cancel"])
+  expect(ops.sent[0].body).toEqual({ pid: "52" })
+
+  // The list no longer holds it: the page stays, as it was last seen, and says so.
+  await expect(session).toContainText("Ended, shown as it was last seen")
+  await expect(detailView(page)).toContainText("SELECT count(*) FROM order_items")
+  await expect(
+    page.getByRole("button", { name: /^(Cancel statement|Terminate session)$/ }),
+  ).toHaveCount(0)
+  // It is a state of the page, not a failure of it.
+  await expect(page.getByText(/could not/i)).toHaveCount(0)
+  // It is still on its own rail, apart from the sessions that are there.
+  await expect(rail(page, "Sessions").locator("[aria-current=page]")).toContainText("ended")
+})
+
+test("terminating is the page's command where there is nothing to cancel, and in its menu where there is", async ({
+  page,
+}) => {
+  const ops = await mockOps(page)
+  await visit(page, "/databases/1/performance/sessions/12~2C3301")
+  await about(page, "About session 12,3301")
+    .getByRole("button", { name: "Terminate session" })
+    .click()
+  await expect(dialog(page)).toContainText("its open transaction is rolled back")
+  await dialog(page).getByRole("button", { name: "Terminate session" }).click()
+  await expect
+    .poll(() => ops.sent.at(-1))
+    .toMatchObject({ request: "POST 1/activity/kill", body: { pid: "12,3301" } })
+
+  await visit(page, "/databases/1/performance/sessions/52")
+  await page.getByRole("button", { name: "More for session 52" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "Open in Query",
+    "Copy statement",
+    "Terminate session",
+  ])
+  await page.getByRole("menuitem", { name: "Terminate session" }).click()
+  await expect(dialog(page)).toContainText("Session 52")
+  await page.keyboard.press("Escape")
+  // The dashboard's own session is offered neither.
+  await visit(page, "/databases/1/performance/sessions/60")
+  await expect(about(page, "About session 60")).toContainText("this dashboard")
+  await expect(
+    page.getByRole("button", { name: /^(Cancel statement|Terminate session)$/ }),
+  ).toHaveCount(0)
+})
+
+test("an account that may only read sees no control it cannot use on the three pages", async ({
+  page,
+}) => {
+  await mockOps(page, { viewer: true })
+  await visit(page, "/databases/1/performance/statements/s1")
+  await expect(aboutStatement(page)).toContainText("60% of runtime")
+  await expect(page.getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+  await tab(page, "Plan").click()
+  await expect(
+    detailView(page).getByRole("button", { name: "Explain with these values" }),
+  ).toBeVisible()
+  await expect(detailView(page).getByRole("button", { name: /Open in Query/ })).toHaveCount(0)
+
+  await visit(page, "/databases/1/performance/sessions/52")
+  await expect(about(page, "About session 52")).toContainText("Active")
+  await expect(
+    page.getByRole("button", { name: /^(Cancel statement|Terminate session)$/ }),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "More for session 52" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Copy statement"])
+  await page.keyboard.press("Escape")
+
+  await visit(page, "/databases/1/performance/tables/public.orders")
+  await expect(
+    about(page, "About public.orders").getByRole("link", { name: "Open in Data" }),
+  ).toBeVisible()
+  // What it may read of the table's keeping is there; nothing that runs is.
+  await tab(page, "Maintenance").click()
+  await expect(detailView(page)).toContainText("Vacuumed by the engine")
+  await expect(detailView(page).getByRole("button")).toHaveCount(0)
+  await page.getByRole("button", { name: "More for public.orders" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Open in Schema"])
+})
+
+for (const width of [1280, 390]) {
+  test(`a list's rows are one height with and without what only some of them have, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockOps(page, {
+      answers: {
+        "GET 1/activity": {
+          ...ACTIVITY,
+          sessions: [...ACTIVITY.sessions, session("70", "active", { seconds: 2 })],
+        },
+      },
+    })
+    // No bar under a statement, a table or an index: a share is a figure.
+    for (const name of ["statements", "tables", "indexes"]) {
+      await visit(page, `/databases/1/performance?view=${name}`)
+      await expect(
+        page.locator("[data-slot=page] tbody tr, [data-slot=page] li").first(),
+      ).toBeVisible()
+      await expect(page.locator("[data-slot=page] .bg-meter-track")).toHaveCount(0)
+      await expect(page.locator("[data-slot=stat-grid], [data-slot=metric-strip]")).toHaveCount(0)
+    }
+
+    await visit(page, "/databases/1/performance?view=statements")
+    await expect(region(page, "Statements").getByRole("row")).toHaveCount(4)
+    expectOnePitch(await rowPitches(page, "[data-slot=page] tbody tr"))
+
+    // A table that is overdue and one that says nothing of itself.
+    await visit(page, "/databases/1/performance?view=tables")
+    await expect(page.locator("[data-list-row=table]")).toHaveCount(4)
+    expectOnePitch(await rowPitches(page, "[data-list-row=table]"))
+    if (width >= 1280) {
+      await expect(page.locator("[data-list-row=table] [data-slot=share]")).toHaveText([
+        "57%",
+        "31%",
+        "11%",
+        "1%",
+      ])
+    }
+    // The strip is the whole database's, and does not grow from row to row.
+    await expect(
+      page.locator("[data-slot=tables-split]").getByRole("img", { name: /^Rows .*, Indexes / }),
+    ).toBeVisible()
+
+    // An index with two things wrong beside one with nothing to say.
+    await visit(page, "/databases/1/performance?view=indexes")
+    await expect(page.locator("[data-list-row=index]")).toHaveCount(5)
+    expectOnePitch(await rowPitches(page, "[data-list-row=index]"))
+
+    // A session that waits on another, one with no statement, one with neither.
+    await visit(page, "/databases/1/performance?view=sessions")
+    await expect(page.locator("[data-list-row=session]")).toHaveCount(5)
+    expectOnePitch(await rowPitches(page, "[data-list-row=session]"))
+  })
+
+  test(`a page's opening block is in the same place while it is read and once it has been, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const statements = held<null>()
+    const tables = held<null>()
+    const activity = held<null>()
+    await mockOps(page, {
+      answers: {
+        "GET 1/statements": () => statements.until.then(() => STATEMENTS),
+        "GET 1/tablestats": () => tables.until.then(() => TABLESTATS),
+        "GET 1/activity": () => activity.until.then(() => ACTIVITY),
+      },
+    })
+    const line = "[data-slot=host-identity]"
+    const strip = "[role=tablist]"
+
+    await visit(page, "/databases/1/performance/statements/s2")
+    await expect(page.getByText("Reading the statement…")).toBeVisible()
+    const statementLine = await topOf(page, line)
+    statements.release(null)
+    await expect(aboutStatement(page)).toContainText("30% of runtime")
+    expect(await topOf(page, line)).toBe(statementLine)
+    const statementStrip = await topOf(page, strip)
+    // Stepping to a statement with something wrong with its reads moves nothing either.
+    await page.getByRole("button", { name: "Previous statement" }).click()
+    await expect(aboutStatement(page)).toContainText("miss the cache")
+    if (width >= 1280) expect(await topOf(page, strip)).toBe(statementStrip)
+
+    await visit(page, "/databases/1/performance/tables/public.sessions_log")
+    await expect(page.getByText("Reading its figures…")).toBeVisible()
+    const tableLine = await topOf(page, line)
+    tables.release(null)
+    await expect(about(page, "About public.sessions_log")).toContainText("a vacuum is due")
+    expect(await topOf(page, line)).toBe(tableLine)
+
+    await visit(page, "/databases/1/performance/sessions/52")
+    await expect(page.locator(line).getByText("Reading the sessions…")).toBeVisible()
+    const sessionLine = await topOf(page, line)
+    activity.release(null)
+    await expect(about(page, "About session 52")).toContainText("Active")
+    expect(await topOf(page, line)).toBe(sessionLine)
+  })
+}
+
+test("a page of one thing is a single pane on a phone, with the way back and nothing cut off sideways", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOps(page)
+  for (const [path, name] of [
+    ["/databases/1/performance/statements/s1", "About this statement"],
+    ["/databases/1/performance/tables/public.orders?tab=maintenance", "About public.orders"],
+    ["/databases/1/performance/sessions/40~2C77?tab=waits", "About session 40,77"],
+  ] as const) {
+    await visit(page, path)
+    await expect(about(page, name)).toBeVisible()
+    await expect(page.locator("[data-slot=detail-rail]")).toBeHidden()
+    await expect(page.locator("[data-slot=page-context]").getByRole("link")).toBeVisible()
+    await keepsTheRules(page, `${name} at a phone's width`)
+  }
+})
+
+test("a page of an engine that has no such thing says so and asks the server nothing", async ({
+  page,
+}) => {
+  const ops = await mockOps(page)
+  // A file has no sessions and no statement statistics.
+  await visit(page, "/databases/7/performance/sessions/1")
+  await expect(page.getByText(/has nothing of the kind for this page to read/)).toBeVisible()
+  await visit(page, "/databases/7/performance/statements/s1")
+  await expect(page.getByRole("link", { name: "Open Performance" })).toBeVisible()
+  expect(ops.seen.filter((request) => /\/(activity|statements)/.test(request))).toEqual([])
+})
+
+test("a top statement on Logs opens the statement's page, not a dialog of its own", async ({
+  page,
+}) => {
+  await mockOps(page, {
+    queryLog: {
+      supported: true,
+      source: "log",
+      entries: [ENTRY],
+      truncated: false,
+      threshold: "250ms",
+    },
+  })
+  await visit(page, "/databases/1/logs")
+  await page.getByRole("button", { name: "Top statements" }).click()
+  const top = region(page, "Top statements").locator("[data-slot=rank-list] button")
+  await expect(top).toHaveCount(3)
+  await top.nth(1).click()
+  await expect(dialog(page)).toHaveCount(0)
+  await expect(page).toHaveURL(/\/databases\/1\/performance\/statements\/s2$/)
+  await expect(aboutStatement(page)).toContainText("UPDATE carts SET total = $1 WHERE id = $2")
+  await expect(page.locator("[data-slot=metric-strip]")).toHaveCount(0)
+})
+
+test("Performance's lists and the pages they open, for the record @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the screenshots go to")
+  test.setTimeout(600_000)
+  const dir = process.env.JD_SHOTS
+  const wait = { statements: held<null>(), tables: held<null>(), activity: held<null>() }
+  // What the routes answer is the test's to change between captures.
+  const now = {
+    viewer: false,
+    loading: false,
+    statements: STATEMENTS as unknown,
+    tables: TABLESTATS as unknown,
+    activity: ACTIVITY as unknown,
+  }
+  const answers = {
+    "GET 1/statements": () =>
+      now.loading ? wait.statements.until.then(() => now.statements) : now.statements,
+    "GET 1/tablestats": () => (now.loading ? wait.tables.until.then(() => now.tables) : now.tables),
+    "GET 1/activity": () =>
+      now.loading ? wait.activity.until.then(() => now.activity) : now.activity,
+    "POST 1/explain": ORDERS_PLAN,
+  }
+  const mocked = async (viewer: boolean) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockOps(page, {
+      viewer,
+      answers,
+      queryLog: {
+        supported: true,
+        source: "log",
+        entries: [ENTRY],
+        truncated: false,
+        threshold: "250ms",
+      },
+    })
+  }
+
+  // JD_SHOTS_WIDTHS narrows the run to one width: "390".
+  const widths = (process.env.JD_SHOTS_WIDTHS ?? "1280,390").split(",").map(Number)
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    const shot = async (name: string, path: string, ready?: () => Promise<unknown>) => {
+      await visit(page, path)
+      if (ready) await ready()
+      if (!now.loading) await page.waitForLoadState("networkidle")
+      await risen(page)
+      await page.waitForTimeout(400)
+      await page.screenshot({ path: `${dir}/after-${name}-${width}.png`, fullPage: true })
+    }
+    const drawn = (name: string) => () => expect(about(page, name)).toBeVisible()
+    Object.assign(now, {
+      viewer: false,
+      loading: false,
+      statements: STATEMENTS,
+      tables: TABLESTATS,
+      activity: ACTIVITY,
+    })
+    await mocked(false)
+
+    // The lists.
+    await shot("performance-overview-full", "/databases/1/performance")
+    await shot("performance-statements-full", "/databases/1/performance?view=statements")
+    await shot("performance-history-full", "/databases/1/performance?view=history")
+    await shot("performance-tables-full", "/databases/1/performance?view=tables")
+    await shot("performance-indexes-full", "/databases/1/performance?view=indexes")
+    await shot("performance-sessions-full", "/databases/1/performance?view=sessions")
+    await shot("logs-top-statements", "/databases/1/logs", async () => {
+      await page.getByRole("button", { name: "Top statements" }).click()
+      await expect(region(page, "Top statements").locator("[data-slot=rank-row]")).toHaveCount(3)
+    })
+
+    // A statement.
+    const statementUrl = "/databases/1/performance/statements/s1"
+    await shot("statement-full", statementUrl, drawn("About this statement"))
+    await shot("statement-text", `${statementUrl}?tab=text`, () =>
+      expect(detailView(page).locator("[data-slot=code-view]")).toContainText("customer_id"),
+    )
+    await shot("statement-plan", `${statementUrl}?tab=plan`, async () => {
+      await detailView(page).getByRole("textbox").first().fill("42")
+      await detailView(page).getByRole("button", { name: "Explain with these values" }).click()
+      await expect(detailView(page)).toContainText("Index Scan")
+    })
+    await shot("statement-history", "/databases/1/performance/statements/7731904?tab=history", () =>
+      expect(detailView(page).getByRole("heading", { name: "Rows", exact: true })).toBeVisible(),
+    )
+    await shot("statement-gone", "/databases/1/performance/statements/nope", () =>
+      expect(page.getByText(/not among the ones the server lists/)).toBeVisible(),
+    )
+
+    // A table.
+    const tableUrl = "/databases/1/performance/tables/public.sessions_log"
+    await shot("table-full", tableUrl, drawn("About public.sessions_log"))
+    await shot("table-maintenance", `${tableUrl}?tab=maintenance`, () =>
+      expect(detailView(page)).toContainText("Housekeeping"),
+    )
+    await shot("table-missing", "/databases/1/performance/tables/public.gone", () =>
+      expect(page.getByText(/holds no table named/)).toBeVisible(),
+    )
+
+    // A session.
+    await shot("session-full", "/databases/1/performance/sessions/52", drawn("About session 52"))
+    await shot("session-waits", "/databases/1/performance/sessions/40~2C77?tab=waits", () =>
+      expect(detailView(page).getByRole("link", { name: "Open session 12,3301" })).toBeVisible(),
+    )
+    await shot("session-missing", "/databases/1/performance/sessions/nope", () =>
+      expect(page.getByText(/is not in the session list/)).toBeVisible(),
+    )
+    await visit(page, "/databases/1/performance/sessions/52")
+    await expect(about(page, "About session 52")).toContainText("Active")
+    now.activity = { ...ACTIVITY, sessions: ACTIVITY.sessions.filter((one) => one.pid !== "52") }
+    await expect(about(page, "About session 52")).toContainText("Ended", { timeout: 20_000 })
+    await page.screenshot({ path: `${dir}/after-session-ended-${width}.png`, fullPage: true })
+    now.activity = ACTIVITY
+
+    // Empty, off and failed.
+    now.statements = { ...STATEMENTS, totalMs: 0, statements: [] }
+    await shot("performance-statements-empty", "/databases/1/performance?view=statements", () =>
+      expect(page.getByText(/No statement has been counted yet/)).toBeVisible(),
+    )
+    now.statements = STATEMENTS_OFF
+    await shot("performance-statements-off", "/databases/1/performance?view=statements", () =>
+      expect(page.getByText("This server is not counting its statements")).toBeVisible(),
+    )
+    await shot("statement-off", statementUrl, () =>
+      expect(page.getByText("This server is not counting its statements").last()).toBeVisible(),
+    )
+    now.statements = failing("pq: permission denied for view pg_stat_statements")
+    await shot("performance-statements-failed", "/databases/1/performance?view=statements", () =>
+      expect(page.getByText("Could not read the statements")).toBeVisible(),
+    )
+    await shot("statement-failed", statementUrl, () =>
+      expect(page.getByText("Could not read the statements")).toBeVisible(),
+    )
+    now.statements = STATEMENTS
+    now.tables = { ...TABLESTATS, tables: [] }
+    await shot("performance-tables-empty", "/databases/1/performance?view=tables", () =>
+      expect(page.getByText(/holds no tables yet/)).toBeVisible(),
+    )
+    now.tables = TABLESTATS
+
+    // While it is read.
+    now.loading = true
+    await shot("performance-statements-loading", "/databases/1/performance?view=statements")
+    await shot("statement-loading", statementUrl, () =>
+      expect(page.getByText("Reading the statement…")).toBeVisible(),
+    )
+    await shot("table-loading", tableUrl, () =>
+      expect(page.getByText("Reading its figures…")).toBeVisible(),
+    )
+    await shot("session-loading", "/databases/1/performance/sessions/52", () =>
+      expect(
+        page.locator("[data-slot=host-identity]").getByText("Reading the sessions…"),
+      ).toBeVisible(),
+    )
+    now.loading = false
+
+    // An account that may only read.
+    await mocked(true)
+    await shot("performance-statements-readonly", "/databases/1/performance?view=statements", () =>
+      expect(region(page, "Statements").getByRole("row")).toHaveCount(4),
+    )
+    await shot("statement-readonly", statementUrl, drawn("About this statement"))
+    await shot("table-readonly", `${tableUrl}?tab=maintenance`, () =>
+      expect(detailView(page)).toContainText("Housekeeping"),
+    )
+    await shot(
+      "session-readonly",
+      "/databases/1/performance/sessions/52",
+      drawn("About session 52"),
+    )
+  }
+})

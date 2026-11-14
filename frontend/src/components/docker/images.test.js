@@ -3,6 +3,12 @@ import {
   foldPull,
   freshness,
   imageFreshness,
+  imageHref,
+  imageKey,
+  imageNames,
+  imageRequest,
+  imageSteps,
+  imageTab,
   layerInstruction,
   parseSize,
   pullShare,
@@ -155,4 +161,51 @@ test("a history line reads as the instruction that wrote it", () => {
   })
   expect(layerInstruction("COPY app /srv # buildkit")).toEqual({ verb: "COPY", rest: "app /srv" })
   expect(layerInstruction("")).toEqual({ verb: "", rest: "" })
+})
+
+test("an image's address is its id's hex, and a reference is one escaped segment", () => {
+  const id = `sha256:${"a1".repeat(32)}`
+  expect(imageKey(id)).toBe("a1".repeat(32))
+  expect(imageHref(id)).toBe(`/docker/images/${"a1".repeat(32)}`)
+  // Layers is the page's own view; the others are said.
+  expect(imageHref(id, "layers")).toBe(`/docker/images/${"a1".repeat(32)}`)
+  expect(imageHref(id, "history")).toBe(`/docker/images/${"a1".repeat(32)}?tab=history`)
+  expect(imageHref(id, "nonsense")).toBe(`/docker/images/${"a1".repeat(32)}`)
+  expect(imageHref("ghcr.io/acme/api:main")).toBe("/docker/images/ghcr.io%2Facme%2Fapi%3Amain")
+  expect(imageHref("localhost:5000/tools/api:1", "containers")).toBe(
+    "/docker/images/localhost%3A5000%2Ftools%2Fapi%3A1?tab=containers",
+  )
+})
+
+test("a path segment asks Docker for an id or for the reference as written", () => {
+  expect(imageRequest("a1".repeat(32))).toBe(`sha256:${"a1".repeat(32)}`)
+  expect(imageRequest(`sha256%3A${"a1".repeat(32)}`)).toBe(`sha256:${"a1".repeat(32)}`)
+  expect(imageRequest("ghcr.io%2Facme%2Fapi%3Amain")).toBe("ghcr.io/acme/api:main")
+  // Already unescaped by whoever read the address.
+  expect(imageRequest("ghcr.io/acme/api:main")).toBe("ghcr.io/acme/api:main")
+  // Twelve hex digits can be a repository's name; only the full id is an id.
+  expect(imageRequest("deadbeefcafe")).toBe("deadbeefcafe")
+  expect(imageRequest("100%25")).toBe("100%")
+  expect(imageRequest("100%")).toBe("100%")
+  expect(imageTab("history")).toBe("history")
+  expect(imageTab("shell")).toBe("layers")
+  expect(imageTab(null)).toBe("layers")
+})
+
+test("the history is read in build order, each line as its instruction", () => {
+  const steps = imageSteps([
+    { createdBy: 'CMD ["nginx"]', size: 0, created: "2026-10-02T00:00:00Z" },
+    {
+      createdBy: "RUN /bin/sh -c apk add curl # buildkit",
+      size: 40,
+      created: "2026-10-02T00:00:00Z",
+    },
+    { createdBy: "", comment: "imported from a tarball", size: 7, created: "2026-10-01T00:00:00Z" },
+  ])
+  expect(steps.map((s) => s.step)).toEqual([1, 2, 3])
+  expect(steps[0]).toMatchObject({ verb: "", rest: "imported from a tarball", size: 7 })
+  expect(steps[1]).toMatchObject({ verb: "RUN", rest: "apk add curl", size: 40 })
+  expect(steps[2]).toMatchObject({ verb: "CMD", rest: '["nginx"]', size: 0 })
+  expect(imageNames({ repoTags: ["<none>:<none>"] })).toEqual([])
+  expect(imageNames({ repoTags: ["a:1", "b:2"] })).toEqual(["a:1", "b:2"])
 })

@@ -1,47 +1,51 @@
 "use client"
 
-import { NetworkReadWarning } from "@/components/network/read-warning"
-import { Suspense, useState } from "react"
+import { Suspense, useCallback, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { LockClosed } from "@/components/icons"
+import { get } from "@/lib/api"
+import type { VPNView, WGInterface, WGPeer, WireGuardView } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { Plus, Trash } from "@/components/icons"
-import { del, get, post } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
-import { notify } from "@/lib/toast"
-import type { NetworkOverview, VPNView, WGInterface, WGPeer } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { Page, PageContext, Section } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { NumberTicker } from "@/components/ui/number-ticker"
-import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { useConfirm } from "@/components/confirm-dialog"
-import { ProductGlyph } from "@/components/product-logo"
-import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
-import { TunnelPicture } from "@/components/network/vpn/tunnel-picture"
-import { AddPeer, PeerSheet } from "@/components/network/vpn/peers"
-import { WireGuardSetup } from "@/components/network/vpn/setup"
-import { WireGuardFamilyEvidence } from "@/components/network/vpn/family-evidence"
-import { TailscaleBlock, TailscaleMissing } from "@/components/network/vpn/tailscale"
-import { TunnelAlerts, TunnelRecord } from "@/components/network/vpn/record"
-import { ArchivedTunnels } from "@/components/network/vpn/archive"
-import { VPNLog } from "@/components/network/vpn/vpn-log"
+import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Modal } from "@/components/modal"
+import { Page, PageContext } from "@/components/page"
+import { ProductGlyph } from "@/components/product-logo"
+import { WireMark } from "@/components/deploy/wire"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { WireFlow } from "@/components/wire-flow"
+import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
+import { NetworkReadWarning } from "@/components/network/read-warning"
+import { ArchivedTunnels } from "@/components/network/vpn/archive"
+import { usePeerSheets } from "@/components/network/vpn/peers"
+import { WireGuardSetup } from "@/components/network/vpn/setup"
+import { TailscaleBlock, TailscaleMissing } from "@/components/network/vpn/tailscale"
+import { TunnelExit } from "@/components/network/vpn/tunnel-exit"
+import {
+  IdentitySkeleton,
+  TunnelIdentity,
+  useTunnelControl,
+} from "@/components/network/vpn/tunnel-identity"
+import { PEERS_DRAWN, TunnelPicture } from "@/components/network/vpn/tunnel-picture"
+import { VPNLog } from "@/components/network/vpn/vpn-log"
 
 /**
  * The tunnels into and out of this server.
  *
- * WireGuard first, because it is the one the dashboard runs: each tunnel is
- * its picture — the devices that dial in, the tunnel, the sites it joins,
- * every wire moving while its peer is connected — with its switches in its
- * head (up, exit node) and every peer a press away from its QR code. A
- * server with no tunnel opens on the one-step setup; one without the tools
- * on their install. Then Tailscale: this server's place on the tailnet, what
- * it offers, and every other machine with how it is reached; Headscale's
- * nodes under it where Headscale runs. The log of all of it ends the page.
+ * It opens on what it is about, with no row of figures over it: each VPN is
+ * its own identity line. WireGuard first, because it is the one the dashboard
+ * runs: a tunnel's line (who is online, its network, its port, Add a device),
+ * its picture straight under it — the devices that dial in, the tunnel, the
+ * sites it joins, every wire moving while its peer is connected — and whether
+ * its clients' internet leaves through here. A tunnel's record is its own
+ * page (`/network/vpn/<name>`). A server with no tunnel opens on the one-step
+ * setup; one without the tools on their install. Then Tailscale: this
+ * server's place on the tailnet, what it offers, and every other machine with
+ * how it is reached; Headscale's nodes under it where Headscale runs. The log
+ * of all of it ends the page.
  *
  * Every read here names who connects, so the page is an administrator's,
  * as the SSH configuration is.
@@ -66,27 +70,13 @@ function NetworkVPNContent() {
   const vpn = usePoll<VPNView>((signal) => get("/network/vpn", undefined, signal), 10_000, [], {
     enabled: admin,
   })
-  const overview = usePoll<NetworkOverview>(
-    (signal) => get("/network/overview", undefined, signal),
-    60_000,
-  )
-  const [adding, setAdding] = useState<{ tunnel: string; kind: "device" | "site" }>()
-  const [opened, setOpened] = useState<{ tunnel: string; key: string }>()
-  const [creating, setCreating] = useState(false)
-  const [dismissedReservationId, setDismissedReservationId] = useState("")
-  const query = useSearchParams().get("ipamReservation") ?? ""
-  const initialReservationId =
-    admin && /^[a-f0-9]{32}$/.test(query) && query !== dismissedReservationId ? query : ""
-  const closeCreation = () => {
-    setCreating(false)
-    if (initialReservationId) setDismissedReservationId(initialReservationId)
-  }
 
   if (!admin) {
     return (
       <Page>
         <PageContext eyebrow="Network" title="VPN" />
         <EmptyState
+          icon={LockClosed}
           title="VPN needs the admin capability"
           description="Tunnel peers and their client configurations are visible to administrators."
         />
@@ -98,149 +88,148 @@ function NetworkVPNContent() {
     return (
       <Page className="animate-rise">
         <PageContext eyebrow="Network" title="VPN" />
-        {vpn.error ? <ErrorState error={vpn.error} onRetry={vpn.refresh} /> : <LoadingPanel />}
+        {vpn.error ? (
+          <>
+            <HostIdentity
+              mark="wireguard"
+              title="VPN"
+              state={<Status tone="danger" label="Not read" />}
+              facts={<HostFact>WireGuard and Tailscale on this server</HostFact>}
+            />
+            <ErrorState error={vpn.error} onRetry={vpn.refresh} retryable />
+          </>
+        ) : (
+          // The page's own shape while it is read: both lines and the picture
+          // stand where they will, so nothing moves when the answer lands.
+          <>
+            <section aria-label="WireGuard" aria-busy className="flex min-w-0 flex-col gap-6">
+              <IdentitySkeleton mark="wireguard" />
+              <WireFlow
+                loading
+                start={{ title: "Devices", nodes: [] }}
+                end={{ title: "Sites", nodes: [], loadingRows: 2 }}
+                hub={{
+                  mark: (
+                    <WireMark tone="neutral" shape="square">
+                      <ProductGlyph id="wireguard" />
+                    </WireMark>
+                  ),
+                }}
+              />
+            </section>
+            <section aria-label="Tailscale" aria-busy className="flex min-w-0 flex-col gap-6">
+              <IdentitySkeleton mark="tailscale" />
+              <LoadingRows rows={4} />
+            </section>
+          </>
+        )}
       </Page>
     )
   }
   const { wireguard, tailscale, headscale } = vpn.data
-  const peers = wireguard.interfaces.flatMap((t) => t.peers)
-  const online = peers.filter((p) => p.online).length
-  const alerts = wireguard.interfaces.reduce((n, t) => n + (t.alerts?.length ?? 0), 0)
-  const moved = peers.reduce((n, p) => n + p.rxBytes + p.txBytes, 0)
-  const tsOnline = tailscale.peers.filter((p) => p.online).length
-  const exits = [
-    ...wireguard.interfaces.filter((t) => t.exitNode).map((t) => t.name),
-    ...(tailscale.prefs.advertisingExitNode ? ["Tailscale"] : []),
-  ]
-  const localNetworks = [
-    ...(overview.data?.dockerNetworks.flatMap((n) => n.subnets) ?? []),
-    ...(overview.data?.links
-      .filter((l) => l.managed && l.role === "bridge")
-      .flatMap((l) => l.addresses.map((a) => network(a.cidr))) ?? []),
-  ]
-  const addingTunnel = wireguard.interfaces.find((t) => t.name === adding?.tunnel)
-  const openTunnel = wireguard.interfaces.find((t) => t.name === opened?.tunnel)
-  const openPeer = openTunnel?.peers.find((p) => p.publicKey === opened?.key)
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="VPN" />
-      {vpn.data && (
+    <SaveBarProvider>
+      <Page className="animate-rise">
+        <PageContext eyebrow="Network" title="VPN" />
         <NetworkReadWarning error={vpn.error} refresh={vpn.refresh} lastSuccess={vpn.lastSuccess} />
-      )}
 
-      <StatGrid columns={4}>
-        <StatTile
-          label={
-            <>
-              <ProductGlyph id="wireguard" className="mr-1.5 inline-block size-3 align-[-1.5px]" />
-              WireGuard
-            </>
-          }
-          value={
-            wireguard.interfaces.length === 0 ? (
-              "No tunnel"
-            ) : (
-              <>
-                <NumberTicker value={online} />
-                <span className="text-muted-foreground"> / {peers.length}</span>
-              </>
-            )
-          }
-          trailing={wireguard.interfaces.length ? "peers online" : undefined}
-          hint={
-            wireguard.interfaces.length
-              ? `${plural(wireguard.interfaces.length, "tunnel")} · ${wireguard.interfaces.map((t) => t.name).join(", ")}${alerts ? ` · ${plural(alerts, "alert")}` : ""}`
-              : wireguard.installed
-                ? "one step to set up"
-                : "wireguard-tools is not installed"
-          }
-        />
-        <StatTile
-          label={
-            <>
-              <ProductGlyph id="tailscale" className="mr-1.5 inline-block size-3 align-[-1.5px]" />
-              Tailnet
-            </>
-          }
-          value={
-            !tailscale.installed ? (
-              "Not here"
-            ) : (
-              <>
-                <NumberTicker value={tsOnline} />
-                <span className="text-muted-foreground"> / {tailscale.peers.length}</span>
-              </>
-            )
-          }
-          trailing={tailscale.installed ? "online" : undefined}
-          hint={
-            tailscale.tailnet ||
-            (tailscale.installed ? tailscale.backendState : "Tailscale is not installed")
-          }
-        />
-        <StatTile
-          label="Exit"
-          value={exits.length ? exits.join(" · ") : "None"}
-          hint={
-            exits.length
-              ? "configured exit offers; provider path untested"
-              : "this server routes no client's internet"
-          }
-        />
-        <StatTile
-          label="Moved"
-          value={bytes(moved)}
-          hint={`through WireGuard since each tunnel came up`}
-        />
-      </StatGrid>
+        <WireGuard wireguard={wireguard} onChanged={vpn.refresh} />
+        {wireguard.installed && <ArchivedTunnels onRestored={vpn.refresh} />}
 
-      <Section
-        title="WireGuard"
-        actions={
-          wireguard.installed && wireguard.interfaces.length > 0 ? (
-            <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
-              Create another tunnel
-            </Button>
-          ) : undefined
-        }
-      >
-        {wireguard.error && <Notice title="WireGuard could not be read">{wireguard.error}</Notice>}
-        {wireguard.installed && <InstallFollowUp pkg="wireguard-tools" />}
-        {!wireguard.installed ? (
-          <InstallHandoff
-            pkg="wireguard-tools"
-            products={["wireguard"]}
-            title="WireGuard is not installed"
-            description="The kernel has WireGuard built in; the tools that configure it are one package. Once it is in, a tunnel is one step: devices get a QR code, other sites a file."
-            onInstalled={vpn.refresh}
+        {tailscale.error ? (
+          <Notice title="Tailscale could not be read">{tailscale.error}</Notice>
+        ) : !tailscale.installed ? (
+          <TailscaleMissing onInstalled={vpn.refresh} />
+        ) : (
+          <TailscaleBlock tailscale={tailscale} headscale={headscale} onChanged={vpn.refresh} />
+        )}
+
+        <VPNLog vpn={vpn.data} />
+      </Page>
+    </SaveBarProvider>
+  )
+}
+
+/**
+ * WireGuard on this server: its tunnels, each on its own line with its
+ * picture; the setup where there is none; the install where the tools are
+ * missing. The dialog that makes another tunnel is opened from a tunnel's
+ * menu, or by a link from Address planning that carries a planned range.
+ */
+function WireGuard({ wireguard, onChanged }: { wireguard: WireGuardView; onChanged: () => void }) {
+  const [creating, setCreating] = useState(false)
+  const [dismissedReservationId, setDismissedReservationId] = useState("")
+  const query = useSearchParams().get("ipamReservation") ?? ""
+  const initialReservationId =
+    /^[a-f0-9]{32}$/.test(query) && query !== dismissedReservationId ? query : ""
+  const closeCreation = () => {
+    setCreating(false)
+    if (initialReservationId) setDismissedReservationId(initialReservationId)
+  }
+  const created = () => {
+    closeCreation()
+    onChanged()
+  }
+  const peers = usePeerSheets(wireguard.interfaces, onChanged)
+  const create = useCallback(() => setCreating(true), [])
+
+  return (
+    <section aria-label="WireGuard" className="flex min-w-0 flex-col gap-6">
+      {wireguard.error && <Notice title="WireGuard could not be read">{wireguard.error}</Notice>}
+      {wireguard.installed && <InstallFollowUp pkg="wireguard-tools" />}
+      {!wireguard.installed ? (
+        <InstallHandoff
+          pkg="wireguard-tools"
+          products={["wireguard"]}
+          title="WireGuard is not installed"
+          description="The kernel has WireGuard built in; the tools that configure it are one package. Then a tunnel is one step: devices get a QR code, other sites a file."
+          onInstalled={onChanged}
+        />
+      ) : wireguard.interfaces.length === 0 ? (
+        <>
+          <HostIdentity
+            label="About WireGuard"
+            slot="tunnel-identity"
+            mark="wireguard"
+            title="WireGuard"
+            state={<Status tone="stopped" label="No tunnel yet" />}
+            facts={
+              <>
+                <HostFact>
+                  <span className="font-mono">{wireguard.package || "wireguard-tools"}</span>{" "}
+                  installed
+                </HostFact>
+                {wireguard.kernel && (
+                  <>
+                    <FactDot />
+                    <HostFact>in this kernel</HostFact>
+                  </>
+                )}
+              </>
+            }
           />
-        ) : wireguard.interfaces.length === 0 ? (
           <Panel plain>
             <PanelHeader title="Set up a tunnel" />
             <PanelBody>
-              <WireGuardSetup
-                initialReservationId={initialReservationId}
-                onCreated={() => {
-                  closeCreation()
-                  vpn.refresh()
-                }}
-              />
+              <div className="max-w-3xl">
+                <WireGuardSetup initialReservationId={initialReservationId} onCreated={created} />
+              </div>
             </PanelBody>
           </Panel>
-        ) : (
-          wireguard.interfaces.map((tunnel) => (
-            <TunnelBlock
-              key={tunnel.name}
-              tunnel={tunnel}
-              onChanged={vpn.refresh}
-              onAdd={(kind) => setAdding({ tunnel: tunnel.name, kind })}
-              onPeer={(peer) => setOpened({ tunnel: tunnel.name, key: peer.publicKey })}
-            />
-          ))
-        )}
-        {wireguard.installed && <ArchivedTunnels onRestored={vpn.refresh} />}
-      </Section>
+        </>
+      ) : (
+        wireguard.interfaces.map((tunnel) => (
+          <TunnelBlock
+            key={tunnel.name}
+            tunnel={tunnel}
+            onChanged={onChanged}
+            onAdd={peers.add}
+            onPeer={peers.open}
+            onCreate={create}
+          />
+        ))
+      )}
       {wireguard.installed && wireguard.interfaces.length > 0 && (
         <Modal
           open={creating || Boolean(initialReservationId)}
@@ -249,252 +238,44 @@ function NetworkVPNContent() {
           description="WireGuard validates and creates its native tunnel. Selected shared plans recheck current ownership and overlap."
           size="lg"
         >
-          <WireGuardSetup
-            initialReservationId={initialReservationId}
-            onCreated={() => {
-              closeCreation()
-              vpn.refresh()
-            }}
-          />
+          <WireGuardSetup initialReservationId={initialReservationId} onCreated={created} />
         </Modal>
       )}
-
-      <Section title="Tailscale">
-        {tailscale.error ? (
-          <Notice title="Tailscale could not be read">{tailscale.error}</Notice>
-        ) : !tailscale.installed ? (
-          <TailscaleMissing onInstalled={vpn.refresh} />
-        ) : (
-          <TailscaleBlock tailscale={tailscale} headscale={headscale} onChanged={vpn.refresh} />
-        )}
-      </Section>
-
-      <VPNLog vpn={vpn.data} />
-
-      {addingTunnel && adding && (
-        <AddPeer
-          tunnel={addingTunnel}
-          kind={adding.kind}
-          open
-          onOpenChange={(open) => !open && setAdding(undefined)}
-          onAdded={vpn.refresh}
-          localNetworks={localNetworks}
-        />
-      )}
-      <PeerSheet
-        tunnel={openTunnel}
-        peer={openPeer}
-        onOpenChange={(open) => !open && setOpened(undefined)}
-        onChanged={vpn.refresh}
-      />
-    </Page>
+      {peers.sheets}
+    </section>
   )
 }
 
-/** A network address from an interface address: 192.168.50.1/24 is 192.168.50.0/24. */
-function network(cidr: string) {
-  const [address, bits] = cidr.split("/")
-  const n = Number(bits)
-  const parts = address.split(".").map(Number)
-  if (parts.length !== 4 || !Number.isInteger(n)) return cidr
-  const value = parts.reduce((v, p) => (v << 8) | p, 0) >>> 0
-  const masked = n === 0 ? 0 : (value & (~0 << (32 - n))) >>> 0
-  return `${[24, 16, 8, 0].map((s) => (masked >>> s) & 255).join(".")}/${n}`
-}
-
 /**
- * One tunnel: its state and switches in the head, its picture, and its
- * peers as the picture's nodes. A hand-written tunnel is drawn the same way
- * and says it is read-only here.
+ * One tunnel on the VPN page: the line it opens on, its picture straight
+ * under it, and its internet exit. A column of the picture draws six peers
+ * and sends the rest to the tunnel's own page, which draws them all.
  */
 function TunnelBlock({
   tunnel,
   onChanged,
   onAdd,
   onPeer,
+  onCreate,
 }: {
   tunnel: WGInterface
   onChanged: () => void
-  onAdd: (kind: "device" | "site") => void
-  onPeer: (peer: WGPeer) => void
+  onAdd: (tunnel: string, kind: "device" | "site") => void
+  onPeer: (tunnel: string, peer: WGPeer) => void
+  onCreate: () => void
 }) {
-  const { confirm, dialog } = useConfirm()
-  const [busy, setBusy] = useState(false)
-  const [record, setRecord] = useState(false)
-  const base = `/network/vpn/wireguard/${encodeURIComponent(tunnel.name)}`
-  const act = async (run: () => Promise<unknown>, label: string) => {
-    setBusy(true)
-    try {
-      await run()
-      notify.success(label)
-      onChanged()
-    } catch (err) {
-      notify.error(`${tunnel.name} was not changed`, err)
-    } finally {
-      setBusy(false)
-    }
-  }
-  const down = () =>
-    confirm({
-      title: `Take ${tunnel.name} down`,
-      confirmLabel: "Take down",
-      description: <p>Every device and site on it is disconnected until it is brought up again.</p>,
-      action: async () => {
-        await post(`${base}/down`)
-        notify.success(`${tunnel.name} is down`)
-        onChanged()
-      },
-    })
-  const remove = () =>
-    confirm({
-      title: `Remove ${tunnel.name}`,
-      confirmLabel: "Remove",
-      description: (
-        <p>
-          The tunnel stops, its peers are cut off and it is not started at boot. Its file is moved
-          aside rather than deleted, so its key is not lost if this was a mistake.
-        </p>
-      ),
-      action: async () => {
-        const result = await del<{ firewall: { removed: boolean; reason?: string } }>(base)
-        notify.success(`${tunnel.name} removed`, {
-          description: result.firewall?.removed
-            ? "Its dashboard-created firewall opening was removed."
-            : result.firewall?.reason,
-        })
-        onChanged()
-      },
-    })
-  const setExit = (on: boolean) => {
-    const apply = () =>
-      act(
-        () => post(`${base}/exit`, { on }),
-        on ? `${tunnel.name} has IPv4 exit rules` : `${tunnel.name} is a private network only`,
-      )
-    if (on) return void apply()
-    confirm({
-      title: `Stop using ${tunnel.name} as an exit node`,
-      confirmLabel: "Turn off",
-      description: (
-        <p>
-          Clients using this tunnel for internet access lose that access until they change their
-          configuration or this exit is enabled again.
-        </p>
-      ),
-      action: async () => {
-        await post(`${base}/exit`, { on: false })
-        notify.success(`${tunnel.name} is a private network only`)
-        onChanged()
-      },
-    })
-  }
-  const setIPv6Exit = (on: boolean) => {
-    if (on)
-      return void act(
-        () => post(`${base}/exit`, { on: true, ipv6: true }),
-        `${tunnel.name} has IPv4 and IPv6 exit rules`,
-      )
-    confirm({
-      title: `Turn off ${tunnel.name}'s IPv6 exit`,
-      confirmLabel: "Turn off IPv6",
-      description: "Full-tunnel clients lose IPv6 internet access. IPv4 exit remains configured.",
-      action: async () => {
-        await post(`${base}/exit`, { on: true, ipv6: false })
-        onChanged()
-      },
-    })
-  }
-  const online = tunnel.peers.filter((p) => p.online).length
+  const control = useTunnelControl(tunnel, onChanged)
+  const add = useCallback(
+    (kind: "device" | "site") => onAdd(tunnel.name, kind),
+    [onAdd, tunnel.name],
+  )
+  const open = useCallback((peer: WGPeer) => onPeer(tunnel.name, peer), [onPeer, tunnel.name])
   return (
-    <Panel plain>
-      <PanelHeader
-        title={
-          <span className="inline-flex items-center gap-2">
-            <ProductGlyph id="wireguard" />
-            <span className="font-mono">{tunnel.name}</span>
-          </span>
-        }
-        actions={
-          <span className="flex flex-wrap items-center gap-3">
-            <Status
-              tone={tunnel.up ? "running" : "stopped"}
-              label={tunnel.up ? `${online} of ${tunnel.peers.length} online` : "Down"}
-            />
-            <Button size="xs" variant="ghost" onClick={() => setRecord(true)}>
-              History
-            </Button>
-            {tunnel.managed && (
-              <>
-                <label className="flex items-center gap-2 text-hint text-muted-foreground">
-                  IPv4 exit
-                  <Switch
-                    checked={tunnel.exitNode}
-                    disabled={
-                      busy ||
-                      (!tunnel.exitNode && tunnel.families?.ipv4.exit.capability.writable === false)
-                    }
-                    onCheckedChange={setExit}
-                    aria-label={`${tunnel.name} as an exit node`}
-                  />
-                </label>
-                {tunnel.ipv6Enabled && (
-                  <label className="flex items-center gap-2 text-hint text-muted-foreground">
-                    IPv6 exit
-                    <Switch
-                      checked={Boolean(tunnel.families?.ipv6.exit.configured)}
-                      disabled={
-                        busy ||
-                        (!tunnel.families?.ipv6.exit.configured &&
-                          tunnel.families?.ipv6.exit.capability.writable === false)
-                      }
-                      onCheckedChange={setIPv6Exit}
-                      aria-label={`${tunnel.name} IPv6 exit`}
-                    />
-                  </label>
-                )}
-                {tunnel.up ? (
-                  <Button size="xs" variant="outline" onClick={down} disabled={busy}>
-                    Take down
-                  </Button>
-                ) : (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() => void act(() => post(`${base}/up`), `${tunnel.name} is up`)}
-                    disabled={busy}
-                  >
-                    Bring up
-                  </Button>
-                )}
-                <Button size="xs" variant="outline" onClick={() => onAdd("device")} disabled={busy}>
-                  <Plus aria-hidden />
-                  Device
-                </Button>
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  onClick={remove}
-                  aria-label={`Remove ${tunnel.name}`}
-                >
-                  <Trash aria-hidden />
-                </Button>
-              </>
-            )}
-          </span>
-        }
-      />
-      <PanelBody>
-        <TunnelAlerts tunnel={tunnel} />
-        <WireGuardFamilyEvidence tunnel={tunnel} />
-        {!tunnel.managed && (
-          <Notice title="Written by hand">
-            This tunnel&rsquo;s file was not written here, so it is read and never changed.
-          </Notice>
-        )}
-        <TunnelPicture tunnel={tunnel} onPeer={onPeer} onAdd={onAdd} />
-      </PanelBody>
-      {record && <TunnelRecord tunnel={tunnel.name} open onOpenChange={setRecord} />}
-      {dialog}
-    </Panel>
+    <div data-slot="tunnel" className="flex min-w-0 flex-col gap-6">
+      <TunnelIdentity tunnel={tunnel} control={control} onAdd={add} onCreate={onCreate} linked />
+      <TunnelPicture tunnel={tunnel} onPeer={open} onAdd={add} max={PEERS_DRAWN} />
+      <TunnelExit tunnel={tunnel} control={control} />
+      {control.dialog}
+    </div>
   )
 }

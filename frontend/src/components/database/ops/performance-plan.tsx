@@ -81,26 +81,24 @@ export function StatementPlan({
 
   return (
     <div className="space-y-2.5">
-      <div className="flex min-h-7 items-center justify-between gap-3">
-        <p className="eyebrow">Plan</p>
-        {plans === "plan" && (
-          <Button size="xs" variant="outline" pending={plan?.busy} onClick={() => void explain()}>
-            <Route />
-            {plan?.answer || plan?.error ? "Explain again" : "Explain"}
-          </Button>
-        )}
-      </div>
-
       {plans === "none" ? (
         <FormNote>
           Only a statement that reads or changes rows has a plan; this one does neither.
         </FormNote>
       ) : plans === "plan" ? (
-        !plan && (
-          <FormNote>
-            Explain asks the engine how it would run this statement. Nothing is executed.
-          </FormNote>
-        )
+        // The page's Plan view is the heading: the verb leads, as it does
+        // under a shape's fields.
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <Button size="xs" variant="outline" pending={plan?.busy} onClick={() => void explain()}>
+            <Route />
+            {plan?.answer || plan?.error ? "Explain again" : "Explain"}
+          </Button>
+          {!plan && (
+            <FormNote className="min-w-0">
+              Explain asks the engine how it would run this statement. Nothing is executed.
+            </FormNote>
+          )}
+        </div>
       ) : fillable ? (
         <form
           className="space-y-2.5"

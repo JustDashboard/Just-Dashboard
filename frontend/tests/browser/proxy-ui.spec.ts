@@ -131,12 +131,12 @@ test("the overview draws each domain wired through nginx to what answers it", as
   // A port the engine itself holds is "open": the line hangs under nginx's tile.
   await expect(picture.getByText(":443 open")).toBeVisible()
 
-  // The hour's traffic is shared out by site, and a site opens its traffic.
+  // The hour's traffic is shared out by site, and a site opens its page.
   const traffic = page.getByRole("region", { name: "Traffic", exact: true })
   await expect(traffic.getByText("requests this hour")).toBeVisible()
   await expect(traffic).toContainText("1.3k")
   await traffic.getByRole("button", { name: "Open app.example.com's requests" }).click()
-  await expect(page).toHaveURL(/\/proxy\/traffic\?site=app\.example\.com$/)
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
 })
 
 test("/proxy/sites keeps the band's blocks and height while the traffic summary lands", async ({
@@ -253,7 +253,12 @@ test("the raw editor reads its file afresh on every opening", async ({ page }) =
   await expect(card).toBeVisible()
   expect(reads).toBe(0)
 
-  await card.getByRole("button", { name: "Raw config" }).click()
+  // The file is a word in the row's menu now, as every verb of a site is.
+  const openRaw = async () => {
+    await card.getByRole("button", { name: "More actions for app.example.com" }).click()
+    await page.getByRole("menuitem", { name: "Raw config" }).click()
+  }
+  await openRaw()
   const sheet = page.getByRole("dialog")
   const lines = sheet.locator(".monaco-editor .view-lines")
   await expect(lines).toContainText("revision-1")
@@ -265,7 +270,7 @@ test("the raw editor reads its file afresh on every opening", async ({ page }) =
   await page.getByRole("button", { name: "Close and discard" }).click()
   await expect(sheet).toHaveCount(0)
 
-  await card.getByRole("button", { name: "Raw config" }).click()
+  await openRaw()
   await expect(lines).toContainText("revision-2")
   await expect(lines).not.toContainText("typed-then-closed")
   await expect(sheet.getByRole("button", { name: "Discard" })).toBeDisabled()
@@ -321,10 +326,11 @@ test("once nginx is reading them, the stream form promises a live forward again"
 
 test("the certificates page offers to turn the renewal timer on", async ({ page }) => {
   await mockProxy(page, { included: true })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
 
   await expect(page.getByText("Nothing is scheduled to renew these")).toBeVisible()
   await expect(page.getByRole("button", { name: "Turn it on" })).toBeVisible()
+  await page.getByRole("tab", { name: "Certificates" }).click()
   // The installed list says which site uses a certificate, and draws each
   // as who signed it: R11 is one of Let's Encrypt's intermediates.
   const installed = page
@@ -333,9 +339,9 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
   const row = installed.filter({ hasText: "old.example.com" })
   await expect(row.getByText("Used by nothing")).toBeVisible()
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
-  // And the expired one is first, over a meter with nothing left in it.
+  // And the expired one is first, saying so.
   await expect(installed.first()).toContainText("old.example.com")
-  await expect(row.getByRole("meter")).toHaveAttribute("aria-valuenow", "0")
+  await expect(row.getByText("expired", { exact: true })).toBeVisible()
 })
 
 test("a stream is drawn as the service its port is", async ({ page }) => {
@@ -424,9 +430,10 @@ for (const width of [390, 1280, 1720]) {
         const cards = page
           .getByRole("list", { name: "Streams" })
           .locator("[data-slot='choice-row']")
+        // One line per stream since 0.8.7: the second under the first, as tall.
         const first = await cards.nth(0).boundingBox()
         const second = await cards.nth(1).boundingBox()
-        expect(Math.abs(first!.y - second!.y)).toBeLessThan(1)
+        expect(second!.y).toBeGreaterThan(first!.y + first!.height - 1)
         expect(Math.abs(first!.height - second!.height)).toBeLessThan(1)
       }
       await page.screenshot({
@@ -446,15 +453,16 @@ test("certificate cards filter, reveal complete details and link to their owning
   await page.getByPlaceholder("Name, a host it covers, or issuer").fill("app.example.com")
   const list = page.getByRole("list", { name: "Installed certificates" })
   await expect(list.locator("[data-slot='choice-row']")).toHaveCount(1)
-  await list.getByRole("button", { name: "Inspect app.example.com" }).click()
-  const detail = page.getByRole("dialog")
+  // A certificate is a page of its own, as a site is.
+  await list.getByRole("link", { name: "Open app.example.com" }).click()
+  await expect(page).toHaveURL(/\/proxy\/certificates\/app\.example\.com$/)
+  const detail = page.locator("[data-slot='page']")
   await expect(detail.getByText(certs[0].path)).toBeVisible()
   // A site is a page of its own now, which a reader without the form can open too.
-  await expect(detail.getByRole("link", { name: "app.example.com", exact: true })).toHaveAttribute(
-    "href",
-    "/proxy/sites/app.example.com",
-  )
-  await detail.getByRole("button", { name: "More actions for app.example.com" }).click()
+  await expect(
+    detail.getByRole("link", { name: "app.example.com", exact: true }).first(),
+  ).toHaveAttribute("href", "/proxy/sites/app.example.com")
+  await page.getByRole("button", { name: "More actions for app.example.com" }).click()
   const menu = page.getByRole("menu")
   await expect(menu.getByRole("menuitem", { name: "Copy path" })).toBeVisible()
   await menu.getByRole("menuitem", { name: "TLS report for app.example.com" }).click()
@@ -463,7 +471,7 @@ test("certificate cards filter, reveal complete details and link to their owning
 
 test("a watched service retains its port when opening the live report", async ({ page }) => {
   await mockShowcase(page)
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const watched = page.getByRole("list", { name: "Watched domains" })
   await expect(watched.getByRole("link", { name: "Inspect mail.example.com" })).toHaveAttribute(
     "href",
@@ -496,11 +504,7 @@ test("read-only users can inspect certificates without proxy mutation controls o
   await expect(page.getByRole("button", { name: "New site", exact: true })).toHaveCount(0)
   await page.goto("/proxy/certificates")
   await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "Inspect app.example.com", exact: true }).click()
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "More actions for app.example.com" })
-    .click()
+  await page.getByRole("button", { name: "Actions for app.example.com", exact: true }).click()
   await expect(page.getByRole("menu").getByRole("menuitem", { name: /TLS report/ })).toHaveCount(0)
   await page.goto("/proxy/tls")
   await expect(page.getByRole("button", { name: "Scan", exact: true })).toBeDisabled()
@@ -539,9 +543,8 @@ test("unreadable certificates keep their error in the detail surface without ove
       .locator("[data-slot='page']")
       .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
   ).toBe(true)
-  await inventory.getByRole("button", { name: "Inspect app.example.com" }).click()
-  const detail = page.getByRole("dialog")
-  await expect(detail).toBeInViewport({ ratio: 1 })
+  await inventory.getByRole("link", { name: "Open app.example.com" }).click()
+  const detail = page.locator("[data-slot='page']")
   await expect(detail.getByText(message)).toBeVisible()
   for (const label of ["Issued", "Expires", "Self-signed"]) {
     await expect(detail.locator(`dt:has-text("${label}") + dd`)).toHaveText("—")
@@ -874,8 +877,10 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
   await expect(route).toContainText("127.0.0.1:3000")
   await expect(route.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
 
-  // It opens on its requests, from its own record, in the pane a
+  // Its Logs view opens on its requests, from its own record, in the pane a
   // deployment's logs are read in.
+  await page.getByRole("tab", { name: "Logs" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com\?tab=logs$/)
   const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
     "aria-pressed",
@@ -942,7 +947,7 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
 test("/proxy/sites/app.example.com reads its error log by what failed", async ({ page }) => {
   await mockProxy(page, { included: true })
   const logs = await mockLogs(page)
-  await page.goto("/proxy/sites/app.example.com")
+  await page.goto("/proxy/sites/app.example.com?tab=logs")
 
   const views = page.getByRole("navigation", { name: "Log view" })
   await views.getByRole("button", { name: "Errors" }).click()
@@ -994,7 +999,8 @@ test("a site's Logs verb opens its page rather than the host Logs page", async (
   await card.getByRole("button", { name: "More actions for app.example.com" }).click()
   await expect(page.getByRole("menuitem", { name: "Access log" })).toHaveCount(0)
   await page.getByRole("menuitem", { name: "Logs" }).click()
-  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com\?tab=logs$/)
+  await expect(page.getByRole("navigation", { name: "Log view" })).toBeVisible()
 })
 
 test("/proxy reads the engine's own log inline", async ({ page }) => {
@@ -1018,7 +1024,7 @@ test("/proxy reads the engine's own log inline", async ({ page }) => {
 test("/proxy/certificates reads every renewal certbot ran", async ({ page }) => {
   await mockProxy(page, { included: true })
   const logs = await mockLogs(page)
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
 
   await expect(page.getByRole("heading", { name: "Renewals" })).toBeVisible()
   await expect(
@@ -1040,13 +1046,20 @@ test("/proxy/sites/app.example.com's verdict narrows its requests, and lets go w
 
   const identity = page.locator("[data-slot='host-identity']")
   const views = page.getByRole("navigation", { name: "Log view" })
+  // From the Overview, the verdict opens Logs on the requests it counts.
+  await identity.getByRole("button", { name: "Show the requests that failed" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com\?tab=logs$/)
+  await expect.poll(() => logs.requests.some((q) => q.get("classes") === "5xx")).toBe(true)
+  await identity.getByRole("button", { name: "Show every request again" }).click()
+  await expect(page.getByText("/.env", { exact: true })).toBeVisible()
+
   // The day's failures are the Errors tab's count, which the view's All chip
   // agrees with.
   await expect(views.getByRole("button", { name: "Errors" })).toContainText("2")
   await views.getByRole("button", { name: "Errors" }).click()
   await expect(page.getByRole("button", { name: /^All/ })).toContainText("2")
 
-  // From any view, the verdict brings Requests back narrowed to what it counts.
+  // From any view of its logs, the verdict brings Requests back narrowed to what it counts.
   await identity.getByRole("button", { name: "Show the requests that failed" }).click()
   await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
     "aria-pressed",
@@ -1288,15 +1301,22 @@ test("/proxy/sites/legacy.example.com says why it has no requests to read, and r
   )
   await page.goto("/proxy/sites/legacy.example.com")
 
-  await expect(page.getByText("This site has no access log of its own")).toBeVisible()
-  await expect(page.getByText(/nginx's shared log, syslog or a stream/)).toBeVisible()
-  // Nothing records its requests: no Requests view, and the route says so.
-  const views = page.getByRole("navigation", { name: "Log view" })
-  await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)
-  await expect(views.getByRole("button", { name: "Insights" })).toHaveCount(0)
+  // Nothing records its requests: the route says so, and its Logs have no
+  // Requests view, only a line saying why with the way to change it.
   await expect(
     page.getByRole("region", { name: "How a request reaches the site" }).getByText("Not recorded"),
   ).toBeVisible()
+  await page.getByRole("tab", { name: "Logs" }).click()
+  const note = page.locator("[data-slot='site-unrecorded']")
+  await expect(note.getByText("This site has no access log of its own")).toBeVisible()
+  await expect(note.getByText(/nginx's shared log, syslog or a stream/)).toBeVisible()
+  await expect(note.getByRole("link", { name: "Turn it on" })).toHaveAttribute(
+    "href",
+    "/proxy/sites/legacy.example.com?tab=settings&view=hardening",
+  )
+  const views = page.getByRole("navigation", { name: "Log view" })
+  await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)
+  await expect(views.getByRole("button", { name: "Insights" })).toHaveCount(0)
   await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -1314,13 +1334,10 @@ test("/proxy/sites/legacy.example.com says why it has no requests to read, and r
     .toBe(true)
   await expect(page.getByText(/Connection refused/)).toBeVisible()
 
-  // The form that turns its log on is a press away, in the notice itself.
-  const notice = page
-    .locator("div")
-    .filter({ has: page.getByText("This site has no access log of its own", { exact: true }) })
-    .last()
-  await notice.getByRole("button", { name: "Edit" }).click()
-  await expect(page.getByText("Edit legacy.example.com")).toBeVisible()
+  // The setting that turns its log on is a press away, in the note itself.
+  await note.getByRole("link", { name: "Turn it on" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/legacy\.example\.com\?tab=settings&view=hardening$/)
+  await expect(page.getByRole("switch", { name: "Access log" })).toBeVisible()
 })
 
 /** A route on the Docker Caddy ingress: Caddy's JSON, which records the host and the time taken. */
@@ -1424,7 +1441,7 @@ test("/proxy/sites/just-dashboard-shop reads its route's requests, and what Cadd
       tookMillis: 2,
     })
   })
-  await page.goto("/proxy/sites/just-dashboard-shop")
+  await page.goto("/proxy/sites/just-dashboard-shop?tab=logs")
 
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("a deployment route")).toBeVisible()
@@ -1497,7 +1514,7 @@ test("the Caddyfile's page reads Caddy's journal whole, since its names are addr
       },
     ]),
   )
-  await page.goto("/proxy/sites/Caddyfile")
+  await page.goto("/proxy/sites/Caddyfile?tab=logs")
 
   await expect(
     page.locator("[data-slot='host-identity']").getByText("a site in the Caddyfile"),

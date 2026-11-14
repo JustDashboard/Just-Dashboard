@@ -6,9 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { forgetMemoryState, useMemoryState, useSessionState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
-import { Archive, CloudDownload, Plus } from "@/components/icons"
+import { Archive, CloudDownload, Plus, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
+import { plural } from "@/lib/format"
 import type {
   BackupJob,
   BackupResource,
@@ -19,11 +19,16 @@ import type {
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList } from "@/components/flow"
 import { EmptyState, ErrorState, Hold, LoadingRows } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { JobDialog, type JobPrefill } from "@/components/backups/job-form"
 import { CoveragePanel, type CoverageFilter } from "@/components/backups/coverage"
 import { BackupKeyPanel } from "@/components/backups/backup-key"
@@ -31,14 +36,29 @@ import { ImportDialog } from "@/components/backups/import-dialog"
 import { JobCard } from "@/components/backups/job-card"
 import { ProtectionMap } from "@/components/backups/protection-map"
 import { jobProducts, jobProject } from "@/components/backups/marks"
+import { backupFacts, backupStates } from "@/components/backups/readings"
 import { useJobVerbs } from "@/components/backups/job-verbs"
+
+/**
+ * The line of facts as one block. On a phone it wraps to two lines, so it
+ * holds that room there from the start and the picture under it does not move
+ * when the jobs are read.
+ */
+const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9"
 
 /**
  * Backups: where this server's data goes, what needs doing, the jobs, and what
  * on this server is and is not covered. A job is its own page; a new one
  * starts from the form, or from a thing on the server that has no backup yet.
  *
- * It opens on **a picture of where the data goes** (`backups/protection-map`):
+ * It opens on what it is about, as a project's page does: an identity line
+ * with how the jobs stand as its state (one failed, one being taken, every one
+ * landed), the jobs, what they hold and the next run as its facts, New backup
+ * as its command and Import behind its menu. Both sat on the Jobs title line
+ * until 0.8.7, under the picture, where a page with no jobs had no place for
+ * them but its empty state.
+ *
+ * Then **a picture of where the data goes** (`backups/protection-map`):
  * what the server has, by kind and drawn as its products, wired into this
  * server and out to every directory and bucket a job writes to, with the
  * lines in the colour of how covered each kind is and how each destination's
@@ -49,11 +69,11 @@ import { useJobVerbs } from "@/components/backups/job-verbs"
  * **Four readings used to open the page** — Jobs, Last backup, Next backup,
  * Stored — and took the top third of it to say what every job's own row says
  * again, so §15 pass 2 is dropped here the way `/git` drops it, by naming
- * where each went. The job count and the total stored are the Jobs header's
- * and the picture's middle. The last backup is on each job's card beside its
+ * where each went. The job count and the total stored are the identity
+ * line's. The last backup is on each job's card beside its
  * name, in the colour of how it went, and on its destination in the picture;
  * the run before it and the thirteen before that are its strip. The next
- * backup is under the picture's middle and under each job's name. Cards
+ * backup is the identity line's and under each job's name. Cards
  * retain recorded outcomes and their operation controls.
  *
  * The things on the server are drawn as the products they are, and so are the
@@ -175,13 +195,85 @@ export default function BackupsPage() {
     onDeleted: refresh,
   })
   const ordered = useMemo(() => [...list].sort((a, b) => rank(a) - rank(b)), [list])
-  const stored = list.reduce((sum, j) => sum + j.stored.bytes, 0)
-  const archives = list.reduce((sum, j) => sum + j.stored.runs, 0)
+  const facts = backupFacts(list)
+  const menu: Verb[] = [
+    ...(admin
+      ? [
+          {
+            key: "import",
+            label: "Import from a destination…",
+            icon: CloudDownload,
+            run: () => setImportOpen(true),
+          },
+        ]
+      : []),
+    { key: "refresh", label: "Refresh", icon: RefreshClockwise, run: refresh },
+  ]
 
   return (
     <Workspace name="Backup jobs" refresh={refresh} search={false}>
       <Page className="animate-rise">
         <PageContext eyebrow="Protection" title="Backups" />
+
+        <HostIdentity
+          label="About backups"
+          className="border-b-0 pb-0"
+          fallback={Archive}
+          title="Backups"
+          state={
+            jobs.error && !jobs.data ? (
+              <Status tone="danger" label="Not read" />
+            ) : !jobs.data ? (
+              <Skeleton className="h-4 w-28" />
+            ) : (
+              backupStates(list).map((state) => (
+                <Status
+                  key={state.key}
+                  tone={state.tone}
+                  live={state.live}
+                  label={state.live ? <TextShimmer>{state.label}</TextShimmer> : state.label}
+                />
+              ))
+            )
+          }
+          facts={
+            jobs.error && !jobs.data ? (
+              <span className={FACTS}>The jobs could not be read.</span>
+            ) : !jobs.data ? (
+              <span className={FACTS}>
+                <Skeleton className="my-0.5 h-3 w-72 max-w-full" />
+              </span>
+            ) : list.length === 0 ? (
+              // What there is to back up, which the picture under it draws.
+              <span className={FACTS}>
+                {coverage.data
+                  ? `${plural(resources.length, "thing")} on this server, none backed up`
+                  : "\u00a0"}
+              </span>
+            ) : (
+              <span className={FACTS}>
+                <span className="numeric">{facts.jobs}</span>
+                <FactDot />
+                <span className="numeric">{facts.stored}</span>
+                {facts.next && (
+                  <>
+                    <FactDot />
+                    <span className="numeric">{facts.next}</span>
+                  </>
+                )}
+              </span>
+            )
+          }
+          command={
+            admin && (
+              <Button size="sm" onClick={() => setForm({})}>
+                <Plus className="size-3.5" />
+                New backup
+              </Button>
+            )
+          }
+          menu={<VerbMenu verbs={menu} label="Backup actions" />}
+        />
 
         {/* On the page's own ground rather than in a frame, with no dot grid
             behind it: a wiring picture reads as one thing without either. */}
@@ -210,7 +302,7 @@ export default function BackupsPage() {
           gone quiet. What is not covered is the Coverage list's to say — a
           finding repeating its count was the same sentence twice. */}
 
-        {jobs.error && <ErrorState error={jobs.error} onRetry={jobs.refresh} />}
+        {jobs.error && <ErrorState error={jobs.error} onRetry={jobs.refresh} retryable />}
         {jobs.data && list.length === 0 && (
           <EmptyState
             icon={Archive}
@@ -239,23 +331,8 @@ export default function BackupsPage() {
               title="Jobs"
               actions={
                 <span className="flex items-center gap-3">
-                  <span className="numeric text-hint text-muted-foreground">
-                    {plural(list.length, "job")}
-                    {archives > 0 && ` · ${bytes(stored)} in ${plural(archives, "archive")}`}
-                  </span>
+                  <span className="numeric text-hint text-muted-foreground">{list.length}</span>
                   <WorkspaceHelp compact />
-                  {admin && (
-                    <Button size="sm" variant="ghost" onClick={() => setImportOpen(true)}>
-                      <CloudDownload className="size-4" />
-                      Import…
-                    </Button>
-                  )}
-                  {admin && (
-                    <Button size="sm" onClick={() => setForm({})}>
-                      <Plus className="size-4" />
-                      New backup
-                    </Button>
-                  )}
                 </span>
               }
             />
@@ -283,7 +360,9 @@ export default function BackupsPage() {
           confirm={confirm}
         />
 
-        {coverage.error && <ErrorState error={coverage.error} onRetry={coverage.refresh} />}
+        {coverage.error && (
+          <ErrorState error={coverage.error} onRetry={coverage.refresh} retryable />
+        )}
         <CoveragePanel
           report={coverage.data}
           containers={containers}

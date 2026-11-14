@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { readTip } from "./read-tip"
 
 /**
  * The hub-aware dashboard against a mocked API: Settings → Hub not connected, waiting for
@@ -498,7 +499,26 @@ test("?connect= fills in the hub, says so, shows its machine, chooses no scope, 
   const scopes = page.getByRole("group", { name: "Scope" })
   await expect(scopes.getByText("Refresh the snapshot.")).toBeVisible()
   await expect(scopes.getByText(/install a dashboard update/)).toBeVisible()
-  await expect(page.getByText(/No scope gives the hub a shell, files or accounts/)).toBeVisible()
+  // What no scope allows is behind the ⓘ beside the cards' name; the prompt is said while
+  // Connect waits for a choice, and no sentence stands under the address or the cards.
+  await expect(page.getByText("Choose a scope to connect")).toBeVisible()
+  await expect(page.getByText(/Nothing is sent to it until you press Connect/)).toHaveCount(0)
+  await readTip(
+    page,
+    page.getByRole("button", { name: "What no scope allows" }),
+    /No scope gives the hub a shell, files or accounts/,
+  )
+  // The tip is one line with its link, and why behind its own ⓘ.
+  await expect(page.getByRole("link", { name: "in the Tailscale admin console" })).toHaveAttribute(
+    "href",
+    "https://login.tailscale.com/admin/machines",
+  )
+  await expect(page.getByText(/180 days later by default/)).toHaveCount(0)
+  await readTip(
+    page,
+    page.getByRole("button", { name: "Why key expiry matters" }),
+    /180 days later by default/,
+  )
   const sends = page.locator("section", { hasText: "What this server will send" })
   await expect(sends).toHaveCount(0)
 
