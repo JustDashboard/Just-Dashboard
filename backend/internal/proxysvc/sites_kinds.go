@@ -327,11 +327,7 @@ func renderCanonicalServers(l *lines, spec *SiteSpec) {
 		l.add("    listen 80;")
 		l.add("    listen [::]:80;")
 		if spec.TLS {
-			l.add("    listen 443 ssl;")
-			l.add("    listen [::]:443 ssl;")
-			if spec.HTTP2 {
-				l.add("    http2 on;")
-			}
+			renderTLSListen(l, spec)
 		}
 		l.add("    server_name %s;", pair[0])
 		if spec.TLS {
@@ -384,11 +380,7 @@ func renderHostRedirectServers(l *lines, spec *SiteSpec) {
 		l.add("    listen 80;")
 		l.add("    listen [::]:80;")
 		if tls {
-			l.add("    listen 443 ssl;")
-			l.add("    listen [::]:443 ssl;")
-			if spec.HTTP2 {
-				l.add("    http2 on;")
-			}
+			renderTLSListen(l, spec)
 		}
 		l.add("    server_name %s;", r.From)
 		if tls {

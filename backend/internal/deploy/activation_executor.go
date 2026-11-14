@@ -726,7 +726,7 @@ func (e *NormalizedStepExecutor) activate(
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
 			recovery.RouteRestored = applied.Recovered
 			evidence.Recovery = &recovery
-			return StepResult{State: StepFailed, ErrorCode: "proxy_cutover_failed", ErrorMessage: "the proxy rejected the candidate and the prior route recovery was checked", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
+			return StepResult{State: StepFailed, ErrorCode: "proxy_cutover_failed", ErrorMessage: "the proxy rejected the candidate and the prior route recovery was checked" + proxyRefusal(applyErr), Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 		// Before the public-route checks, which ask Cloudflare's edge for a
 		// tunnel's names.
@@ -877,6 +877,20 @@ func (e *NormalizedStepExecutor) routeInMaintenance(ctx context.Context, name st
 	}
 	state, err := reader.DeploymentMaintenance(ctx, name)
 	return err == nil && state.Ready && state.On
+}
+
+// proxyRefusal is the proxy's own reason for refusing a route, as the end of
+// a step's message: nginx's failing line names the directive and file, which
+// is what anyone reading the failure needs and what the step used to drop.
+func proxyRefusal(err error) string {
+	if err == nil {
+		return ""
+	}
+	reason := strings.TrimSpace(err.Error())
+	if len(reason) > 400 {
+		reason = reason[:400] + "…"
+	}
+	return ": " + reason
 }
 
 func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeActivationEvidence {

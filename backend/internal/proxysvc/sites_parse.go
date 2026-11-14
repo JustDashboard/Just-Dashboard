@@ -33,6 +33,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	sleepUpstream := ""
 	rootLocationWS := false
 	sawTLSListen := false
+	// HTTP/2 spelled as a listen parameter and as the directive: a file
+	// with only the first is one written for an nginx before 1.25.1.
+	sawListenHTTP2, sawHTTP2Directive := false, false
 	sawPlainRedirect := false
 	// A redirecting name served over HTTPS on a site whose own server is
 	// plain: the site is TLS, and every served name is a plain-HTTP one.
@@ -291,9 +294,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			// turned HTTP/2 off for real.
 			if hasField(value, "http2") {
 				spec.HTTP2 = true
+				sawListenHTTP2 = true
 			}
 		case "http2":
 			spec.HTTP2 = value == "on"
+			sawHTTP2Directive = true
 		case "ssl_protocols":
 			if value == "TLSv1.3" {
 				spec.TLSProfile = tlsProfileModern
@@ -584,6 +589,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// its upstream whatever try_files a hand-written file put beside it.
 	spec.SPA = spec.SPA && spec.Kind == "static"
 	spec.ForceHTTPS = sawTLSListen && sawPlainRedirect
+	spec.listenHTTP2 = spec.HTTP2 && sawListenHTTP2 && !sawHTTP2Directive
 	// The plain-HTTP names are the site's domains too, after the ones its
 	// own server answers; on a site whose own server is plain and whose
 	// redirecting names are HTTPS, every served name is a plain one.

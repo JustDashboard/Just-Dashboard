@@ -57,6 +57,23 @@ func Lint(tree []Directive) []LintFinding {
 	return l.findings
 }
 
+// LintHost is Lint for this host's nginx. One older than 1.25.1 refuses
+// `http2 on;`, so the parameter is the only way it serves HTTP/2 and advice
+// to drop it would take every site down at the next test.
+func (s *Service) LintHost(tree []Directive) []LintFinding {
+	findings := Lint(tree)
+	if !s.nginxNeedsListenHTTP2() {
+		return findings
+	}
+	kept := findings[:0]
+	for _, f := range findings {
+		if f.Rule != "listen-http2" {
+			kept = append(kept, f)
+		}
+	}
+	return kept
+}
+
 func (l *linter) add(rule, level string, d Directive, title, detail string) {
 	l.findings = append(l.findings, LintFinding{
 		ID:   fmt.Sprintf("%s:%s:%d", rule, d.File, d.Line),

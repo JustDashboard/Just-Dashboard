@@ -306,7 +306,22 @@
   Renderer details:
   - The ACME challenge location goes **above** the catch-all redirect, or renewal silently stops and
     nobody finds out for sixty days.
-  - `http2 on;` is a directive, not a `listen` parameter (nginx 1.25 warns on every reload).
+  - `http2 on;` is a directive, not a `listen` parameter (nginx 1.25 warns on every reload) — **where
+    the host's nginx reads it.** nginx before 1.25.1 (Ubuntu 24.04 ships 1.24, 22.04 ships 1.18) refuses
+    `http2 on;` as an unknown directive and fails the whole test, which failed every first HTTPS
+    deployment on those hosts at its cutover. `nginx_http2.go` asks the host's nginx once (cached ten
+    minutes) by testing a few-line config of its own under the nginx directory; when nginx names the
+    directive unknown, `forHostNginx` sets `SiteSpec.listenHTTP2` and every HTTPS server is written
+    `listen 443 ssl http2;` instead. Asking rather than comparing versions keeps OpenResty and Angie
+    right. Every path that writes a file nginx serves calls it before rendering: `SaveSite`,
+    `deploymentSpec`, the NPM import and the site preview. The parser sets the same flag from a file
+    spelled that way, so rename and drift re-render it byte for byte, and `LintHost` drops the
+    `listen-http2` advice on such a host, where following it would take every site down.
+    `TestLiveDeploymentRouteHTTP2PassesHostNginx` runs the real probe and route against whatever
+    nginx is installed.
+  - A deployment route nginx refuses carries nginx's failing line in the error
+    (`ErrInvalidConf: nginx: [emerg] …`), and the activate and rollback steps end their
+    `proxy_cutover_failed` message with it.
   - **`proxy_pass` is the upstream as typed, less a path that is the location's own.** Its path is how
     nginx is told to replace the location's prefix: `/api/` to `http://127.0.0.1:4000/` sends `/api/users`
     as `/users`. Trimming its slash sent `/page` to `http://…/app/` as `/apppage`. When the path and the

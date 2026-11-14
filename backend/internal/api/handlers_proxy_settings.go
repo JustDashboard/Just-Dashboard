@@ -102,7 +102,7 @@ func (s *Server) handleProxyLint(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.Wrap(http.StatusBadGateway, "tree_failed", err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"findings": proxysvc.Lint(tree), "checkedAt": at})
+	httpx.JSON(w, http.StatusOK, map[string]any{"findings": s.modules.proxy.LintHost(tree), "checkedAt": at})
 	return nil
 }
 
