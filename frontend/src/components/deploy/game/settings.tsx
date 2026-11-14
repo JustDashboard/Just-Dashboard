@@ -2,29 +2,16 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import { Slash } from "@/components/icons"
 import { get, put } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { cn } from "@/lib/utils"
-import type { BlueprintProperty, GameProperties } from "@/lib/types"
+import type { BlueprintConfigFile, BlueprintProperty, GameProperties } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import {
-  Disclosure,
-  Field,
-  FieldRow,
-  FormNote,
-  FormSection,
-  FormSections,
-  OptionList,
-  OptionRow,
-} from "@/components/form"
+import { Disclosure, Field, FieldRow, OptionList, OptionRow } from "@/components/form"
 import { LogText } from "@/components/logs/log-text"
 import { Well } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { Tag } from "@/components/tag"
-import { useSaveBarEntry } from "@/components/deploy/settings/save-bar"
+import { ErrorState } from "@/components/state"
 import { Input } from "@/components/ui/input"
 import {
   InputGroup,
@@ -39,27 +26,69 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
-import { GameIdentity, useGameOverview } from "@/components/deploy/game/identity"
+import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
+import {
+  GameIdentity,
+  GameIdentitySkeleton,
+  useGameOverview,
+} from "@/components/deploy/game/identity"
+import { groupFacts, groupProperties } from "@/components/deploy/game/settings-model"
+import { HoverTip } from "@/components/deploy/settings/hover-tip"
+import { Segments } from "@/components/deploy/settings/segments"
+import {
+  SettingForm,
+  SettingSection,
+  SettingsPage,
+  settingStatus,
+} from "@/components/deploy/settings/setting-card"
+import { useConfiguration } from "@/components/deploy/settings/use-configuration"
 
 /**
- * The server's own settings file, as a page that is a form (§7): the file's
- * name and what this page does to it under the head, over the fields, and the
- * file itself, as it sits on disk, in a second section folded away.
+ * The server's own settings file, as a settings page like the project's
+ * others: the strip of what is saved and not live, then the file's declared
+ * keys in sections by what they are about — the world, who may join, how the
+ * server is found — each head saying what the section currently is, and the
+ * file itself, as it sits on disk, folded away in a last section.
  *
- * Only the keys the blueprint declares get a control — a line of text full
- * width, the numbers and choices two to a row with a declared range said
- * inside the field, the switches as options with their sentence — and
- * everything else in the file is kept exactly as written.
+ * It was one section of every field, each with its key as a chip and its
+ * description under it, closed by a note that the server reads the file on
+ * start. The key is the file's word, not the reader's, so it is on the label's
+ * hover and in the file view; and when a save applies is the save bar's line
+ * to say, where the other settings pages say it.
  *
- * Changing anything raises the settings pages' own foot, which stays at the
- * bottom of the window until it is saved or discarded, so Save never scrolls
- * away with the first two fields on a phone; that the server only reads the
- * file on start is said there, where it matters, rather than in a banner
- * nobody has to act on yet.
+ * Only the keys the blueprint declares get a control, and everything else in
+ * the file is kept exactly as written.
  */
 export function GameSettings({ projectId }: { projectId: number }) {
+  const project = useProject()
+  const overview = useGameOverview(projectId)
+  // The strip at the head is the deployment's: a game server has saved
+  // changes that are not live like any other project.
+  const state = useConfiguration(projectId, project.environmentId)
+  return (
+    <div className="space-y-6">
+      {overview.data ? (
+        <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
+      ) : (
+        !overview.error && <GameIdentitySkeleton />
+      )}
+      <SettingsPage state={state}>
+        {() => <PropertiesForm projectId={projectId} files={overview.data?.files} />}
+      </SettingsPage>
+    </div>
+  )
+}
+
+function PropertiesForm({
+  projectId,
+  files,
+}: {
+  projectId: number
+  /** The blueprint's files, for the name it gives the one this page edits. */
+  files?: BlueprintConfigFile[]
+}) {
   const { can } = useAuth()
   const project = useProject()
   const admin = can("system.admin")
@@ -68,7 +97,6 @@ export function GameSettings({ projectId }: { projectId: number }) {
     {},
   )
   const [saving, setSaving] = useState(false)
-  const overview = useGameOverview(projectId)
   const properties = usePoll(
     (signal) => get<GameProperties>(`/deploy/${projectId}/game/properties`, undefined, signal),
     0,
@@ -76,7 +104,7 @@ export function GameSettings({ projectId }: { projectId: number }) {
   )
   const data = properties.data
   // What the file holds for a key, or what the server assumes when the file
-  // does not name it — the one rule the fields, their "was" hints and the
+  // does not name it — the one rule the fields, their "was" marks and the
   // count of unsaved changes all read, so a switch turned on and off again is
   // not a change.
   const savedValue = useCallback(
@@ -109,6 +137,7 @@ export function GameSettings({ projectId }: { projectId: number }) {
     return found
   }, [data, draft])
   const invalid = changed.some(([key]) => errors[key])
+  const groups = useMemo(() => groupProperties(data?.known ?? []), [data])
 
   const save = async () => {
     if (changed.length === 0 || invalid) return false
@@ -118,6 +147,8 @@ export function GameSettings({ projectId }: { projectId: number }) {
         `/deploy/${projectId}/game/properties`,
         { changes: Object.fromEntries(changed) },
       )
+      // Saving writes the file and does not apply it, so the toast that says
+      // it was written is also where the restart is one press away.
       const restart = result.restartRequired && can("service.control") && project.normalized
       notify.success(
         result.applied.length === 1
@@ -143,100 +174,117 @@ export function GameSettings({ projectId }: { projectId: number }) {
     }
   }
 
-  // The page's Save is the settings pages' floating bar; the restart the
-  // toast offers stays, because saving writes the file and does not apply it.
-  const saveAll = useSaveBarEntry(
-    admin,
-    {
-      name: "Server settings",
-      dirty: changed.length > 0,
-      changes: changed.length,
-      saving,
-      invalid,
-      applies: "immediately",
-    },
-    { save, discard: () => setDraft({}) },
-  )
+  if (properties.error && !data)
+    return <ErrorState error={properties.error} onRetry={properties.refresh} />
+  if (!data) return <PropertiesSkeleton />
+  if (data.status !== "available")
+    return (
+      <ProjectEmpty title="The settings file cannot be read right now" reason={data.reason}>
+        <EmptyStep href={`/deploy/${projectId}/runtime`}>Runtime</EmptyStep>
+        <EmptyStep href={`/deploy/${projectId}/logs`}>Logs</EmptyStep>
+      </ProjectEmpty>
+    )
+  if (data.known.length === 0)
+    return (
+      <ProjectEmpty title="This template declares no settings to edit here">
+        <EmptyStep href={`/deploy/${projectId}/console`}>Console</EmptyStep>
+      </ProjectEmpty>
+    )
 
+  const current = (property: BlueprintProperty) => draft[property.key] ?? savedValue(property.key)
   return (
-    <div className="space-y-6 pb-20">
-      {overview.data && (
-        <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
-      )}
-      {properties.error ? (
-        <ErrorState error={properties.error} />
-      ) : !data ? (
-        <LoadingRows rows={5} />
-      ) : data.status !== "available" ? (
-        <Notice title="Settings unavailable" icon={Slash}>
-          {data.reason ?? "This file could not be read from the running server."}
-        </Notice>
-      ) : data.known.length === 0 ? (
-        <EmptyNote className="px-0 text-left">
-          This blueprint declares no settings this dashboard edits.
-        </EmptyNote>
-      ) : (
-        <form
-          aria-label="Server settings"
-          className="mx-auto w-full max-w-3xl"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void saveAll?.()
-          }}
-        >
-          <FormSections className="animate-rise">
-            <FormSection
-              aside
-              title={
-                overview.data?.files.find((file) => file.path === data.path)?.label ??
-                "Server settings"
+    <>
+      <SettingForm
+        name="Server settings"
+        onSave={save}
+        dirty={changed.length > 0}
+        changes={changed.length}
+        saving={saving}
+        invalid={invalid}
+        canEdit={admin}
+        onDiscard={() => setDraft({})}
+        applies={data.restartRequired ? "restart" : "immediately"}
+        note={!admin && "Changing these needs the system administrator capability."}
+      >
+        {groups.map((group) => {
+          const facts = groupFacts(group.properties, current).join(" · ")
+          return (
+            <SettingSection
+              key={group.id}
+              title={group.title}
+              state={
+                facts && (
+                  <span key={facts} className="numeric block animate-rise">
+                    {facts}
+                  </span>
+                )
               }
-              hint={
-                <div className="space-y-2">
-                  <p>
-                    {data.path && <span className="font-mono text-foreground/80">{data.path}</span>}
-                    {data.restartRequired && " · read when the server starts"}
-                  </p>
-                  <p>
-                    {plural(data.known.length, "setting")} edited here · every other line kept as
-                    written
-                  </p>
-                  {!admin && (
-                    <FormNote className="text-foreground/80">
-                      Changing these needs the system administrator capability.
-                    </FormNote>
-                  )}
-                </div>
-              }
+              status={settingStatus({
+                dirty: group.properties.some((property) =>
+                  changed.some(([key]) => key === property.key),
+                ),
+              })}
             >
               <PropertyFields
-                known={data.known}
+                known={group.properties}
                 saved={savedValue}
                 draft={draft}
                 errors={errors}
                 disabled={!admin}
                 onChange={(key, value) => setDraft((previous) => ({ ...previous, [key]: value }))}
               />
-            </FormSection>
-            {data.raw && <RawFile raw={data.raw} />}
-          </FormSections>
-
-          {data.restartRequired && (
-            <FormNote className={cn("mt-6", changed.length > 0 && "text-warning")}>
-              The server reads this file on start. Saving writes the change; restarting applies it.
-            </FormNote>
-          )}
-        </form>
+            </SettingSection>
+          )
+        })}
+      </SettingForm>
+      {data.raw && (
+        <RawFile
+          raw={data.raw}
+          path={data.path}
+          label={files?.find((file) => file.path === data.path)?.label}
+        />
       )}
-    </div>
+    </>
   )
 }
 
 /**
- * The declared keys, each in the control its kind wants: text full width,
- * numbers and choices two to a row, switches as options with their sentence.
- * A field whose value differs from the file says what it was, so a reader
- * sees what saving would change without comparing in their head.
+ * The form before the file is read: two sections, each a head over its
+ * fields, in the column the form takes — so the sections land where their
+ * outlines were.
+ */
+function PropertiesSkeleton() {
+  return (
+    <>
+      {[0, 1].map((section) => (
+        <div
+          key={section}
+          aria-hidden
+          className="min-w-0 space-y-4 py-8 first:pt-0 last:pb-0"
+          data-slot="setting-skeleton"
+        >
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-3 w-48" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+          <Skeleton className="h-9 w-full" />
+        </div>
+      ))}
+    </>
+  )
+}
+
+/**
+ * A section's declared keys, each in the control its kind wants: text full
+ * width, numbers and choices two to a row, switches as rows on hairlines.
+ *
+ * A field whose value differs from the file says what it was at the far end
+ * of its own label line, where the key's chip used to be: under the field it
+ * pushed every field below it down a line on the first keystroke.
  */
 function PropertyFields({
   known,
@@ -259,10 +307,16 @@ function PropertyFields({
   // A choice is named as its control shows it, not as the file spells it.
   const shown = (property: BlueprintProperty) =>
     property.choices?.find((choice) => choice.value === saved(property))?.label ?? saved(property)
-  const hint = (property: BlueprintProperty) =>
-    current(property) !== saved(property)
-      ? `was “${shown(property) || "empty"}”`
-      : property.description
+  const was = (property: BlueprintProperty, value: string) =>
+    current(property) !== saved(property) && (
+      <span className="max-w-48 animate-rise truncate text-hint text-warning">was {value}</span>
+    )
+  // The file's own word for the setting, for a reader who knows the file.
+  const named = (property: BlueprintProperty) => (
+    <HoverTip tip={<span className="font-mono">{property.key}</span>}>
+      <span>{property.label}</span>
+    </HoverTip>
+  )
 
   const text = known.filter((property) => property.kind === "text")
   const paired = known.filter(
@@ -275,38 +329,26 @@ function PropertyFields({
     const value = current(property)
     const error = errors[property.key]
     const choices = property.choices ?? []
+    const segments = property.kind === "choice" && choices.length <= 4
     return (
       <Field
         key={property.key}
-        label={property.label}
-        htmlFor={property.kind === "choice" && choices.length <= 4 ? undefined : id}
-        hint={hint(property)}
+        label={named(property)}
+        htmlFor={segments ? undefined : id}
+        info={property.description}
         error={error}
-        trailing={<Tag mono>{property.key}</Tag>}
+        trailing={was(property, `“${shown(property) || "empty"}”`)}
       >
         {property.kind === "choice" ? (
-          choices.length <= 4 ? (
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
+          segments ? (
+            <Segments
+              label={property.label}
               value={value}
+              options={choices}
               disabled={disabled}
-              aria-label={property.label}
-              // Pressing the chosen one again is not a way to choose nothing.
-              onValueChange={(next) => next && onChange(property.key, next)}
-              className="w-full"
-            >
-              {choices.map((choice) => (
-                <ToggleGroupItem
-                  key={choice.value}
-                  value={choice.value}
-                  className="h-11 flex-1 px-2 text-body sm:h-9"
-                >
-                  {choice.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+              fill
+              onChange={(next) => onChange(property.key, next)}
+            />
           ) : (
             <Select
               value={value}
@@ -373,12 +415,15 @@ function PropertyFields({
           {switches.map((property) => (
             <OptionRow
               key={property.key}
-              title={property.label}
-              hint={
-                current(property) !== saved(property)
-                  ? `was ${saved(property) === "true" ? "on" : "off"}`
-                  : (property.description ?? <span className="font-mono">{property.key}</span>)
+              title={
+                // What it was rides the title's own line, so a switch that is
+                // turned keeps the height it had.
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                  {named(property)}
+                  {was(property, saved(property) === "true" ? "on" : "off")}
+                </span>
               }
+              hint={property.description}
               checked={current(property) === "true"}
               disabled={disabled}
               onCheckedChange={(checked) => onChange(property.key, checked ? "true" : "false")}
@@ -394,23 +439,23 @@ function PropertyFields({
  * The declared settings as the file writes them — escapes and all — numbered
  * and folded away until wanted. It is not the whole file: the server sends
  * only the keys this page edits, because the rest can hold an RCON password
- * or a plugin's credentials, and it says so rather than presenting these
- * lines as everything on disk.
+ * or a plugin's credentials, and the head says so rather than presenting
+ * these lines as everything on disk.
  */
-function RawFile({ raw }: { raw: string }) {
+function RawFile({ raw, path, label }: { raw: string; path?: string; label?: string }) {
   const lines = raw.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n")
   return (
-    <FormSection
-      aside
-      title="The file on disk"
-      hint={
-        <p>
-          These lines as the file writes them. The rest of the file stays on the server: it can hold
-          passwords this page has no reason to show.
-        </p>
+    <SettingSection
+      title={label ?? "The file on disk"}
+      state={
+        <>
+          {path && <span className="font-mono text-foreground/80">{path}</span>}
+          {path && " · "}
+          {plural(lines.length, "line")} edited here · the rest kept as written and not shown
+        </>
       }
     >
-      <Disclosure summary="View the file on disk">
+      <Disclosure summary="View the file on disk" quiet>
         <Well className="max-h-96 px-0 py-2">
           <ol className="min-w-max">
             {lines.map((line, index) => (
@@ -429,6 +474,6 @@ function RawFile({ raw }: { raw: string }) {
           </ol>
         </Well>
       </Disclosure>
-    </FormSection>
+    </SettingSection>
   )
 }

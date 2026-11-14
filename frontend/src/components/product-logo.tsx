@@ -288,6 +288,7 @@ const LOGOS: Record<string, string> = {
   opengist: "opengist.svg",
   opensearch: "opensearch.svg",
   opensuse: "opensuse.svg",
+  opentelemetry: "opentelemetry.svg",
   pairdrop: "pairdrop.webp",
   openvpn: "openvpn.svg",
   opera: "opera.svg",

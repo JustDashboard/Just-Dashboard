@@ -269,6 +269,8 @@ export function TagDialog({
 }) {
   const [tag, setTag] = useState("")
   const [busy, setBusy] = useState(false)
+  // Enter pressed twice lands before `busy` has drawn, and each press posted.
+  const sending = useRef(false)
   const [seeded, setSeeded] = useState<string | null>(null)
   const suggestion = image ? suggestTag(image.name) : ""
   if (image && seeded !== image.id) {
@@ -277,7 +279,8 @@ export function TagDialog({
   }
 
   const submit = async () => {
-    if (!image || !tag.trim()) return
+    if (!image || !tag.trim() || sending.current) return
+    sending.current = true
     setBusy(true)
     try {
       await post(`/docker/images/${encodeURIComponent(image.id)}/tag`, { tag: tag.trim() })
@@ -287,6 +290,7 @@ export function TagDialog({
     } catch (err) {
       notify.error("Could not tag the image", err)
     } finally {
+      sending.current = false
       setBusy(false)
     }
   }

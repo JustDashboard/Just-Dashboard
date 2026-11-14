@@ -11,9 +11,12 @@
  *
  * The client's error tells the first from the other two. Whether
  * `docker.service` is running tells the second from the third, where systemd
- * can be asked.
+ * can be asked. A systemd that answers and has no such unit is the fourth
+ * reading: Docker was never installed here, which is fixed by installing it.
  */
 export type DockerFault =
+  /** systemd has no unit for the daemon and nothing answers: it is not installed. */
+  | "absent"
   /** The socket is there and refused the dashboard. */
   | "refused"
   /** systemd says the daemon is not running. */
@@ -88,6 +91,19 @@ export function dockerUnreachable(ping: DockerPing, unit: DockerUnitReading): Do
       fault: "other",
       title: "Docker did not answer as expected",
       description: `Something answered at ${at}, and not with what the dashboard asked for. What it said is below.`,
+      startable: false,
+      raw,
+    }
+  }
+
+  // systemd answered and knows no such unit. That is its word on the matter,
+  // and a different one from having none (`unit` undefined): a daemon that
+  // listens somewhere else is the second sentence's.
+  if (unit && unit.loadState === "not-found") {
+    return {
+      fault: "absent",
+      title: "Docker is not installed",
+      description: `systemd has no ${DOCKER_UNIT} on this server and nothing answers at ${at}. A daemon that listens somewhere else is named with JD_DOCKER_HOST.`,
       startable: false,
       raw,
     }

@@ -14,6 +14,7 @@ Every container, stack, image, volume and network on the server, with what each 
 - Docker state, health checks and recorded lifecycle events
 - Reviewed container configuration and live resource limits
 - Browse a volume's or a container's files in place
+- Where Docker does not answer, the page says which fault it is and fixes it in place: Start Docker for a stopped daemon, Install Docker where there is none
 
 <a href="../readme/docker.png"><img src="../readme/docker.png" alt="The Docker overview with processor and memory by container, containers, Compose projects and disk use"></a>
 
