@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { json, mockProxy, user } from "./proxy-fixtures"
+import { risen } from "./risen"
+import { carrying, mockCarrying } from "./fixtures/proxy/stream-traffic"
 import {
   dropInPath,
   heldStream,
@@ -54,6 +56,17 @@ function saved(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+/** A stream's own Settings, where its form is since 0.8.7. */
+async function openSettings(page: Page, name: string) {
+  await page.goto(`/proxy/streams/${encodeURIComponent(name)}?tab=settings`)
+  const settings = page.locator("[data-slot='stream-settings']")
+  await expect(settings).toBeVisible()
+  return settings
+}
+
+/** The settings column's one floating Save. */
+const saveBar = (page: Page) => page.getByRole("region", { name: "Save changes" })
 
 async function fillNew(page: Page) {
   const sheet = page.getByRole("dialog")
@@ -112,13 +125,14 @@ test("a stream block nginx cannot read is an outage, said as one", async ({ page
   // pass: nothing offers to make one.
   await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "New stream" })).toHaveCount(0)
-  await page.getByRole("button", { name: "Edit bastion" }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("No stream can pass nginx’s test yet")).toBeVisible()
-  await expect(sheet.getByText("nginx’s test fails until it has the stream module.")).toBeVisible()
-  await expect(sheet.getByRole("textbox", { name: "Listen on", exact: true })).toBeDisabled()
-  await expect(sheet.getByRole("button", { name: "Save for later" })).toBeDisabled()
-  await expect(sheet.getByText("This will not forward anything yet")).toHaveCount(0)
+  const settings = await openSettings(page, "bastion")
+  await expect(settings.getByText("No stream can pass nginx’s test yet")).toBeVisible()
+  await expect(
+    settings.getByText("nginx’s test fails until it has the stream module."),
+  ).toBeVisible()
+  await expect(settings.getByRole("textbox", { name: "Listen on", exact: true })).toBeDisabled()
+  await expect(saveBar(page)).toHaveCount(0)
+  await expect(settings.getByText("This will not forward anything yet")).toHaveCount(0)
 })
 
 // nginx reads a file included inside http — as http — and its test refuses
@@ -142,22 +156,20 @@ test("the streams tool retains native invalid-configuration feedback", async ({ 
   await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "New stream" })).toHaveCount(0)
 
-  await page.getByRole("button", { name: "Edit bastion" }).click()
-  const sheet = page.getByRole("dialog")
+  const settings = await openSettings(page, "bastion")
   // nginx reads the directory, as http: it is not "not read yet".
   await expect(
-    sheet.getByText("nginx reads this directory inside http, where its test refuses a stream."),
+    settings.getByText("nginx reads this directory inside http, where its test refuses a stream."),
   ).toBeVisible()
-  await expect(sheet.getByText(/does not read this directory yet/)).toHaveCount(0)
-  await expect(sheet.getByText(/includes this directory inside http/)).toBeVisible()
+  await expect(settings.getByText(/does not read this directory yet/)).toHaveCount(0)
+  await expect(settings.getByText(/includes this directory inside http/)).toBeVisible()
   await expect(
-    sheet.getByText(/with files there, it refuses every reload on this host/),
+    settings.getByText(/with files there, it refuses every reload on this host/),
   ).toBeVisible()
-  await expect(sheet.getByText(/Move the include into a top-level stream block/)).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Save for later" })).toBeDisabled()
-  await page.keyboard.press("Escape")
-  await expect(sheet).toHaveCount(0)
+  await expect(settings.getByText(/Move the include into a top-level stream block/)).toBeVisible()
+  await expect(saveBar(page)).toHaveCount(0)
 
+  await page.goto("/proxy/streams")
   await page.getByRole("button", { name: "More actions for bastion" }).click()
   await page.getByRole("menuitem", { name: "Delete" }).click()
   const dialog = page.getByRole("dialog")
@@ -194,15 +206,13 @@ test("with no stream module, a misplaced include comes out before the module and
   ).toBeVisible()
   await expect(page.getByText(/Move the include/)).toHaveCount(0)
 
-  await page.getByRole("button", { name: "Edit bastion" }).click()
-  const sheet = page.getByRole("dialog")
+  const settings = await openSettings(page, "bastion")
   await expect(
-    sheet.getByText(
+    settings.getByText(
       /Take that include out\. Install libnginx-mod-stream, the package with nginx's stream module\. Then add this stream block/,
     ),
   ).toBeVisible()
-  await expect(sheet.getByText(/Move the include/)).toHaveCount(0)
-  await page.keyboard.press("Escape")
+  await expect(settings.getByText(/Move the include/)).toHaveCount(0)
 })
 
 test("an empty directory included inside http is named, and nothing offers a save", async ({
@@ -262,18 +272,18 @@ test("renaming says so, and names the file it came from", async ({ page }) => {
   const bodies = await onSave(page, (route) =>
     json(route, saved({ name: "ssh", renamed: "bastion" })),
   )
-  await page.goto("/proxy/streams")
-  await page.getByRole("button", { name: "Edit bastion" }).click()
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("textbox", { name: "Name", exact: true }).fill("ssh")
+  const settings = await openSettings(page, "bastion")
+  await settings.getByRole("textbox", { name: "Name", exact: true }).fill("ssh")
   await expect(
-    sheet.getByText(
+    settings.getByText(
       "Saving renames bastion.conf to ssh.conf and keeps the old file as bastion.conf.bak.",
     ),
   ).toBeVisible()
-  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await saveBar(page).getByRole("button", { name: "Save" }).click()
 
   await expect(page.getByText("bastion renamed to ssh saved and reloaded")).toBeVisible()
+  // The page follows the stream to its new name.
+  await expect(page).toHaveURL(/\/proxy\/streams\/ssh\?tab=settings$/)
   const body = bodies[0] as { previous: string; reload: boolean; spec: Record<string, unknown> }
   expect(body.previous).toBe("bastion")
   expect(body.reload).toBe(true)
@@ -377,8 +387,9 @@ test("allow all is open to anyone, and counted so", async ({ page }) => {
     ],
   })
   await page.goto("/proxy/streams")
-  const tile = page.locator("[data-slot='stat-grid']").getByText("Open to anyone").locator("..")
-  await expect(tile).toContainText("1")
+  await expect(
+    page.locator("[data-slot='host-identity']").getByText("1 open to anyone"),
+  ).toBeVisible()
   const cards = page.locator("[data-slot='choice-row']")
   await expect(cards.first()).toContainText("everyone")
   await expect(cards.first().getByText("anyone", { exact: true })).toBeVisible()
@@ -406,16 +417,16 @@ test("a hand-written file opens read-only, with the file itself to hand", async 
   await page.goto("/proxy/streams")
 
   const card = page.locator("[data-slot='choice-row']").first()
-  // A loopback bind is shown as one, and the card says who wrote the file.
-  await expect(card.getByText("127.0.0.1:6000")).toBeVisible()
-  await expect(card).toContainText("written by hand")
+  // A loopback bind is shown as one, and the stream's page says who wrote the file.
+  await expect(card.getByText("127.0.0.1:6000 → 10.0.0.5:6000")).toBeVisible()
+  await card.getByRole("link", { name: "Open legacy" }).click()
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("written by hand")
 
-  await page.getByRole("button", { name: "Edit legacy" }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("Written by hand")).toBeVisible()
+  const sheet = await openSettings(page, "legacy")
+  await expect(sheet.getByText("Written by hand", { exact: true })).toBeVisible()
   await expect(sheet.getByText(/uses deny rules, 2 upstream servers/)).toBeVisible()
   await expect(sheet.getByRole("textbox", { name: "Listen on", exact: true })).toBeDisabled()
-  await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
+  await expect(saveBar(page)).toHaveCount(0)
 
   await sheet.getByRole("button", { name: "Edit the file" }).click()
   const editor = page.getByRole("dialog", { name: "legacy.conf" })
@@ -510,7 +521,10 @@ test("an unreadable stream file is deleted without a port or a backup promised",
   const card = page.locator("[data-slot='choice-row']").first()
   await expect(card.getByText("unreadable")).toBeVisible()
   await expect(card.getByText(/permission denied/)).toBeVisible()
-  await expect(card.getByRole("button", { name: "Edit", exact: true })).toBeDisabled()
+  // Its page says why; it has no form to open.
+  await page.getByRole("button", { name: "More actions for secret" }).click()
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
   await page.getByRole("button", { name: "More actions for secret" }).click()
   await page.getByRole("menuitem", { name: "Delete" }).click()
 
@@ -594,18 +608,16 @@ test("a linked stream opens read-only, and its delete keeps what it points to", 
     unsupported: ["a symbolic link"],
   }
   await listing(page, { streams: [linked] })
-  await page.goto("/proxy/streams")
-  const card = page.locator("[data-slot='choice-row']").first()
-  await expect(card).toContainText("a symbolic link")
+  await page.goto("/proxy/streams/linked")
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("a symbolic link")
 
-  await page.getByRole("button", { name: "Edit linked" }).click()
-  const sheet = page.getByRole("dialog")
+  const sheet = await openSettings(page, "linked")
   await expect(sheet.getByText(/uses a symbolic link, which this form cannot keep/)).toBeVisible()
   await expect(sheet.getByText(/It links to \.\.\/streams-available\/linked\.conf\./)).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
+  await expect(saveBar(page)).toHaveCount(0)
   await expect(sheet.getByRole("button", { name: "Edit the file" })).toBeVisible()
-  await page.keyboard.press("Escape")
 
+  await page.goto("/proxy/streams")
   await page.getByRole("button", { name: "More actions for linked" }).click()
   await page.getByRole("menuitem", { name: "Delete" }).click()
   const dialog = page.getByRole("dialog")
@@ -631,12 +643,14 @@ test("a plain listen port reads as every IPv4 address, not as a restriction", as
   await listing(page, { streams: [plain] })
   await page.goto("/proxy/streams")
   const card = page.locator("[data-slot='choice-row']").first()
-  await expect(card.getByText("Listen on every IPv4 address")).toBeVisible()
-  await expect(card.getByText("20003", { exact: true })).toBeVisible()
+  await expect(card.getByText("20003 → 192.168.1.5:6000")).toBeVisible()
   await expect(card).not.toContainText("0.0.0.0")
+  await page.goto("/proxy/streams/plain")
+  const port = page.locator("[data-slot='host-identity']").getByText("20003", { exact: true })
+  await expect(port).toHaveAttribute("title", "Every IPv4 address")
+  await expect(page.locator("[data-slot='host-identity']")).not.toContainText("0.0.0.0")
 
-  await page.getByRole("button", { name: "Edit plain" }).click()
-  const sheet = page.getByRole("dialog")
+  const sheet = await openSettings(page, "plain")
   await expect(sheet.getByRole("combobox", { name: "Listening address" })).toContainText(
     "Every address",
   )
@@ -660,9 +674,28 @@ test("a read-only account can inspect streams without edit controls", async ({ p
   await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
   await expect(page.getByRole("button", { name: "New stream" })).toHaveCount(0)
   await page.getByRole("button", { name: "More actions for bastion" }).click()
-  await expect(page.getByRole("menuitem", { name: "Traffic" })).toBeVisible()
-  await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0)
-  await expect(page.getByRole("menuitem", { name: "Delete" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Copy port" })).toBeVisible()
+  for (const verb of ["Edit", "Test", "Pause", "Duplicate", "Raw file", "Delete"]) {
+    await expect(page.getByRole("menuitem", { name: verb })).toHaveCount(0)
+  }
+  await page.keyboard.press("Escape")
+
+  // Its page is open to every account; nothing on it changes the stream.
+  await page.getByRole("link", { name: "Open bastion" }).click()
+  await expect(page).toHaveURL(/\/proxy\/streams\/bastion$/)
+  await expect(page.getByRole("tab", { name: "Overview" })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Settings" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Test" })).toHaveCount(0)
+  await page.getByRole("button", { name: "More actions for bastion" }).click()
+  await expect(page.getByRole("menuitem", { name: "Copy upstream" })).toBeVisible()
+  for (const verb of ["Pause", "Delete", "Raw file", "Duplicate", "Trace in Network"]) {
+    await expect(page.getByRole("menuitem", { name: verb })).toHaveCount(0)
+  }
+  await page.keyboard.press("Escape")
+  // A link to Settings lands on the Overview.
+  await page.goto("/proxy/streams/bastion?tab=settings")
+  await expect(page.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator("[data-slot='stream-settings']")).toHaveCount(0)
 })
 
 test("without nginx the page says so and offers nothing to save", async ({ page }) => {
@@ -681,7 +714,12 @@ test("without nginx the page says so and offers nothing to save", async ({ page 
     module: { state: "unknown", usable: false, detail: "nginx was not found on this host" },
   })
   await page.goto("/proxy/streams")
+  // The section's own install screen, not a paragraph with nowhere to go.
   await expect(page.getByText("nginx is not installed on this host")).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Put nginx in front of this server" }),
+  ).toBeVisible()
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
   await expect(page.getByText("nginx is not reading these yet")).toHaveCount(0)
 })
@@ -780,16 +818,19 @@ test("a stream's timeouts open as they would be typed, and save unchanged", asyn
   await mockProxy(page, { included: true })
   await listing(page, { streams: [{ ...bastion, timeout: 3600, connectTimeout: 90 }] })
   const bodies = await onSave(page, (route) => json(route, saved()))
-  await page.goto("/proxy/streams")
-  const card = page.locator("[data-slot='choice-row']").first()
-  await expect(card).toContainText("1h idle timeout")
-  await expect(card).toContainText("1m 30s connect timeout")
+  await page.goto("/proxy/streams/bastion")
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("1h idle timeout")
+  await expect(identity).toContainText("1m 30s connect timeout")
 
-  await page.getByRole("button", { name: "Edit bastion" }).click()
-  const sheet = page.getByRole("dialog")
+  const sheet = await openSettings(page, "bastion")
   await expect(sheet.getByLabel("Idle timeout")).toHaveValue("1h")
   await expect(sheet.getByLabel("Connect timeout")).toHaveValue("1m30s")
-  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  // Untouched, nothing is waiting to be saved; another field's edit saves them as they were.
+  await expect(saveBar(page)).toHaveCount(0)
+  await sheet.getByRole("switch", { name: "Send the PROXY header" }).click()
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await saveBar(page).getByRole("button", { name: "Save" }).click()
   await expect(page.getByText("bastion saved and reloaded")).toBeVisible()
   const spec = bodies[0].spec as Record<string, unknown>
   expect([spec.timeout, spec.connectTimeout]).toEqual([3600, 90])
@@ -810,14 +851,17 @@ test("a stream of both protocols counts as TCP and as UDP", async ({ page }) => 
   }
   await listing(page, { streams: [dns, bastion] })
   await page.goto("/proxy/streams")
-  const tiles = page.locator("[data-slot='stat-grid']")
-  await expect(tiles.getByText("TCP", { exact: true }).locator("..")).toContainText("2")
-  await expect(tiles.getByText("UDP", { exact: true }).locator("..")).toContainText("1")
+  const strip = page.locator("[data-slot='panel-toolbar']")
+  await expect(strip.getByRole("button", { name: /^TCP/ })).toHaveText("TCP 2")
+  await expect(strip.getByRole("button", { name: /^UDP/ })).toHaveText("UDP 1")
   const card = page.locator("[data-slot='choice-row']").filter({ hasText: "dns" })
-  await expect(card).toContainText("TCP+UDP forwarding · one reply per UDP session")
+  await expect(card).toContainText("TCP+UDP")
 
-  await page.getByRole("button", { name: "Edit dns" }).click()
-  const sheet = page.getByRole("dialog")
+  await page.goto("/proxy/streams/dns")
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("TCP+UDP forwarding", { exact: true })).toBeVisible()
+  await expect(identity.getByText("one reply per UDP session", { exact: true })).toBeVisible()
+  const sheet = await openSettings(page, "dns")
   await expect(sheet.getByRole("radio", { name: "TCP+UDP" })).toBeChecked()
   await expect(sheet.getByRole("radio", { name: "One reply" })).toBeChecked()
 })
@@ -1570,40 +1614,55 @@ test("each stream says what nginx does with it, worst first, with where to look"
   // another stream shadows, and the one that is fine.
   await expect(cards).toHaveCount(5)
   const names = await cards.evaluateAll((rows) =>
-    rows.map((row) => row.querySelector("button")?.textContent?.trim()),
+    rows.map((row) => row.querySelector("a")?.textContent?.trim()),
   )
   expect(names).toEqual(["cache", "web", "quiet", "zz-copy", "db"])
 
-  const tile = page.locator("[data-slot='stat-tile']").filter({ hasText: /^Live/ })
-  await expect(tile).toContainText("1")
-  await expect(tile).toContainText("2 stop every reload")
+  // The Live tile's count is the identity line's verdict, and a press of it
+  // narrows the list to what it counts.
+  const verdict = page.locator("[data-slot='host-identity']").getByRole("button", {
+    name: "2 stop every reload",
+  })
+  await expect(verdict).toBeVisible()
+  await verdict.click()
+  await expect(cards).toHaveCount(4)
+  await verdict.click()
+  await expect(cards).toHaveCount(5)
 
+  // Each row is one line: the state, and why as its tooltip.
   const cache = cards.filter({ hasText: "cache" })
   await expect(cache.getByText("not listening", { exact: true })).toBeVisible()
+  const db = cards.filter({ hasText: /^db/ })
+  await expect(db.getByText("live", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "More actions for db" }).click()
+  await expect(page.getByRole("menuitem", { name: "Re-check" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  // Why, and where to look, is said on the stream's page.
+  await cache.getByRole("link", { name: "Open cache" }).click()
   await expect(
-    cache.getByText(/is held by postgres \(pid 900\), so nginx cannot bind it/),
+    page.getByText(/is held by postgres \(pid 900\), so nginx cannot bind it/),
   ).toBeVisible()
   await expect(
-    cache.getByText(
+    page.getByText(
       "2026/09/28 03:29:05 bind() to 0.0.0.0:6379 failed (98: Address already in use)",
     ),
   ).toBeVisible()
-  await expect(cache.getByRole("link", { name: "See who holds it" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "See who holds it" })).toHaveAttribute(
     "href",
     "/proxy/ports",
   )
-  const web = cards.filter({ hasText: "web" })
-  await expect(web.getByRole("link", { name: "Open the site" })).toHaveAttribute(
+  await page.goto("/proxy/streams/web")
+  await expect(page.getByRole("link", { name: "Open the site" })).toHaveAttribute(
     "href",
-    "/proxy/sites?site=app.example.com",
+    "/proxy/sites/app.example.com",
   )
-  const copy = cards.filter({ hasText: "zz-copy" })
-  await expect(copy.getByText("shadowed", { exact: true })).toBeVisible()
-  await expect(copy.getByText(/taken first by the stream db/)).toBeVisible()
-  await expect(copy.getByRole("link")).toHaveCount(0)
-  const db = cards.filter({ hasText: /^db/ })
-  await expect(db.getByText("live", { exact: true })).toBeVisible()
-  await expect(db.getByRole("button", { name: "Re-check" })).toHaveCount(0)
+  await page.goto("/proxy/streams/zz-copy")
+  await expect(page.getByText(/taken first by the stream db/)).toBeVisible()
+  await expect(page.getByRole("link", { name: "Open db" })).toHaveAttribute(
+    "href",
+    "/proxy/streams/db",
+  )
 })
 
 test("the chips filter the list and keep the one chosen", async ({ page }) => {
@@ -1655,15 +1714,15 @@ test("re-check reads the list again, for any account", async ({ page }) => {
   await page.route("**/api/v1/auth/session", (route) =>
     json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
   )
-  await page.goto("/proxy/streams")
-  const quiet = page.locator("[data-slot='choice-row']").filter({ hasText: "quiet" })
-  // A read-only account edits nothing, and may still ask again.
-  await expect(quiet.getByRole("button", { name: "Edit" })).toHaveCount(0)
-  await quiet.getByRole("button", { name: "Re-check" }).click()
-  await expect(quiet.getByRole("button", { name: "Checking…" })).toBeDisabled()
+  await page.goto("/proxy/streams/quiet")
+  // A read-only account edits nothing, and may still ask again: for a
+  // stream that is not live, that is the page's command.
+  await expect(page.getByRole("tab", { name: "Settings" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Re-check" }).click()
+  await expect(page.getByRole("button", { name: "Checking…" })).toBeDisabled()
   await expect.poll(() => reads).toBe(2)
   release()
-  await expect(quiet.getByRole("button", { name: "Re-check" })).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Re-check" })).toBeEnabled()
 })
 
 test("the form says a port is taken while it is typed, with the next one free", async ({
@@ -1718,7 +1777,7 @@ test("the form says a port is taken while it is typed, with the next one free", 
   await sheet.getByRole("textbox", { name: "Listen on", exact: true }).fill("8080")
   await expect(
     sheet.getByRole("alert").getByRole("link", { name: "Open the site" }),
-  ).toHaveAttribute("href", "/proxy/sites?site=app.example.com")
+  ).toHaveAttribute("href", "/proxy/sites/app.example.com")
 })
 
 test("a save nginx could not bind is refused on the field and changes nothing", async ({
@@ -1792,6 +1851,13 @@ test("the states fit a phone, bind errors and all", async ({ page }) => {
   await mockProxy(page, { included: true })
   await listing(page, { streams: stateShowcase })
   await page.goto("/proxy/streams")
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(5)
+  expect(
+    await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+  await page.goto("/proxy/streams/cache")
   await expect(page.getByText(/bind\(\) to 0\.0\.0\.0:6379 failed/)).toBeVisible()
   expect(
     await page
@@ -1819,4 +1885,314 @@ test("a TCP stream traces its connection path on the Network page", async ({ pag
   )
   await expect(page.getByLabel("Destination", { exact: true })).toHaveValue("127.0.0.1")
   await expect(page.getByLabel("Port", { exact: true })).toHaveValue("2222")
+})
+
+/*
+ * The overhaul (0.8.7): the list opens on its identity line and a picture
+ * rather than four tiles, a stream is a one-line row that opens its own page,
+ * and that page holds what the traffic sheet and the edit form did.
+ */
+
+const viewer = { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }
+
+for (const width of [1280, 390]) {
+  test(`every row is one height whatever it holds, and a test's result moves nothing at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProxy(page, { included: true })
+    await mockCarrying(page)
+    await page.route("**/api/v1/proxy/streams/test", (route) =>
+      json(route, {
+        mode: "upstream",
+        protocol: "tcp",
+        address: "10.0.0.5:5432",
+        outcome: "connected",
+        ok: true,
+        ms: 3,
+        detail: "accepted",
+        warnings: [],
+      }),
+    )
+    await page.goto("/proxy/streams")
+    const rows = page.getByRole("list", { name: "Streams" }).locator("[data-slot='choice-row']")
+    // With traffic, without, held, paused, UDP: five kinds of row.
+    await expect(rows).toHaveCount(5)
+    await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+    await risen(page)
+    const heights = await rows.evaluateAll((all) =>
+      all.map((row) => Math.round(row.getBoundingClientRect().height)),
+    )
+    expect(new Set(heights).size, `row heights ${heights}`).toBe(1)
+
+    const first = rows.first()
+    const next = rows.nth(1)
+    // Measured against each other: opening a menu on a phone may scroll the page.
+    const box = async () => ({ first: await first.boundingBox(), next: await next.boundingBox() })
+    const before = await box()
+    await page.getByRole("button", { name: "More actions for minecraft" }).click()
+    await page.getByRole("menuitem", { name: "Test" }).click()
+    if (width >= 640) await expect(first.getByText("Test passed")).toBeVisible()
+    else
+      await expect(page.getByRole("button", { name: "More actions for minecraft" })).toBeEnabled()
+    await risen(page)
+    const after = await box()
+    expect(Math.abs(after.first!.height - before.first!.height)).toBeLessThan(1)
+    expect(
+      Math.abs(after.next!.y - after.first!.y - (before.next!.y - before.first!.y)),
+    ).toBeLessThan(1)
+    expect(
+      await page
+        .locator("[data-slot='page']")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true)
+  })
+
+  test(`the identity line is in one place loading and loaded at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProxy(page, { included: true })
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/proxy/streams/", async (route) => {
+      await held
+      return json(route, { ...streamStatus({ streams: carrying }) })
+    })
+    await page.goto("/proxy/streams")
+    const identity = page.locator("[data-slot='host-identity']")
+    await expect(identity).toContainText("Reading the streams…")
+    await risen(page)
+    const loading = await identity.boundingBox()
+    release()
+    await expect(identity).toContainText("4 forwards")
+    await risen(page)
+    const loaded = await identity.boundingBox()
+    expect(Math.abs(loaded!.y - loading!.y)).toBeLessThan(1)
+    expect(Math.abs(loaded!.x - loading!.x)).toBeLessThan(1)
+  })
+}
+
+test("the list draws the forwards: open to anyone in the warning colour, 5432 as PostgreSQL", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  await page.goto("/proxy/streams")
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("stream module loaded")
+  await expect(identity).toContainText("4 forwards")
+  await expect(identity).toContainText("2 open to anyone")
+  await expect(identity).toContainText("1 paused")
+  await expect(identity).toContainText("2,461 sessions in the hour")
+  const picture = page.locator("[data-slot='stream-picture']")
+  await expect(
+    picture.getByRole("list", { name: "Ports on this host" }).getByRole("listitem"),
+  ).toHaveCount(5)
+  await expect(picture.locator("img[src='/logos/postgresql.svg']").first()).toBeVisible()
+  await expect(picture.getByText("PostgreSQL to anyone")).toHaveClass(/text-destructive/)
+  await expect(picture.getByText("anyone", { exact: true })).toHaveClass(/text-warning/)
+  await expect(
+    picture.getByRole("list", { name: "Forwarded to" }).getByText("10.0.0.5:5432"),
+  ).toBeVisible()
+  const row = page.locator("[data-slot='choice-row']").filter({ hasText: "postgres-replica" })
+  await expect(row.locator("img[src='/logos/postgresql.svg']")).toHaveCount(1)
+  await expect(row.getByText("142 sessions/h")).toBeVisible()
+  await expect(row.getByText("5432 → 10.0.0.5:5432")).toBeVisible()
+})
+
+test("an old ?stream= link lands on the stream's page, on Settings where it could be edited", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  await page.goto("/proxy/streams?stream=postgres-replica")
+  await expect(page).toHaveURL(/\/proxy\/streams\/postgres-replica\?tab=settings$/)
+  await expect(page.locator("[data-slot='stream-settings']")).toBeVisible()
+  // A paused one has no form to open; it lands on its Overview.
+  await page.goto("/proxy/streams?stream=old-bastion")
+  await expect(page).toHaveURL(/\/proxy\/streams\/old-bastion$/)
+
+  await page.route("**/api/v1/auth/session", (route) => json(route, viewer))
+  await page.goto("/proxy/streams?stream=postgres-replica")
+  await expect(page).toHaveURL(/\/proxy\/streams\/postgres-replica$/)
+})
+
+test("a stream's page reads what it carried in words, with no tiles and no p-numbers", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  await page.goto("/proxy/streams/postgres-replica")
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("postgres-replica")
+  await expect(identity).toContainText("→ 10.0.0.5:5432")
+  await expect(identity.getByText("PostgreSQL to anyone")).toBeVisible()
+  await expect(identity.getByText("live", { exact: true })).toBeVisible()
+
+  const lines = page.locator("[data-slot='reading-line']")
+  await expect(lines.filter({ hasText: /^Sessions/ })).toContainText("142 sessions")
+  await expect(lines.filter({ hasText: /^Turned away/ })).toContainText("3 denied")
+  await expect(lines.filter({ hasText: /^Not forwarded/ })).toContainText("2 not forwarded")
+  await expect(lines.filter({ hasText: /^Session length/ })).toContainText("half inside 2.4 s")
+  await expect(lines.filter({ hasText: /^Session length/ })).toContainText(
+    "9 in 10 inside 31.0 s · 99 in 100 inside 6m 50s · longest 2h 1m",
+  )
+  await expect(page.locator("[data-slot='page']")).not.toContainText(/\bp(50|90|99)\b/)
+  const outcome = page.getByRole("heading", { name: "How sessions ended" }).locator("../../..")
+  await expect(outcome.locator("[data-slot='rank-row']")).toHaveCount(3)
+
+  // The window is in the session, and a Day reads the day.
+  const asked: string[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (url.pathname.endsWith("/postgres-replica/traffic"))
+      asked.push(url.searchParams.get("window") ?? "")
+  })
+  await page.getByRole("radio", { name: "Day" }).click()
+  await expect.poll(() => asked.at(-1)).toBe("24h")
+  await expect(lines.filter({ hasText: /^Sessions/ })).toContainText("in the last day")
+
+  // The Clients line is a way to the ranked clients, the view in the address.
+  await lines.filter({ hasText: /^Clients/ }).click()
+  await expect(page).toHaveURL(/\?tab=clients$/)
+  await expect(page.locator("[data-slot='rank-row']")).toHaveCount(3)
+  await page.getByRole("tab", { name: "Connected now" }).click()
+  await expect(page).toHaveURL(/\?tab=connections$/)
+  await expect(page.getByText("2 TCP connections open")).toBeVisible()
+  await expect(page.getByText("10.0.0.21:51234")).toBeVisible()
+})
+
+test("a client is denied from its stream's page, ahead of every other rule", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  const bodies = await onSave(page, (route) => json(route, saved({ name: "postgres-replica" })))
+  await page.goto("/proxy/streams/postgres-replica?tab=clients")
+  const busiest = page.locator("[data-slot='rank-row']").filter({ hasText: "10.0.0.21" })
+  await busiest.getByRole("button", { name: "Deny" }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Deny and reload" }).click()
+  await expect.poll(() => bodies.length).toBe(1)
+  const spec = bodies[0].spec as { rules?: { action: string; source: string }[] }
+  expect(spec.rules?.[0]).toEqual({ action: "deny", source: "10.0.0.21" })
+  // An address the list already turns away is offered the Allow.
+  const refused = page.locator("[data-slot='rank-row']").filter({ hasText: "203.0.113.50" })
+  await expect(refused.getByRole("button", { name: "Allow" })).toBeVisible()
+
+  await page.route("**/api/v1/auth/session", (route) => json(route, viewer))
+  await page.reload()
+  await expect(page.locator("[data-slot='rank-row']")).toHaveCount(3)
+  await expect(page.getByRole("button", { name: "Deny" })).toHaveCount(0)
+})
+
+test("pause, resume, duplicate, delete and the walk between streams work from the page", async ({
+  page,
+}) => {
+  test.setTimeout(60_000)
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  const toggles: { path: string; enabled: boolean }[] = []
+  await page.route(/\/api\/v1\/proxy\/streams\/[^/]+\/enabled$/, (route) => {
+    toggles.push({
+      path: new URL(route.request().url()).pathname,
+      enabled: route.request().postDataJSON().enabled,
+    })
+    return json(route, { ...saved({ name: "x" }), listening: true, validation: { ok: true } })
+  })
+  const deletes = await onDelete(page, { name: "private-redis", reloaded: true })
+
+  await page.goto("/proxy/streams/private-redis")
+  await page.getByRole("button", { name: "More actions for private-redis" }).click()
+  await page.getByRole("menuitem", { name: "Pause" }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Pause and reload" }).click()
+  await expect
+    .poll(() => toggles.at(-1))
+    .toEqual({
+      path: "/api/v1/proxy/streams/private-redis/enabled",
+      enabled: false,
+    })
+
+  // A paused stream's one command is Resume.
+  await page.goto("/proxy/streams/old-bastion")
+  await page.getByRole("button", { name: "Resume" }).first().click()
+  await expect
+    .poll(() => toggles.at(-1))
+    .toEqual({
+      path: "/api/v1/proxy/streams/old-bastion/enabled",
+      enabled: true,
+    })
+
+  // Duplicate opens the New stream sheet on the same fields under a new name.
+  await page.goto("/proxy/streams/private-redis")
+  await page.getByRole("button", { name: "More actions for private-redis" }).click()
+  await page.getByRole("menuitem", { name: "Duplicate" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
+    "private-redis-copy",
+  )
+  await expect(sheet.getByLabel("Forward to")).toHaveValue("10.0.0.9:6379")
+  await sheet.getByRole("button", { name: "Close" }).click()
+  await expect(sheet).toHaveCount(0)
+
+  // Alt+↓ walks the list in its order, keeping the view.
+  await page.goto("/proxy/streams/minecraft?tab=clients")
+  await page.locator("body").press("Alt+ArrowDown")
+  await expect(page).toHaveURL(/\/proxy\/streams\/postgres-replica\?tab=clients$/)
+  await page.locator("body").press("Alt+ArrowUp")
+  await expect(page).toHaveURL(/\/proxy\/streams\/minecraft\?tab=clients$/)
+
+  // Delete goes back to the list once the stream is gone.
+  await page.goto("/proxy/streams/private-redis")
+  await page.getByRole("button", { name: "More actions for private-redis" }).click()
+  await page.getByRole("menuitem", { name: "Delete" }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Delete and reload" }).click()
+  await expect(page).toHaveURL(/\/proxy\/streams$/)
+  expect(deletes).toEqual(["/api/v1/proxy/streams/private-redis"])
+})
+
+test("from xl the list stands beside the stream, with the one on screen filled", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  await page.goto("/proxy/streams/postgres-replica?tab=connections")
+  const rail = page.getByRole("navigation", { name: "Streams" })
+  await expect(rail.getByRole("link")).toHaveCount(5)
+  await expect(rail.getByRole("link", { name: "postgres-replica" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  await rail.getByRole("link", { name: "resolver" }).click()
+  await expect(page).toHaveURL(/\/proxy\/streams\/resolver\?tab=connections$/)
+  // A UDP-only stream has no socket per client to list, and says why.
+  await expect(page.getByText(/no connection per client to list/)).toBeVisible()
+  await rail.getByRole("textbox", { name: "Search the streams" }).fill("redis")
+  await expect(rail.getByRole("link")).toHaveCount(1)
+})
+
+test("a stream that is not there says so, with the way back", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  await page.goto("/proxy/streams/nope")
+  await expect(page.getByText("No stream called nope")).toBeVisible()
+  await expect(page.getByRole("link", { name: "All streams" })).toHaveAttribute(
+    "href",
+    "/proxy/streams",
+  )
+})
+
+test("a stream's page fits a phone, one pane", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  for (const tab of ["", "?tab=clients", "?tab=connections", "?tab=settings"]) {
+    await page.goto(`/proxy/streams/postgres-replica${tab}`)
+    await expect(page.locator("[data-slot='host-identity']")).toBeVisible()
+    await expect(page.getByRole("navigation", { name: "Streams" })).toBeHidden()
+    expect(
+      await page
+        .locator("[data-slot='page']")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+      `${tab} overflows`,
+    ).toBe(true)
+  }
 })

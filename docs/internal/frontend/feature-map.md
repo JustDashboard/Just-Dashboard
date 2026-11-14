@@ -1095,16 +1095,37 @@ unit-tested); checked by `tests/browser/processes-ui.spec.ts` and
 ### `/proxy/*`
 
 Proxy overview, Sites and site details, Certificates, Streams, Ports, Configuration, TLS tools and
-Traffic show observed inventories and records. Alerts (`/proxy/alerts`, administrators) is its own
+Traffic show observed inventories and records. Certificates keeps its views in the address
+(`?tab=`: certificates, renewal, DNS challenge, ACME accounts, local CA, signing requests, watched
+domains), and a certificate is a page of its own, `/proxy/certificates/<name>` with `?path=` where
+two share a name (`certificate-page.tsx`, its rail and picture; the shared console, forms and verbs
+in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are
 `components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's identity bar
-links there with the firing count. Site/stream configuration, certificate issuance/renewal,
+links there with the firing count. Ports (`/proxy/ports`) opens on its counts, a picture of which
+networks reach which listening programs and the list of sockets; each listening port has its own page
+(`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
+reach, owner, clients and history, and the list as a rail; the old `?socket=` sheet address opens
+it. Site/stream configuration, certificate issuance/renewal,
 requested TLS scans, nginx tests/lint and traffic diagnostics keep their own controls and
 authorization. The overview has no automatic attention list or domain suggestions. Certificate
 hygiene and finding snoozes are removed; nginx Settings exposes current values and edit constraints
 without advice or recommended values
 
+Streams (`/proxy/streams`, 0.8.7) opens on its identity line — the forwards as the services their
+ports are, the stream module's state, how many forward and how many are open to anyone, the hour's
+sessions, the verdict (a press narrows the list to what it counts) and New stream — then the wiring
+picture of the host's ports through nginx to where they go (`stream-picture.tsx`), the module and
+include steps where they are still to do (`stream-setup.tsx`), and the forwards as one-line rows,
+each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`).
+A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a rail from `xl`,
+`stream-rail.tsx`) holds what the traffic sheet and the edit form did: Overview (the forward drawn,
+what it carried as reading lines and its sessions and outcomes), Clients (with Deny or Allow),
+Connected now, and Settings (the form as a settings column with one save bar, administrators only),
+`?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
+`stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
+the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
 Configuration (`/proxy/config`) opens on nginx's directory as an identity line with Test config, the
 include picture over the files by folder, and for administrators What nginx loads, Settings (one
 column, one save bar, a reload switch), Lint and History as `?tab=` views; a file's revisions and
@@ -1115,6 +1136,14 @@ connected, the dashed picture, a choice of token or API and one form (administra
 
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)
+
+Traffic (`/proxy/traffic`, every account) is the last hour across every site from
+`GET /proxy/traffic`: requests a minute, the failing share, the slowest site's response time in
+words and bytes sent, the hour by the minute, the sites busiest first (each opening its site page,
+where its requests are read), and nginx's error log grouped from `GET /proxy/errors` over a window,
+for every site or one (`?tab=errors&site=`). The old one-site address `?site=<name>` redirects to
+`/proxy/sites/<name>`. Checked by `tests/browser/proxy-traffic.spec.ts`; the logic is
+`components/proxy/site-traffic.ts` (unit-tested)
 
 ### `/network/*`
 

@@ -50,6 +50,11 @@ export function HostIdentity({
   facts,
   aside,
   bar,
+  state,
+  command,
+  menu,
+  label,
+  slot = "host-identity",
   className,
 }: {
   /** A `product-logo` id; nothing names the host when it is undefined. */
@@ -67,12 +72,50 @@ export function HostIdentity({
    * empty ground between them, and the operator asked for one bar.
    */
   bar?: boolean
+  /**
+   * The thing's state, beside its title: a `Status` dot and its word. With
+   * `state`, `command` or `menu` the line is laid out as a project's header.
+   */
+  state?: React.ReactNode
+  /** The one brand-faced command at the far end, and anything that sits before it. */
+  command?: React.ReactNode
+  /** The `⋯` menu after the command, holding the rest of the verbs. */
+  menu?: React.ReactNode
+  /** The line's landmark name ("About api"): set, the line is a `section`. */
+  label?: string
+  /** The `data-slot`, for a page whose specs know its header by another name. */
+  slot?: string
   className?: string
 }) {
+  if (state !== undefined || command !== undefined || menu !== undefined)
+    return (
+      <ProjectLine
+        tile={
+          logo ?? (
+            <ProductLogo
+              id={mark}
+              fallback={fallback}
+              className="size-10 rounded-lg [&_img]:size-6"
+            />
+          )
+        }
+        title={title}
+        facts={facts}
+        state={state}
+        command={command}
+        menu={menu}
+        aside={aside}
+        label={label}
+        slot={slot}
+        className={className}
+      />
+    )
   return (
     <div
-      data-slot="host-identity"
+      data-slot={slot}
       data-bar={bar || undefined}
+      aria-label={label}
+      role={label ? "region" : undefined}
       className={cn(
         "flex min-w-0 flex-wrap items-center justify-between",
         bar
@@ -120,6 +163,71 @@ export function HostIdentity({
           wraps them on a phone rather than pushing the last one off it. */}
       {aside && <div className="flex max-w-full shrink-0">{aside}</div>}
     </div>
+  )
+}
+
+/**
+ * The identity line laid out as a project's header (`deploy/project-shell`),
+ * which the operator named the opening every page should reach: the tile
+ * beside two rows, the title with its state after it on the first and the
+ * facts on the second, the command and its `⋯` menu at the far end across
+ * both. On a phone the tile, the title and the command share the first row,
+ * the state takes the next, and the facts run the full width under them.
+ */
+function ProjectLine({
+  tile,
+  title,
+  facts,
+  state,
+  command,
+  menu,
+  aside,
+  label,
+  slot,
+  className,
+}: {
+  tile: React.ReactNode
+  title: React.ReactNode
+  facts: React.ReactNode
+  state?: React.ReactNode
+  command?: React.ReactNode
+  menu?: React.ReactNode
+  aside?: React.ReactNode
+  label?: string
+  slot: string
+  className?: string
+}) {
+  const Line = label ? "section" : "div"
+  return (
+    <Line
+      aria-label={label}
+      data-slot={slot}
+      data-layout="project"
+      className={cn(
+        "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5",
+        className,
+      )}
+    >
+      <div className="flex sm:row-span-2">{tile}</div>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:contents">
+        {/* A flex box, so a title that is a link or an address sits on the
+            row's centre rather than on the baseline of a taller line box. */}
+        <p className="flex max-w-full min-w-0 text-title font-semibold tracking-tight">{title}</p>
+        {state !== undefined && (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:order-2 max-sm:col-span-3">
+            {state}
+          </div>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2 max-sm:order-1 sm:row-span-2">
+        {aside}
+        {command}
+        {menu}
+      </div>
+      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:order-3 sm:col-span-1 sm:col-start-2">
+        {facts}
+      </div>
+    </Line>
   )
 }
 
