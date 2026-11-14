@@ -24,6 +24,7 @@ import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Notice } from "@/components/state"
 import { accountHref, groupGrant, isPrivateGroup } from "@/components/system-users/access"
 import { GroupWord, ShellGlyph } from "@/components/system-users/marks"
+import { NewAccountPicture } from "@/components/system-users/new-account-picture"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -65,6 +66,11 @@ const USERNAME = /^[a-z_][a-z0-9_-]{0,31}$/
  * name and offered a key as optional, and that made `zoro`: an administrator
  * nobody could ever sign in as. So here the way in is the question, and an account
  * nobody can sign in to has to be asked for by name.
+ *
+ * The form is the one focused surface, at the width a deployment's is, and the
+ * column beside it draws what the answers add up to (`new-account-picture`):
+ * the way in, the account, how far it reaches. Narrower, the picture goes under
+ * the form.
  */
 export function NewAccount() {
   const router = useRouter()
@@ -202,7 +208,7 @@ export function NewAccount() {
     return (
       <Page register="flow">
         <FlowHeader question={`${created.username} is ready`} />
-        <FlowPanel className="max-w-2xl">
+        <FlowPanel className="mx-auto w-full max-w-2xl">
           <FlowPanelBody>
             <div className="grid gap-4" data-slot="created-password">
               <Notice tone="success" title="Copy the password now">
@@ -268,193 +274,221 @@ export function NewAccount() {
         })}
       </ChoiceGrid>
 
-      <FlowPanel>
-        <FlowPanelBody>
-          <div className="grid gap-5">
-            <FieldRow>
-              <Field label="Username" htmlFor="new-username" error={nameError}>
-                <Input
-                  id="new-username"
-                  className="font-mono"
-                  autoComplete="off"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                />
-              </Field>
-              <Field label="Full name" htmlFor="new-comment" hint="Optional.">
-                <Input
-                  id="new-comment"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                />
-              </Field>
-            </FieldRow>
+      <div className="grid min-w-0 gap-x-6 gap-y-8 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
+        <FlowPanel>
+          <FlowPanelBody>
+            <div className="grid gap-5">
+              <FieldRow>
+                <Field label="Username" htmlFor="new-username" error={nameError}>
+                  <Input
+                    id="new-username"
+                    className="font-mono"
+                    autoComplete="off"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                  />
+                </Field>
+                <Field label="Full name" htmlFor="new-comment">
+                  <Input
+                    id="new-comment"
+                    placeholder="Optional"
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                  />
+                </Field>
+              </FieldRow>
 
-            {!isService && (
-              <Field label="How do they sign in?">
-                <div className="grid gap-3">
+              {!isService && (
+                <Field label="How do they sign in?">
+                  <div className="grid gap-3">
+                    <Segments
+                      label="How they sign in"
+                      value={way}
+                      onChange={setWay}
+                      fill
+                      options={[
+                        {
+                          value: "key",
+                          label: (
+                            <span className="inline-flex items-center gap-1.5">
+                              <Key className="size-3.5 max-sm:hidden" />
+                              SSH key
+                            </span>
+                          ),
+                        },
+                        {
+                          value: "github",
+                          label: (
+                            <span className="inline-flex items-center gap-1.5">
+                              <ProductGlyph id="github" className="max-sm:hidden" />
+                              <span>
+                                GitHub<span className="max-sm:hidden"> keys</span>
+                              </span>
+                            </span>
+                          ),
+                        },
+                        {
+                          value: "password",
+                          label: (
+                            <span className="inline-flex items-center gap-1.5">
+                              <LockClosed className="size-3.5 max-sm:hidden" />
+                              Password
+                            </span>
+                          ),
+                        },
+                        // Four answers across a phone: the marks and the second
+                        // words go there, so the last one is not cut off.
+                        {
+                          value: "none",
+                          label: (
+                            <span>
+                              Nobody<span className="max-sm:hidden"> directly</span>
+                            </span>
+                          ),
+                        },
+                      ]}
+                    />
+                    {way === "key" && (
+                      <Textarea
+                        aria-label="SSH public key"
+                        value={key}
+                        onChange={(e) => setKey(e.target.value)}
+                        className="font-mono text-xs"
+                        rows={3}
+                        placeholder="ssh-ed25519 AAAA…"
+                      />
+                    )}
+                    {way === "github" && (
+                      <Input
+                        aria-label="GitHub username"
+                        value={github}
+                        onChange={(e) => setGithub(e.target.value)}
+                        autoComplete="off"
+                        placeholder="GitHub username"
+                      />
+                    )}
+                    {way === "password" && (
+                      <>
+                        <SecretField
+                          id="new-password"
+                          label="Password"
+                          value={password}
+                          onChange={setPassword}
+                        />
+                        <OptionRow
+                          title="Make them change it"
+                          hint="The first sign-in has to choose a new one."
+                          checked={mustChange}
+                          onCheckedChange={setMustChange}
+                        />
+                      </>
+                    )}
+                    {way === "none" && (
+                      <FormNote>
+                        Nobody can sign in as this account until you give it a key or a password. It
+                        can still be reached with sudo or from the terminal here.
+                      </FormNote>
+                    )}
+                  </div>
+                </Field>
+              )}
+
+              {!isService && (
+                <Field label="Root access">
                   <Segments
-                    label="How they sign in"
-                    value={way}
-                    onChange={setWay}
-                    fill
+                    label="Root access"
+                    value={sudo}
+                    onChange={setSudo}
                     options={[
-                      {
-                        value: "key",
-                        label: (
-                          <span className="inline-flex items-center gap-1.5">
-                            <Key className="size-3.5" />
-                            SSH key
-                          </span>
-                        ),
-                      },
-                      {
-                        value: "github",
-                        label: (
-                          <span className="inline-flex items-center gap-1.5">
-                            <ProductGlyph id="github" />
-                            GitHub keys
-                          </span>
-                        ),
-                      },
-                      {
-                        value: "password",
-                        label: (
-                          <span className="inline-flex items-center gap-1.5">
-                            <LockClosed className="size-3.5" />
-                            Password
-                          </span>
-                        ),
-                      },
-                      { value: "none", label: "Nobody directly" },
+                      { value: "none", label: "None" },
+                      { value: "password", label: "Asks for password" },
+                      { value: "nopassword", label: "No password" },
                     ]}
                   />
-                  {way === "key" && (
-                    <Textarea
-                      aria-label="SSH public key"
-                      value={key}
-                      onChange={(e) => setKey(e.target.value)}
-                      className="font-mono text-xs"
-                      rows={3}
-                      placeholder="ssh-ed25519 AAAA…"
-                    />
-                  )}
-                  {way === "github" && (
-                    <Input
-                      aria-label="GitHub username"
-                      value={github}
-                      onChange={(e) => setGithub(e.target.value)}
-                      autoComplete="off"
-                      placeholder="GitHub username"
-                    />
-                  )}
-                  {way === "password" && (
-                    <>
-                      <SecretField
-                        id="new-password"
-                        label="Password"
-                        value={password}
-                        onChange={setPassword}
-                      />
-                      <OptionRow
-                        title="Make them change it"
-                        hint="The first sign-in has to choose a new one."
-                        checked={mustChange}
-                        onCheckedChange={setMustChange}
-                      />
-                    </>
-                  )}
-                  {way === "none" && (
-                    <FormNote>
-                      Nobody can sign in as this account until you give it a key or a password. It
-                      can still be reached with sudo or from the terminal here.
+                  {sudo === "password" && way !== "password" && (
+                    <FormNote className="pt-2">
+                      sudo will ask for a password this account will not have. Choose Password
+                      above, or No password here.
                     </FormNote>
                   )}
-                </div>
-              </Field>
-            )}
+                </Field>
+              )}
 
-            {!isService && (
-              <Field label="Root access">
-                <Segments
-                  label="Root access"
-                  value={sudo}
-                  onChange={setSudo}
-                  options={[
-                    { value: "none", label: "None" },
-                    { value: "password", label: "Asks for password" },
-                    { value: "nopassword", label: "No password" },
-                  ]}
-                />
-                {sudo === "password" && way !== "password" && (
-                  <FormNote className="pt-2">
-                    sudo will ask for a password this account will not have. Choose Password above,
-                    or No password here.
-                  </FormNote>
-                )}
-              </Field>
-            )}
+              {!isService && (
+                <Field label="Groups">
+                  <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-body">
+                    {(hostGroups ?? [])
+                      .filter((g) => (g.rootEquivalent || !g.system) && !isPrivateGroup(g))
+                      .map((group) => (
+                        <label
+                          key={group.name}
+                          title={groupGrant(group.name)}
+                          className="inline-flex cursor-pointer items-center gap-1.5"
+                        >
+                          <Checkbox
+                            aria-label={group.name}
+                            checked={groups.includes(group.name)}
+                            onCheckedChange={(on) =>
+                              setGroups((now) =>
+                                on
+                                  ? [...now, group.name]
+                                  : now.filter((name) => name !== group.name),
+                              )
+                            }
+                          />
+                          <GroupWord name={group.name} />
+                        </label>
+                      ))}
+                  </div>
+                </Field>
+              )}
 
-            {!isService && (
-              <Field label="Groups" hint={groups.map(groupGrant).filter(Boolean)[0]}>
-                <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-body">
-                  {(hostGroups ?? [])
-                    .filter((g) => (g.rootEquivalent || !g.system) && !isPrivateGroup(g))
-                    .map((group) => (
-                      <label
-                        key={group.name}
-                        className="inline-flex cursor-pointer items-center gap-1.5"
-                      >
-                        <Checkbox
-                          aria-label={group.name}
-                          checked={groups.includes(group.name)}
-                          onCheckedChange={(on) =>
-                            setGroups((now) =>
-                              on ? [...now, group.name] : now.filter((name) => name !== group.name),
-                            )
-                          }
-                        />
-                        <GroupWord name={group.name} />
-                      </label>
-                    ))}
-                </div>
-              </Field>
-            )}
-
-            {!isService && shells.length > 0 && (
-              <Field label="Shell" htmlFor="new-shell">
-                <Select value={chosenShell || shells[0]} onValueChange={setShell}>
-                  <SelectTrigger id="new-shell" className="max-w-xs font-mono">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {shells.map((option) => (
-                      <SelectItem key={option} value={option} className="font-mono">
-                        <span className="inline-flex items-center gap-1.5">
-                          <ShellGlyph shell={option} />
-                          {option}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-          </div>
-        </FlowPanelBody>
-        <FlowActions>
-          <Button
-            variant="ghost"
-            onClick={() => void saveTemplate()}
-            disabled={!comment.trim() && !username.trim()}
+              {!isService && shells.length > 0 && (
+                <Field label="Shell" htmlFor="new-shell">
+                  <Select value={chosenShell || shells[0]} onValueChange={setShell}>
+                    <SelectTrigger id="new-shell" className="max-w-xs font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {shells.map((option) => (
+                        <SelectItem key={option} value={option} className="font-mono">
+                          <span className="inline-flex items-center gap-1.5">
+                            <ShellGlyph shell={option} />
+                            {option}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+            </div>
+          </FlowPanelBody>
+          <FlowActions
+            secondary={
+              <Button
+                variant="ghost"
+                onClick={() => void saveTemplate()}
+                disabled={!comment.trim() && !username.trim()}
+              >
+                Save as template
+              </Button>
+            }
           >
-            Save as template
-          </Button>
-          <Button onClick={() => void create()} disabled={!ready} pending={busy}>
-            Create account
-          </Button>
-        </FlowActions>
-      </FlowPanel>
+            <Button onClick={() => void create()} disabled={!ready} pending={busy}>
+              Create account
+            </Button>
+          </FlowActions>
+        </FlowPanel>
+        <NewAccountPicture
+          username={USERNAME.test(username) ? username : ""}
+          service={isService}
+          way={way}
+          sudo={sudo}
+          groups={groups}
+          hostGroups={hostGroups ?? []}
+        />
+      </div>
     </Page>
   )
 }

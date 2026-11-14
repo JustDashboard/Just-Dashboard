@@ -186,6 +186,12 @@ taking a frame:
   two System pages follow the same shape: on System users the identity line and what to change over
   the accounts as a table of readings whose row opens the account, each account's page plain lists
   of rows and plain forms, and on the audit
+
+  from plain panels that opens on the thing's own mark, the unit's journal, a PM2
+  application's logs, a timer's runs and a job's cron lines a `Pane` in their sheets — and the
+  two System pages follow the same shape: on System users the identity line, what to change and the
+  ways to root as one picture over the accounts as one-line cards that open the account, each
+  account's page three views of plain lists of rows and one settings column, and on the audit
   log four readings of the last day over its table and filters, where a request's outcome is a
   `Status` dot and the code in its family's colour rather than a wash across the row; and
   both of the dashboard's own pages — on Version the identity line, the update in flight and the
@@ -1459,7 +1465,10 @@ their groups, last sign-in, keys and state beside the name from `lg` and beneath
 a table again in 0.8.2 at the operator's request, when an account came to open a whole page rather
 than a sheet: the readings on a card had no names on them, a key count beside an arrow and a padlock
 that read as a state rather than a verb, and the four questions the page exists for are each asked
-of a column. The audit
+of a column. In 0.8.7 the rows are cards once more (`ChoiceRow`) and keep what the table was for:
+each reading has a column of its own from `xl` (how it gets in, how far it reaches, when it last
+did), a fixed width so they line up down the list, and narrower each takes a line of its own under
+the name, so every account is one height at every width. The audit
 log is the counter-example on the next page of the same section: an entry opens nothing, so its
 trail stays a table. The volumes were cards from 2026-09-23 and became a table again on 2026-10-08
 at the operator's request: a volume's card said "1 container" and not which, so the question every
@@ -4199,7 +4208,7 @@ the reader through it.
 | Sign-in, first-run setup, `/welcome` — the first-run question | **Flow** | A sequence with an outcome: the account's sidebar. |
 | Remote Desktop — the computers (`/remote-desktop`) | Reading | The reader arrives to find out which computers can be opened now. |
 | A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's columns held to the window around the live screen, but edge to edge: no measure, gutter or frame, since every pixel of those was taken from the screen; a stream's frame is the computer's own shape, so the space left round it is the workspace's ground rather than black bars; drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
-| `/system-users/new` — add an account | **Flow** | What it is for, then who it is and how they get in, ending in the one command that creates it. An account nobody can sign in to has to be asked for by name, which is the failure this replaced: a dialog that took a name and left the way in optional made an administrator nobody could ever sign in as. An account's own page, the groups and the defaults are reading pages. |
+| `/system-users/new` — add an account | **Flow** | What it is for, then who it is and how they get in, ending in the one command that creates it. An account nobody can sign in to has to be asked for by name, which is the failure this replaced: a dialog that took a name and left the way in optional made an administrator nobody could ever sign in as. The form is the one focused surface and the column beside it draws what the answers add up to (the way in, the account, how far it reaches). An account's own page, the groups, a group's page and the defaults are reading pages. |
 | `/remote-desktop/new` — add a computer | **Flow** | Which computer, is its remote desktop on, and the sign-in: ending in the one command that saves it and opens the screen. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which
