@@ -1,12 +1,15 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { del, patch, postForm } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DashboardUser } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { Field, FieldRow } from "@/components/form"
+import { Field, FieldRow, InfoTip } from "@/components/form"
 import { useSaveBarEntry } from "@/components/deploy/settings/save-bar"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { FactDot } from "@/components/metrics/host-identity"
+import { EditedTag } from "@/components/settings-column"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
@@ -58,25 +61,21 @@ async function squareImage(file: File): Promise<Blob> {
 }
 
 /**
- * The picture and the two names, beside the card the rail will draw from
- * them.
+ * The profile as one section of the account's settings column: the picture
+ * and the two names under a head that says how the rail and the audit log
+ * will draw them.
  *
- * No frame: the section title above is the block's edge. The picture applies
- * the moment it is chosen; the names are a draft on the settings pages' one
- * Save at the foot of the window, which comes up with the first keystroke and
- * leaves when the profile in the auth status matches what is typed — where a
- * Save sat greyed under the fields for as long as nothing had changed. The
- * card beside them is the rail's own, drawn from the draft, so the initials
- * and their hue (taken from the username) change as the names are typed.
+ * It was three columns across the page — the picture, the fields, and a card
+ * of the rail's own beside them — with a sentence under each. The card is the
+ * head's line now, drawn from the draft, so the initials and their hue (taken
+ * from the username) still change as the names are typed; what each field is
+ * for is behind the ⓘ beside its name. The picture applies the moment it is
+ * chosen; the names are a draft on the settings pages' one Save at the foot
+ * of the window, which comes up with the first keystroke and leaves when the
+ * profile in the auth status matches what is typed, and *Edited* stands in
+ * the head for as long as it is up.
  */
-export function ProfilePanel({
-  user,
-  onDirty,
-}: {
-  user: DashboardUser
-  /** Whether the names hold an unsaved edit, for the section's head. */
-  onDirty?: (dirty: boolean) => void
-}) {
+export function ProfileSection({ user }: { user: DashboardUser }) {
   const { refresh } = useAuth()
   const [displayName, setDisplayName] = useState(displayNameOf(user))
   const [username, setUsername] = useState(user.username)
@@ -89,9 +88,7 @@ export function ProfilePanel({
   const dirty = nameChanged || usernameChanged
   const invalid = !displayName.trim() || !username.trim()
 
-  useEffect(() => onDirty?.(dirty), [dirty, onDirty])
-
-  useSaveBarEntry(
+  const saveAll = useSaveBarEntry(
     true,
     {
       name: "Profile",
@@ -165,30 +162,50 @@ export function ProfilePanel({
   }
 
   return (
-    <div className="grid min-w-0 items-start gap-x-10 gap-y-6 lg:grid-cols-[14rem_minmax(0,1fr)_15rem]">
-      <div className="flex min-w-0 items-start gap-4 lg:flex-col">
+    <SettingSection
+      title="Profile"
+      status={dirty ? <EditedTag /> : undefined}
+      state={
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span
+            role="img"
+            aria-label={`The rail draws this account as ${displayNameOf(draft)}, ${user.role}`}
+            className="inline-flex min-w-0 items-center gap-1.5"
+          >
+            <UserAvatar key={user.avatarVersion} user={draft} size="xs" />
+            <span className="truncate font-medium text-foreground">{displayNameOf(draft)}</span>
+            <span className="shrink-0 capitalize">{user.role}</span>
+          </span>
+          <span>in the rail</span>
+          <FactDot />
+          <span className="truncate">
+            <span className="font-mono text-[var(--tag-blue)]">@{draft.username}</span> in the audit
+            log
+          </span>
+        </span>
+      }
+    >
+      <div className="flex min-w-0 items-center gap-4">
         <UserAvatar key={user.avatarVersion} user={draft} size="xl" />
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              pending={uploading}
-              disabled={uploading}
-              onClick={() => fileInput.current?.click()}
-            >
-              {user.avatarVersion ? "Change picture" : "Upload picture"}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            pending={uploading}
+            disabled={uploading}
+            onClick={() => fileInput.current?.click()}
+          >
+            {user.avatarVersion ? "Change picture" : "Upload picture"}
+          </Button>
+          {user.avatarVersion > 0 && (
+            <Button size="sm" variant="ghost" disabled={uploading} onClick={remove}>
+              Remove
             </Button>
-            {user.avatarVersion > 0 && (
-              <Button size="sm" variant="ghost" disabled={uploading} onClick={remove}>
-                Remove
-              </Button>
-            )}
-          </div>
-          <p className="max-w-56 text-hint leading-relaxed text-muted-foreground">
+          )}
+          <InfoTip label="What happens to the picture">
             Any image. It is cropped to a square and shrunk to {AVATAR_EDGE} px before it leaves the
             browser.
-          </p>
+          </InfoTip>
           <input
             ref={fileInput}
             type="file"
@@ -202,57 +219,47 @@ export function ProfilePanel({
         </div>
       </div>
 
-      <FieldRow>
-        <Field
-          label="Name"
-          htmlFor="profile-name"
-          hint="How you appear in the rail and the users list."
-        >
-          <Input
-            id="profile-name"
-            value={displayName}
-            maxLength={64}
-            onChange={(e) => setDisplayName(e.target.value)}
-          />
-        </Field>
-        <Field
-          label="Username"
-          htmlFor="profile-username"
-          hint="What you sign in with, and how the audit log names you. One word; case does not matter."
-        >
-          <Input
-            id="profile-username"
-            value={username}
-            maxLength={64}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-        </Field>
-      </FieldRow>
-
-      <div className="min-w-0 space-y-2">
-        <p className="eyebrow">In the rail</p>
-        <div
-          role="img"
-          aria-label={`The rail draws this account as ${displayNameOf(draft)}, ${user.role}`}
-          className="flex w-full max-w-64 min-w-0 items-center gap-3 rounded-lg border border-sidebar-border bg-card px-2.5 py-2"
-        >
-          <UserAvatar key={user.avatarVersion} user={draft} size="md" />
-          <span className="grid min-w-0 flex-1 gap-0.5">
-            <span className="truncate text-body leading-tight font-semibold">
-              {displayNameOf(draft)}
-            </span>
-            <span className="truncate text-hint leading-tight text-muted-foreground capitalize">
-              {user.role}
-            </span>
-          </span>
-        </div>
-        <p className="truncate font-mono text-hint text-muted-foreground">
-          <span className="text-[var(--tag-blue)]">@{draft.username}</span> in the audit log
-        </p>
-      </div>
-    </div>
+      {/* A form, so Enter in either field is the bar's Save. */}
+      <form
+        aria-label="Profile"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void saveAll?.()
+        }}
+      >
+        <FieldRow>
+          <Field
+            label="Name"
+            htmlFor="profile-name"
+            info="How you appear in the rail and the users list."
+          >
+            <Input
+              id="profile-name"
+              value={displayName}
+              maxLength={64}
+              onChange={(e) => setDisplayName(e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Username"
+            htmlFor="profile-username"
+            info="What you sign in with, and how the audit log names you. One word; case does not matter."
+          >
+            <Input
+              id="profile-username"
+              value={username}
+              maxLength={64}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </Field>
+        </FieldRow>
+        {/* Enter submits a form only where it has a submit control. This
+            one is never drawn or reached: the floating bar is the control. */}
+        <button type="submit" hidden tabIndex={-1} aria-label="Save" />
+      </form>
+    </SettingSection>
   )
 }
