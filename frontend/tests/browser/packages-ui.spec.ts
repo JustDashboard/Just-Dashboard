@@ -324,36 +324,38 @@ test("the page opens on software and updates without summary cards", async ({ pa
   expect(await page.locator("[data-slot='tabs-list']").count()).toBe(0)
 })
 
-test("the band is there before the inventory, and keeps its height when it lands", async ({
-  page,
-}) => {
-  await mockHost(page)
-  let release = () => {}
-  const held = new Promise<void>((resolve) => (release = resolve))
-  await page.route(/\/api\/v1\/packages\/$/, async (route) => {
-    await held
-    await route.fallback()
+for (const width of [1440, 390]) {
+  test(`the band is there before the inventory, and keeps its height when it lands at ${width}`, async ({
+    page,
+  }) => {
+    await mockHost(page)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route(/\/api\/v1\/packages\/$/, async (route) => {
+      await held
+      await route.fallback()
+    })
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/packages")
+    const band = page.locator("[data-slot='software-band']")
+    const identity = page.locator("[data-slot='host-identity']")
+    const strip = page.getByRole("navigation", { name: "Package views" })
+    await expect(band.getByText("Reading the installed packages…")).toBeVisible()
+    await risen(page)
+    const before = await band.boundingBox()
+    const line = await identity.boundingBox()
+    const views = await strip.boundingBox()
+    release()
+    await expect(band.getByRole("button", { name: "Only Linux packages" })).toBeVisible()
+    await risen(page)
+    const after = await band.boundingBox()
+    expect(after?.height).toBe(before?.height)
+    expect(after?.y).toBe(before?.y)
+    // The line above it and the strip of views under it were already there.
+    expect(await identity.boundingBox()).toEqual(line)
+    expect(await strip.boundingBox()).toEqual(views)
   })
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto("/packages")
-  const band = page.locator("[data-slot='software-band']")
-  const identity = page.locator("[data-slot='host-identity']")
-  const strip = page.getByRole("navigation", { name: "Package views" })
-  await expect(band.getByText("Reading the installed packages…")).toBeVisible()
-  await risen(page)
-  const before = await band.boundingBox()
-  const line = await identity.boundingBox()
-  const views = await strip.boundingBox()
-  release()
-  await expect(band.getByRole("button", { name: "Only Linux packages" })).toBeVisible()
-  await risen(page)
-  const after = await band.boundingBox()
-  expect(after?.height).toBe(before?.height)
-  expect(after?.y).toBe(before?.y)
-  // The line above it and the strip of views under it were already there.
-  expect(await identity.boundingBox()).toEqual(line)
-  expect(await strip.boundingBox()).toEqual(views)
-})
+}
 
 test("each package is drawn as the software it is", async ({ page }) => {
   await mockHost(page)

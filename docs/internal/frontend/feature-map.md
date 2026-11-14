@@ -938,10 +938,10 @@ unit-tested), shared job console; checked by `tests/browser/packages-ui.spec.ts`
 
 A package's own page (`package-page.tsx`; the old `?package=` address that opened its sheet
 redirects there, and the name is one encoded path segment, so `g++` and `libc6:amd64` open): a way
-back and two arrows, then the identity line with the package as the software it is, its name, its
-state on one line (installed or not, the version it is at, the one an update lands on with its
-changed part in ink and amber for a security fix, or what the manager is doing to it), its
-description, size and whether it was installed by hand as facts, **Install** or **Update** as the
+back and two arrows, then the identity line, two rows in every state: the package as the software it
+is, its name and its state (installed or not, an update or a security update waiting, or what the
+manager is doing to it), then the version it is at, the one an update lands on with its changed part
+in ink and amber for a security fix, its size and its description, **Install** or **Update** as the
 one command and Remove and Remove and purge behind the menu and their confirmations (for an account
 with both `system.admin` and `destructive`, and never for a protected package). The job console
 opens under the line, a run started elsewhere for the same package is attached rather than offered
@@ -951,7 +951,8 @@ what it gives the server (`WireFlow`: dependencies as links to their pages, dash
 installed; its commands, its service or services, its configuration and its manual as ways into the
 views or the unit's page; every line pulsing while a run is in flight; held to one height for every
 package and while loading), why it cannot be removed where it cannot, and About (description,
-repository, section, architecture, licence, maintainer, homepage); **Files**, what its file list put
+installed by hand or as a dependency, essential, repository, section, architecture, licence,
+maintainer, homepage); **Files**, what its file list put
 on the server (commands that copy, services opening the unit with `systemctl start` to copy,
 configuration and documentation opening in Files); **Manual**, its man page and its other pages;
 **Depends**, everything it needs one line each with the version on the host or "not installed" and

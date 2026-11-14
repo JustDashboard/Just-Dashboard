@@ -7,6 +7,7 @@ import { Tabs as TabsPrimitive } from "radix-ui"
 import {
   ArrowCircleUp,
   ArrowLeft,
+  ArrowRight,
   ChevronDown,
   ChevronUp,
   Download,
@@ -17,7 +18,6 @@ import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { HostInfo, Job, PackageDetail, PackageInventory, PackageUsage } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -314,9 +314,9 @@ function PackageMain({
   const installedOf = useMemo(() => installedLookup(inventory?.packages), [inventory])
   const row = installedOf(name)
 
-  // A run started somewhere else (the Install on a search result, the sheet's
-  // old address) is still this package's run: the page attaches to it rather
-  // than offering a second Install over the first.
+  // A run started somewhere else (the Install on a search result) is still
+  // this package's run: the page attaches to it rather than offering a second
+  // Install over the first.
   const jobs = usePoll<Job[]>((signal) => get<Job[]>("/jobs/", undefined, signal), 5000, [], {
     key: "/jobs",
   }).data
@@ -504,47 +504,20 @@ function PackageMain({
                 <TextShimmer>{`${runWord(acting, detail.installed)}…`}</TextShimmer>
               </span>
             ) : (
-              // One line at every width: the version gives way first, and on
-              // a phone the version an update lands on stands in for the one
-              // it leaves, which is the part of it drawn stepped back.
-              <span className="flex max-w-full min-w-0 items-center gap-x-3 whitespace-nowrap">
+              <>
                 <Status
                   verdict={detail.installed ? "ok" : "notice"}
                   label={detail.installed ? "Installed" : "Not installed"}
-                  className="shrink-0 text-body"
+                  className="text-body"
                 />
-                <span
-                  className={cn(
-                    "min-w-0 truncate font-mono text-body text-muted-foreground",
-                    upgradable && "max-sm:hidden",
-                  )}
-                  title={detail.installedVersion ?? detail.version}
-                >
-                  {detail.installedVersion ?? detail.version ?? "—"}
-                </span>
                 {upgradable && (
-                  <span
-                    className="inline-flex min-w-0 items-center gap-1.5 text-body"
-                    title={`${security ? "A security update" : "An update"} from ${detail.installedVersion} to ${upgradable} is waiting`}
-                  >
-                    <StatusDot tone={security ? "warning" : "notice"} />
-                    <span
-                      className={cn(
-                        "shrink-0",
-                        security ? "text-warning" : "text-muted-foreground",
-                      )}
-                    >
-                      {security ? "security update to" : "update to"}
-                    </span>
-                    <VersionTo
-                      from={detail.installedVersion}
-                      to={upgradable}
-                      security={security}
-                      className="min-w-0 truncate"
-                    />
-                  </span>
+                  <Status
+                    verdict={security ? "warning" : "notice"}
+                    label={security ? "Security update" : "Update available"}
+                    className="text-body"
+                  />
                 )}
-              </span>
+              </>
             )
           }
           command={
@@ -568,37 +541,53 @@ function PackageMain({
           menu={verbs.length > 0 && <VerbMenu verbs={verbs} label={`Actions on ${name}`} />}
           facts={
             // The same rows whatever a package says about itself, so the views
-            // under the line do not move when it lands: one line from `sm`, the
-            // description giving way; on a phone the description over the facts.
+            // under the line do not move when it lands. One line from `sm`: the
+            // version it is at and the one an update lands on, its size, then
+            // what it is, which gives way. On a phone the description goes
+            // under the figures. Beside the rail at 1280 the line has under
+            // 500px, which is why how it came to be installed is in About.
             <span className="flex w-full min-w-0 flex-col gap-y-1 sm:flex-row sm:items-center sm:gap-x-3">
-              <span className="min-w-0 truncate text-foreground" title={detail?.summary}>
-                {detail?.summary || "\u00a0"}
+              <span className="flex min-w-0 items-center gap-x-3 whitespace-nowrap sm:shrink-0">
+                {detail ? (
+                  <span
+                    className="min-w-0 truncate font-mono text-foreground"
+                    title={detail.installedVersion ?? detail.version}
+                  >
+                    {detail.installedVersion ?? detail.version ?? "—"}
+                  </span>
+                ) : (
+                  <span>&nbsp;</span>
+                )}
+                {upgradable && (
+                  <span
+                    className="inline-flex shrink-0 items-center gap-1.5"
+                    title={`${security ? "A security update" : "An update"} to ${upgradable} is waiting`}
+                  >
+                    <ArrowRight aria-hidden className="size-3" />
+                    <span className="sr-only">update to</span>
+                    <VersionTo
+                      from={detail?.installedVersion}
+                      to={upgradable}
+                      security={security}
+                    />
+                  </span>
+                )}
+                {detail?.size ? (
+                  <>
+                    <FactDot />
+                    <span className="numeric shrink-0">
+                      {bytes(detail.size)} {detail.installed ? "on disk" : "once installed"}
+                    </span>
+                  </>
+                ) : null}
               </span>
               {detail?.summary && (
                 <span className="max-sm:hidden">
                   <FactDot />
                 </span>
               )}
-              <span className="flex shrink-0 items-center gap-x-3 whitespace-nowrap">
-                {detail?.size ? (
-                  <span className="numeric">
-                    {bytes(detail.size)} {detail.installed ? "on disk" : "once installed"}
-                  </span>
-                ) : (
-                  <span>{detail ? "size not reported" : "\u00a0"}</span>
-                )}
-                {row && inventory && inventory.explicitCount > 0 && (
-                  <>
-                    <FactDot />
-                    <span>{row.explicit ? "installed by hand" : "a dependency"}</span>
-                  </>
-                )}
-                {(detail?.essential || row?.essential) && (
-                  <>
-                    <FactDot />
-                    <span>essential</span>
-                  </>
-                )}
+              <span className="min-w-0 truncate" title={detail?.summary}>
+                {detail?.summary || "\u00a0"}
               </span>
             </span>
           }
@@ -629,7 +618,22 @@ function PackageMain({
         </TabsPrimitive.List>
 
         <TabsContent value="overview" className="min-h-0 flex-1 pt-2 xl:overflow-y-auto">
-          {detail ? <PackageOverview detail={detail} picture={picture} /> : picture}
+          {detail ? (
+            <PackageOverview
+              detail={detail}
+              picture={picture}
+              came={
+                row && inventory && inventory.explicitCount > 0
+                  ? row.explicit
+                    ? "by hand"
+                    : "as a dependency"
+                  : undefined
+              }
+              essential={Boolean(detail.essential || row?.essential)}
+            />
+          ) : (
+            picture
+          )}
         </TabsContent>
         <TabsContent value="files" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
           {tab === "files" &&

@@ -861,7 +861,7 @@ function PackageCards({ packages }: { packages: InstalledPackage[] }) {
           key={p.name}
           workspaceItem={{ id: p.name, name: p.name }}
           leading={
-            <span className="relative flex" title={p.summary}>
+            <span className="relative flex">
               <PackageMark name={p.name} section={p.section} />
               {p.upgradable && (
                 <span
@@ -873,7 +873,11 @@ function PackageCards({ packages }: { packages: InstalledPackage[] }) {
               )}
             </span>
           }
-          title={<span className="font-mono">{p.name}</span>}
+          title={
+            <span className="font-mono" title={p.summary}>
+              {p.name}
+            </span>
+          }
           verb={p.name}
           description={
             p.upgradable ? (

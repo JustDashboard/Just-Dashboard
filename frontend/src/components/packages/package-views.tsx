@@ -314,12 +314,19 @@ export function PackagePicture({
 export function PackageOverview({
   detail,
   picture,
+  came,
+  essential,
 }: {
   detail: PackageDetail
   picture: React.ReactNode
+  /** How it came to be on the host, where the manager records it: "by hand", "as a dependency". */
+  came?: string
+  essential?: boolean
 }) {
   const about = detail.description || detail.summary
   const facts = Boolean(
+    came ||
+    essential ||
     detail.repository ||
     detail.section ||
     detail.arch ||
@@ -344,6 +351,10 @@ export function PackageOverview({
             )}
             {facts && (
               <DetailList>
+                {came && <Detail label="Installed">{came}</Detail>}
+                {essential && (
+                  <Detail label="Essential">the system does not work without it</Detail>
+                )}
                 {detail.repository && (
                   <Detail label="Repository">
                     <OriginFact origin={detail.repository} />

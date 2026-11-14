@@ -51,18 +51,18 @@ test("the address that opened the sheet lands on the package's page", async ({ p
   await page.goto("/packages?package=nginx")
   await expect(page).toHaveURL(/\/packages\/nginx$/)
 
-  // The line it opens on: the package as the software it is, its name, its
-  // state with the version it is at and the one it would move to, then what
-  // it is in a sentence and its facts.
+  // The line it opens on: the package as the software it is, its name and its
+  // state, then the version it is at and the one an update lands on, its
+  // size, and what it is in a sentence.
   const line = identity(page)
   await expect(line.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(line).toContainText("nginx")
   await expect(line).toContainText("Installed")
+  await expect(line).toContainText("Update available")
   await expect(line).toContainText("1.24.0-2ubuntu7")
-  await expect(line).toContainText("update to")
-  await expect(line).toContainText("small, powerful, scalable web/proxy server")
+  await expect(line.getByText(".1", { exact: true })).toHaveClass(/text-foreground/)
   await expect(line).toContainText("1.5 MB on disk")
-  await expect(line).toContainText("installed by hand")
+  await expect(line).toContainText("small, powerful, scalable web/proxy server")
   await expect(line.getByRole("button", { name: "Update", exact: true })).toBeVisible()
   await expect(back(page)).toHaveAttribute("href", "/packages")
 
@@ -129,6 +129,10 @@ test("the views are in the address and hold everything the sheet did", async ({ 
   await tabs.getByRole("tab", { name: "Overview", exact: true }).click()
   await expect(page).toHaveURL(/\/packages\/nginx$/)
   await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible()
+  const about = page.locator("[data-slot=panel]").filter({ hasText: "About" })
+  await expect(about).toContainText("by hand")
+  await expect(about).toContainText("httpd")
+  await expect(about).toContainText("amd64")
   await expect(page.getByRole("link", { name: /example\.org\/nginx/ })).toHaveAttribute(
     "href",
     "https://example.org/nginx",
@@ -139,6 +143,9 @@ test("a package's log is the manager's, searched for its name", async ({ page })
   await mockHost(page)
   const logs = await mockHostLogs(page)
   await page.goto("/packages/openssl?tab=log")
+  // A security fix is said as one, with the part of the version it changes in amber.
+  await expect(identity(page)).toContainText("Security update")
+  await expect(identity(page).getByText(".4", { exact: true })).toHaveClass(/text-warning/)
   const lines = page.getByLabel("Log lines")
   await expect(lines.getByText("upgrade", { exact: true })).toBeVisible()
   const search = logs.searches.at(-1)!
@@ -338,7 +345,7 @@ test("updating runs where it is read, and the page says what happened", async ({
 
   await expect.poll(() => Boolean(finish)).toBe(true)
   finish!()
-  await expect(line).not.toContainText("update to")
+  await expect(line).not.toContainText("Update available")
   await expect(line).toContainText("1.24.0-2ubuntu7.1")
   await expect(line.getByRole("button", { name: "Update", exact: true })).toHaveCount(0)
   expect(seen).toHaveLength(1)
@@ -442,8 +449,9 @@ test("a protected package says why it stays and offers no removal", async ({ pag
   await page.goto("/packages/libc6")
   await expect(page.getByText("This one cannot be removed from here")).toBeVisible()
   await expect(page.getByText("The system does not run without it.")).toBeVisible()
-  await expect(identity(page)).toContainText("essential")
-  await expect(identity(page)).toContainText("a dependency")
+  const about = page.locator("[data-slot=panel]").filter({ hasText: "About" })
+  await expect(about).toContainText("as a dependency")
+  await expect(about).toContainText("the system does not work without it")
   await expect(page.getByRole("button", { name: "Actions on libc6" })).toHaveCount(0)
 })
 
@@ -461,7 +469,7 @@ for (const [capabilities, sees] of [
     )
     await page.goto("/packages/nginx")
     const line = identity(page)
-    await expect(line).toContainText("update to")
+    await expect(line).toContainText("Update available")
     await expect(line.getByRole("button", { name: "Update", exact: true })).toHaveCount(
       sees.update ? 1 : 0,
     )
@@ -541,7 +549,7 @@ for (const width of [1280, 390]) {
     await expect(line).toContainText("Installed")
     await expect(picture).not.toHaveAttribute("data-loading", "true")
     await risen(page)
-    expect((await line.boundingBox())?.y).toBe(before.line?.y)
+    expect(await line.boundingBox()).toEqual(before.line)
     expect(await tabs.boundingBox()).toEqual(before.tabs)
     expect((await picture.boundingBox())?.y).toBe(before.picture?.y)
     if (width >= 1024) {
