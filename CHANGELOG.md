@@ -4,6 +4,49 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.8.7 — 14 November 2026
+
+**Every page reads like the deployment pages, and HTTPS works on older nginx**
+
+The rest of the dashboard now opens the way a project's pages do: one line that says what the page is about, pictures that carry the facts, and a page of its own for each item, with its list as a rail beside it. Network, the proxy, Security, Docker, the databases, settings and the account pages were all rebuilt this way, and Files, the terminal and remote sessions show one pane at a time on a phone. A first HTTPS deployment on Ubuntu 22.04 or 24.04 no longer fails at its last step.
+
+### Added
+
+- An item has a page of its own
+  - Ports, streams, certificates, connections, egress groups, VPN tunnels, network devices, DNS engines, captures and saved runs, PM2 applications, packages, Docker images, volumes and networks, database accounts, and a database's statements, tables and sessions each open on their own page, with the list beside them.
+
+### Changed
+
+- Pages open on what they are about, not on a row of tiles
+  - Each page starts with one line naming its subject and its state, then a picture or a list. Readings that were tiles are reading lines or a sentence.
+- Network is rebuilt page by page
+  - The overview, Firewall, Gateway, Drift, Routing, Traffic, DNS, Interfaces, Protection, VPN, Connections and the network tools follow the deployment pages' look, and a picture that is still loading already has the shape it will have.
+- The proxy pages read alike
+  - Sites are edited on their own page and listed one line a row; TLS opens on the chain it was served; Traffic reads like a project's Logs page; Configuration, Tunnel and the overview with its alerts open on what they are about.
+- Security, the audit log and Backups
+  - Logins opens on a picture of who is in, Intrusion shows one engine at a time, SSH is set in one column, and a backup job's readings are said in words.
+- Docker opens on a picture of its engine
+  - Stacks are listed as cards, and the list stays beside a container, a stack, an image, a volume or a network.
+- A database's pages share one header
+  - Every page of a database opens on the same header; its settings have one Save and a strip of what waits; Alerts, Backups, Import, Generate, Search and the four workbenches follow the same look.
+- A project's Logs, Deployments, runs and settings
+  - Logs opens on four reading lines for the last hour, a run's row says its time once, and a project's console and six settings pages read like its other pages.
+- The dashboard's and the account's settings take a project's shape
+  - Profile, Security, Workspace, API keys and the dashboard's own settings, the Overview, Metrics, host Alerts and the assistant's settings follow the deployment pages.
+- Something that is not there has one screen
+  - Docker, systemd, the logs and the map say the same way that what they show is not installed or not running.
+- One pane at a time on a phone
+  - Files and its editor, the terminal and remote sessions fill the screen with a bar along the foot, and the editor's commands are grouped.
+- The sidebar lights the page an item was opened from
+  - On an item's page two levels down, the row it belongs to is lit, and the save bar says in one rule when each change applies.
+- Log drains, Secret stores, Templates, Shared variables and System users
+  - These pages are drawn the way Notifications and the deployment pages are.
+
+### Fixed
+
+- HTTPS deployments work on the nginx that Ubuntu 22.04 and 24.04 ship
+  - Sites and deployment routes were written with "http2 on;", which nginx before 1.25.1 refuses, so the route switch failed with proxy_cutover_failed. The dashboard now asks the host's nginx which spelling it reads and writes that, and a refused route says nginx's own reason.
+
 ## 0.8.6 — 13 November 2026
 
 **Updates that wait for a tag, and a page for every process and service**

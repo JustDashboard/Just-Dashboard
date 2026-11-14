@@ -349,9 +349,15 @@ for (const width of [1280, 390]) {
     await expect(head.getByRole("button", { name: "Add server item" })).toBeVisible()
     await expect(head.getByRole("button", { name: "Delete drawing" })).toHaveCount(0)
     await expect(head.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
-    await head.getByRole("button", { name: "Drawing actions" }).click()
+    const actions = head.getByRole("button", { name: "Drawing actions" })
+    await actions.click()
     await expect(page.getByRole("menuitem")).toHaveText(["Save now", "Reload", "Delete drawing"])
     await page.keyboard.press("Escape")
+    // The menu hands focus back to its trigger once it has closed. On a loaded
+    // runner that lands after the name field below is cleared, blurs it, and
+    // the blur puts the saved name back.
+    await expect(page.getByRole("menu")).toHaveCount(0)
+    await expect(actions).toBeFocused()
     // The canvas is the rest of the frame.
     const canvas = await page.getByLabel("Untitled board drawing canvas").boundingBox()
     const strip = await head.boundingBox()

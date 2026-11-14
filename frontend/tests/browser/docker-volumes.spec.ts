@@ -166,11 +166,18 @@ for (const width of [1440, 390]) {
     await expect(band.getByRole("region", { name: "Who holds the data" })).toContainText(
       "Reading the volumes…",
     )
-    const heights = await blocks.evaluateAll((all) =>
-      all.map((block) => block.getBoundingClientRect().height),
-    )
-    expect(new Set(heights).size).toBe(1)
+    // Measured once the page has settled: on a loaded runner the first frame
+    // can be laid out before the fonts, with the two blocks briefly apart.
+    await page.evaluate(() => document.fonts.ready)
     await risen(page)
+    await expect
+      .poll(async () => {
+        const heights = await blocks.evaluateAll((all) =>
+          all.map((block) => Math.round(block.getBoundingClientRect().height)),
+        )
+        return new Set(heights).size === 1 ? 1 : heights.join(", ")
+      })
+      .toBe(1)
     const before = { identity: await identity.boundingBox(), band: await band.boundingBox() }
 
     release()
