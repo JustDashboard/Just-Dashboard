@@ -15,6 +15,7 @@ import {
   replayPolicyLine,
   type ReplayDraft,
 } from "@/components/deploy/replay-model"
+import { FactsLine } from "@/components/deploy/settings/facts-line"
 import { SettingSection } from "@/components/deploy/settings/setting-card"
 
 /** The Runtime form's field ids for the replay's terms, as the server's refusal names them. */
@@ -98,16 +99,19 @@ export function ReplaySection({
       id="replay"
       title="Traffic replay"
       state={
-        <span key={line} className="block animate-rise">
-          {line}
-        </span>
+        <FactsLine line={line} about="How traffic replay works">
+          The last distinct GET and HEAD requests visitors sent, as the access log recorded them,
+          are sent to the new release at its own address — with the recorded Host, and without
+          cookies, credentials or bodies. A release that answers them in other status classes, or
+          slower, than the live release did is stopped before any traffic moves to it.
+        </FactsLine>
       }
       status={status}
     >
       <OptionList>
         <OptionRow
           title="Replay recorded requests before the cutover"
-          hint="The last distinct GET and HEAD requests visitors sent, as the access log recorded them, are sent to the new release at its own address — with the recorded Host, and without cookies, credentials or bodies. A release that answers them in other status classes, or slower, than the live release did is stopped before any traffic moves to it."
+          hint="Stops a release that answers them differently, or slower"
           checked={enabled}
           onCheckedChange={(on) => onChange({ enabled: on })}
           disabled={!canEdit}

@@ -15,6 +15,7 @@ import {
   sleepPolicyLine,
   type SleepDraft,
 } from "@/components/deploy/sleep-model"
+import { FactsLine } from "@/components/deploy/settings/facts-line"
 import { SettingSection } from "@/components/deploy/settings/setting-card"
 
 /** The Runtime form's field ids for the sleep terms, as the server's refusal names them. */
@@ -133,16 +134,19 @@ export function SleepSection({
       id="sleep"
       title="Sleep when idle"
       state={
-        <span key={line} className="block animate-rise">
-          {line}
-        </span>
+        <FactsLine line={line} about="How sleeping works">
+          Once the route has served no request for the idle time, the container is stopped — not
+          removed: its image, volumes and network stay. The next request is held while it starts and
+          passes its readiness checks, then reaches it as it was sent, so a visitor gets the page
+          after a pause rather than an error.
+        </FactsLine>
       }
       status={status}
     >
       <OptionList>
         <OptionRow
           title="Stop the container while nobody visits"
-          hint="Once the route has served no request for the idle time, the container is stopped — not removed: its image, volumes and network stay. The next request is held while it starts and passes its readiness checks, then reaches it as it was sent, so a visitor gets the page after a pause rather than an error."
+          hint="The next request wakes it, and waits for it"
           checked={draft.enabled}
           onCheckedChange={(on) => onChange({ enabled: on })}
           disabled={!canEdit}

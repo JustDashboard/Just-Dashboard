@@ -1,15 +1,16 @@
 "use client"
 
-import { useId } from "react"
-import { Plus, Trash } from "@/components/icons"
+import { useState } from "react"
+import { Connection, Globe, Heart, Plus, Terminal, Trash } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DeploymentConfiguration } from "@/lib/types"
-import { GroupRule } from "@/components/flow"
-import { Field, FieldRow, OptionRow } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
-import { Group } from "@/components/panel"
-import { ProductGlyph, programProduct } from "@/components/product-logo"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { Field, FieldRow, FormNote, OptionRow } from "@/components/form"
+import { DimActions, IconAction } from "@/components/icon-action"
+import { ProductGlyph, ProductLogo, programProduct } from "@/components/product-logo"
+import { SidePanel } from "@/components/side-panel"
 import { EmptyNote } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -162,17 +163,39 @@ function givesUpAfter(check: Check) {
   return attempts * ((config.timeoutSeconds ?? 3) + (config.intervalSeconds ?? 0))
 }
 
+/** What a kind of check is drawn as, where no product names it. */
+const KIND_MARK: Record<string, React.ComponentType<{ className?: string }>> = {
+  http: Globe,
+  tcp: Connection,
+  docker_health: Heart,
+  command: Terminal,
+  game_handshake: Connection,
+  udp_probe: Connection,
+}
+
+/** The product a check is drawn as: Docker for its verdict, a command's own program. */
+function checkProduct(check: Check) {
+  if (check.kind === "docker_health") return "docker"
+  if (check.kind === "command")
+    return programProduct(argvOf((check.config as Config | undefined)?.command ?? [])[0])
+  return undefined
+}
+
 /**
  * The evidence a release must produce before it takes traffic (readiness)
  * and once more right after (smoke), grouped by which of the two each is.
- * Each kind asks only the questions its own probe can answer — a Docker
- * health check has nothing to configure beyond how long to wait for one.
  *
- * Each check says what it does in one line above its fields, and how long it
- * keeps trying, because "20 attempts, 5 s timeout, 3 s interval" is three
- * numbers a reader otherwise multiplies in their head to find out how long a
- * bad release is left running. That line is the check's reading, so it is set
- * a rung above the field hints rather than at their size.
+ * Each check is one line: what it is drawn as, its name over what it does in
+ * the shape that is written elsewhere — a request line, a socket, a command —
+ * then how long it keeps trying and whether it is required, in columns. "20
+ * attempts, 5 s timeout, 3 s interval" is three numbers a reader otherwise
+ * multiplies in their head to find out how long a bad release is left running.
+ *
+ * The check's fields are a small form the line opens. Every check used to be
+ * a framed box of them, open all the time, so two checks made the foot of the
+ * Runtime page a stack of forms and the page could not be scanned. The form
+ * edits the page's draft like any field on it: closing it saves nothing, and
+ * the page's one Save sends the checks with everything else.
  *
  * A check rises as it is added, and again as it moves into the other phase's
  * group; a kind's own fields rise as the kind is chosen, because they replace
@@ -193,8 +216,15 @@ export function HealthChecks({
   /** The application's port, which a check with no port of its own probes. */
   port?: number
 }) {
+  // The check whose form is open, by its place in the list.
+  const [open, setOpen] = useState<number>()
   const update = (index: number, patch: Partial<Check>) =>
     onChange(checks.map((check, i) => (i === index ? { ...check, ...patch } : check)))
+  const remove = (index: number) => {
+    setOpen(undefined)
+    onChange(checks.filter((_, i) => i !== index))
+  }
+  const editing = open !== undefined ? checks[open] : undefined
 
   return (
     <div className="space-y-5">
@@ -209,18 +239,65 @@ export function HealthChecks({
           return (
             <div key={phase.value} className="space-y-3">
               <GroupRule label={phase.rule} count={entries.length} />
-              {entries.map(({ check, index }) => (
-                <CheckEditor
-                  key={index}
-                  check={check}
-                  index={index}
-                  disabled={disabled}
-                  port={port}
-                  error={rowError?.(index)}
-                  onChange={(patch) => update(index, patch)}
-                  onRemove={() => onChange(checks.filter((_, i) => i !== index))}
-                />
-              ))}
+              <ChoiceList aria-label={`${phase.label} checks`}>
+                {entries.map(({ check, index }) => {
+                  const name = check.name || `Health check ${index + 1}`
+                  const error = rowError?.(index)
+                  return (
+                    <ChoiceRow
+                      key={index}
+                      className="animate-rise"
+                      verb={`${disabled ? "Open" : "Edit"} ${name}`}
+                      onSelect={() => setOpen(index)}
+                      leading={
+                        <ProductLogo
+                          size="sm"
+                          id={checkProduct(check)}
+                          fallback={KIND_MARK[check.kind] ?? Heart}
+                        />
+                      }
+                      title={name}
+                      // A refusal takes the line the summary was on, so a
+                      // refused check is the height of every other.
+                      description={
+                        error ? (
+                          <span role="alert" className="text-destructive">
+                            {error}
+                          </span>
+                        ) : (
+                          <span className="font-mono">{checkSummary(check, port)}</span>
+                        )
+                      }
+                      trailing={
+                        <>
+                          <span className="numeric w-28 text-right text-hint whitespace-nowrap text-muted-foreground max-sm:hidden">
+                            gives up ~{formatDuration(givesUpAfter(check))}
+                          </span>
+                          <Status
+                            tone={error ? "danger" : check.required ? "running" : "stopped"}
+                            label={error ? "Not saved" : check.required ? "Required" : "Optional"}
+                            className="w-20"
+                          />
+                        </>
+                      }
+                      actions={
+                        !disabled && (
+                          <DimActions>
+                            <IconAction
+                              type="button"
+                              label={`Remove health check ${check.name || index + 1}`}
+                              onClick={() => remove(index)}
+                              className="text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash />
+                            </IconAction>
+                          </DimActions>
+                        )
+                      }
+                    />
+                  )
+                })}
+              </ChoiceList>
             </div>
           )
         })
@@ -230,17 +307,59 @@ export function HealthChecks({
           type="button"
           size="sm"
           variant="outline"
-          onClick={() => onChange([...checks, newCheck("readiness")])}
+          onClick={() => {
+            onChange([...checks, newCheck("readiness")])
+            setOpen(checks.length)
+          }}
         >
           <Plus className="size-3.5" />
           Add check
         </Button>
       )}
+      <SidePanel
+        open={editing !== undefined}
+        onOpenChange={(next) => !next && setOpen(undefined)}
+        title={editing ? editing.name || `Health check ${(open ?? 0) + 1}` : "Health check"}
+        description="What this check probes, when it runs and how long it keeps trying."
+        width="sm"
+        // The name already holds a sensible value; landing in it would select it.
+        initialFocus="body"
+        footer={
+          <>
+            {!disabled && open !== undefined && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="mr-auto text-destructive"
+                onClick={() => remove(open)}
+              >
+                <Trash className="size-3.5" />
+                Remove
+              </Button>
+            )}
+            {!disabled && <FormNote className="max-sm:hidden">Saved with the page</FormNote>}
+            <Button type="button" onClick={() => setOpen(undefined)}>
+              Done
+            </Button>
+          </>
+        }
+      >
+        {editing && open !== undefined && (
+          <CheckEditor
+            check={editing}
+            index={open}
+            disabled={disabled}
+            port={port}
+            error={rowError?.(open)}
+            onChange={(patch) => update(open, patch)}
+          />
+        )}
+      </SidePanel>
     </div>
   )
 }
 
-/** One check: its name, what kind of probe and when it runs, then that probe's own fields. */
+/** One check's form: its name, what kind of probe and when it runs, then that probe's own fields. */
 function CheckEditor({
   check,
   index,
@@ -248,7 +367,6 @@ function CheckEditor({
   port,
   error,
   onChange,
-  onRemove,
 }: {
   check: Check
   index: number
@@ -256,9 +374,7 @@ function CheckEditor({
   port?: number
   error?: string
   onChange: (patch: Partial<Check>) => void
-  onRemove: () => void
 }) {
-  const nameId = useId()
   const config = (check.config ?? {}) as Config
   const kind = check.kind as CheckKind
   const n = index + 1
@@ -270,35 +386,17 @@ function CheckEditor({
   const portPlaceholder = port ? String(port) : "app port"
 
   return (
-    <Group
-      role="group"
-      aria-labelledby={nameId}
-      tone={error ? "danger" : "default"}
-      className="animate-rise space-y-3"
-    >
-      <span id={nameId} className="sr-only">
-        {check.name || `Health check ${n}`}
-      </span>
-      <div className="flex min-w-0 items-center gap-2">
+    <div className="space-y-4">
+      <Field label="Name" htmlFor={id("name")}>
         <Input
+          id={id("name")}
           aria-label={`Health check ${n} name`}
           value={check.name}
           onChange={(event) => onChange({ name: event.target.value })}
           readOnly={disabled}
           placeholder="Answers on /health"
-          className="min-w-0 flex-1 font-medium sm:text-sm"
         />
-        {!disabled && (
-          <IconAction
-            type="button"
-            label={`Remove health check ${check.name || n}`}
-            onClick={onRemove}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            <Trash />
-          </IconAction>
-        )}
-      </div>
+      </Field>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Segments
@@ -405,7 +503,7 @@ function CheckEditor({
               to say, which is where the reader is looking when it matters. */}
           <OptionRow
             title="Any answer counts"
-            hint="Anything below 500 except 400 and 421 passes — for an API with no page at this path."
+            hint="Anything below 500 but 400 and 421 passes"
             checked={Boolean(config.acceptAnyAnswer)}
             disabled={disabled}
             onCheckedChange={(acceptAnyAnswer) =>
@@ -512,7 +610,7 @@ function CheckEditor({
 
       <OptionRow
         title="Required"
-        hint="A failing check blocks activation."
+        hint="A failure stops the release"
         checked={check.required}
         onCheckedChange={(required) => onChange({ required })}
         disabled={disabled}
@@ -522,7 +620,7 @@ function CheckEditor({
           {error}
         </p>
       )}
-    </Group>
+    </div>
   )
 }
 
