@@ -1964,19 +1964,33 @@ here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
 vertical chain; long header values wrap instead of hiding the verdict. Its scan field is one input
 group, the address and its port, with a hint naming what will be scanned and a native datalist of
-known names; a scan in flight is a line with its elapsed time and an outline Cancel. Listening sockets stay a
-table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
-layout chosen once by `useMediaQuery`; the three named columns sort from their headings, which carry
-`aria-sort`, and a phone gets the same orders as one Sort menu. The application cell is the owner
-drawn as its product (a container as its image's), its name with a "This dashboard" `Tag` on the
-dashboard's own, how it runs as one hint line, then the command and the account; the owner's page is
-the row's first inline verb. Grouped by application, one owner's sockets are a line whose name is the
-disclosure button, unfolding its sockets indented beneath it. How old the list is sits in the panel header beside Refresh, Pause and Export; a failed
-poll is a warning `Notice` over the rows it kept. A socket first seen in the last day carries a `New`
-tag beside its protocol, a property of the row rather than a state. Below the table, Changes is a
-plain panel of lines grouped under day headings — the minute, the change as a `Status` word coloured
-as the table colours that socket, the port, its addresses, the program and where it answered — with
-its window as `Segments` in the header and the reach chips under it. Tables retain their scrolling
+known names; a scan in flight is a line with its elapsed time and an outline Cancel. The Ports page (0.8.7) opens on
+its identity line — "9 listening · 7 TCP, 2 UDP · 5 internet-facing · 2 on private networks · 2
+dangerous services exposed", each count's make-up its tooltip, then how old the list is, Refresh,
+Pause, a `⋯` with the two exports and Find a free port at the end — where four tiles stood; then
+`ports-picture.tsx`, who reaches what: the networks a socket answers on (the internet, the tailnet,
+a VPN, a private network, Docker's networks, only this server) wired to the programs listening
+there, a wire red where the posture calls the exposure critical and moving only while somebody is
+connected; a network is a button that narrows the list like its chip, and each program's ports open
+their pages. Below `lg` the networks are not drawn and each program says who reaches it. Listening
+sockets stay a framed table read down its columns, one line per row at one height (`h-12`): the
+port is the link to its page with the protocol, the `New` tag and the addresses after it; the
+application is its product, its name and how it runs (or the command), the account and PIDs its
+tooltip; reach is one coloured word with the interface, a database's firewall default its tooltip;
+the firewall's verdict is one word whose conclusion is its tooltip; clients a count. The three named
+columns sort from their headings with `aria-sort`, and a phone gets the same orders as one Sort menu
+over rows of two lines at one height (`h-16`). Grouped by application, one owner's sockets are a line
+whose name is the disclosure button. A failed poll is a warning `Notice` over the rows it kept. A
+port's page (`/proxy/ports/tcp-443`, the address added where two rows share a protocol and port;
+`port-page.tsx`) is built as a process's: the way back, the socket's verbs, its identity line (the
+owner as its product, the port, addresses, account, PIDs, how it runs, and the reach as its state),
+then Reach (`port-path.tsx`: who can reach it → the firewall → the port → the program, then where it
+answers, from outside, the Docker path and Identify), Owner, Clients and History as an underlined
+strip in `?tab=`, and the list as its rail from `xl` with Alt+↑ and Alt+↓; the side sheet's
+`?socket=` address, in either spelling, opens it. Below the table, Changes is a plain panel of lines
+grouped under day headings — the minute, the change as a `Status` word coloured as the table colours
+that socket, the port, its addresses, the program and where it answered — with its window as
+`Segments` in the header and the reach chips under it; on a port's page it is that port's. Tables retain their scrolling
 boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
