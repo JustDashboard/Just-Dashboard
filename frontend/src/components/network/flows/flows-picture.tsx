@@ -206,7 +206,7 @@ export function FlowsPicture({
       end={{ title: "Kept", nodes: kept }}
       hub={{
         mark: (
-          <WireMark tone={recording ? "brand" : "neutral"} size="lg">
+          <WireMark tone={recording ? "success" : "neutral"} size="lg">
             <ClockRewind aria-hidden />
           </WireMark>
         ),
