@@ -147,8 +147,9 @@ rail does with *Settings*: a `NavChild` names its `group`, `groupedChildren` (`n
 into the panel's groups, and a section that names none is the single list it always was. Network is the
 one that does, since 0.8.6: Overview above every heading, then *Setup* (Interfaces, Routing, Egress
 groups, Firewall, Gateway, Protection, VPN, DNS, Address planning), *Activity* (Traffic, Socket history,
-Connections, Drift) and *Diagnostics* (Tools, Connection path, Packet captures, External checks, Saved
-runs). It was nineteen siblings with four glyphs each used twice. No two pages of one section share a
+Connections, Drift) and *Diagnostics* (Tools, Packet captures, External checks, Saved
+runs; Connection path left the rail in 0.8.7, when it became a tool of the Tools workbench). It was
+nineteen siblings with four glyphs each used twice. No two pages of one section share a
 glyph, which `nav.test.js` holds for every section: the glyph is what a row is found by before it is
 read.
 
