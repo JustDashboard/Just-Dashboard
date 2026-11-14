@@ -1420,11 +1420,28 @@ test("every generator the server lists is reachable, and the request carries wha
     page.getByRole("region", { name: "Types & validation" }).getByRole("button"),
   ).toHaveCount(1)
   await expect(page.getByRole("region", { name: "Schema" }).getByRole("button")).toHaveCount(1)
-  // Nothing is asked of the server until the reader asks.
-  await expect(page.getByText("Nothing written yet")).toBeVisible()
+  // Each is drawn as the project it writes for, or as its language where that has no mark.
+  await expect(page.locator("[data-target=prisma] img")).toHaveAttribute("src", "/logos/prisma.svg")
+  await expect(page.locator("[data-target=typeorm] img")).toHaveAttribute(
+    "src",
+    "/logos/typeorm.svg",
+  )
+  await expect(page.locator("[data-target=zod] img")).toHaveAttribute("src", "/logos/zod.svg")
+  await expect(page.locator("[data-target=diesel] img")).toHaveAttribute(
+    "src",
+    "/logos/diesel.webp",
+  )
+  // Nothing is asked of the server until the reader asks: the generator's
+  // own mark, two words and the command, with what it writes behind an (i).
+  const empty = page.locator("[data-slot=empty-state]")
+  await expect(empty).toHaveText(/^Nothing written yetGenerate$/)
+  await expect(empty.locator("img")).toHaveAttribute("src", "/logos/prisma.svg")
+  await page.getByRole("button", { name: "What Prisma writes" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("nothing in the database is changed")
+  await page.mouse.move(0, 0)
   expect(sent.orm).toHaveLength(0)
 
-  await page.getByRole("button", { name: "Generate" }).click()
+  await empty.getByRole("button", { name: "Generate" }).click()
   const code = page.locator("[data-slot=code-view]")
   await expect(code).toContainText("schema.prisma")
   expect(sent.orm[0]).toEqual({ target: "prisma", schema: "public" })
@@ -2018,7 +2035,7 @@ test("a generator remembered from another engine does not open the page on a ref
   await page.goto("/databases/7/generate")
   await expect(page.locator("[data-target=prisma]")).toHaveAttribute("aria-pressed", "true")
   await expect(page.getByText(/is not written for/)).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Generate" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Generate" }).first()).toBeVisible()
   // Picked on this visit, the one it lacks says why, in the server's words.
   await page.getByRole("button", { name: "Zod schemas, not for SQLite" }).click()
   await expect(page.getByText("Zod schemas is not written for SQLite")).toBeVisible()

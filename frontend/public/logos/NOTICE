@@ -286,3 +286,14 @@ where it has one, and otherwise its mono path filled with the brand's colour
 (openrouter's #94A3FF and lmstudio's #7B8CFF on the L 0.72 rung, groq's #F55036,
 and white for xAI's black mark), because a mono file's currentColor is black in an
 image and disappears on a dark ground.
+
+The generators on a database's Generate page are drawn as the project each
+writes for. prisma.svg, typeorm.svg, zod.svg, drizzle.svg, sequelize.svg and
+sqlalchemy.svg are from Simple Icons 15.22.0 (https://simpleicons.org), CC0 1.0,
+each the collection's path filled with the brand's own colour (#FE0803,
+#408AFF, #C5F74F, #52B0E7, #D71F00), and white for Prisma's #2D3748, which
+disappears on a dark ground. None of the three collections has GORM or Diesel,
+so each is the project's own artwork, fetched from its own site and resized to
+96px WebP the way docker-compose.webp was: gorm.webp is gorm.io's
+apple-touch-icon.png and diesel.webp is diesel.rs's diesel_logo_favicon.png.
+Kysely and MikroORM publish no mark in any of them and keep their language's.
