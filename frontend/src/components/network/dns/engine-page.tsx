@@ -405,7 +405,10 @@ function Engine({ account, id }: { account: number; id: string }) {
               ) : (
                 // The strip's place and the first view's, so the read lands under the line.
                 <div className="flex min-w-0 flex-col">
-                  <div data-slot="engine-strip" className="h-10 border-b border-hairline" />
+                  {/* A tab's height over the strip's hairline, as the strip is built. */}
+                  <div data-slot="engine-strip" className="border-b border-hairline">
+                    <div className="h-10" />
+                  </div>
                   <div className="pt-6">
                     <LoadingRows rows={4} />
                   </div>
