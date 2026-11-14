@@ -33,7 +33,7 @@ export function WaysOut({ identity }: { identity: NetworkEgressIdentity[] }) {
     <Panel plain>
       <PanelHeader title="Ways out" />
       <PanelBody>
-        <ul aria-label="Ways out" className="grid min-w-0 gap-x-10 xl:grid-cols-2">
+        <ul aria-label="Ways out" className="min-w-0">
           {identity.map((id) => (
             <WayOut key={id.family} id={id} />
           ))}

@@ -161,7 +161,10 @@ function RepairRow({
         />
         {row && <DriftMark row={row} />}
         <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
-          <span className="block truncate font-mono text-body font-medium" title={name}>
+          <span
+            className="block font-mono text-body font-medium break-all sm:truncate"
+            title={name}
+          >
             {name}
             {named && (
               <span className="ml-2 font-sans text-hint font-normal text-muted-foreground">
@@ -169,7 +172,7 @@ function RepairRow({
               </span>
             )}
           </span>
-          <span className="block truncate text-hint text-muted-foreground" title={item.reason}>
+          <span className="block text-hint text-muted-foreground sm:truncate" title={item.reason}>
             {item.reason}
           </span>
         </label>
@@ -194,9 +197,7 @@ function RepairRow({
           tone={item.executable ? "running" : "stopped"}
           label={item.executable ? "Can apply" : "Review only"}
         />
-        {item.blocker && (
-          <InfoTip label={`Why ${item.resource} is review only`}>{item.blocker}</InfoTip>
-        )}
+        {item.blocker && <InfoTip label={`Why ${name} is review only`}>{item.blocker}</InfoTip>}
       </p>
     </li>
   )

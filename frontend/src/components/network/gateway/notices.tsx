@@ -105,8 +105,9 @@ export function PolicyEvidence({
   const { capability, admission } = view
   const state = admissionState(admission)
   const chains = admission.chains?.filter((chain) => chain.needed) ?? []
+  const [open, setOpen] = useState(false)
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -121,28 +122,42 @@ export function PolicyEvidence({
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-medium">Policy evidence</p>
           {onRepair && (
-            <Button type="button" size="xs" variant="outline" onClick={onRepair}>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              onClick={() => {
+                // The confirmation is a dialog of its own: it takes the page.
+                setOpen(false)
+                onRepair()
+              }}
+            >
               Repair owned rules
             </Button>
           )}
         </div>
         {chains.length > 0 && (
-          <ul aria-label="Admission chains" className="space-y-1.5">
+          <dl
+            aria-label="Admission chains"
+            className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-hint"
+          >
             {chains.map((chain) => (
-              <li key={`${chain.family}:${chain.chain}`} className="min-w-0 text-hint">
-                <span className="flex flex-wrap items-center gap-x-2">
-                  <span className="font-mono">
-                    {chain.family === "inet6" ? "IPv6" : "IPv4"} {chain.chain}
-                  </span>
+              <div key={`${chain.family}:${chain.chain}`} className="contents">
+                <dt className="font-mono text-muted-foreground">
+                  {chain.family === "inet6" ? "IPv6" : "IPv4"} {chain.chain}
+                </dt>
+                <dd className="min-w-0">
                   <Status
                     tone={chain.status === "present" ? "running" : "warning"}
                     label={chain.status === "present" ? "Owned rule present" : chain.status}
                   />
-                </span>
-                {chain.reason && <span className="text-muted-foreground">{chain.reason}</span>}
-              </li>
+                  {chain.reason && (
+                    <span className="block text-muted-foreground">{chain.reason}</span>
+                  )}
+                </dd>
+              </div>
             ))}
-          </ul>
+          </dl>
         )}
         {Boolean(view.flows?.length) && (
           <div className="space-y-1.5">

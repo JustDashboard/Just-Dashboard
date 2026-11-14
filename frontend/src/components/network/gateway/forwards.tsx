@@ -150,7 +150,7 @@ export function ForwardList({
                     <Port port={f.ports} /> <span className="text-muted-foreground">→</span>{" "}
                     <Endpoint address={f.target} port={targetPortOf(f)} />
                   </span>
-                  {f.decision?.drift && <Tag tone="warning">auto decision drifted</Tag>}
+                  {wide && f.decision?.drift && <Tag tone="warning">auto decision drifted</Tag>}
                 </span>
               }
               verb={`Edit ${forwardTitle(f)}`}
@@ -164,7 +164,7 @@ export function ForwardList({
                 <span className="flex items-center gap-4">
                   {wide && <span className={cn("flex min-w-0", STATE_COLUMN)}>{state}</span>}
                   <span
-                    className="numeric hidden min-w-[4.5rem] text-right font-mono text-micro leading-tight text-muted-foreground sm:grid"
+                    className="numeric hidden w-24 text-right font-mono text-micro leading-tight text-muted-foreground sm:grid"
                     title={totalWord(f.total, calendarDate)}
                   >
                     <span>{compact(f.packets)} packets</span>
@@ -188,7 +188,11 @@ export function ForwardList({
             >
               {!wide && (
                 <span className="flex min-w-0 items-center justify-between gap-3 pl-11">
-                  {state}
+                  <span className="flex min-w-0 items-center gap-2">
+                    {state}
+                    {/* Beside the name it would wrap the row a line taller. */}
+                    {f.decision?.drift && <Tag tone="warning">drifted</Tag>}
+                  </span>
                   <span className="numeric shrink-0 font-mono text-micro text-muted-foreground">
                     {compact(f.packets)} packets · {bytes(f.bytes)}
                   </span>

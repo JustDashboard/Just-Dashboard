@@ -108,14 +108,26 @@ export function NATList({
           const owner = n.owner ? ownerOf(n.owner) : undefined
           const movable =
             !owner && writable && can("system.admin") && (!n.enabled || can("destructive"))
-          const state = (
-            <EntryEvidence
-              name={label(n)}
-              enabled={n.enabled}
-              readiness={n.readiness}
-              flow={flowOf(flows, "nat", n.id)}
-            />
-          )
+          const flow = flowOf(flows, "nat", n.id)
+          // An entry another feature keeps may carry no reading of its own
+          // rules: it says only whether it is in force, as it always did.
+          const state =
+            owner && !n.readiness && !flow ? (
+              // In the box the pressable word takes, so the row is its height.
+              <span className="-mx-1 inline-flex min-w-0 items-center px-1 py-0.5">
+                <Status
+                  tone={n.enabled ? "running" : "stopped"}
+                  label={n.enabled ? "In force" : "Off"}
+                />
+              </span>
+            ) : (
+              <EntryEvidence
+                name={label(n)}
+                enabled={n.enabled}
+                readiness={n.readiness}
+                flow={flow}
+              />
+            )
           const carried = {
             packets: compact(n.packets + (n.inPackets ?? 0)),
             bytes: bytes(n.bytes + (n.inBytes ?? 0)),
@@ -147,7 +159,7 @@ export function NATList({
               trailing={
                 <span className="flex items-center gap-4">
                   {wide && <span className={cn("flex min-w-0", STATE_COLUMN)}>{state}</span>}
-                  <span className="numeric hidden min-w-[4.5rem] text-right font-mono text-micro leading-tight text-muted-foreground sm:grid">
+                  <span className="numeric hidden w-24 text-right font-mono text-micro leading-tight text-muted-foreground sm:grid">
                     <span>{carried.packets} packets</span>
                     <span>{carried.bytes}</span>
                   </span>

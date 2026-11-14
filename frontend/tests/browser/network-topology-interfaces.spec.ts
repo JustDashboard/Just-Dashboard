@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import {
+  firewall,
   iso,
   json,
   links,
@@ -69,12 +70,19 @@ test("the identity says both forwarding families and keeps a translated source f
       .locator("[data-slot=host-identity]")
       .getByText("translated upstream; public address not observed"),
   ).toBeVisible()
-  const ways = page.getByRole("table").filter({ hasText: "The internet sees" })
-  const v4 = ways.locator("tr[data-family=inet]")
-  await expect(v4).toContainText("10.0.0.5 · private")
-  await expect(v4).toContainText("was not observed by this host")
-  await expect(ways.locator("tr[data-family=inet6]")).toContainText("NIC address is public")
-  await expect(ways.locator("tr[data-family=inet6]")).toContainText("off")
+  // Each way out is a line: a sentence, what it establishes, and the
+  // explanation behind the note.
+  const ways = page.getByRole("list", { name: "Ways out" })
+  const v4 = ways.locator("li[data-family=inet]")
+  await expect(v4).toContainText("Leaves ens3 via 203.0.113.1 from 10.0.0.5, private")
+  await expect(v4).toContainText("translated upstream; public address not observed")
+  await v4.getByRole("button", { name: "About the IPv4 way out" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText("was not observed by this host")
+  await page.keyboard.press("Escape")
+  const v6 = ways.locator("li[data-family=inet6]")
+  await expect(v6).toContainText("NIC address is public")
+  await expect(v6).toContainText("forwarding off")
+  await expect(page.getByRole("table").filter({ hasText: "The internet sees" })).toHaveCount(0)
 })
 
 test("paths in use come from tracked flows and pointing at a node lights who it trades with", async ({
@@ -188,7 +196,7 @@ test("a failed live poll keeps the ring with a dated retry", async ({ page }) =>
   await expect(warning.getByRole("button", { name: "Refresh" })).toBeVisible()
 })
 
-test("the throughput tiles and the chart drill into the devices under them", async ({ page }) => {
+test("the throughput lines and the chart drill into the devices under them", async ({ page }) => {
   await mockNetwork(page)
   await page.goto("/network")
   await loaded(page)
@@ -237,7 +245,25 @@ test("a node's mark names what it opens, and a scrolling table of plain rows can
   // The private bridge is the one the audit met with no name.
   expect(names).toContain("jd-lab")
 
-  const table = page.locator("[data-slot=table-container]").filter({ hasText: "Leaves through" })
+  // The overview has no table left; the firewall's policy by family is one
+  // of plain rows.
+  await mockNetwork(page, [], {
+    overrides: {
+      "/firewall/": {
+        ...firewall,
+        effective: {
+          families: [
+            { family: "ipv4", filtered: true, incoming: "deny", outgoing: "allow", routed: "deny" },
+            { family: "ipv6", filtered: true, incoming: "deny", outgoing: "allow", routed: "deny" },
+          ],
+          interfaces: [],
+        },
+      },
+    },
+  })
+  await page.goto("/network/firewall")
+  await loaded(page)
+  const table = page.locator("[data-slot=table-container]").filter({ hasText: "Filtered" })
   await expect(table).toHaveCount(1)
   await expect(table).not.toHaveAttribute("tabindex")
   // The same table in a box shorter than its rows.

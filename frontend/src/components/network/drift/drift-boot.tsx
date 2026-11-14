@@ -88,7 +88,10 @@ export function DriftBoot({ boot }: { boot: DriftReport["boot"] }) {
           <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
             <ProductLogo id="systemd" size="sm" />
             <div className="min-w-0">
-              <p className="truncate font-mono text-body font-medium" title={boot.unit}>
+              <p
+                className="font-mono text-body font-medium break-all sm:truncate"
+                title={boot.unit}
+              >
                 {boot.unit}
               </p>
               <p className="flex flex-wrap gap-x-3 text-hint text-muted-foreground sm:flex-nowrap sm:truncate">

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, Crosshair, Globe, RefreshClockwise, Wrench } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, rate } from "@/lib/format"
@@ -65,8 +65,9 @@ const formatRate = (value: number) => rate(value)
 const axisRate = (value: number) => `${bytes(value, 0)}/s`
 
 /** What the picture drew at the last visit, so the grey page is the page's own shape. */
-type Shape = { outside: number; inside: number }
-const FIRST_VISIT: Shape = { outside: 3, inside: 3 }
+type Shape = { outside: number; inside: number; facts: number }
+// Two lines of facts: what a laptop's width gives this server's line.
+const FIRST_VISIT: Shape = { outside: 3, inside: 3, facts: 36 }
 
 /**
  * Is the network doing what it should, and what is it carrying right now?
@@ -114,9 +115,15 @@ export default function NetworkOverviewPage() {
   useEffect(() => {
     if (outside === undefined || inside === undefined) return
     setShape((held) =>
-      held.outside === outside && held.inside === inside ? held : { outside, inside },
+      held.outside === outside && held.inside === inside ? held : { ...held, outside, inside },
     )
   }, [outside, inside, setShape])
+  // The line of facts wraps by what this server has to say and how wide the
+  // window is, so its height is remembered too rather than guessed.
+  const measured = useCallback(
+    (facts: number) => setShape((held) => (held.facts === facts ? held : { ...held, facts })),
+    [setShape],
+  )
 
   const failed = !data && Boolean(overview.error)
   const nodeOf = (id: string) => flowNode(id, data!, links)
@@ -127,6 +134,8 @@ export default function NetworkOverviewPage() {
         overview={data}
         links={links}
         failed={failed}
+        factsHeight={shape.facts}
+        onFacts={measured}
         onRefresh={() => {
           overview.refresh()
           live.refresh()
@@ -236,7 +245,7 @@ function withLiveRates(links: NetworkLink[], live: LiveTraffic): NetworkLink[] {
  * of room there from the start and the picture under it does not move when
  * the read lands.
  */
-const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-2 gap-y-1 max-sm:min-h-9"
+const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-2 gap-y-1"
 
 /** Whether the default route's device can carry anything, as a dot and a word. */
 function uplinkState(overview: NetworkOverview, links: NetworkLink[]) {
@@ -260,15 +269,32 @@ function NetworkIdentity({
   overview,
   links,
   failed,
+  factsHeight,
+  onFacts,
   onRefresh,
 }: {
   /** Undefined until the first read. */
   overview?: NetworkOverview
   links: NetworkLink[]
   failed: boolean
+  /** The height the facts took at the last visit, held while the read is out. */
+  factsHeight: number
+  onFacts: (height: number) => void
   onRefresh: () => void
 }) {
   const router = useRouter()
+  const facts = useRef<HTMLSpanElement>(null)
+  const arrived = overview !== undefined
+  useLayoutEffect(() => {
+    const node = facts.current
+    if (!node) return
+    const report = () => onFacts(node.offsetHeight)
+    report()
+    const observer = new ResizeObserver(report)
+    observer.observe(node)
+    return () => observer.disconnect()
+    // Measured again when the read lands: the line is not there before it.
+  }, [onFacts, arrived])
   // The two diagnostics behind the menu are an administrator's; a reader's
   // menu holds the refresh alone rather than a way to a page that refuses.
   const { can } = useAuth()
@@ -305,7 +331,18 @@ function NetworkIdentity({
       <HostIdentity
         label="About the network"
         fallback={Globe}
-        title={failed ? "Network" : <Skeleton className="my-1 h-5 w-40" />}
+        title={
+          failed ? (
+            "Network"
+          ) : (
+            // Beside a character of no width, so the grey block stands on a
+            // line of the title's own height.
+            <span className="inline-flex items-center">
+              <Skeleton className="h-4 w-40" />
+              &#8203;
+            </span>
+          )
+        }
         state={
           failed ? (
             <Status tone="danger" label="Not read" />
@@ -319,7 +356,7 @@ function NetworkIdentity({
           failed ? (
             <span>The network could not be read.</span>
           ) : (
-            <span className={FACTS}>
+            <span className={FACTS} style={{ minHeight: factsHeight }}>
               <Skeleton className="my-0.5 h-3 w-72 max-w-full" />
             </span>
           )
@@ -348,7 +385,7 @@ function NetworkIdentity({
       command={command}
       menu={menu}
       facts={
-        <span className={FACTS}>
+        <span ref={facts} className={FACTS}>
           {primary ? (
             <HostFact>
               <span className="font-mono">{primary.device}</span>
