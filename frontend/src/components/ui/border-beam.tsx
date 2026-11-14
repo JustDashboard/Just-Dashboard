@@ -19,6 +19,13 @@ import { cn } from "@/lib/utils"
  * on it busy for as long as the card worked. A frame that changes size is
  * measured again and the light carries on from where it was. Reduced motion
  * draws no light, in CSS, and starts no lap.
+ *
+ * The light is a square centred on the frame's edge, so half of it is always
+ * outside the frame. The mask hides that half, but a mask only paints: the
+ * half still counted as content, and a frame that ended near the window's
+ * edge widened the page each time the light went down its right side (a
+ * running transfer on a phone, a busy row). So the frame stands in a box of
+ * its own size that clips, and nothing that holds a light has to.
  */
 export function BorderBeam({
   className,
@@ -70,27 +77,32 @@ export function BorderBeam({
 
   return (
     <div
-      ref={frame}
       aria-hidden
-      className="pointer-events-none absolute inset-0 rounded-[inherit] border-(length:--border-beam-width) border-transparent mask-[linear-gradient(transparent,transparent),linear-gradient(#000,#000)] mask-intersect [mask-clip:padding-box,border-box] motion-reduce:hidden"
-      style={{ "--border-beam-width": `${borderWidth}px` } as React.CSSProperties}
+      data-slot="border-beam"
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] motion-reduce:hidden"
     >
-      {/* Its corner on the frame's own, the border's width out from the
+      <div
+        ref={frame}
+        className="absolute inset-0 rounded-[inherit] border-(length:--border-beam-width) border-transparent mask-[linear-gradient(transparent,transparent),linear-gradient(#000,#000)] mask-intersect [mask-clip:padding-box,border-box]"
+        style={{ "--border-beam-width": `${borderWidth}px` } as React.CSSProperties}
+      >
+        {/* Its corner on the frame's own, the border's width out from the
           padding it is positioned in; until the first lap is handed over it
           waits beyond the corner, where the mask shows none of it. */}
-      <div
-        ref={light}
-        className={cn(
-          "absolute aspect-square bg-linear-to-l from-brand via-signal to-transparent",
-          className,
-        )}
-        style={{
-          width: size,
-          top: -borderWidth,
-          left: -borderWidth,
-          transform: `translate(${-2 * size}px, ${-2 * size}px)`,
-        }}
-      />
+        <div
+          ref={light}
+          className={cn(
+            "absolute aspect-square bg-linear-to-l from-brand via-signal to-transparent",
+            className,
+          )}
+          style={{
+            width: size,
+            top: -borderWidth,
+            left: -borderWidth,
+            transform: `translate(${-2 * size}px, ${-2 * size}px)`,
+          }}
+        />
+      </div>
     </div>
   )
 }

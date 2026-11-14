@@ -885,7 +885,10 @@ test("a transfer already running is shown on arrival, and can be stopped by the 
  */
 function widestDuringLap(page: Page, unclipped = false) {
   return progress(page).evaluate(async (el, bare) => {
-    if (bare) el.querySelector("span.overflow-hidden")?.classList.remove("overflow-hidden")
+    // The light's own box clips it (`ui/border-beam.tsx`), and so does what holds it here.
+    if (bare)
+      for (const node of el.querySelectorAll(".overflow-hidden"))
+        node.classList.remove("overflow-hidden")
     const laps = el
       .getAnimations({ subtree: true })
       .filter((animation) =>
