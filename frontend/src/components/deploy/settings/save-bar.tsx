@@ -54,6 +54,16 @@ type EntryState = {
   saving: boolean
   invalid: boolean
   applies: SettingApplies
+  /**
+   * The bar's command where pressing it does more than save: "Apply and
+   * restart", "Change password". Left out, it is Save.
+   */
+  verb?: string
+  /**
+   * When and how the form applies, in the form's own words, where neither
+   * kind of `applies` says it: "Restarts the dashboard".
+   */
+  note?: string
 }
 
 type EntryActions = {
@@ -82,7 +92,9 @@ function sameEntry(a: EntryState | undefined, b: EntryState) {
     a.changes === b.changes &&
     a.saving === b.saving &&
     a.invalid === b.invalid &&
-    a.applies === b.applies
+    a.applies === b.applies &&
+    a.verb === b.verb &&
+    a.note === b.note
   )
 }
 
@@ -203,11 +215,11 @@ export function useSaveBarEntry(
   useEffect(() => {
     ref.current = entryActions
   })
-  const { name, dirty, changes, saving, invalid, applies } = state
+  const { name, dirty, changes, saving, invalid, applies, verb, note } = state
   useEffect(() => {
     if (!bar || !enabled) return
-    bar.register(id, { name, dirty, changes, saving, invalid, applies }, ref)
-  }, [bar, enabled, id, name, dirty, changes, saving, invalid, applies])
+    bar.register(id, { name, dirty, changes, saving, invalid, applies, verb, note }, ref)
+  }, [bar, enabled, id, name, dirty, changes, saving, invalid, applies, verb, note])
   useEffect(() => {
     if (!bar || !enabled) return
     return () => bar.unregister(id)
@@ -273,6 +285,9 @@ function SaveBar({
   // until its saved value is read back — and that is not an edit left over.
   const done = phase === "saved"
   const shown = done || dirty.length === 0 ? saved : dirty
+  // A form that says these itself is the only one on its page that needs to.
+  const verb = shown.find((entry) => entry.verb)?.verb ?? "Save"
+  const note = shown.find((entry) => entry.note)?.note
 
   const bar = (
     <div
@@ -313,10 +328,12 @@ function SaveBar({
           </p>
           <p className="mt-0.5 pl-4 text-xs text-muted-foreground max-sm:line-clamp-2 sm:truncate">
             {done
-              ? appliesLine(shown)
-              : invalid
-                ? "A value is out of range — fix it to save"
-                : `${names(shown)} · ${appliesLine(shown)}`}
+              ? (note ?? appliesLine(shown))
+              : note
+                ? `${names(shown)} · ${note}`
+                : invalid
+                  ? "A value is out of range — fix it to save"
+                  : `${names(shown)} · ${appliesLine(shown)}`}
           </p>
         </div>
         {!done && (
@@ -339,7 +356,7 @@ function SaveBar({
               onClick={onSave}
               className="max-sm:h-10"
             >
-              Save
+              {verb}
               <kbd
                 aria-hidden
                 className={cn(
