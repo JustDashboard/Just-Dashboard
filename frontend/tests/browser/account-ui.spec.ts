@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { readTip } from "./read-tip"
+import { risen } from "./risen"
 
 /**
  * The account pages after their 0.7.5 pass, against a mocked API: no page
@@ -6,6 +8,12 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * its face, sessions are drawn as the path each takes to the server, keys as
  * what holds them wired through their role, users by their faces on cards
  * that chips narrow, and Security opens on what a sign-in passes.
+ *
+ * The 0.8.7 pass brought Profile, Security and API keys to the deployment
+ * pages' shape: the profile and the factors are sections of one centred
+ * column with the settings pages' floating bar, no sentence stands under a
+ * title or a field, the role ladder is names and glyphs, and the keys open on
+ * a line that counts them and are cards as the accounts are.
  */
 
 const now = Date.now()
@@ -197,6 +205,8 @@ test("the profile opens on the account's identity line and what is signed in as 
   await expect(page.locator("[data-slot=host-identity]")).toContainText("4 accounts")
   await expect(page.locator('img[src="/logos/tailscale.svg"]').first()).toBeVisible()
   await expect(page.getByText("two-factor on").first()).toBeVisible()
+  // The verdict stands beside the name, as a project's state does.
+  await expect(page.locator("[data-slot=host-identity]")).toHaveAttribute("data-layout", "project")
 
   // The four tiles went; what they counted is the picture's two sides.
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
@@ -222,14 +232,58 @@ test("the profile opens on the account's identity line and what is signed in as 
   await expect(ladder.getByText("Open a shell")).toBeVisible()
   await expect(ladder.locator('img[src="/logos/docker.svg"]')).toBeVisible()
   await expect(page.getByText("Granted.")).toHaveCount(6)
+  // Names and glyphs: what a power means is its name's tooltip, not a line under it.
+  await expect(ladder.getByText(/A root terminal on this server/)).toHaveCount(0)
+  await readTip(
+    page,
+    ladder.getByText("Open a shell").locator(".."),
+    /A root terminal on this server/,
+  )
+  await readTip(
+    page,
+    ladder.getByText("Administrator", { exact: true }).locator(".."),
+    /Everything: a root shell/,
+  )
 
-  // A rename raises the floating Save rather than a button under the fields.
-  await page.getByLabel("Name", { exact: true }).fill("Ion P.")
+  // The profile and the ladder are two sections of one centred column.
+  const column = page.locator("[data-slot=settings-column]")
+  const sections = column.locator("[data-slot=setting]")
+  await expect(sections).toHaveCount(2)
+  await risen(page)
+  const boxes = await sections.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect()
+      return { x: Math.round(box.x), width: Math.round(box.width) }
+    }),
+  )
+  expect(boxes[1]).toEqual(boxes[0])
+  expect(boxes[0].width).toBeLessThanOrEqual(768)
+  // No sentence under the picture or a field.
+  await expect(column.locator("p.text-hint")).toHaveCount(0)
+  await expect(page.getByText(/cropped to a square/)).toHaveCount(0)
+
+  // A rename raises the floating Save rather than a button under the fields,
+  // and moves nothing: the head's line is the rail's card, drawn from the draft.
+  const name = page.getByLabel("Name", { exact: true })
+  const placed = await name.boundingBox()
+  await name.fill("Ion P.")
   await expect(page.getByText("Edited", { exact: true })).toBeVisible()
   await expect(
     page.getByRole("img", { name: /The rail draws this account as Ion P\./ }),
   ).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Save/ })).toBeVisible()
+  expect((await name.boundingBox())!.y).toBe(placed!.y)
+  const bar = page.getByRole("region", { name: "Save changes" })
+  await expect(bar.getByText("1 unsaved change")).toBeVisible()
+  await expect(bar.getByRole("button", { name: /^Save/ })).toBeVisible()
+  // The bar's Save is the one write the profile had.
+  await page.route("**/api/v1/account/profile", (route) =>
+    json(route, { ...me, displayName: "Ion P." }),
+  )
+  const patched = page.waitForRequest(
+    (request) => request.method() === "PATCH" && request.url().endsWith("/api/v1/account/profile"),
+  )
+  await bar.getByRole("button", { name: /^Save/ }).click()
+  expect((await patched).postDataJSON()).toEqual({ displayName: "Ion P." })
 })
 
 test("sessions are the browser, the system and the network each came from", async ({ page }) => {
