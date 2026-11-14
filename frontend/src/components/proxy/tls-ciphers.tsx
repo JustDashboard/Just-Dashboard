@@ -102,11 +102,9 @@ export function DeepScanSection({ scan }: { scan: TLSScan }) {
           }
         />
         <PanelBody>
-          <p className="text-body leading-relaxed text-muted-foreground">
-            A deep scan lists every cipher suite each version accepts, the key exchange groups,
-            post-quantum ones included, HTTP/2 against the site form, HTTP/3, session resumption,
-            and the certificate a client gets when it names no site. It opens about forty more
-            connections to this address.
+          <p className="text-body text-muted-foreground">
+            Every suite and key exchange group, HTTP/2 and HTTP/3, resumption and the default
+            certificate: about forty more connections.
           </p>
         </PanelBody>
       </Panel>

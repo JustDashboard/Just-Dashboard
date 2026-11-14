@@ -96,7 +96,7 @@ taking a frame:
   the sites, certificates and
   streams inventories and the ports table with their toolbars; the Renewals section on
   Certificates; a site's own page, its route picture on the page's ground and its logs one `Pane`
-  under it; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
+  under it; the TLS report's findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
   the runtime-health bar, and every block of the deployment section — the fleet
@@ -1865,6 +1865,27 @@ site's own page (`/proxy/sites/<name>`): the same marks as an identity line, the
 reaches it on the page's ground, and its requests and errors read there in one log `Pane`, so a
 site's Logs verb goes to that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
 ends on the engine's own log, a `Pane` across the page under the two columns.
+
+The TLS page (`/proxy/tls`) opens each of its three views on an identity line, with the views as
+an underlined strip under it in the address (`?view=fleet`, `?tool=request`). A report's line is the
+target — host and port as its heading, the grade as a word in its verdict's colour, the protocol,
+what answered (its nginx site, which opens the site's page) and how old the report is — with the
+scan's summary at the right and a `⋯` of Scan again, Copy as Markdown, the JSON and `chain.pem`,
+Copy link and a request to the same name in the tester. Under the scan form the report draws the way
+the scan reached the name (`tls-chain-picture.tsx`, its verdicts in `lib/tls-chain.ts`): this server
+as the visitor, the domain and the address it reached, what answered, the leaf, the intermediate (or
+the one missing, on a dashed amber line) and the root, each step on a tile in its verdict's colour,
+the leaf's term as a meter under its days. A failed scan is the same row cut short at the name, the
+port and the handshake, the failed step red and the rest not reached. The row is drawn unjudged
+before anything is asked and while the first answer is on its way, at its loaded height, with a
+pulse down its lines while a scan is in flight and once when the answer lands. The four tiles that
+opened the report ("—" before a scan) are gone: each reading stands on its step. Every site is an
+identity line saying the names, how many are below A, expiring or unreachable and how old the newest
+report is, with Scan all sites and an Export CSV menu, over one-line cards (the engine's mark with
+the report's verdict in its corner, the name, its days, protocol, issues and age in aligned columns
+and the grade last) that open the report. The request tester's line is the request: the URL, then
+the answer's status in its colour, protocol, first byte, total and bytes read; its redirect chain
+is cards that pick a hop, and a host with no nginx gets the section's empty card with Install.
 
 Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
 its details — all names, dates, the full path and links to the sites using it — so it takes the lit
