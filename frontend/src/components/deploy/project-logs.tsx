@@ -372,7 +372,12 @@ export function ProjectLogs() {
   const disruptions = lifecycle.data?.recent.length ?? 0
   const choose = (next: LogsView) => setAsked(next)
 
-  const readings = <TrafficReadings requests={requests.data} alerts={alerts.data?.alerts} />
+  // A read that failed with nothing to show is said as that, not as a read
+  // still on its way.
+  const unread = Boolean(requests.error) && !requests.data
+  const readings = (
+    <TrafficReadings requests={requests.data} alerts={alerts.data?.alerts} unread={unread} />
+  )
   const alertsLine = !staging && (
     <AlertsLine
       projectId={project.projectId}
@@ -412,6 +417,7 @@ export function ProjectLogs() {
           ) : (
             <HourLine
               requests={requests.data}
+              unread={unread}
               alerts={staging ? undefined : alerts.data}
               onOpen={() => setHourOpen(true)}
             />
@@ -647,16 +653,21 @@ function ViewTab({
 function TrafficReadings({
   requests,
   alerts,
+  unread,
 }: {
   requests?: DeploymentRequests
   alerts?: TrafficAlert[]
+  /** The record could not be read, and there is no earlier reading to draw. */
+  unread?: boolean
 }) {
   const summary = requests?.summary
   const served = requests?.status === "available"
   const ready = served && summary ? summary : undefined
   const buckets = ready ? ready.buckets : []
   const waiting = !requests
-    ? "Reading the request record…"
+    ? unread
+      ? UNREAD
+      : "Reading the request record…"
     : requests.reason
       ? "No request record"
       : "No requests recorded yet"
@@ -803,6 +814,8 @@ function TrafficReadings({
   )
 }
 
+const UNREAD = "The request record could not be read"
+
 /** A reading's words as the line of a sentence they are: "half inside 24ms" leads with a capital. */
 function sentence(words: string) {
   return words.charAt(0).toUpperCase() + words.slice(1)
@@ -818,10 +831,12 @@ function sentence(words: string) {
 function HourLine({
   requests,
   alerts,
+  unread,
   onOpen,
 }: {
   requests?: DeploymentRequests
   alerts?: TrafficAlertList
+  unread?: boolean
   onOpen: () => void
 }) {
   const summary = requests?.status === "available" ? requests.summary : undefined
@@ -867,6 +882,8 @@ function HourLine({
           </>
         ) : requests ? (
           "No request record"
+        ) : unread ? (
+          UNREAD
         ) : (
           "Reading the request record…"
         )}

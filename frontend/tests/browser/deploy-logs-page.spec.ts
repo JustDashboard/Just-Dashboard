@@ -290,3 +290,30 @@ test("what was served is a line under Pages, and the heaviest pages keep their l
   await expect(page.getByRole("heading", { name: "Served", exact: true })).toHaveCount(0)
   await expect(page.getByText("Each, on average")).toHaveCount(0)
 })
+
+for (const viewport of [{ width: 1280, height: 900 }, PHONE]) {
+  test(`a record that cannot be read is said as that, not as still reading, at ${viewport.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport)
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/requests?*", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "unavailable", message: "the log is not readable" },
+        }),
+      }),
+    )
+    await page.goto("/deploy/7/logs")
+    const said =
+      viewport.width < 768
+        ? page.locator('[data-slot="hour-line"]')
+        : page.locator('[data-slot="reading-line"]').first()
+    await expect(said).toContainText("The request record could not be read")
+    await expect(page.getByText("Reading the request record…")).toHaveCount(0)
+    // The rules were read: who is told is still said.
+    if (viewport.width >= 768) await expect(page.getByText("1 firing")).toBeVisible()
+  })
+}
