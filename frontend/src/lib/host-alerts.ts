@@ -164,6 +164,32 @@ export const HOST_ALERT_WORDS: Record<HostAlertKind, { label: string; hint: stri
   },
 }
 
+/**
+ * A kind's line as one fact, for a card that offers it: the default it would
+ * be added with, in a few words. The sentence in `HOST_ALERT_WORDS` is the
+ * form's, where there is room to read it.
+ */
+export function hostAlertFact(kind: HostAlertKind): string {
+  const p = HOST_ALERT_DEFAULTS[kind]
+  switch (kind) {
+    case "cpu_high":
+    case "memory_high":
+      return `${p.threshold}% or more over ${minutesWords(p.minutes ?? 1)}`
+    case "disk_filling":
+      return `${p.threshold}% of space or inodes`
+    case "container_down":
+      return `down for ${minutesWords(p.minutes ?? 1)}`
+    case "backup_failed":
+      return "a job's latest run fails"
+    case "image_vulnerable":
+      return "a fix and a newer base exist"
+    case "tunnel_down":
+      return `off the edge for ${minutesWords(p.minutes ?? 1)}`
+    case "account_changed":
+      return "a new account, key or sudo rule"
+  }
+}
+
 /** A minute count in words: "1 min", "90 min", "2 h", "1 day". */
 export function minutesWords(minutes: number) {
   if (minutes >= 1440 && minutes % 1440 === 0) {
