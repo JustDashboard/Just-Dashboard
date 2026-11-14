@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -951,9 +952,23 @@ type dbBackupSummaryRow struct {
 	Count     int           `json:"count"`
 	TotalSize int64         `json:"totalSize"`
 	Newest    *dbBackupFile `json:"newest"`
+	// Recent is when its newest dumps were written and how large each is,
+	// newest first: what a list of every connection draws as a strip.
+	Recent []dbBackupRecent `json:"recent"`
 	// Job is the dump, restore or copy running against it now.
 	Job *jobs.Job `json:"job,omitempty"`
 }
+
+// dbBackupRecent is one dump on a connection's strip: its file's own time and
+// size, read from the directory entry without opening its description.
+type dbBackupRecent struct {
+	TakenAt time.Time `json:"takenAt"`
+	Size    int64     `json:"size"`
+}
+
+// dbBackupRecentMax is how many of a connection's newest dumps the summary
+// lists: the width of the strip a database's own page draws.
+const dbBackupRecentMax = 14
 
 // handleDBBackupSummary reports the newest dump of every connection in one
 // read: what the page that lists them all needs to say which have a backup
@@ -995,6 +1010,11 @@ func (s *Server) handleDBBackupSummary(w http.ResponseWriter, r *http.Request) e
 		if newest != nil {
 			described := describeDump(dir, newest.Name(), newest)
 			out[i].Newest = &described
+		}
+		sort.Slice(entries, func(a, b int) bool { return entries[a].ModTime().After(entries[b].ModTime()) })
+		out[i].Recent = []dbBackupRecent{}
+		for _, info := range entries[:min(len(entries), dbBackupRecentMax)] {
+			out[i].Recent = append(out[i].Recent, dbBackupRecent{TakenAt: info.ModTime().UTC(), Size: info.Size()})
 		}
 		if job, running := s.runningTransfer(out[i].ID); running {
 			out[i].Job = &job
