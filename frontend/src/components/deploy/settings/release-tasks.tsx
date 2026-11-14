@@ -285,7 +285,7 @@ export function ReleaseTasks({
                         />
                       )
                     )}
-                    <span className="numeric w-14 text-right text-hint whitespace-nowrap text-muted-foreground">
+                    <span className="numeric w-14 text-right text-hint whitespace-nowrap text-muted-foreground max-sm:hidden">
                       {spoken(task.timeoutSeconds)}
                     </span>
                   </>

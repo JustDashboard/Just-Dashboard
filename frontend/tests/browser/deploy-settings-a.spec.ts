@@ -1324,8 +1324,16 @@ test.describe("Settings lists are one line each, and a line opens its small form
       expect(writes).toHaveLength(0)
       await expect(saveBar(page)).toContainText("Health checks")
 
-      // Removing is on the line, and in the form's foot.
-      await form.getByRole("button", { name: "Remove health check Checkout page renders" }).click()
+      // Removing is on the line where there is room for it, and in the
+      // form's foot at every width.
+      if (width === 390) {
+        await form.getByRole("button", { name: "Edit Checkout page renders" }).click()
+        await sheet.getByRole("button", { name: "Remove", exact: true }).click()
+      } else {
+        await form
+          .getByRole("button", { name: "Remove health check Checkout page renders" })
+          .click()
+      }
       await expect(smoke).toHaveCount(0)
       await saveSettings(page)
       await expectSaved(page)
@@ -1520,6 +1528,35 @@ test.describe("Danger, Storage, Databases and Domains read at a glance", () => {
     // Stacked on a phone, each row carries its own names again.
     await page.setViewportSize({ width: 390, height: 900 })
     expect(await drawn(1)).toBe(true)
+  })
+
+  test("Edge rules with none is a row that adds the first, and a reader without the role gets a sentence", async ({
+    page,
+  }) => {
+    await mockProject(page, { normalized: true })
+    await page.goto("/deploy/7/settings/domains")
+    const form = page.getByRole("form", { name: "Edge rules" })
+    const empty = form.getByRole("list", { name: "Edge rules" }).getByRole("listitem")
+    await expect(empty).toHaveCount(1)
+    await expect(empty).toContainText("No rules: every request reaches the application")
+    await form.getByRole("button", { name: "Add the first rule" }).click()
+    await expect(form.getByRole("listitem", { name: /^Rule 1:/ })).toBeVisible()
+    await expect(saveBar(page)).toContainText("Edge rules")
+    await saveBar(page).getByRole("button", { name: "Discard", exact: true }).click()
+    await expect(empty).toHaveCount(1)
+
+    await page.route("**/api/v1/auth/session", (route) =>
+      json(route, {
+        authenticated: true,
+        needsTotp: false,
+        needsEnrollment: false,
+        require2fa: false,
+        capabilities: ["read"],
+      }),
+    )
+    await page.reload()
+    await expect(form.getByText("No rules: every request reaches the application.")).toBeVisible()
+    await expect(form.getByRole("button", { name: "Add the first rule" })).toHaveCount(0)
   })
 
   test("Databases says what the last gate did on the backup section's head, with no empty section under the page", async ({

@@ -276,13 +276,15 @@ export function HealthChecks({
                           <Status
                             tone={error ? "danger" : check.required ? "running" : "stopped"}
                             label={error ? "Not saved" : check.required ? "Required" : "Optional"}
-                            className="w-20"
+                            className="sm:w-20"
                           />
                         </>
                       }
                       actions={
+                        // On a phone the line is the name, what it does and
+                        // its state; removing is in the form's foot there.
                         !disabled && (
-                          <DimActions>
+                          <DimActions className="max-sm:hidden">
                             <IconAction
                               type="button"
                               label={`Remove health check ${check.name || index + 1}`}
