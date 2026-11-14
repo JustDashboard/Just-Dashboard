@@ -177,6 +177,12 @@ export default function TerminalPage() {
   // A browser that last had the Diff tab open comes back to the tab it grew into.
   const toolsTab: ToolsTab = storedTab === "diff" ? "git" : storedTab
   const [changed, setChanged] = useState(0)
+  // A phone draws the tools column from the first look at Files or Git, and
+  // keeps it from then on. Drawn from the start it read the folder and asked
+  // git every eight seconds for a column a phone may never open, with no
+  // toggle to stop it; a wide screen has the toggle, and its column is drawn
+  // while it is shown.
+  const [toolsSeen, setToolsSeen] = useState(false)
   // The emulator is put away, not covered, while another pane is up: covered
   // it was still laid out, so a phone's keyboard rising for the session
   // filter fitted it to five rows and told the shell so. Out of sight it
@@ -404,13 +410,16 @@ export default function TerminalPage() {
     if (phone) setPane(pane === "sessions" ? "terminal" : "sessions")
     else setShowRail(!showRail)
   }
-  const toggleTools = () => {
-    if (phone) setPane(pane === "files" || pane === "git" ? "terminal" : toolsTab)
-    else setShowTools(!showTools)
-  }
   const pickPane = (next: PhonePane) => {
-    if (next === "files" || next === "git") setToolsTab(next)
+    if (next === "files" || next === "git") {
+      setToolsTab(next)
+      setToolsSeen(true)
+    }
     setPane(next)
+  }
+  const toggleTools = () => {
+    if (phone) pickPane(pane === "files" || pane === "git" ? "terminal" : toolsTab)
+    else setShowTools(!showTools)
   }
 
   const select = (session: TerminalWorkspace) => {
@@ -1226,9 +1235,10 @@ export default function TerminalPage() {
             </div>
           </div>
 
-          {/* A phone keeps the column drawn while it is put away on a wide
-              screen: its bar counts the changed files on the Git stop. */}
-          {(showTools || phone) && (
+          {/* Once a phone has drawn the column it stays drawn while another
+              pane is up: the tree keeps its place, and the bar counts the
+              changed files on the Git stop. */}
+          {(phone ? toolsSeen : showTools) && (
             <div
               className={cn(
                 "relative flex min-w-0 flex-col max-lg:flex-1 lg:w-(--jd-tools) lg:shrink-0 lg:border-l lg:border-hairline",

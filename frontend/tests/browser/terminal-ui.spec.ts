@@ -408,6 +408,141 @@ test("fits the pane again when the WebGL context is lost", async ({ page }) => {
   expect(errors).toEqual([])
 })
 
+// One pane at a time on a phone (`components/phone-panes.tsx`). The rail and
+// the Files and Git column used to cover the emulator below `lg`, each with a
+// hide button of its own; covered, the emulator was still laid out, so a
+// phone's keyboard rising for the session filter fitted it to a few rows and
+// told the shell so.
+test("on a phone the page is one pane at a time, and a shell put away keeps its socket and its size", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { connections, errors } = await terminalFixture(page, "dom")
+  const bar = page.getByRole("navigation", { name: "Terminal" })
+  await expect(bar.getByRole("tab")).toHaveText(["Sessions", "Terminal", "Files", "Git"])
+  // It opens on the emulator, with the session that was on screen last.
+  await expect(bar.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
+  // The bar is the one way between panes.
+  await expect(page.getByRole("button", { name: "Hide this panel" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /the sessions rail$/ })).toBeHidden()
+  await expect(page.getByRole("button", { name: /files & git$/ })).toBeHidden()
+  // The frame is the screen, edge to edge, with the bar at its foot.
+  const frame = await page.locator("[data-slot=terminal-workspace]").boundingBox()
+  expect([frame!.x, frame!.width]).toEqual([0, 390])
+  const foot = await bar.boundingBox()
+  expect(Math.round(foot!.y + foot!.height)).toBe(844)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+  const first = connections.get("window-a")![0]
+  await expect.poll(() => first.sizes.length).toBeGreaterThan(0)
+  await page.waitForTimeout(500)
+  const size = first.sizes.at(-1)
+  const said = first.sizes.length
+  expect(size!.cols).toBeGreaterThan(20)
+
+  await bar.getByRole("tab", { name: "Sessions" }).click()
+  const rail = page.getByLabel("Terminal sessions")
+  await expect(rail).toBeVisible()
+  await expect(page.locator(".xterm-screen:visible")).toHaveCount(0)
+  // A keyboard takes half the screen while the list is up. The shell is not
+  // told: out of sight it keeps the grid it had.
+  await page.setViewportSize({ width: 390, height: 420 })
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")))
+  await page.waitForTimeout(600)
+  expect(first.sizes).toHaveLength(said)
+  expect(first.closed).toBe(false)
+  await page.setViewportSize({ width: 390, height: 844 })
+
+  // Picking a session is asking for its shell: the emulator is shown and has the keyboard.
+  await rail.locator('[data-session="session-b"]').getByRole("button").first().click()
+  await expect(bar.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator(".xterm-helper-textarea:visible")).toBeFocused()
+  await page.keyboard.type("only-c")
+  await expect.poll(() => connections.get("window-c")![0].input.join("")).toContain("only-c")
+  expect(first.input.join("")).not.toContain("only-c")
+
+  await bar.getByRole("tab", { name: "Sessions" }).click()
+  await rail.locator('[data-session="session-a"]').getByRole("button").first().click()
+  await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
+  await expect(page.locator(".xterm-helper-textarea:visible")).toBeFocused()
+  // The shell it was, on the socket it had, told its size once more and the same.
+  expect(connections.get("window-a")).toHaveLength(1)
+  expect(first.closed).toBe(false)
+  await expect.poll(() => first.sizes.length).toBeGreaterThan(said)
+  expect(first.sizes.at(-1)).toEqual(size)
+  expect(errors).toEqual([])
+})
+
+test("from lg the three columns stand side by side and no bar is drawn", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 800 })
+  await terminalFixture(page, "dom")
+  await expect(page.locator("[data-slot=pane-bar]")).toBeHidden()
+  await expect(page.getByLabel("Terminal sessions")).toBeVisible()
+  await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "Hide the sessions rail" })).toBeVisible()
+  // The frame stands in the page's gutter, rounded.
+  const frame = await page.locator("[data-slot=terminal-workspace]").boundingBox()
+  const area = await page.locator("[data-workspace-shell-scroll]").boundingBox()
+  expect(frame!.x).toBeGreaterThan(area!.x)
+})
+
+/** The terminal's listing with the feature switched off, for an account with these capabilities. */
+async function terminalOff(page: Page, capabilities: string[]) {
+  await page.route("**/api/v1/**", (route) => {
+    const path = new URL(route.request().url()).pathname.replace("/api/v1", "")
+    if (path === "/auth/session")
+      return route.fulfill({
+        json: {
+          authenticated: true,
+          user: { username: "operator", role: "admin" },
+          capabilities,
+        },
+      })
+    if (path === "/terminal/")
+      return route.fulfill({
+        json: { enabled: false, persistent: true, login: {}, folders: [], sessions: [] },
+      })
+    return route.fulfill({ json: {} })
+  })
+  await page.goto("/terminal")
+}
+
+for (const width of [1280, 390]) {
+  test(`a terminal that is turned off says where it is turned on, at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 })
+    await terminalOff(page, ["read", "terminal", "system.admin"])
+    const screen = page.locator("[data-slot=missing-thing]")
+    await expect(screen).toHaveAttribute("data-thing", "terminal")
+    await expect(screen).toHaveAttribute("data-reason", "module-off")
+    await expect(screen.getByRole("heading", { level: 2 })).toHaveText(
+      "The web terminal is turned off",
+    )
+    await expect(screen.locator('img[src="/logos/terminal.svg"]')).toBeVisible()
+    await expect(screen.getByRole("link", { name: "Open Configuration" })).toHaveAttribute(
+      "href",
+      "/dashboard/configuration",
+    )
+    // The switch is on a page, so the page is named and the variable is not.
+    await expect(page.getByText("JD_TERMINAL_ENABLED")).toHaveCount(0)
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Terminal")
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    )
+  })
+}
+
+test("an account that cannot change Configuration is told who can turn the terminal on", async ({
+  page,
+}) => {
+  await terminalOff(page, ["read", "terminal"])
+  const screen = page.locator("[data-slot=missing-thing]")
+  await expect(screen).toContainText("An administrator can turn it on.")
+  await expect(screen.getByRole("link")).toHaveCount(0)
+})
+
 // A tab is named after what its shell is doing and marked while something
 // runs; the rail names a session after the window it is on. And the page
 // remembers which session and window were on screen across a navigation.
