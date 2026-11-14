@@ -161,7 +161,7 @@ segment under `/api/v1`.
 | Assistant | `assistant/` | `assistant/` | `/assistant` → `handlers_assistant*.go` | `assistant` | `assistant.spec.ts` | [`operator.md`](../deployments/operator.md) |
 | Metrics | `metrics/` | `metrics/` | `/system` → `handlers_system.go`, `handlers_capacity.go` | `metrics`, `sysinfo` | `metrics-ui.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | Alerts | `metrics/alerts/` | `metrics/`, `alerts/` | `/system/alerts` → `handlers_host_alerts.go`, `host_alert*.go` | `metrics` | `host-alerts.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
-| Processes | `processes/` | `procs/` | `/processes`, `/pm2`, `/systemd`, `/cron` → `handlers_procs*.go` | `procs` | `processes-ui.spec.ts`, `services-ui.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md) |
+| Processes | `processes/` | `procs/` | `/processes`, `/pm2`, `/systemd`, `/cron` → `handlers_procs*.go` | `procs` | `processes-ui.spec.ts`, `pm2-application.spec.ts`, `services-ui.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md) |
 | Logs | `logs/` | `logs/` | `/logs` → `handlers_logs*.go` | `logsx` | `logs-*.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | **Apps** | | | | | | |
 | Deployments | `deploy/` | `deploy/` | `/deploy` → `handlers_deploy*.go`, `deployment_*.go` | `deploy`, `blueprint`, and the ones below | `deploy-*.spec.ts` | [the deployment guides](../deployments/README.md), [`implementation.md`](../deployments/implementation.md) |
