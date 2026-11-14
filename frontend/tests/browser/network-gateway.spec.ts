@@ -15,6 +15,10 @@ const open = async (page: Page, path: string, mutations: Mutation[] = [], data =
   await page.goto(path)
 }
 
+/** A blocklist's row; the picture over the list names the same lists in its own items. */
+const blocklistRow = (page: Page, name: string) =>
+  page.locator("#blocklists").getByRole("listitem").filter({ hasText: name })
+
 /**
  * Review screenshots, for the eyes the checks do not have. Written only when
  * asked for, into the directory named — never into the tree.
@@ -338,8 +342,14 @@ test("the protection page reads the lists, the limits and the trusted set", asyn
   await open(page, "/network/protection")
   await expect(page.getByRole("button", { name: "Edit China and Russia" })).toBeVisible()
   await expect(page.getByText("China · Russia")).toBeVisible()
-  // The last fetch's failure is said on the card, in words.
-  await expect(page.getByText("the feed answered 503")).toBeVisible()
+  // The last fetch's failure is the row's state, and its words are in the editor.
+  const firehol = blocklistRow(page, "FireHOL level 1")
+  await expect(firehol.getByText("Fetch failed").filter({ visible: true })).toBeVisible()
+  await page.getByRole("button", { name: "Edit FireHOL level 1" }).click()
+  await expect(page.getByRole("dialog").getByRole("alert")).toHaveText(
+    "the feed answered 503; the copy from two days ago is in force",
+  )
+  await page.keyboard.press("Escape")
   await expect(page.getByRole("button", { name: "Edit SSH" })).toBeVisible()
   await expect(
     page.getByText("22/tcp · 10 new connections a minute per address, bursts of 5 · drop"),
@@ -349,7 +359,8 @@ test("the protection page reads the lists, the limits and the trusted set", asyn
     "18",
   )
   await expect(page.getByText("your allowlist")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Stop trusting 198.51.100.23" })).toBeVisible()
+  await page.getByRole("button", { name: "198.51.100.23 actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Stop trusting" })).toBeVisible()
 })
 
 test("a list holding the reader's address and an untrusted reader are each said", async ({
@@ -369,16 +380,13 @@ test("a list holding the reader's address and an untrusted reader are each said"
 
 test("staged kernel settings post exactly the settings that changed", async ({ page }) => {
   const mutations: Mutation[] = []
-  await open(page, "/network/protection", mutations)
+  await open(page, "/network/protection?tab=kernel", mutations)
   // Stage IPv6 redirects from On to Off.
-  await page
-    .getByRole("radiogroup", { name: "Accept ICMP redirects (IPv6)" })
-    .getByRole("radio", { name: "Off" })
-    .click()
+  await page.getByRole("switch", { name: "Accept ICMP redirects (IPv6)" }).click()
   await page.getByLabel("SYN backlog", { exact: true }).fill("4096")
-  const bar = page.getByRole("region", { name: "Apply kernel settings" })
+  const bar = page.getByRole("region", { name: "Save changes" })
   await expect(bar).toContainText("2 unsaved changes")
-  await bar.getByRole("button", { name: "Apply" }).click()
+  await bar.getByRole("button", { name: "Save" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog).toContainText("SYN backlog")
   expect(mutations).toEqual([])
@@ -397,13 +405,11 @@ test("staged kernel settings post exactly the settings that changed", async ({ p
 })
 
 test("a number outside its range holds the apply back", async ({ page }) => {
-  await open(page, "/network/protection")
+  await open(page, "/network/protection?tab=kernel")
   await page.getByLabel("SYN-ACK retries", { exact: true }).fill("9")
   await expect(page.getByText("A whole number from 1 to 5.")).toBeVisible()
   await expect(
-    page
-      .getByRole("region", { name: "Apply kernel settings" })
-      .getByRole("button", { name: "Apply" }),
+    page.getByRole("region", { name: "Save changes" }).getByRole("button", { name: "Save" }),
   ).toBeDisabled()
 })
 
@@ -660,13 +666,24 @@ test.describe("installed, measured and previewed", () => {
 test.describe("protection lifecycle", () => {
   test("lists say their schedule, last change, integrity and staleness", async ({ page }) => {
     await open(page, "/network/protection")
-    await expect(page.getByText("+12 −3 at the last change")).toBeVisible()
-    const drop = page.getByRole("listitem").filter({ hasText: "Spamhaus DROP" })
-    await expect(drop.getByText("signed", { exact: true })).toBeVisible()
-    await expect(drop.getByText(/every 6 hours · next fetch/)).toBeVisible()
-    const firehol = page.getByRole("listitem").filter({ hasText: "FireHOL level 1" })
-    await expect(firehol.getByText(/failing \(3 tries\) · stale/)).toBeVisible()
-    await expect(page.getByText(/Covers 412M IPv4 addresses \(9\.59% of IPv4\)/)).toBeVisible()
+    // A row is one line: its coverage is on it, its schedule and state in columns.
+    await expect(page.getByText(/China · Russia · 412M IPv4 addresses \(9\.59%\)/)).toBeVisible()
+    const drop = blocklistRow(page, "Spamhaus DROP")
+    await expect(drop.getByText("Signed", { exact: true }).filter({ visible: true })).toBeVisible()
+    await expect(drop.getByText(/every 6 hours · fetched/)).toBeVisible()
+    await expect(drop.getByText(/next in \d/)).toBeVisible()
+    const firehol = blocklistRow(page, "FireHOL level 1")
+    await expect(firehol.getByText(/3 failed · next in/)).toBeVisible()
+    // What the row has no room for is the head of the list's editor.
+    await page.getByRole("button", { name: "Edit China and Russia" }).click()
+    const about = page.getByRole("region", { name: "About China and Russia" })
+    await expect(about).toContainText("412M IPv4 addresses (9.59% of IPv4)")
+    await expect(about).toContainText("+12 −3 at the last change")
+    await page.keyboard.press("Escape")
+    await page.getByRole("button", { name: "Edit FireHOL level 1" }).click()
+    await expect(page.getByRole("region", { name: "About FireHOL level 1" })).toContainText(
+      "daily · failing (3 tries) · stale",
+    )
   })
 
   test("a list's preview names this server's networks, open sessions and geography", async ({
@@ -767,8 +784,11 @@ test.describe("protection lifecycle", () => {
   }) => {
     const mutations: Mutation[] = []
     await open(page, "/network/protection", mutations)
-    await expect(page.getByText("120 let through")).toBeVisible()
-    await expect(page.getByText(/Partner monitoring · FireHOL level 1 · ends/)).toBeVisible()
+    await expect(
+      page.locator("#exceptions").getByText("120 let through").filter({ visible: true }),
+    ).toBeVisible()
+    await expect(page.getByText(/Partner monitoring · FireHOL level 1 · made by/)).toBeVisible()
+    await expect(page.getByText(/^Ends .* from now$/)).toBeVisible()
     await page.getByRole("button", { name: "New exception" }).click()
     const dialog = page.getByRole("dialog")
     await dialog.getByLabel("Address or network").fill("203.0.113.40")
@@ -797,7 +817,8 @@ test.describe("protection lifecycle", () => {
     await expect(
       page.getByText(/Old office · kept by operator · no sign-in seen in 90 days/),
     ).toBeVisible()
-    await page.getByRole("button", { name: "Confirm 198.51.100.23 is still needed" }).click()
+    await page.getByRole("button", { name: "198.51.100.23 actions" }).click()
+    await page.getByRole("menuitem", { name: "Confirm still needed" }).click()
     await expect.poll(() => mutations.length).toBe(1)
     expect(mutations[0]).toEqual({
       method: "PUT",
@@ -840,12 +861,12 @@ test.describe("protection lifecycle", () => {
   })
 
   test("the connection table panel says what points at a cause", async ({ page }) => {
-    await open(page, "/network/protection")
+    await open(page, "/network/protection?tab=table")
     const panel = page.getByLabel("Connection table pressure")
     await expect(panel.getByText(/Half-open TCP connections are a large share/)).toBeVisible()
     await expect(panel.getByText("198.51.100.77 holds 3600 entries (31%).")).toBeVisible()
     await expect(panel.getByRole("region", { name: "By state" })).toContainText("tcp SYN_RECV")
-    await expect(panel.getByText(/Since boot the kernel dropped 12 new connections/)).toBeVisible()
+    await expect(panel.getByText("since boot 12 dropped · 3 early-dropped")).toBeVisible()
   })
 
   test("a read-only reader never asks for the connection table", async ({ page }) => {
@@ -858,23 +879,27 @@ test.describe("protection lifecycle", () => {
       asked = true
       return json(route, pressure)
     })
-    await page.goto("/network/protection")
-    await expect(page.getByRole("button", { name: "Edit SSH" })).toBeVisible()
+    await page.goto("/network/protection?tab=table")
+    await expect(page.locator("#limits").getByRole("button", { name: "Open SSH" })).toBeVisible()
     expect(asked).toBe(false)
+    // Its view is not offered, and its address opens the overview instead.
+    await expect(page.getByRole("tab", { name: "Connection table" })).toHaveCount(0)
     await expect(page.getByLabel("Connection table pressure")).toHaveCount(0)
   })
 
   test("a workload profile stages its values and per-interface values are shown", async ({
     page,
   }) => {
-    await open(page, "/network/protection")
+    await open(page, "/network/protection?tab=kernel")
     await page.getByRole("combobox", { name: "Stage a workload profile" }).click()
     await page.getByRole("option", { name: "VPN or container gateway" }).click()
-    const bar = page.getByRole("region", { name: "Apply kernel settings" })
+    const bar = page.getByRole("region", { name: "Save changes" })
     // Of its four values two differ from what runs: the table size and the backlog,
     // and new-interface filtering (running Off).
     await expect(bar).toContainText("3 unsaved changes")
-    await page.getByRole("button", { name: /Per-interface values/ }).click()
-    await expect(page.getByText(/device Strict, all Off/)).toBeVisible()
+    const devices = page.getByRole("list", { name: "Per-interface values" })
+    await expect(
+      devices.getByText(/device Strict, all Off/).filter({ visible: true }),
+    ).toBeVisible()
   })
 })

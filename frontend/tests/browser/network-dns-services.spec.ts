@@ -93,7 +93,9 @@ async function confirmation(page: Page) {
 
 test("private native services are absent for a reader and make no native GET", async ({ page }) => {
   const control = await mockDNSServicePage(page, { reader: true })
-  await expect(page.getByRole("heading", { name: "Resolver chain", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "About the resolver" })).toContainText(
+    "systemd-resolved",
+  )
   await expect(page.getByRole("button", { name: "Connect engine", exact: true })).toHaveCount(0)
   expect(control.reads).toEqual([])
 })

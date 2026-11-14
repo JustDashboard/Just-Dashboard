@@ -1582,7 +1582,7 @@ function VolumeRow({
       <span className="flex gap-0.5">
         {value && (
           <IconAction label="Open the volume" asChild>
-            <Link href={`/docker/volumes?volume=${encodeURIComponent(value)}`}>
+            <Link href={`/docker/volumes/${encodeURIComponent(value)}`}>
               <ArrowUpRight />
             </Link>
           </IconAction>

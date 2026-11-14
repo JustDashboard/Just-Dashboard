@@ -14,7 +14,7 @@ export function share(rate: number): string {
   return percent(rate * 100, rate > 0 && rate < 0.001 ? 2 : 1)
 }
 
-/** One site's last hour in a line: `1.2k req/h · 0.4% 5xx`. */
+/** One site's last hour in a line, as the overview's route list reads it: `1.2k req/h · 0.4% 5xx`. */
 export function trafficLabel(reading: SiteTrafficReading): string {
   return `${compactCount(reading.requests)} req/h · ${share(reading.errorRate)} 5xx`
 }
@@ -26,25 +26,106 @@ export function errorRateTone(rate: number): Tone {
   return "default"
 }
 
-export type TrafficView = "requests" | "errors"
+/**
+ * Where a site's requests are read in full: its own page, which reads the
+ * record its file names (an nginx site's access log, or the ingress's record
+ * for a route on the Docker Caddy ingress) in the deployment Logs page's
+ * workspace. The Traffic page drew a second, older copy of that record at
+ * `?site=`; that address now lands on the site's page.
+ */
+export function readingHref(reading: Pick<SiteTrafficReading, "site">): string {
+  return `/proxy/sites/${encodeURIComponent(reading.site)}`
+}
 
-/** Where a site's traffic opens; the contract other proxy pages link by. */
-export function trafficHref(site: string, view?: TrafficView) {
-  const q = new URLSearchParams({ site })
-  if (view === "errors") q.set("view", "errors")
-  return `/proxy/traffic?${q}`
+/** The page's two views, as `?tab=` spells them. */
+export type TrafficTab = "sites" | "errors"
+
+/**
+ * Which view an address opens. `?tab=` is the page's own; `?view=errors` is
+ * what the overview's Error log link and older bookmarks say, and still opens
+ * the error log.
+ */
+export function trafficTab(params: Pick<URLSearchParams, "get">): TrafficTab {
+  const asked = params.get("tab") ?? params.get("view")
+  return asked === "errors" ? "errors" : "sites"
 }
 
 /**
- * Where a reading's requests are read in full. An nginx site's on the Traffic
- * page, which reads the file its configuration names; a route on the Docker
- * Caddy ingress has no such file, so its own site page, which reads the
- * deployment's record.
+ * Where an old one-site address goes. `?site=<name>` opened that site's
+ * requests here; they are its page's now. With `view=errors` it asked for the
+ * site's error log, grouped and explained, which only this page reads, so
+ * that one stays: the Errors view narrowed to the site.
  */
-export function readingHref(reading: Pick<SiteTrafficReading, "site" | "engine">): string {
-  return reading.engine === "caddy-ingress"
-    ? `/proxy/sites/${encodeURIComponent(reading.site)}`
-    : trafficHref(reading.site)
+export function legacySiteTarget(params: Pick<URLSearchParams, "get">): string | undefined {
+  const site = params.get("site")
+  if (!site || trafficTab(params) === "errors") return undefined
+  return readingHref({ site })
+}
+
+/** The share that failed, as the deployment pages say it: "1.0% of requests failed". */
+export function failingWords(rate: number): string {
+  if (rate <= 0) return "No requests failed"
+  const pct = rate * 100
+  return pct < 0.1 ? "Under 0.1% of requests failed" : `${percent(pct, 1)} of requests failed`
+}
+
+/** The edge's last hour as the page reads it: every logging site added up. */
+export type EdgeHour = {
+  /** Every site the summary named, logging or not. */
+  sites: number
+  logging: number
+  /** Sites whose log the dashboard cannot read, or that keep none. */
+  unlogged: SiteTrafficReading[]
+  total: number
+  /** Answered with a 5xx. */
+  failed: number
+  /** Answered with a 4xx, from the minutes. */
+  refused: number
+  bytes: number
+  /** 0-1 of the hour's requests that failed. */
+  rate: number
+  /** Requests a minute over the hour. */
+  perMinute: number
+  /** Every logging site's whole log was read; otherwise the counts are floors. */
+  complete: boolean
+  /** The slowest site by its 19-in-20 time, where any site's log carries timing. */
+  slowest?: { site: string; p95: number }
+  /** How many logging sites carry timing at all. */
+  timed: number
+  points: TrafficPoint[]
+}
+
+/**
+ * The hour across every site. The failed count is each site's share of its
+ * own requests turned back into requests, since the summary carries a share
+ * and not the count; rounded, so "13 of 1,284" never reads 12.9999.
+ */
+export function edgeHour(sites: SiteTrafficReading[]): EdgeHour {
+  const logging = sites.filter((s) => s.status === "available")
+  const total = logging.reduce((n, s) => n + s.requests, 0)
+  const failed = Math.round(logging.reduce((n, s) => n + s.requests * s.errorRate, 0))
+  const points = edgeTraffic(logging)
+  const refused = points.reduce((n, p) => n + p.refused, 0)
+  const timed = logging.filter((s) => typeof s.p95 === "number")
+  const slowest = timed.reduce<{ site: string; p95: number } | undefined>(
+    (worst, s) => (worst && worst.p95 >= (s.p95 as number) ? worst : { site: s.site, p95: s.p95! }),
+    undefined,
+  )
+  return {
+    sites: sites.length,
+    logging: logging.length,
+    unlogged: sites.filter((s) => s.status !== "available"),
+    total,
+    failed,
+    refused,
+    bytes: logging.reduce((n, s) => n + s.bytes, 0),
+    rate: total > 0 ? failed / total : 0,
+    perMinute: total / 60,
+    complete: logging.every((s) => s.complete),
+    slowest,
+    timed: timed.length,
+    points,
+  }
 }
 
 /** The edge's hour: every site's minutes added up, oldest first. */
@@ -101,9 +182,10 @@ export function busiestSites(sites: SiteTrafficSummary["sites"], limit?: number)
     label: s.site,
     value: s.status === "available" ? `${compactCount(s.requests)}/h` : "—",
     share: s.status === "available" && whole > 0 ? s.requests / whole : undefined,
-    hint: s.status === "available" ? `${share(s.errorRate)} 5xx` : "no log",
+    hint:
+      s.status !== "available" ? "no log" : s.errorRate > 0 ? `${share(s.errorRate)} failing` : "",
     tone: s.status === "available" ? errorRateTone(s.errorRate) : "default",
-    title: s.reason ?? `Open ${s.site}'s traffic`,
+    title: s.reason ?? `Open ${s.site}'s requests`,
     href: readingHref(s),
   }))
 }

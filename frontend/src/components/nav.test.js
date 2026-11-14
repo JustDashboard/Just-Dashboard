@@ -133,7 +133,7 @@ test("Settings → Hub is in the rail only on a linked server, or while you are 
   expect(tabTitle("/dashboard/hub")).toBe("Hub · Just Dashboard")
 })
 
-test("the Network rail is the overview and three headed groups, not nineteen siblings", () => {
+test("the Network rail is the overview and three headed groups, not eighteen siblings", () => {
   const network = NAV.flatMap((group) => group.items).find((entry) => entry.href === "/network")
   const groups = groupedChildren(network.children)
   expect(groups.map((group) => group.label)).toEqual([
@@ -143,9 +143,9 @@ test("the Network rail is the overview and three headed groups, not nineteen sib
     "Diagnostics",
   ])
   expect(groups[0].items.map((item) => item.title)).toEqual(["Overview"])
-  expect(groups.map((group) => group.items.length)).toEqual([1, 9, 4, 5])
+  expect(groups.map((group) => group.items.length)).toEqual([1, 9, 4, 4])
   // Nothing was dropped or moved out of the section by the grouping.
-  expect(network.children).toHaveLength(19)
+  expect(network.children).toHaveLength(18)
   expect(groups.find((group) => group.label === "Activity").items.map((i) => i.title)).toEqual([
     "Traffic",
     "Socket history",
