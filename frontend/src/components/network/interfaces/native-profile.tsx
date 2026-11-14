@@ -10,9 +10,9 @@ import {
   type NativeProfile,
 } from "@/lib/network-native-profile"
 import { useConfirm } from "@/components/confirm-dialog"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
 import { Detail, DetailList } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Field, FieldRow, FormSection, OptionRow } from "@/components/form"
+import { Field, FieldRow, FormSection, InfoTip, OptionRow } from "@/components/form"
 import { Status } from "@/components/status-dot"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { Button } from "@/components/ui/button"
@@ -61,11 +61,9 @@ const intentFamily = (family: DraftFamily): NativeFamily => ({
 /** Native ownership is a separate persistent owner, never a second managed profile. */
 export function NativeProfileEditor({
   device,
-  open,
   onChanged,
 }: {
   device: string
-  open: boolean
   onChanged: () => void
 }) {
   const { can } = useAuth()
@@ -82,7 +80,7 @@ export function NativeProfileEditor({
       ),
     30_000,
     [device],
-    { enabled: open && can("system.admin") },
+    { enabled: can("system.admin") },
   )
   const view = profile.data
   const [draft, setDraft] = useState<NativeDraft>()
@@ -96,8 +94,7 @@ export function NativeProfileEditor({
     draft.renderer === view.renderer &&
     draft.profile === view.profile
   const changed = draft && view && draft.generation !== view.generation
-  const blocked =
-    !open || !writable || !view?.editable || Boolean(profile.error) || changed || !sameOwner
+  const blocked = !writable || !view?.editable || Boolean(profile.error) || changed || !sameOwner
   const latestReview = useRef<{ draft?: NativeDraft; blocked: boolean }>({ blocked: true })
   useLayoutEffect(() => {
     latestReview.current = { draft, blocked }
@@ -153,12 +150,34 @@ export function NativeProfileEditor({
   }
 
   return (
-    <Panel plain>
-      <PanelHeader
-        title="Native persistent profile"
-        actions={view && <Status tone={view.editable ? "running" : "warning"} label={view.owner} />}
-      />
-      <PanelBody className="space-y-4">
+    <div className="py-8 first:pt-0 last:pb-0">
+      <SettingSection
+        title={
+          <span className="inline-flex items-center gap-2">
+            Native persistent profile
+            <InfoTip label="How a native profile is applied">
+              Native profile edits always require dashboard reconnection confirmation. Existing bond
+              membership, bond mode and VRF table remain owned by the native profile.
+            </InfoTip>
+          </span>
+        }
+        status={view && <Status tone={view.editable ? "running" : "warning"} label={view.owner} />}
+        actions={
+          view &&
+          !draft &&
+          writable && (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={!view.editable || Boolean(profile.error)}
+              onClick={begin}
+              aria-label="Edit native profile"
+            >
+              Edit
+            </Button>
+          )
+        }
+      >
         <NetworkReadWarning
           error={profile.error}
           refresh={profile.refresh}
@@ -197,16 +216,6 @@ export function NativeProfileEditor({
               )}
             </DetailList>
             {view.refusal && <p className="text-body text-warning">{view.refusal}</p>}
-            {!draft && writable && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!view.editable || Boolean(profile.error)}
-                onClick={begin}
-              >
-                Edit native profile
-              </Button>
-            )}
           </>
         )}
         {draft && (
@@ -263,15 +272,11 @@ export function NativeProfileEditor({
                 Discard native draft
               </Button>
             </div>
-            <p className="text-hint text-muted-foreground">
-              Native profile edits always require dashboard reconnection confirmation. Existing bond
-              membership, bond mode and VRF table remain owned by the native profile.
-            </p>
           </div>
         )}
-      </PanelBody>
+      </SettingSection>
       {dialog}
-    </Panel>
+    </div>
   )
 }
 
@@ -331,7 +336,7 @@ function NativeFamilyFields({
         <Field
           label={`${label} static addresses`}
           htmlFor={`${id}-addresses`}
-          hint="One address/prefix per line. Manual addressing requires at least one."
+          info="One address/prefix per line. Manual addressing requires at least one."
         >
           <Textarea
             id={`${id}-addresses`}
@@ -340,7 +345,7 @@ function NativeFamilyFields({
             onChange={(event) => onChange({ ...value, addresses: event.target.value })}
           />
         </Field>
-        <Field label={`${label} DNS servers`} htmlFor={`${id}-dns`} hint="One IP literal per line.">
+        <Field label={`${label} DNS servers`} htmlFor={`${id}-dns`} info="One IP literal per line.">
           <Textarea
             id={`${id}-dns`}
             className="font-mono"
@@ -352,7 +357,7 @@ function NativeFamilyFields({
       <Field
         label={`${label} search and route domains`}
         htmlFor={`${id}-domains`}
-        hint="One suffix per line. Prefix a routing-only suffix with ~."
+        info="One suffix per line. Prefix a routing-only suffix with ~."
       >
         <Textarea
           id={`${id}-domains`}
