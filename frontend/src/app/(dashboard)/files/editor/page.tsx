@@ -162,7 +162,7 @@ export default function FileEditorPage() {
     )
 
   return (
-    <Page fill className="max-w-none gap-2 p-0 lg:px-3 lg:py-3">
+    <Page fill className="max-w-none gap-2 p-0 md:px-0 md:py-0 lg:px-3 lg:py-3">
       {/* A frame is needed because both the tree and editor own their scrolling.
           Below `lg` it runs to the screen's edges and shows one of the two,
           picked on the bar at its foot: beside each other on a phone the tree

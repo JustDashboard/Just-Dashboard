@@ -1521,7 +1521,7 @@ export default function FilesPage() {
   })
 
   return (
-    <Page fill data-files-workspace className="gap-2 p-0 lg:px-3 lg:py-3">
+    <Page fill data-files-workspace className="gap-2 p-0 md:px-0 md:py-0 lg:px-3 lg:py-3">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Files</h1>
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
