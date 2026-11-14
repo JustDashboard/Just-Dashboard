@@ -257,6 +257,7 @@ export function Insights({
   const daily = data?.daily ?? []
   const durationValues = daily.map((day) => day.medianDurationSeconds).filter((value) => value > 0)
   // The window's median is drawn across the days, so it has to be on their scale.
+  const timed = durationValues.length > 0
   const slowest = Math.max(data?.medianDurationSeconds ?? 0, ...durationValues)
   const total = (day: Day) => day.succeeded + day.failed + day.cancelled
   const peak = Math.max(1, ...daily.map(total))
@@ -326,7 +327,9 @@ export function Insights({
         (history || failures) && "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
       )}
     >
-      <div className="min-w-0 space-y-2">
+      {/* With no release time to draw beside it, the releases take the row
+          rather than leave the second column standing empty. */}
+      <div className={cn("min-w-0 space-y-2", history && !timed && "lg:col-span-2")}>
         <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h3 className="text-title font-medium">Releases per day</h3>
           <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
@@ -380,66 +383,59 @@ export function Insights({
         {axis}
       </div>
 
-      {history && (
+      {/* A window nothing succeeded in has no release time, and a row of
+          empty days would draw one as zero (§10): the facts say why. */}
+      {history && timed && (
         <div className="min-w-0 space-y-2">
-          {/* A window nothing succeeded in has no release time, and a row of
-              empty days would draw one as zero (§10). */}
-          {durationValues.length > 0 && (
-            <>
-              <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                <h3 className="text-title font-medium">Release time per day</h3>
-                <p className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
-                  <span
-                    aria-hidden
-                    className="w-3 border-t border-dashed border-muted-foreground"
-                  />
-                  median {seconds(data.medianDurationSeconds)}
-                </p>
-              </div>
-              {/* The same days at the same height as the releases beside it,
+          <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h3 className="text-title font-medium">Release time per day</h3>
+            <p className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
+              <span aria-hidden className="w-3 border-t border-dashed border-muted-foreground" />
+              median {seconds(data.medianDurationSeconds)}
+            </p>
+          </div>
+          {/* The same days at the same height as the releases beside it,
                   which a line through the days that shipped was not: it
                   joined four releases a week apart into one slope with no
                   scale. The first line of the plot is kept for the scale's
                   top, so the slowest day never runs under its own label. */}
-              <div key={range} className="relative animate-rise">
-                <DayBars
-                  days={daily}
-                  label="Median release time per day"
-                  testId="insights-durations"
-                  className="h-28 pt-4"
-                  lines={durationLines}
-                >
-                  {(day) =>
-                    day.medianDurationSeconds ? (
-                      <span
-                        className="block w-full max-w-3 rounded-t-sm bg-chart-2"
-                        style={{
-                          height: `${Math.max(4, (day.medianDurationSeconds / slowest) * 100)}%`,
-                        }}
-                      />
-                    ) : (
-                      <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
-                    )
-                  }
-                </DayBars>
-                <span className="numeric absolute top-0 left-0 text-micro leading-4 text-muted-foreground">
-                  {seconds(slowest)}
-                </span>
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-x-0 top-4 border-t border-hairline"
-                />
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-x-0 border-t border-dashed border-muted-foreground"
-                  style={{
-                    bottom: `calc(1px + (100% - 1rem - 1px) * ${data.medianDurationSeconds / slowest})`,
-                  }}
-                />
-              </div>
-              {axis}
-            </>
-          )}
+          <div key={range} className="relative animate-rise">
+            <DayBars
+              days={daily}
+              label="Median release time per day"
+              testId="insights-durations"
+              className="h-28 pt-4"
+              lines={durationLines}
+            >
+              {(day) =>
+                day.medianDurationSeconds ? (
+                  <span
+                    className="block w-full max-w-3 rounded-t-sm bg-chart-2"
+                    style={{
+                      height: `${Math.max(4, (day.medianDurationSeconds / slowest) * 100)}%`,
+                    }}
+                  />
+                ) : (
+                  <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
+                )
+              }
+            </DayBars>
+            <span className="numeric absolute top-0 left-0 text-micro leading-4 text-muted-foreground">
+              {seconds(slowest)}
+            </span>
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 top-4 border-t border-hairline"
+            />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 border-t border-dashed border-muted-foreground"
+              style={{
+                bottom: `calc(1px + (100% - 1rem - 1px) * ${data.medianDurationSeconds / slowest})`,
+              }}
+            />
+          </div>
+          {axis}
         </div>
       )}
       {failures && <div className={cn("min-w-0", history && "lg:col-span-2")}>{failures}</div>}

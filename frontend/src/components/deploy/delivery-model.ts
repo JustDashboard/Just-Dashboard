@@ -45,8 +45,8 @@ export type DeliveryFact = {
  * The same figures as a line of facts, for the Deployments page: the success
  * rate, how often, how long and how fast it recovers, each with the basis the
  * four captioned figures used to print under themselves. A fact with nothing
- * behind it is left out rather than drawn as a dash: a window nothing
- * succeeded in has no release time, and one with no failure has no recovery.
+ * behind it is never a dash: a window nothing succeeded in says so where its
+ * release time would be, and one with no failure says nothing of recovery.
  * `within` words the slow tail, so the page says it as it says every other.
  */
 export function deliveryFacts(
@@ -77,6 +77,13 @@ export function deliveryFacts(
       figure: format(data.medianDurationSeconds),
       words: `usually, ${within(format(data.p95DurationSeconds))}`,
       basis: "The median release, from claim to finish",
+    })
+  else if (decided > 0)
+    facts.push({
+      key: "duration",
+      figure: "",
+      words: "no release succeeded in this window",
+      basis: "A release's time is taken from the ones that succeeded",
     })
   if (data.recoveredFailures > 0)
     facts.push({

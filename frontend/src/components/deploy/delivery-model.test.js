@@ -93,7 +93,11 @@ describe("deliveryFacts", () => {
       format,
       within,
     )
-    expect(words(facts)).toEqual(["0% succeeded", "no failure followed by a success yet"])
+    expect(words(facts)).toEqual([
+      "0% succeeded",
+      "no release succeeded in this window",
+      "no failure followed by a success yet",
+    ])
   })
 
   test("a window of only cancelled runs has no facts", () => {
