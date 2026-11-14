@@ -14,6 +14,7 @@ import {
 import { membersKnown, ownerConsequence } from "@/lib/docker-networks"
 import { calendarDate, rate } from "@/lib/format"
 import type { Container, DockerNetwork, NetworkDetail } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { LogoGlyph } from "@/components/logo"
@@ -236,9 +237,10 @@ function naming(network: Pick<DockerNetwork, "name" | "driver">): {
  * `db:5432`, not an address that changes when the container is recreated —
  * and its state with what it is moving. A row opens the container.
  *
- * Every row is the same two lines. In the sheet a member was one, two or
- * three: "also on" was a third line under some, a second address a second
- * line under others.
+ * Every row of a list is one height: two lines, and a third for the names
+ * where the list is too narrow to give them a column. In the sheet a member
+ * was one, two or three: "also on" was a third line under some, a second
+ * address a second line under others.
  */
 export function NetworkMembers({
   network,
@@ -355,7 +357,9 @@ function MemberRow({
     <ChoiceRow
       // A height, not a minimum: an address in the mono face sets a taller
       // line than a name does, and a member with one was a pixel or two taller.
-      className="h-[3.75rem]"
+      // Where the names have no column of their own they are the row's third
+      // line, on every row of a network that has names.
+      className={cn("justify-center @lg:h-[3.75rem]", named ? "h-[5.25rem]" : "h-[3.75rem]")}
       href={`/docker/containers/${encodeURIComponent(member.id)}`}
       verb={`Open ${member.name}`}
       leading={
@@ -462,7 +466,24 @@ function MemberRow({
           </DimActions>
         )
       }
-    />
+    >
+      {named && (
+        <p
+          className="truncate pl-11 text-hint text-muted-foreground @lg:hidden"
+          title={names.join(", ")}
+        >
+          {member.unread ? (
+            "aliases unread"
+          ) : !detailed ? (
+            "\u00a0"
+          ) : (
+            <>
+              answers to <span className="font-mono text-foreground/80">{names.join(", ")}</span>
+            </>
+          )}
+        </p>
+      )}
+    </ChoiceRow>
   )
 }
 

@@ -116,7 +116,23 @@ export function NetworkPage() {
   const requested = search.get("tab")
   const [remembered, remember] = useViewState<string>("docker.network.tab", "overview")
   const [chosen, setChosen] = useState<string>(requested ?? remembered)
+  // A view the address comes to name is the view: a link in the picture, or
+  // Back to an address that named another. Adjusted while rendering, which
+  // is how a value derived from the previous render is kept.
+  const [named, setNamed] = useState(requested)
+  if (requested !== named) {
+    setNamed(requested)
+    if (requested) setChosen(requested)
+  }
   const tab: Tab = (TABS as readonly string[]).includes(chosen) ? (chosen as Tab) : "overview"
+  // The view the page was left on is the one it opens on, and the address
+  // says so: a link copied from it opens where the reader is.
+  useEffect(() => {
+    if (requested || tab === "overview") return
+    const url = new URL(window.location.href)
+    url.searchParams.set("tab", tab)
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`)
+  }, [requested, tab])
   const setTab = useCallback(
     (next: string) => {
       setChosen(next)

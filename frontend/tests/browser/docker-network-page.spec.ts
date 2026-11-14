@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { ctId, inspectOf, mockNetworkPage, netId, readOnly } from "./docker-network-page-fixture"
+import { NETWORKS } from "./docker-networks-fixture"
 import { risen } from "./risen"
 
 /**
@@ -431,10 +432,12 @@ test("on a phone it is one pane: no rail, nothing sideways, every word of the pi
   await page.getByRole("tab", { name: /Members/ }).click()
   const rows = page.locator("[data-slot=choice-row]")
   await expect(rows).toHaveCount(4)
-  // The names fold away with the column; the address and the state stay.
+  // The names have no column here: they are the row's third line, on every row.
   const db = rows.filter({ hasText: "shop-db-1" })
   await expect(db.getByText("172.19.0.2")).toBeVisible()
   await expect(db.getByText("running", { exact: true })).toBeVisible()
+  await expect(db.getByText("answers to db, shop-db-1, database")).toBeVisible()
+  await expect(db.locator("[data-slot=member-names]")).toBeHidden()
   const heights = await rows.evaluateAll((all) =>
     all.map((row) => row.getBoundingClientRect().height),
   )
@@ -467,4 +470,57 @@ test("the dashboard's own network takes no container, and says why where the com
       name: "The dashboard's own private network takes no other containers",
     }),
   ).toBeDisabled()
+})
+
+test("a network removed elsewhere while its page is open goes back to the list", async ({
+  page,
+}) => {
+  await mockNetworkPage(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/networks/old-staging")
+  await expect(identity(page).getByText("unused", { exact: true })).toBeVisible()
+
+  // Somebody prunes it: the list no longer has it and the Engine no longer knows it.
+  const without = NETWORKS.filter((network) => network.name !== "old-staging")
+  await page.route("**/api/v1/docker/networks/", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(without),
+    }),
+  )
+  await page.route("**/api/v1/docker/networks/old-staging", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "not_found", message: "network old-staging not found" },
+      }),
+    }),
+  )
+  // The page's own refresh, rather than waiting ten seconds for the list's next read.
+  await page.keyboard.press("F5")
+  await expect(page).toHaveURL(/\/docker\/networks$/)
+  await expect(page.getByRole("table").first()).toBeVisible()
+})
+
+test("the view a network was left on is the one the next opens on, and the address says so", async ({
+  page,
+}) => {
+  await mockNetworkPage(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/networks/shop_backend")
+  await page.getByRole("tab", { name: /Members/ }).click()
+  await expect(page.locator("[data-slot=choice-row]")).toHaveCount(4)
+
+  await page.goto("/docker/networks/proxy")
+  await expect(page).toHaveURL(/\/docker\/networks\/proxy\?tab=members$/)
+  await expect(page.locator("[data-slot=choice-row]")).toHaveCount(3)
+
+  // A network the picture leads to opens on the view the picture is on.
+  await page.getByRole("tab", { name: "Overview" }).click()
+  await picture(page).getByRole("link", { name: "Open shop_default" }).click()
+  await expect(page).toHaveURL(/\/docker\/networks\/shop_default$/)
+  await expect(identity(page).getByText("shop_default", { exact: true })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
 })

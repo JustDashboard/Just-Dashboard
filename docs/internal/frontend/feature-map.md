@@ -904,8 +904,8 @@ Views in the address as `?tab=` (Overview carries none), remembered between netw
 - **Members**: every member as a one-line card (`ChoiceRow`) that opens the container — its product,
   name, **This dashboard** / **Shared ingress**, its address (both families from a wide column) and
   the other networks it is on, the names the others reach it by (two and a count, all in the tooltip;
-  **aliases unread** where its inspect failed; folded away with the column on a phone), its state
-  and rate — one height whatever it has. Detach reads what it disturbs first; the dashboard's own
+  **aliases unread** where its inspect failed; where the list is too narrow for the column they are
+  the row's third line, on every row), its state and rate — one height whatever it has. Detach reads what it disturbs first; the dashboard's own
   containers and the shared ingress get a locked control with the reason. Nothing attached is an
   empty state with Attach a container. The notices for members unread, members' details unread and
   the default bridge's lack of names are here.

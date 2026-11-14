@@ -22,6 +22,17 @@ import {
 /** A wire moving less than this is drawn still, as on every Network picture. */
 const MOVING = 1024
 
+/**
+ * Room under the hub for the three lines hung there, and as much over it so
+ * the mark stays on the picture's middle: a network nothing is on has no
+ * column tall enough to hold them, and they ran into what stands under the
+ * picture.
+ */
+const HUB = "lg:py-12"
+
+/** The hub's share of the width: a mark and three short lines, so the members keep theirs. */
+const HUB_SHARE = 0.4
+
 /** A side draws this many and counts the rest; the Members view lists every one. */
 const MEMBERS = 5
 const LEADS = 3
@@ -79,7 +90,8 @@ export function NetworkPicture({
       <WireFlow
         loading
         start={{ title: "Leads to", nodes: [], loadingRows: 1 }}
-        hub={{ mark: <HubMark driver="bridge" />, eyebrow: "Network" }}
+        hub={{ mark: <HubMark driver="bridge" />, eyebrow: "Network", className: HUB }}
+        hubShare={HUB_SHARE}
         end={{
           title: "Members",
           nodes: [],
@@ -221,7 +233,9 @@ export function NetworkPicture({
     }
   })
 
-  const device = network.bridge ?? (way.kind === "parent" ? way.device : undefined)
+  // A bridge is named for its device on this server; a network on a card's
+  // own network has none of its own, and the card is the node beside it.
+  const device = network.bridge
   return (
     <WireFlow
       start={{
@@ -254,7 +268,9 @@ export function NetworkPicture({
           network.name
         ),
         hint: network.subnets[0] && <span className="font-mono">{network.subnets[0]}</span>,
+        className: HUB,
       }}
+      hubShare={HUB_SHARE}
       end={{
         title: "Members",
         nodes,
