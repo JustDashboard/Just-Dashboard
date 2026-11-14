@@ -116,6 +116,13 @@ that does something.
   after the image is read again and nothing uses it, since a forced removal also takes an image a
   stopped container was made from. A pull from an image's page follows the tag to the image it
   points at afterwards.
+
+
+- `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
+  server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
+  published), then `stack-band.tsx`, bar readings
+
+  container runs can keep a name across the next pull of its tag.
 - `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2):
   Docker's identity line (stacks running beside its name, stacks deployed, services running, ports
   published, Create stack as its command), then `stack-band.tsx`, bar readings
