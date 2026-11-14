@@ -39,11 +39,13 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  */
 
 /**
- * When a save takes effect. `next-reload` is for a form outside the
+ * When a saved form takes effect. `next-reload` is for a form outside the
  * deployments — nginx's settings written without a reload — that is live
- * once the engine next reloads.
+ * once the engine next reloads. `restart` is a file a running server reads
+ * only when it starts — a game's own settings file — so its save is written
+ * at once and applied by the next restart.
  */
-export type SettingApplies = "next-deployment" | "immediately" | "next-reload"
+export type SettingApplies = "next-deployment" | "immediately" | "next-reload" | "restart"
 
 type EntryState = {
   name: string
@@ -90,7 +92,19 @@ const subscribe = () => () => {}
 const contentArea = () => document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]')
 const noContentArea = () => null
 
-export function SaveBarProvider({ children }: { children: React.ReactNode }) {
+export function SaveBarProvider({
+  children,
+  inline,
+}: {
+  children: React.ReactNode
+  /**
+   * The bar holds to the foot of the column it is in rather than floating
+   * over the content area: for a settings column that shares the area with
+   * something beside it (a rail of siblings), where the area's centre is not
+   * the column's.
+   */
+  inline?: boolean
+}) {
   const [entries, setEntries] = useState<Record<string, EntryState>>({})
   const actions = useRef(new Map<string, { current: EntryActions }>())
   const latest = useRef(entries)
@@ -162,6 +176,7 @@ export function SaveBarProvider({ children }: { children: React.ReactNode }) {
         entries={entries}
         phase={phase}
         saved={saved}
+        inline={inline}
         onSave={() => void saveAll()}
         onDiscard={() => {
           for (const [id, entry] of Object.entries(entries))
@@ -202,6 +217,7 @@ export function useSaveBarEntry(
 
 function appliesLine(dirty: EntryState[]) {
   const kinds = new Set(dirty.map((entry) => entry.applies))
+  if (kinds.size === 1 && kinds.has("restart")) return "Applies when the server restarts"
   if (kinds.size > 1) return "Some apply now, the rest on your next deployment"
   if (kinds.has("next-reload")) return "Applies when nginx next reloads"
   return kinds.has("immediately") ? "Applies immediately" : "Applies on your next deployment"
@@ -220,12 +236,14 @@ function SaveBar({
   entries,
   phase,
   saved,
+  inline,
   onSave,
   onDiscard,
 }: {
   entries: Record<string, EntryState>
   phase: Phase
   saved: EntryState[]
+  inline?: boolean
   onSave: () => void
   onDiscard: () => void
 }) {
@@ -249,15 +267,20 @@ function SaveBar({
     return () => window.removeEventListener("keydown", onKey)
   }, [dirty.length, onSave])
 
-  if (!host || !visible) return null
+  if ((!host && !inline) || !visible) return null
 
   // Every write went through. A form can look dirty for a moment longer —
   // until its saved value is read back — and that is not an edit left over.
   const done = phase === "saved"
   const shown = done || dirty.length === 0 ? saved : dirty
 
-  return createPortal(
-    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-3 md:bottom-6">
+  const bar = (
+    <div
+      className={cn(
+        "pointer-events-none z-40 flex justify-center",
+        inline ? "sticky bottom-4" : "absolute inset-x-0 bottom-4 px-3 md:bottom-6",
+      )}
+    >
       <div
         role="region"
         aria-label="Save changes"
@@ -330,7 +353,7 @@ function SaveBar({
           </div>
         )}
       </div>
-    </div>,
-    host,
+    </div>
   )
+  return inline || !host ? bar : createPortal(bar, host)
 }

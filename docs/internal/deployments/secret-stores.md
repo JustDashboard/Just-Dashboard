@@ -129,8 +129,9 @@ removal read nothing, so a store that is down never keeps anybody from stopping 
   3; pin a version in the reference to keep one)`). A reference that pins a version is frozen in the
   release with its version, so rolling back to that release reads that version exactly.
 
-Every run that read a store records the outcome on the connection (`read_*`), shown on the page as the
-store's last read, in amber with the store's words when it failed.
+Every run that read a store records the outcome on the connection (`read_*`). The page says the newer of
+it and the last Test as the store's state (*Answering*, or *Refused 2m ago* in amber), which opens on the
+store's own words for both.
 
 ## Routes
 
@@ -212,6 +213,7 @@ the audit log's own redaction is the second line.
   stopped. LocalStack accepts any signature, so the signing is proved by the unit vectors and the
   verifying fake, not there. Azure Key Vault has no server to run; the fakes are its coverage, and the
   real service has not been exercised.
-- Browser: `deploy-secret-stores.spec.ts` (the six kinds offered, the AWS and Azure forms and cards, a
-  variable picking a whole Key Vault secret and a Secrets Manager field at a staging label) and
-  `secret-stores.test.js`.
+- Browser: `deploy-secret-stores.spec.ts` (the six kinds offered, the AWS and Azure forms and rows, a
+  variable picking a whole Key Vault secret and a Secrets Manager field at a staging label),
+  `deploy-section-pages.spec.ts` (rows of one height in every state, the readers of a store),
+  `secret-stores.test.js` and `secret-store-state.test.js`.

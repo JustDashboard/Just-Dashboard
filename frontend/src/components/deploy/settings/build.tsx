@@ -20,7 +20,7 @@ import type {
   RailpackProvider,
 } from "@/lib/types"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
-import { Disclosure, Field, FieldRow, FormNote, OptionRow } from "@/components/form"
+import { Disclosure, Field, FieldRow, FormNote, InfoTip, OptionRow } from "@/components/form"
 import {
   ProductGlyph,
   ProductGlyphs,
@@ -1459,7 +1459,7 @@ function BuildForm({
             <div className="animate-rise pt-1.5">
               <OptionRow
                 title="Single-page application"
-                hint="Answers paths without a file with index.html, so client-side routes open directly."
+                hint="A path with no file gets index.html, so client-side routes open"
                 checked={build.spaFallback ?? false}
                 onCheckedChange={(spaFallback) =>
                   setBuild({ ...build, spaFallback: spaFallback || undefined })
@@ -1515,7 +1515,7 @@ function BuildForm({
           </Field>
           <OptionRow
             title="Force a clean build"
-            hint="Ignores the build cache and rebuilds every layer from scratch."
+            hint="Rebuilds every layer, ignoring the cache"
             checked={build.noCache ?? false}
             onCheckedChange={(noCache) => setBuild({ ...build, noCache: noCache || undefined })}
             disabled={!canEdit}
@@ -1560,12 +1560,19 @@ function BuildForm({
           title="Build variables"
           // The figure rises as a stage pressed below changes it.
           state={
-            <>
-              <span key={reaching} className="numeric inline-block animate-rise">
-                {reaching}
-              </span>{" "}
-              reach the build
-            </>
+            <span className="flex items-center gap-1.5">
+              <span>
+                <span key={reaching} className="numeric inline-block animate-rise">
+                  {reaching}
+                </span>{" "}
+                reach the build
+              </span>
+              {/* What the three stages are for was a note closing the list. */}
+              <InfoTip label="What each stage is for">
+                Install only keeps a private registry token out of the build command. Both also
+                mounts the value in the install, for a postinstall script that reads it.
+              </InfoTip>
+            </span>
           }
           status={settingStatus({ dirty: draft.changed(["secrets"]) })}
         >
@@ -1633,10 +1640,6 @@ function BuildForm({
               )
             })}
           </ul>
-          <FormNote>
-            Install only keeps a private registry token out of the build command. Both also mounts
-            the value in the install, for a postinstall script that reads it.
-          </FormNote>
         </SettingSection>
       )}
     </SettingForm>

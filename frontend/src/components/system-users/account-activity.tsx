@@ -8,8 +8,9 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo, processProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { Address } from "@/components/security/marks"
-import { EmptyNote } from "@/components/state"
+import { EmptyState, LoadingRows } from "@/components/state"
 import { useAccount } from "@/components/system-users/account-page"
+import { AccountMark } from "@/components/system-users/marks"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { usePoll } from "@/hooks/use-poll"
@@ -163,12 +164,17 @@ const SHOWN = 12
  * Who got in, who was refused, what they ran as root and what the dashboard did,
  * as one line of time. The server keeps these in four different places, and the
  * question is one question: what happened to this account.
+ *
+ * It is a view of the account's page, so it has no title of its own: the chips
+ * that narrow it stand where a title would, with how many events there are at
+ * the line's end. An account with nothing on record is drawn as itself with one
+ * sentence saying what would be here.
  */
 export function HistoryPanel() {
   const { user, path } = useAccount()
   const [kind, setKind] = useState<Kind | "all">("all")
   const [more, setMore] = useState(false)
-  const { data } = usePoll(
+  const { data, error } = usePoll(
     (signal) => get<AccountHistory>(`${path}/history`, undefined, signal),
     60000,
     [path],
@@ -237,24 +243,34 @@ export function HistoryPanel() {
   const shown = more ? filtered : filtered.slice(0, SHOWN)
 
   return (
-    <Panel plain aria-label="History">
-      <PanelHeader title="History">
-        {present.length > 1 && (
-          <ChipStrip aria-label="Show" className="ml-auto">
+    <Panel plain aria-label="History" className="pb-6">
+      {events.length > 0 && (
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline pb-3">
+          <ChipStrip aria-label="Show">
             <FilterChip selected={kind === "all"} onClick={() => setKind("all")}>
               All <ChipCount>{events.length}</ChipCount>
             </FilterChip>
-            {present.map((name) => (
-              <FilterChip key={name} selected={kind === name} onClick={() => setKind(name)}>
-                {KIND_LABEL[name]} <ChipCount>{counts(name)}</ChipCount>
-              </FilterChip>
-            ))}
+            {present.length > 1 &&
+              present.map((name) => (
+                <FilterChip key={name} selected={kind === name} onClick={() => setKind(name)}>
+                  {KIND_LABEL[name]} <ChipCount>{counts(name)}</ChipCount>
+                </FilterChip>
+              ))}
           </ChipStrip>
-        )}
-      </PanelHeader>
+          <span className="numeric text-hint text-muted-foreground">
+            {plural(filtered.length, "event")}
+          </span>
+        </div>
+      )}
       <PanelBody flush>
-        {shown.length === 0 ? (
-          <EmptyNote className="px-0 py-3 text-left">Nothing on record yet.</EmptyNote>
+        {!data && !error ? (
+          <LoadingRows rows={6} />
+        ) : shown.length === 0 ? (
+          <EmptyState
+            mark={<AccountMark user={user} size="lg" />}
+            title={`Nothing on record for ${user.username}`}
+            description="Its sign-ins, the ones that were refused, what it ran as root and what was changed here appear as they happen."
+          />
         ) : (
           <ol className="animate-rise">
             {shown.map((event) => {

@@ -847,7 +847,11 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   source — its lens, path, size, modified, archives, archive bytes and status — for a page that embeds
   one log and should not walk every root and ask Docker, PM2 and systemd about everything else; it has
   `/logs/sources`' capability and answers 404 for a file that is not there and 400 for one outside the
-  roots. The stream's `meta` carries the lens, and `eof` is a frame.
+  roots. For the whole journal (`journal:`) it also carries `size`, what `journalctl --disk-usage`
+  reports, and `oldest`, when the first record still kept was written (`procs.ReadJournalFacts`: the
+  first line `journalctl --output=json` prints, after which the command is stopped; both within six
+  seconds, and either left out where journalctl would not say). A unit's journal carries neither, and
+  `/logs/sources` asks for neither. The stream's `meta` carries the lens, and `eof` is a frame.
 - **Auth data is `system.admin`'s** (`logTargetFor`). Every `/logs` route that reads a source — the
   stream, the search, the export, the retention verdict and `/logs/source` — parses the id through it,
   so there is no second door to the same lines. It refuses, with a 403 for anyone else, `auth.log` and

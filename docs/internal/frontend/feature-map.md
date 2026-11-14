@@ -179,7 +179,11 @@ inspector names each line; boxes drag and stay where they were put, and a whole 
 its head, per account; the canvas moves like a whiteboard's (two fingers slide it, a pinch zooms, a
 mouse drags open ground) and nothing on it changes size but by the zoom. No bar runs over the
 canvas. Below `lg` it is the canvas alone, and a tap floats one *Open* button to the box's page.
-Read-only: every box opens its own page
+Read-only: every box opens its own page. With no place left behind and every system at once too
+small to read, it opens on the dashboard's own system; what a source did not answer for is one
+line per cause in the inspector ("Docker is not answering: containers, stacks and volumes not
+drawn", **Open Docker**); and the inspector's *On this server* is a row per kind that lights that
+kind's boxes
 
 **Implementation:** `app/(dashboard)/map/`, `components/map/`, `lib/server-systems.ts` and
 `lib/server-map.ts` (unit-tested); [server map](../server-map.md); checked by
@@ -453,31 +457,53 @@ localhost) and `api-keys.spec.ts`; key filtering, ordering and replacement roles
 
 ### `/audit`
 
-Four readings of the last day (changes with an hourly trend, failures, the people behind them as
-faces, sign-ins with the refused ones), read from their own `since` query so a filter does not
-narrow them; the filtered, paginated trail as a framed table shelved by day, each entry drawn with
-the mark of the section it touched, its actor as a face (a key in the corner for an API key, with
-the key named — "· key ci-deploy", its id in the tooltip — when the row recorded it; "· by the
-assistant" for the assistant; "· through Just Hub as <hub user>" for a session a hub sign-in ticket
-opened, the session's id in the tooltip, which is the `sessionId` of the `hub.signin` row that
-opened it; the webhook's and the dashboard's own marks for machines), its address as the network it
-is on, the method and path in the request log's hues and the outcome's code in its family's colour;
-section chips with their marks set the action filter; entries a poll brings rise into place
+An identity line saying how the last day went: what the server refused as its state ("1 of 10
+failed", and "1 sign-in refused" in amber), then this server, the changes in the last day, the
+people behind them as faces with the automated changes, and the sign-ins with where the last came
+from; `?` and a `⋯` menu at its end holding Export as CSV and Refresh. Under it the day as one
+strip, an hour to a stretch in the colour of how its changes went (green, amber where some were
+refused, red where all were, the track where nothing changed), with the busiest sections on the
+line under it and the pointed hour in their place (`components/audit/day-strip.tsx`, the model in
+the unit-tested `day.ts`). Both are read from their own `since` query, on the hour, so a filter
+does not narrow them, and both stand at their final height while the day is read. Then the
+filtered, paginated trail as a framed table shelved by day, one line to a row at every width: the
+time, the actor as a face (a key in the corner for an API key, with the key named — "· key
+ci-deploy", its id in the tooltip — when the row recorded it; "· by the assistant" for the
+assistant; "· through Just Hub as <hub user>" for a session a hub sign-in ticket opened, the
+session's id in the tooltip, which is the `sessionId` of the `hub.signin` row that opened it; the
+webhook's and the dashboard's own marks for machines) with its address as the network it is on, the
+action with the mark of the section it touched, the target with any detail after it, and the
+outcome's code in its family's colour. The action is the row's button and the keyboard's place on
+it: it opens the entry whole in a popover (`entry-detail.tsx`), with the method and path in the
+request log's hues, the key's record or the session's id, and whatever a one-line cell cut short.
+Below `2xl` a row that came through a key or a session says that in place of its address's digits.
+The user and action filters are on the frame's title line and one row of chips is under it
+(Failures only, then the sections with their marks, which set the action filter); entries a poll
+brings wait behind "N new entries · Show" beside the count and rise into place. Export as CSV
+downloads what the filters match, every page of it up to 20,000 rows and none newer than the press
+(`export.ts`, unit-tested; cells a spreadsheet would run as a formula are made text). An account
+without `system.admin`, or one the server refuses, is told the log is for administrators and is
+offered no filter
 
-**Implementation:** audit page, `components/audit/marks.tsx` (unit-tested); checked by
+**Implementation:** audit page, `components/audit/` (`marks.tsx`, `day.ts` and `export.ts`
+unit-tested); checked by `tests/browser/audit-ui.spec.ts` (fixture in `audit-fixture.ts`) and
 `tests/browser/system-ui.spec.ts`
 
 ### `/backups`
 
 Routes: `/backups`, `/backups/[job]`
 
-Backup coverage, jobs, destinations, schedules, next runs and recorded outcomes. Manual runs,
+Backup coverage, jobs, destinations, schedules, next runs and recorded outcomes. The page opens on
+an identity line: how the jobs stand as its state (a job that failed, one being taken, every job
+backed up, with paused ones after), the jobs, what they hold and the next backup as its facts
+(`components/backups/readings.ts`, unit-tested), New backup as its command for an administrator and
+a `⋯` menu holding Import from a destination… and Refresh. Manual runs,
 restore, retention and job configuration keep their confirmed controls. A job may encrypt its
 archives (on by default for S3 and B2): its card and identity line say so, an encrypted run carries
 a lock on the rail and an Encryption block in its inspector, and the Backup key panel under the jobs
 shows the server's key, what depends on it and whether a copy has been exported, with a confirmed
 Export key… for an administrator (`components/backups/backup-key.tsx`, `encryption.ts`), and Import
-key… for one exported elsewhere, listed beside it. Import… opens Import from a destination
+key… for one exported elsewhere, listed beside it. The menu's Import opens Import from a destination
 (`components/backups/import-dialog.tsx`, words in the unit-tested `import-model.ts`): this server's
 destinations as choices or another typed in with its keys, then the archives it did not write
 grouped by server and job, each with what it covers, its size, time and whether a key here opens it,
@@ -487,8 +513,10 @@ runs, offer only Test destination and Remove imported job, and its runs restore 
 dialogs, the in-place one saying per source what it overwrites and what it makes first (a volume
 through Docker, a directory) (`tests/browser/backup-import.spec.ts`). A job opens on its own page
 (`/backups/[job]`, `components/backups/job-detail.tsx`): its identity line, its picture narrowed to
-the one job, its readings, and its runs as a rail beside the run they show, with each run's log,
-archive and restores. Automatic overdue/attention recommendations were removed in 0.7.5
+the one job (its middle the schedule over the next run), one reading as a sentence (what it holds
+over how much is kept, with the archive sizes as its trend), and its runs as a rail beside the run
+they show, each run one height with its archive's size as a figure, with each run's log, archive
+and restores. Automatic overdue/attention recommendations were removed in 0.7.5
 
 **Implementation:** `components/backups/`; backend in
 [`../backend/git-backups-users.md`](../backend/git-backups-users.md)
@@ -497,7 +525,7 @@ archive and restores. Automatic overdue/attention recommendations were removed i
 
 Routes: `/databases`, `/databases/map`, `/databases/new`, `/databases/[id]` (+ `/assistant`,
 `/data`, `/query`, `/search`, `/schema`, `/diagram`, `/generate`, `/performance`, `/logs`,
-`/access`, `/backups`, `/alerts`, `/import`, `/settings`, `/settings/network`,
+`/access`, `/access/[account]`, `/backups`, `/alerts`, `/import`, `/settings`, `/settings/network`,
 `/settings/resources`, `/settings/pooling`, `/settings/parameters`, `/settings/extensions`,
 `/settings/version`, `/settings/danger`)
 
@@ -544,7 +572,21 @@ offered a change it would be refused. Performance's Statement history view
 its time drawn across it and ordered by the column pressed, and opens one statement on charts of its
 time, calls, time per call (with p50, p95 and p99 where the engine keeps run times) and rows. Access
 opens on who signs in (each account wired to the server, pulsing while it holds sessions) over the
-accounts with counted filters; Backups on where the dumps go (the database and its schedule, this
+accounts with counted filters, one card to an account and one height in every state. **An account
+is a page of its own** (`/databases/[id]/access/[account]`, `ops/account-page.tsx` and
+`account-frame.tsx`; the sheet's `?account=` address redirects there): its line (mark, name, whether
+a session is open as it, its tags, what its grants add up to), one command (a new password) with
+the drop in the `⋯` menu, its views in the address (`?tab=`), and from `xl` the list beside it as a
+rail in the filter the list was left in, walked by Alt+↑ and Alt+↓ with the view carried. A SQL
+account has Grants (memberships and the privilege matrix, staged and reviewed as the server's
+statements), Sessions (Performance's sessions narrowed to it, each a way to its panel there) and
+Settings (its attributes on one save bar, sending only what changed); a key–value user has Rule
+(the rule as the server holds it, and its commands, keys and channels) and Settings (the form that
+rewrites it); a document user has its roles, with no strip. The name is one segment of the path,
+written once and read back from the path (`ops/account-address.ts`), and a MySQL host or a document
+user's database is `?host=`. The page asks before it is left over unsaved work, and a reader who
+may not change an account is shown its attributes as words rather than as switches. Backups opens
+on where the dumps go (the database and its schedule, this
 server's dump tool, the directory) over the dumps table, then, for a PostgreSQL server the dashboard
 runs, its point-in-time recovery: the moments it can be recovered to, how archiving is going, its
 base backups and restore points, setup with the command line the server restarts with, a recovery
@@ -695,13 +737,18 @@ beside the reviewed catalogue ([implementation](../deployments/implementation.md
 `/deploy/new` opens on *Your templates* above the shelves, with a *Yours* chip, each a card like a
 built-in's drawn by its public image's product, and its empty state saying the two ways to make one
 with a link to Templates; a chosen one says *Added … on this dashboard* where a built-in says
-*Reviewed*. `/deploy/templates` (Deployments → Templates, `templates-page.tsx`) lists them as rows
-into the picker with the template chosen — id, version, how it was made and by whom, what it runs,
-how many deployments use it — with *Export as JSON* and *Remove template* (whose confirmation says
-those deployments keep running from their own copy), *Import…* for an exported file, and *Add from
-Compose file*, a sheet whose *Check* shows what the template will ask before it is added
-(`template-preview.tsx`) and says the catalogue's refusal under the form; empty, it offers the three
-ways as cards. Settings → General carries *Save as template…* on a deployment that runs published
+*Reviewed*. `/deploy/templates` (Deployments → Templates, `templates-page.tsx`) draws them as the
+picker does, a card each (the product its image is, what it runs, Compose stack or image, *Used by
+N*), and the chosen card (the first until another is pressed) as a picture over the grid: what it
+was made from, by whom and when; the template under its id and version with how many deployments
+use it, or why this dashboard cannot deploy it; and each service it runs with its image, the public
+one marked. A card's own verbs are *Deploy* (into the picker with it chosen, not offered for a
+template that cannot be deployed), *Export as JSON* and *Remove template* (whose confirmation says
+those deployments keep running from their own copy); the head counts them (*3 templates · 1 in
+use*) and carries *Import…* for an exported file and *Add from Compose file*, a sheet whose *Check*
+shows what the template will ask before it is added (`template-preview.tsx`) and says the
+catalogue's refusal under the form; empty, it offers the three ways as cards, each with a product's
+mark. Settings → General carries *Save as template…* on a deployment that runs published
 images (`settings/save-as-template.tsx`): a dialog that reads the live release's plan as it opens
 and says what the template will run, ask when it is chosen and ask on the Variables screen, or why
 it cannot be one. The words are in `templates.ts` (unit-tested). The new-project build step and
@@ -744,9 +791,22 @@ changes. Configure retains the administrator-reviewed replacement specification 
 containers and opens the owning Compose file for Compose containers. Automatic overview findings,
 issue badges, failure/anomaly suggestions and recommendation cards were removed in 0.7.5
 
+An image is a page of its own, `/docker/images/[id]` (`image-page.tsx`; the old `?image=` address
+redirects there): its identity line with Pull or Tag and the rest in a menu, a picture of its
+registry, the image and the containers made from it, the views Layers, Containers, History and
+Configuration in `?tab=`, and from `xl` the images as a rail with the table's own filters.
+`tests/browser/docker-image-page.spec.ts`
+
 **Implementation:** `components/docker/`; see
 [`features-terminal.md`](features-terminal.md#feature-panels) and
 [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md)
+
+A volume is a page of its own (`/docker/volumes/[name]`, `components/docker/volume-page.tsx`): its
+identity line with one command, a picture of the containers that mount it and the backup jobs that
+cover it, and its views in the address as `?tab=` — Files, Mounts, Backups, Configuration — with
+the Volumes table as a rail beside it from `xl`. `/docker/volumes?volume=<name>`, which opened the
+sheet this replaced, redirects to it. Specs: `tests/browser/docker-volumes.spec.ts`,
+`tests/browser/docker-volume-page.spec.ts`.
 
 ### `/metrics`
 
@@ -819,18 +879,20 @@ match replaces the socket's; an exit right after a kill is read as the stop it w
 
 ### `/docker/networks`
 
-Docker's networks, who is on each and what they carry. The engine's identity line (Docker as its
-mark and version, the host, how many networks and how many were made here, the containers on them,
-how many join two or more) with the verdict at its end: the address pool nearly or wholly spent,
-else — where the container listing failed — that who is on them is unread, since then no network is
-called unused or in use; else the unused networks — a press narrows the table to them — else every
-network in use. A band of bar readings (`network-band.tsx`, design system §10): **Traffic**, the
+Docker's networks, who is on each and what they carry. The engine's identity line, laid out as a
+project's header (Docker as its mark and version, how many networks and how many were made here, the
+containers on them; from `sm` the host and how many join two or more) with the verdict beside the
+name: the address pool nearly or wholly spent, else — where the container listing failed — that who
+is on them is unread, since then no network is called unused or in use; else the unused networks — a
+press narrows the table to them — else every network in use. Create network is the line's one
+command. A band of bar readings (`network-band.tsx`, design system §10): **Traffic**, the
 five busiest networks by their bridge's two-second counters (`useLiveTraffic`) as spans of one bar
 in each network's colour, with in and out gliding on its line; **Addresses**, Docker's address pools
 (`default-address-pools` from `/docker/info`, else the built-in thirty-one) as a span per network in
 its colour sized by the blocks it holds, the first free block at the strip's end and any subnet
 outside the pools in the figure's tooltip; **Recent**, Docker's network events followed live as
-ticks on the last day, each naming the container that joined or left. Then the networks as a framed
+ticks on the last day, each naming the container that joined or left. A press in Traffic or Recent
+opens that network's page. Then the networks as a framed
 table — the network's lane colour down its edge, who made it as counted chips that narrow (compose
 project, this dashboard, standalone, Docker's own; the backend's reading of the labels where it has
 one, so a deployment's network and a database link are the dashboard's and name the deployment,
@@ -842,14 +904,14 @@ two minutes of shape, and Attach and Remove drawn disabled with the reason where
 private network) — and every container as a second table: each network it is on in that network's
 colour with its address there, the names it answers to (none on the default bridge, in amber), its
 traffic, chips for the containers that join networks, the default bridge and the stopped ones, and a
-network's chip narrowing the table to it. A network's sheet (`?network=`) is a live readout: in and
-out with their trend, members running, addresses taken of the subnet, the bridge wired to each
-member with a pulse while it moves bytes, the members as a table of both families' addresses, the
-other networks each also joins, and aliases with Detach (the dashboard's own containers and the
-shared ingress are marked and given a locked control with the reason instead, a member whose inspect
-failed says aliases unread), and its settings with what acts on the network next (Compose recreates
-it, its deployment reconciles it, nothing recreates one made by hand). Create network and Remove
-unused sit in the networks table's toolbar. Attach a container, Detach, Remove and Remove unused
+network's chip narrowing the table to it. A network's name is the link to its own page
+(`/docker/networks/[name]`, below) and the row is the pointer's larger target for it;
+`/docker/networks?network=<id>`, the address of the sheet that page replaced, redirects there on the
+server. A row is one height in both tables and in the lists they become below `xl`: a container on
+more than two networks names the first and counts the rest, its names stay on one line with the rest
+behind a count, and a network's traffic below `xl` has its place whether or not it carries any. On a
+phone the two strips of chips wrap rather than run off the panel's edge. Remove
+unused sits in the networks table's toolbar. Attach a container, Remove and Remove unused
 each read what they would disturb first (`network-dialogs.tsx`, `network-conflicts.tsx`; the
 previews' types and ordering in `lib/docker-networks.ts`, unit-tested): refusals are the server's
 too and leave the confirmation off, warnings are confirmed, the attach dialog keeps its container
@@ -864,10 +926,72 @@ catalogue (a missing or refused driver and option keys Docker would ignore are n
 creation](../backend/docker-files-logs.md#network-creation)
 
 **Implementation:** `components/docker/networks-page.tsx`, `network-band.tsx`, `network-table.tsx`,
-`network-members.tsx`, `network-sheet.tsx`, `network-dialogs.tsx`, `network-conflicts.tsx`,
+`network-members.tsx`, `network-live.ts`, `network-dialogs.tsx`, `network-conflicts.tsx`,
 `network-create.tsx`, `networks.ts` (unit-tested), `lib/docker-networks.ts` (unit-tested); checked
 by `tests/browser/docker-networks.spec.ts`, `docker-network-maturity.spec.ts` and
 `docker-network-create.spec.ts`
+
+### `/docker/networks/[name]`
+
+One network, as a place of its own; it was a sheet over the Networks table until 0.8.7. The address
+names the network, and an id opens it too (the Engine resolves either, and a deployment's removal
+plan names one by id): the address is then put right to the name. A way back and Previous / Next;
+the identity line as a project's header — Docker's mark for a bridge or an overlay, the kind of
+device otherwise, the name behind the network's own colour, where it stands beside it (**in use**,
+**N of M running**, **unused** in amber for a network somebody made that nothing is on, **nothing
+attached** for Docker's own, **members unread**) with **no internet** and **IPv6**, then who made it
+(a compose project's is a link to its stack), its driver and device on this server, its subnet and
+how many are on it. **Attach a container** is its one command, offered where Docker would take one;
+the menu holds Open the stack, Copy name, Copy ID and Remove, which is drawn disabled with the
+reason where Docker would refuse, as is the reason the dashboard's own network or a swarm network
+without `--attachable` takes no container. Removing goes back to the list.
+
+Views in the address as `?tab=` (Overview carries none), remembered between networks:
+
+- **Overview**: the wiring picture (`network-picture.tsx`, on `WireFlow`) — where it leads on the
+  left, the network in the middle (its bridge device and subnet), its members on the right as the
+  products they run with their address and what each is moving. Where it leads is how its members
+  leave it (out through this server at its gateway address; straight onto a network card for a
+  macvlan or ipvlan, a link to that card on Interfaces; no way out for an internal one; nothing for
+  `host` and `none`, said in a sentence) and then the other networks its members are also on, each
+  a link to that network and saying through whom, since a container on two networks is the only
+  thing that joins them. A member's line pulses while it moves more than a kilobyte a second, faster
+  the busier, and is dashed while it is stopped; pointing at a member lights the networks it joins
+  this one to. Five members a side and three leads are drawn and the rest counted, the count opening
+  Members. Under it four reading lines: received and sent on its bridge with their last two minutes,
+  addresses taken of the subnet with its gateway, and whether its members answer by name (not on the
+  default bridge, in amber).
+- **Members**: every member as a one-line card (`ChoiceRow`) that opens the container — its product,
+  name, **This dashboard** / **Shared ingress**, its address (both families from a wide column) and
+  the other networks it is on, the names the others reach it by (two and a count, all in the tooltip;
+  **aliases unread** where its inspect failed; where the list is too narrow for the column they are
+  the row's third line, on every row), its state and rate — one height whatever it has. Detach reads what it disturbs first; the dashboard's own
+  containers and the shared ingress get a locked control with the reason. Nothing attached is an
+  empty state with Attach a container. The notices for members unread, members' details unread and
+  the default bridge's lack of names are here.
+- **Configuration**: subnets, gateway and IPv6; who made it and what acts on it next (Compose
+  recreates it, its deployment reconciles it, nothing recreates one made by hand), driver and
+  device, whether it reaches the internet and accepts new members, scope, created, id; then the
+  driver's options and the labels as written.
+
+From `xl` the networks stand beside it as a rail (`network-rail.tsx`): the table's own search, owner
+chip and order (the same session keys), a caption ("11 networks", "3 of 11 · Compose"), Clear
+filters, the network on screen filled and kept in view and drawn first when the filter does not hold
+it. Alt+↑ / Alt+↓ and the two arrows walk it and the open view goes along. Below `xl` the page is
+one pane that scrolls as a whole, the picture's columns stacked with every word kept.
+
+The list is read every ten seconds, for the rail and for who is on the network now; the inspect once,
+and again when the list says its members changed (it inspects every member for its aliases). So the
+page draws from the list before the inspect lands, and when the inspect fails. It has its shape
+while both are on their way (the identity line with the name from the address, the three views, the
+picture waiting); a name that is no network is an empty state with the way back and the rail still
+listing the rest; a network removed while its page is open goes back to the list.
+
+**Implementation:** `components/docker/network-page.tsx`, `network-picture.tsx`, `network-views.tsx`,
+`network-rail.tsx`, `network-live.ts` (the containers socket's listing and rates, shared with the
+table), `networks.ts` (the page's address, standing, members, joined networks and way out,
+unit-tested); checked by `tests/browser/docker-network-page.spec.ts` and
+`docker-network-maturity.spec.ts`
 
 ### `/files`
 
@@ -903,31 +1027,76 @@ in [`../backend/git-backups-users.md`](../backend/git-backups-users.md#git-worki
 
 Every log source in one place: a source rail (`source-rail.tsx`) beside one pane with Live, History
 and Insights (`log-workspace.tsx`), the same readings and views a service's own page reads through
-`service-logs.tsx`
+`service-logs.tsx`. The whole journal's identity line carries the systemd logo, how many units
+write to it, its size on disk and its oldest line (`GET /logs/source?source=journal:`, asked once
+the journal is the source on screen; the two facts keep their room while they are asked). A kind
+of source that is absent is one line in the rail with the thing's mark and the page that says
+more (`MissingLine`, worded by `logKindMissing`): "Docker is not running" to `/docker`, "PM2 is
+not installed" to `/processes/pm2`, "No systemd on this server" to `/processes/services`
 
 **Implementation:** logs page, `components/logs/`, `lib/log-filter.ts`, `lib/log-lenses.ts`,
 `lib/log-sources.ts`; checked by `tests/browser/logs-ui.spec.ts`, `logs-lens.spec.ts`,
-`logs-views.spec.ts`, `logs-handoff.spec.ts` and `logs-buffer.spec.ts`; backend contract in
+`logs-views.spec.ts`, `logs-handoff.spec.ts`, `logs-buffer.spec.ts` and `missing-states.spec.ts`;
+backend contract in
 [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#logs)
 
 ### `/packages`
 
-Reading register without summary tiles: the host identity with manager, inventory count and index
-age; a band of two bar readings (`software-band.tsx`, design system §10): the whole inventory's size
-(products or archive sections, largest five and other packages) that filters Installed, beside
-Updates waiting, a span per pending package, security first, the first five named and each opening
-its readout, with confirmed upgrade actions at the strip's end; count-bearing views and
-by-hand/everything/dependencies/security/behind chips; fixed responsive tables with changed version
-fields, origins and size bars; catalogue product choices and lit search-result rows with separate
-install verbs, pending searches hiding obsolete results; **Log** reads the manager's logs through
-its lens and stays available after an inventory failure; one package readout with versions, size,
-copyable commands, service and file links, manual, inspectable dependencies and metadata, URL/Back
-navigation and resumable jobs; unreadable usage or updates report errors, missing sizes/advisory
-coverage say so
+Reading register without summary tiles: the host identity laid out as a project's header, with the
+manager beside the distribution, what is owed as its state, the inventory count and index age as
+facts, **Refresh index** as its one command and Re-read and the upgrades behind its menu; a band of
+two bar readings (`software-band.tsx`, design system §10): the whole inventory's size (products or
+archive sections, largest five and other packages) that filters Installed, beside Updates waiting, a
+span per pending package, security first, the first five named and each opening its package's page,
+with confirmed upgrade actions at the strip's end; count-bearing views, drawn while the inventory is
+still out, and by-hand/everything/dependencies/security/behind chips; from 1024px framed tables of
+one line a row (the package as the software it is and its name as the link to its page, the
+description as the row's title, version, the changed part of a pending one, the size as a figure in
+its column, security/essential at the edge), below it a card a package of one height; catalogue
+product choices and lit search-result rows that open the package's page, with separate install
+verbs, pending searches hiding obsolete results, and `?q=` opening Add software on a search handed
+over from another page; **Log** reads the manager's logs through its lens and stays available after
+an inventory failure; unreadable updates report errors, missing sizes/advisory coverage say so. The
+list's search, scope, software group and order are one filter (`use-package-filter.ts`, the pure
+part in `inventory.ts`) shared with the rail beside a package
 
 **Implementation:** packages page, `components/packages/` (`marks.tsx` and `inventory.ts`
 unit-tested), shared job console; checked by `tests/browser/packages-ui.spec.ts`, mocks in
 `packages-fixture.ts`
+
+### `/packages/[name]`
+
+A package's own page (`package-page.tsx`; the old `?package=` address that opened its sheet
+redirects there, and the name is one encoded path segment, so `g++` and `libc6:amd64` open): a way
+back and two arrows, then the identity line, two rows in every state: the package as the software it
+is, its name and its state (installed or not, an update or a security update waiting, or what the
+manager is doing to it), then the version it is at, the one an update lands on with its changed part
+in ink and amber for a security fix, its size and its description, **Install** or **Update** as the
+one command and Remove and Remove and purge behind the menu and their confirmations (for an account
+with both `system.admin` and `destructive`, and never for a protected package). The job console
+opens under the line, a run started elsewhere for the same package is attached rather than offered
+again, and the package is read again when the run ends. Views in the address (`?tab=`), carried to
+the next package (`package-views.tsx`): **Overview**, the picture of what it needs, the package and
+what it gives the server (`WireFlow`: dependencies as links to their pages, dashed where one is not
+installed; its commands, its service or services, its configuration and its manual as ways into the
+views or the unit's page; every line pulsing while a run is in flight; held to one height for every
+package and while loading), why it cannot be removed where it cannot, and About (description,
+installed by hand or as a dependency, essential, repository, section, architecture, licence,
+maintainer, homepage); **Files**, what its file list put
+on the server (commands that copy, services opening the unit with `systemctl start` to copy,
+configuration and documentation opening in Files); **Manual**, its man page and its other pages;
+**Depends**, everything it needs one line each with the version on the host or "not installed" and
+what was asked of it; **Log**, the package manager's logs searched for its name, dpkg's per-package
+record first, kept apart from the list's own Log view (`log-view.tsx`'s `about`). No changelog view:
+no manager is asked for one. From `xl` the installed list is a rail beside it (`package-rail.tsx`:
+the list's own search, scope and order, the first 300 drawn, the package on screen filled and drawn
+first when the filter does not hold it, a dot in a logo's corner for one that is behind), walked
+with Alt+↑/↓; on a phone the page is the one pane. Not installed, a library with nothing to run, a
+name nothing knows (with a search for it) and a failed read are each said in place
+
+**Implementation:** `app/(dashboard)/packages/[name]/page.tsx`, `components/packages/package-page.tsx`,
+`package-rail.tsx`, `package-views.tsx`, `use-package-filter.ts`; checked by
+`tests/browser/package-page.spec.ts`
 
 ### `/processes/*`
 
@@ -941,8 +1110,10 @@ supervisor's processes, or the copies of one program started by hand, summed ove
 with shared pages counted once — as spans of one bar the size of the machine that ease to each poll,
 one of them on the line beneath it (a bar reading, design system §10) and a press narrowing the
 table to its workload), over the inventory table whose head counts running, sleeping, blocked and
-zombie as state chips beside the user facet and an automatic focus that says why, with owner chips
-(PM2 and Docker drawn with their marks) and the chosen workload as a chip under it; fixed columns,
+zombie as state chips beside the ranking as five chips (Automatic, which says why it chose, CPU,
+Memory, Disk I/O, Uptime), with owner chips (PM2 and Docker drawn with their marks), the accounts as
+chips beside them (the three with the most processes, the rest behind one more chip, the one in
+force always drawn) and the chosen workload as a chip under it; fixed columns,
 so a long command line never pushes the readings or the row menu past the panel's edge, CPU and
 memory as a figure beside a short bar, a container owner by its name, a kernel thread, a zombie and
 an unreadable command line each saying which it is, and a process that started since the last poll
@@ -971,10 +1142,12 @@ the container's — every signal with what it will do to *this* process from its
 switch to send it to its children too, the priority stepper and the out-of-memory bias as five
 presets) and **Logs** (its supervisor's log through the service logs) — and it stops reading and
 says so when the process exits or its PID is reused; below `xl` the page is the one pane and scrolls
-as a whole. PM2: PM2's own identity line (the account, the Node every application runs, the boot
-hook, the last save and the application count as facts; whether it resurrects on boot as the
-verdict, read against the saved list's own names so an application started since the save turns it
-amber and offers **Save list** beside it; several accounts as rows under it), a band of what PM2
+as a whole. PM2: PM2's own identity line laid out as a project's header (whether it resurrects on
+boot as the verdict beside its name, read against the saved list's own names so an application
+started since the save turns it amber and offers **Save list**; the account, the Node every
+application runs, the boot hook, the last save and the application count as facts; **Start
+application** as the line's one command and the daemon-wide save/reload/restart/stop in its menu;
+several accounts as rows under it), a band of what PM2
 takes of the machine (`pm2-band.tsx`, bar readings: the five heaviest applications by processor and
 by memory, a cluster summed into one, as spans of one bar the size of the host beside everything
 else in use, easing to each poll, a press narrowing the table to the application with a chip to let
@@ -983,20 +1156,38 @@ table of every instance — crashing applications first, each drawn as its inter
 ticking, CPU and memory as a figure beside a short bar (memory against the limit PM2 restarts it at,
 where it has one), its restart count rising when it moves with the unstable ones in red, *not saved*
 where the saved list lacks it, fixed columns from `xl` with the mode folded into the name line below
-`2xl` — with start/reload/restart/stop inline and logs, scale, reset counters, flush, delete behind
-the menu; a detail sheet addressed by `?app=` (an exact `account:id`, or a bare name from the live
-table's owner link, which opens a cluster's first running instance) whose overview is one scroll —
-four live readings from the process table's read of its PID every two seconds (CPU, memory against
-its restart limit, disk I/O, restarts) over the sampler's recent windows, a cluster's other
-instances as rows that open in the same sheet with Scale beside them, what it listens on and who can
-reach each address, the command coloured as a command, how PM2 runs it and its log files — and whose
-Logs tab is the service logs on the process's `pm2:` source (the sheet's layout) under the record's
-own facts — restarts, unstable restarts, uptime — with an Around the last start window only where
-PM2 stamps its lines, and the server's reason instead of a socket where the logs are outside the log
-roots; a scale dialog that is a stepper over the workers, those to start outlined and those to stop
-struck, with one per core a press away; a start-application dialog whose interpreter and mode are
-cards with their marks and which shows the `pm2 start` command it will run, coloured; and
-daemon-wide save/reload/restart/stop. Services: the machine's identity line (systemd's version, the
+`2xl`, every row one height — with start/reload/restart/stop inline and logs, scale, reset counters,
+flush, delete behind the menu; a row opens the application's own page. The line and the band are
+drawn while the list is read; a server without PM2, one where PM2 is installed and no daemon runs,
+and a PM2 that does not answer each say so under PM2's mark with the next step
+(`pm2-missing.tsx`). **An application's page** (`/processes/pm2/[app]`, `pm2-app-page.tsx`; the
+name is the address, `?account=` only where two accounts run the same name, and the old `?app=`
+address — an exact `account:id` or a bare name — redirects there): from `xl` the list folded into
+a rail beside it (`pm2-app-rail.tsx`: the list's own search, state chip and order, a cluster one
+row, held while the pointer is in it), Alt+↑/↓ and two arrows to walk it with the view carried
+along; the identity line (the application as its interpreter, its name and state, its script, fork
+or cluster of n, restarts and unstable restarts, uptime ticking) with one command — Start where a
+worker is down, otherwise Reload — and the rest in a menu; then the views as the underlined strip,
+`?tab=` in the address — **Overview** (`pm2-app-overview.tsx`: notices where PM2 gave up, where
+some workers are down and where a reboot would not bring it back; *Where it runs*, the process
+page's wired picture with the account's daemon and its boot hook on the left and each worker as a
+process, the port they answer on, the log and the working directory on the right; *What it
+takes*, four reading lines — CPU and memory summed over its workers from the process table's read of
+each PID, memory against the limit PM2 restarts a worker at, disk rates and restarts — that hold
+their place while it is not running; the command; how PM2 runs it; and whether it comes back
+after a reboot), **Instances** (a cluster only: each worker a one-line card that opens its
+process's page, with its own verbs in its menu and Scale on the title line), **Logs** (the service
+logs on each worker's `pm2:` source under the record's own facts — restarts, unstable restarts,
+uptime — with an Around the last start window only where PM2 stamps its lines, and the server's
+reason instead of a socket where the logs are outside the log roots), **Environment** (read from
+the running process, credentials masked as on a process's page) and **Control** (every verb as a
+row that says what it does, and the startup list). A verb pressed on the page reaches every worker
+in turn through the per-process routes (`pm2-app-actions.tsx`); a worker's own verbs reach it
+alone. Below `xl` the page is the one pane and scrolls as a whole. Dialogs: a scale dialog
+(`pm2-scale-dialog.tsx`) that is a stepper over the workers, those to start outlined and those to
+stop struck, with one per core a press away, opened from a row, the Instances view or the menu; and
+a start-application dialog whose interpreter and mode are
+cards with their marks and which shows the `pm2 start` command it will run, coloured. Services: the machine's identity line (systemd's version, the
 active and boot-enabled counts and when it booted as facts, the failed count as the verdict that
 narrows the table to them, Reload unit files and the shortcuts at its right end), then
 `procs/service-band.tsx`, bar readings — the five services using the most processor and memory as
@@ -1082,14 +1273,25 @@ the same sheet without verbs, and one left to systemd says so first and links th
 service's Runs with Live and History. The job editor sheet asks what runs, then when — its frequency
 a grid of toggles — over a preview of the schedule in words, its week and its next three runs
 
+**Where there is no systemd** (a container, a host started by another init, or the dashboard's own
+container without `/run/systemd`), the Services list, a unit's page and Scheduled's Timers draw
+one screen (`procs/no-systemd.tsx` over `MissingThing`): the systemd logo, why, **Open Processes**
+and the mount to copy. A unit's page is that screen whole, with no rail, whether the list answered
+`available: false` or the unit's read answered `systemd_not_running`, and systemctl's own refusal
+is behind *What the server said*; on Scheduled it is one block under Timers and the cron jobs
+above it are drawn as usual
+
 **Implementation:** processes layout and pages, `components/procs/` (`process-page.tsx`,
 `process-rail.tsx`, `process-overview.tsx`, `process-views.tsx`, `process-detail.tsx`,
 `process-facts.ts`, `wiring-picture.tsx`, `services.tsx`, `service-page.tsx`, `service-rail.tsx`,
 `service-overview.tsx`, `service-views.tsx`, `service-facts.ts`, `service-band.tsx`, `pm2-band.tsx`,
-`pm2-shared.ts`, `unit-runs.tsx`, `units.ts`, `schedule-band.tsx`, `cron-job-sheet.tsx`,
+`pm2-shared.ts`, `pm2-facts.ts`, `pm2-app-page.tsx`, `pm2-app-rail.tsx`, `pm2-app-overview.tsx`,
+`pm2-app-views.tsx`, `pm2-app-actions.tsx`, `pm2-scale-dialog.tsx`, `pm2-start-dialog.tsx`,
+`pm2-missing.tsx`, `unit-runs.tsx`, `units.ts`, `schedule-band.tsx`, `cron-job-sheet.tsx`,
 `timer-sheet.tsx`), `components/verbs.tsx`, `lib/cron.ts`, `lib/crontab.ts`, `lib/schedule.ts`,
-`lib/unit-runs.ts` (`units.ts`, `pm2-shared.ts`, `process-facts.ts`, `service-facts.ts` and these
-unit-tested); checked by `tests/browser/processes-ui.spec.ts` and
+`lib/unit-runs.ts` (`units.ts`, `pm2-shared.ts`, `pm2-facts.ts`, `process-facts.ts`,
+`service-facts.ts` and these unit-tested); checked by `tests/browser/processes-ui.spec.ts`,
+`tests/browser/pm2-application.spec.ts` and
 `tests/browser/services-ui.spec.ts`
 
 ### `/proxy/*`
@@ -1152,6 +1354,8 @@ of one, is still made in a sheet over the list (`SiteForm`, the same fields). `?
 the site's Settings for an administrator and a file the form owns, and opens the config viewer
 otherwise. Checked by `tests/browser/proxy-site-page.spec.ts`, `proxy-site-builder.spec.ts`,
 `proxy-sites-list.spec.ts` and `proxy-sites-tools.spec.ts`.
+
+
 
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)
@@ -1334,58 +1538,120 @@ available. SSH edits are reviewed and protected by lockout guards; intrusion con
 capabilities, confirmation and audit. Automatic posture findings and settings recommendation
 comparisons were removed in 0.7.5
 
+Since 0.8.7 the overview is its identity line, the picture of the ways in and the access-boundary
+report: the picture's nodes carry the readings (connections, firewall, fail2ban, sshd, who is signed
+in) and their marks link to Connections, Firewall, Intrusion, SSH and Logins. Logins
+(`/security/logins`) opens on this server's identity line and a picture of where sessions are held
+from, who is attacking and which accounts are in; then open sessions (End session, `system.admin`
+and `destructive`), attackers ranked by attempts (Block at the firewall and the address lookups in
+each row's menu; an address the firewall already denies reads "blocked"), and the login record
+(Successful / Failed for administrators as `?failed=1`, a filter as `?q=`, new records held behind
+"N new logins · Show"). Checked by `security-logins.spec.ts` and `security-ui.spec.ts`; captures of
+every state with `JD_SECURITY_SHOTS=<folder>` and `security-logins-shots.spec.ts`
+
+Intrusion (0.8.7) is an identity line, a picture of the internet, this server and the three
+engines, and one engine at a time as a view in the address: `?tab=fail2ban`, `crowdsec`, `suricata`
+or `blocked` (every engine's refused addresses folded by address). Without `tab` it opens on the
+first engine that is installed. A jail is a page, `/security/intrusion/jails/[jail]`: what it holds
+with Unban and Never ban again on each address, its policy, and Ban an address, Tune and Release
+every ban as its verbs. One form bans through CrowdSec or a jail. A stopped fail2ban is started
+from the page (`POST /systemd/fail2ban.service/start`, `service.control`) and an absent one is
+installed from it. SSH (0.8.7) stages its directives in one column and applies them through the
+shared save bar and a review dialog; `?setting=<key>` still lands on a directive.
+
 **Implementation:** `app/(dashboard)/security/`, `components/security/`; backend in
 [`../backend/observability-security.md`](../backend/observability-security.md)
 
 ### `/system-users`
 
-Host accounts as a table read down its columns and opened by a press: who can sign in and how
-(password, keys, or the one thing closing them), how far each reaches root (read from the sudoers
-files, `docker`, `lxd`, `libvirt` and `disk` as root by another name), and when each last signed in,
-under the host's identity line and, only when there is something to change, a list of findings each
-with where to change it. Root is in the list however the system-accounts chip is set, and daemons
-are a shelf of their own drawn as their products. A row's checkbox selects it for lock, disable,
-enable, end sessions and delete; Groups and Defaults are in the line's end.
+Host accounts, under the host's identity line (how many can sign in as its state, New account as its
+command, Groups and Account defaults in its menu) and, only when there is something to change, a list
+of findings each with where to change it. Then the ways to root as one picture (`RootPicture`, a
+`WireFlow`): the accounts that become root on the left, by sudo or by a group that is root by another
+name (`docker`, `lxd`, `libvirt`, `disk`), each line in the tone of how strong it is; root in the
+middle; and on the right whether root itself signs in by password and by key. Under it every account
+is a one-line card (`ChoiceRow`) that opens the account: who can sign in and how (password, keys, or
+the one thing closing them), how far each reaches root (read from the sudoers files), and when each
+last signed in, in columns from `xl` and on two lines of their own under the name below it, so no
+account is taller than another. Root is in the list however the system-accounts chip is set, and
+daemons are a shelf of their own drawn as their products. A row's checkbox selects it for lock,
+disable, enable, end sessions and delete (one request at a time); its menu goes to that account's
+terminal, files, settings and history. The page has its shape while it waits: the line, the picture
+and the rows are drawn at the height the last read gave them.
 
-**Implementation:** `app/(dashboard)/system-users/page.tsx`, `components/system-users/access.ts` and
-`marks.tsx`
+The whole section is `system.admin`, reads included. An account without the role is shown a closed
+door on every page of it (`read-state.tsx`) rather than controls that fail.
+
+**Implementation:** `app/(dashboard)/system-users/page.tsx`, `components/system-users/access.ts`,
+`marks.tsx`, `root-picture.tsx`, `wire-marks.tsx` and `read-state.tsx`
 
 ### `/system-users/user/[name]`
 
-One account: its password and every SSH key as rows of one list (set or generate a password, require
-a change, lock, unlock only when there is a password behind the lock, remove; add a key by paste,
-GitHub import or generation, with label, restrictions, last use and a weak-key warning, and give it
-to other accounts); its routes to root with the file each rule is in, its own sudo rule, and its
-groups; what it is running right now, drawn only when it is running something; one history of
-sign-ins, refusals, sudo commands and dashboard changes; folded profile, password rules and limits.
-Disable, a terminal as that account (`/terminal?as=<name>`, which `/terminal` passes on as
-`asUser`), files, end sessions and a delete that reads what would go first. A system account is
-read-only until `Allow changes` is pressed.
+One account, on the shape a service's page has: a way back, its identity line (sign-in state beside
+the name; a terminal as that account as the command, `/terminal?as=<name>`, which `/terminal` passes
+on as `asUser`, or its files where it has no shell; Files, Disable or Enable, End sessions and a
+delete that reads what would go first in the menu), and three views as an underlined strip with the
+one on screen in the address (`?tab=`). **Overview**: its password and every SSH key as rows of one
+list (set or generate a password, require a change, lock, unlock only when there is a password
+behind the lock, remove; add a key by paste, GitHub import or generation, with label, restrictions,
+last use and a weak-key warning, and give it to other accounts); its routes to root with the file
+each rule is in, its own sudo rule, and its groups; what it is running right now, drawn only when it
+is running something. **Settings**: profile, password rules and limits as one centred column of
+sections under one floating save bar; they are still three writes, and the bar sends each form that
+holds an edit. A disabled account's expiry is not offered and not sent, since an empty one is how an
+account is enabled. **History**: sign-ins, refusals, sudo commands and dashboard changes on one line
+of time, narrowed by chips; an account with nothing on record is drawn as itself with one sentence.
+From `xl` the accounts stand in a column beside it (`AccountRail`) with the list's own search, filter
+and order; Alt+↑ and Alt+↓ walk them and the view on screen goes along. A system account is read-only
+until `Allow changes` is pressed.
 
-**Implementation:** `components/system-users/account-page.tsx` and its `account-*.tsx`
+**Implementation:** `components/system-users/account-page.tsx`, `account-rail.tsx`, `detail-shell.tsx`
+and the `account-*.tsx` views
 
 ### `/system-users/new`
 
 A flow page: what the account is for, as templates (the operator's own beside the built-in ones),
-then its name, how it signs in, its root access, groups and shell, ending in Create. An account
-nobody can sign in to has to be asked for by name.
+then its name, how it signs in, its root access, groups and shell in the one focused surface, ending
+in Create with Save as template beside it. The column beside the form (`NewAccountPicture`; under it
+below `xl`) draws what the answers add up to: the way in, the account, how far it will reach. An
+account nobody can sign in to has to be asked for by name.
 
-**Implementation:** `components/system-users/new-account.tsx`
+**Implementation:** `components/system-users/new-account.tsx`, `new-account-picture.tsx`
 
 ### `/system-users/groups`
 
-The host's groups, what reaches root first, with what each hands over and who is in it; a private
-group is hidden and system groups are behind a chip; a sheet edits members, and name and number and
-deletion once a system group's changes are allowed.
+The host's groups under an identity line that says how many reach root (a press narrows the rows to
+those) with New group as its command. Each group is a one-line card: its mark, its name over its
+number, what it hands over in its tone, and who is in it; on a phone what it hands over takes the
+line under the name. What reaches root comes first; a private group is hidden and system groups are
+behind a chip. A row opens the group's page; `?group=<name>` lands there too.
 
-**Implementation:** `app/(dashboard)/system-users/groups/page.tsx`
+**Implementation:** `app/(dashboard)/system-users/groups/page.tsx`, `components/system-users/groups.ts`,
+`group-parts.tsx`
+
+### `/system-users/groups/[name]`
+
+One group, on the same shape as an account: its identity line (what it hands over as its state, its
+number, how many are in it, whether a package made it), three views in the address and from `xl` the
+groups in a column beside it (`GroupRail`) with the list's search and switch, walked by Alt+↑ and
+Alt+↓. **Overview**: who is in it, the group, and what being in it reaches as a picture, then the
+sudo rules that say so, each with its file and line. **Members**: a switch per account (those already
+in it that the people's list does not hold as well); an account it is the main group of is said, not
+offered. **Settings**: name and number, held for a package's group until `Allow changes` and never
+offered for one the system depends on, and deletion. Membership, name and number are one write, saved
+by the one floating bar whichever view the edit was made in. It was a sheet over the list until
+0.8.7.
+
+**Implementation:** `components/system-users/group-page.tsx`, `group-rail.tsx`, `detail-shell.tsx`
 
 ### `/system-users/defaults`
 
-What an account is born under: default shell, password rules and quality, what `/etc/skel` holds,
-naming the file each writes; and the operator's own templates.
+What an account is born under, as one centred column: New accounts (default shell, grace after a
+password expires, what `/etc/skel` holds with a link to it) and Passwords (how long one lasts, how
+soon it can change, the warning, the shortest allowed and how many kinds of character), each head
+naming the file it writes; one floating save bar; and the operator's own templates, one line each.
 
-**Implementation:** `app/(dashboard)/system-users/defaults/page.tsx`
+**Implementation:** `app/(dashboard)/system-users/defaults/page.tsx`, `components/system-users/fields.ts`
 
 ### `/terminal`
 
@@ -1568,9 +1834,12 @@ and the exact masked text that was sent — is kept with the run, and an adminis
 up from there (`deploy-run-diagnosis.spec.ts`). `/deploy/notifications`
 (`components/deploy/notifications-page.tsx`) manages Discord, Slack, Microsoft Teams, Mattermost,
 Telegram, ntfy, Gotify, Pushover, e-mail and signed webhook channels with event selection, pause/resume, test delivery and delivery history.
-`/deploy/variables` (`components/deploy/shared-variables.tsx`, Deployments → Shared variables) lists the
+`/deploy/variables` (`components/deploy/shared-variables-page.tsx` over the list in
+`shared-variables.tsx`, Deployments → Shared variables) lists the
 server's shared variables and Settings → Variables a project's own under *Project variables*, the same
-list in both: each row the name, the `${{server.NAME}}` or `${{project.NAME}}` it is read as, who changed
+list in both; the server's page opens on a picture of what they reach (each variable, this server, the
+projects whose variables read one, a dashed line to a project still on an earlier value;
+`shared-variables-reading.ts`) and counts them on its head (*4 variables · 2 not live yet*): each row the name, the `${{server.NAME}}` or `${{project.NAME}}` it is read as, who changed
 it when, how many variables read it and, under it, those readers by project and environment (each a link
 to that project's Variables page), with *Saved · not live yet* on the row and *(not live yet)* on a reader
 whose live release started before the value changed. Copy reference, Reveal value (the audited reveal),
@@ -1581,16 +1850,24 @@ variables by name beside the linked databases (`SharedReferencePicker`), and cho
 the variable secret too; a variable reading one draws `server.NAME` or `project.NAME` as a link to where it
 is defined. Checked by `deploy-shared-variables.spec.ts`; the Automatic
 deployment section on General carries the GitHub commit-status switch. `/deploy/drains`
-(`components/deploy/log-drains-page.tsx`, its sentences in `log-drains.ts`) lists the log drains with
-each one's reach and delivery health, and adds or edits one in a side panel: format, endpoint, sealed
+(`components/deploy/log-drains-page.tsx`, its sentences in `log-drains.ts`, its state word, figure and
+line in `log-drain-state.ts`) reads as Notifications does: a picture of the projects, this server and
+each drain as the service it sends to (OpenTelemetry, Grafana, the webhook mark for JSON lines; the
+formats not added as dashed rings an administrator presses), then one line per drain: the host and
+what it carries, a dot and a word (*Shipping*, *Failing 3m*, *Paused*, *Nothing sent*) and one figure
+(what waits, what was dropped, else what was shipped), the count on the head (*2 drains · 1 failing*).
+The destination's own words and the totals open from the state word. It adds or edits one in a side panel: format, endpoint, sealed
 headers, streams — container output, requests and, for an OpenTelemetry drain, traces with the link
 its service opens one at — and projects. A request opened in a project's Logs names its trace and
 links to it through the first drain that exports the project's traces with a link (`traceLinkFor`). `/deploy/secret-stores` (`components/deploy/secret-stores-page.tsx`, its
 sentences and the reference grammar in `secret-stores.ts`) lists the Vault, OpenBao, Infisical, Doppler, AWS
-Secrets Manager and Azure Key Vault connections: each card the product's mark, the name, the endpoint (derived
+Secrets Manager and Azure Key Vault connections under a picture of the stores, this server and the projects
+whose variables read them (`secret-store-state.ts`; the kinds not connected as dashed rings): each store one
+line with the product's mark, the name, the endpoint (derived
 from the region or the vault name for the last two) with the mount, namespace and sign-in (or the Infisical
-environment, the region, the tenant), the newest test or run's read in the store's own words (amber when it
-failed), and who reads it. The side panel takes the store, the name (shown as the reference it is read as, fixed once
+environment, the region, the tenant), a dot and a word for the newest test or run's read (*Answering*,
+*Refused 2m ago*, *Not tested*) that opens on the store's own words, and *Read by N*, which opens on every
+variable that reads it by project, each project a link to its Variables; the head counts them (*3 stores · 1 refused*). The side panel takes the store, the name (shown as the reference it is read as, fixed once
 saved), the address, the kind's settings, an optional CA, the sealed credentials and whether previews may read
 it; an edit adds Test with an optional path and key, which shows the version found and never the value. An
 environment variable's editor, with *Reference* on, offers the connected stores with path, key and an
@@ -1608,7 +1885,15 @@ for every non-game deployment, using automatic shell detection and the image's u
 `cmd` or `user` overrides (`console-session.ts`). Its toolbar contains only Terminal actions and
 fullscreen; shell, user, container, search, snippet and terminal settings controls are absent.
 Runtime's Console action still selects a service through `?service=`. The
-`docker.container.exec.open` audit entry records the exec command and user. The shared vocabulary
+`docker.container.exec.open` audit entry records the exec command and user. A console with nothing
+to open (no capability, no answer from Docker, no running container; a game server that is not
+running, on its Console, Players and Server settings alike) is `ProjectEmpty`
+(`components/deploy/project-empty.tsx`): the project's mark, one sentence, the backend's reason
+under it and the next page as a button, in the height the pane takes. A game's Players
+(`game/players.tsx`) draws each player as `PlayerFace` (`game/player-face.tsx`, the game's
+eight-pixel head drawn from the name, since the image policy admits no skin server) and says since
+when the page has seen them on (`game/players-model.ts`: the game reports who is online and not
+when they joined, so "joined 3m ago" is only for a player the page saw arrive). The shared vocabulary
 (`components/deploy/vocabulary.tsx`) is the one place a run state, a project state, a source line or a
 release path is put into words, and the one
 place a project is resolved to the product it is drawn as (`projectProduct`, `sourceProduct`); a
