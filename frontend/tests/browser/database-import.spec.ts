@@ -768,7 +768,8 @@ test("a copy can go to another saved connection of the same engine", async ({ pa
     },
   })
   await visit(page, "/databases/1/backups")
-  await page.getByRole("button", { name: "Copy database" }).click()
+  await page.getByRole("button", { name: "More backup actions" }).click()
+  await page.getByRole("menuitem", { name: "Copy database" }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("combobox", { name: "Copy into" }).click()
   await page.getByRole("option", { name: /shop-replica/ }).click()
@@ -789,7 +790,8 @@ test("a copy can go to another saved connection of the same engine", async ({ pa
 test("a copy offers no other server where there is none", async ({ page }) => {
   await mockImports(page)
   await visit(page, "/databases/1/backups")
-  await page.getByRole("button", { name: "Copy database" }).click()
+  await page.getByRole("button", { name: "More backup actions" }).click()
+  await page.getByRole("menuitem", { name: "Copy database" }).click()
   await expect(page.getByRole("dialog").getByRole("combobox", { name: "Copy into" })).toHaveCount(0)
 })
 
@@ -940,7 +942,8 @@ test("screenshots of each state @shots", async ({ page }) => {
 
   // The copy dialog with another server to go to.
   await page.goto("/databases/1/backups")
-  await page.getByRole("button", { name: "Copy database" }).click()
+  await page.getByRole("button", { name: "More backup actions" }).click()
+  await page.getByRole("menuitem", { name: "Copy database" }).click()
   const copy = page.getByRole("dialog")
   await copy.getByRole("combobox", { name: "Copy into" }).click()
   await page.getByRole("option", { name: /shop-replica/ }).click()

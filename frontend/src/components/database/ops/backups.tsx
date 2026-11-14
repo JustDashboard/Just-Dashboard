@@ -1,7 +1,7 @@
 "use client"
 
 import { useConfirm } from "@/components/confirm-dialog"
-import { sectionHref } from "@/components/database/engine"
+import { sectionHref, type Engine } from "@/components/database/engine"
 import { CouldNotRead, NotUpdating, staleOf } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineMark, ProtectedTag, SectionFrame } from "@/components/database/kit"
@@ -43,7 +43,7 @@ import {
   RotateCounterClockwise,
   Trash,
 } from "@/components/icons"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Panel, PanelHeader } from "@/components/panel"
 import { EmptyState, LoadingPanel } from "@/components/state"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { FilterChip } from "@/components/tabs"
@@ -57,7 +57,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { VerbActions, VerbMenu, type Verb } from "@/components/verbs"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { del, downloadUrl, get, post } from "@/lib/api"
@@ -73,16 +74,14 @@ const TABLE_FROM = 600
 /** The key of the address that names the transfer on screen. */
 const JOB_KEY = ["job"] as const
 
-/** The width from which the page's three commands stand beside the panel's title. */
-const COMMANDS_FROM = 600
-
 type Asking =
   { kind: "take" } | { kind: "upload" } | { kind: "copy" } | { kind: "restore"; file: DbBackupFile }
 
 /**
  * A database's dumps: when it was last backed up and what is kept, the dump,
- * restore or copy running now with its own output, and every dump with the
- * three things done to one — download it, restore it, delete it.
+ * restore or copy running now with its own output, and every dump on one
+ * line with the three things done to one — download it, restore it, delete
+ * it. A dump's name opens the rest of what is known about it.
  *
  * The page reads files and jobs, never the database: it is the same page for
  * a server that is stopped, minus the command that needs it to answer. A
@@ -325,39 +324,31 @@ export function Backups() {
     ) : undefined
   ) : undefined
 
-  const roomy = width === 0 || width >= COMMANDS_FROM
-  const commands = (
-    <>
-      {mayUpload && (
-        <Button size="sm" variant="outline" onClick={() => setAsking({ kind: "upload" })}>
-          <CloudUpload />
-          Upload a dump
-        </Button>
-      )}
-      {mayCopy && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!idle || !answering}
-          onClick={() => setAsking({ kind: "copy" })}
-        >
-          <Copy />
-          Copy database
-        </Button>
-      )}
-      {mayDump && (
-        <Button
-          ref={command}
-          size="sm"
-          disabled={!idle || !answering || !data}
-          onClick={() => setAsking({ kind: "take" })}
-        >
-          <Archive />
-          Back up now
-        </Button>
-      )}
-    </>
-  )
+  // One command on the title line; the two that are not pressed daily are
+  // words in a menu beside it, which is also what a phone has room for.
+  const more: Verb[] = [
+    ...(mayUpload
+      ? [
+          {
+            key: "upload",
+            label: "Upload a dump",
+            icon: CloudUpload,
+            run: () => setAsking({ kind: "upload" }),
+          },
+        ]
+      : []),
+    ...(mayCopy
+      ? [
+          {
+            key: "copy",
+            label: "Copy database",
+            icon: Copy,
+            disabled: !idle || !answering,
+            run: () => setAsking({ kind: "copy" }),
+          },
+        ]
+      : []),
+  ]
 
   const schedule = scheduledDump(scheduled.data ?? [], id)
   return (
@@ -406,12 +397,21 @@ export function Backups() {
             <>
               {staleOf(backups) && <NotUpdating error={staleOf(backups)!} />}
               {readOnly && <ProtectedTag />}
-              {roomy && commands}
+              {mayDump && (
+                <Button
+                  ref={command}
+                  size="sm"
+                  disabled={!idle || !answering || !data}
+                  onClick={() => setAsking({ kind: "take" })}
+                >
+                  <Archive />
+                  Back up now
+                </Button>
+              )}
+              {more.length > 0 && <VerbMenu verbs={more} label="More backup actions" />}
             </>
           }
         />
-        {/* Three commands do not fit beside the title on a phone: they take a row of their own. */}
-        {!roomy && <div className="flex flex-wrap gap-2 pt-3">{commands}</div>}
         {!data ? (
           backups.error ? (
             <div className="pt-4">
@@ -439,7 +439,7 @@ export function Backups() {
               <EmptyState
                 mark={<EngineMark engine={engine} size="md" />}
                 title={`No dump of ${conn.name} is kept here`}
-                description="A dump is one file on this server that this page can restore from. Take one now, or upload one made somewhere else."
+                description="Take one now, or upload one made somewhere else."
                 action={
                   mayDump && (
                     <Button
@@ -455,16 +455,16 @@ export function Backups() {
                 }
               />
             ) : width >= TABLE_FROM ? (
-              // Five columns of two lines each: what a dump holds over the tool
-              // that wrote it, its size over how long it took. The name keeps
-              // the width that leaves.
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              // Framed, because it is a table (§2), and one line to a dump:
+              // who took it, the tool that wrote it and how long it took are
+              // behind its name.
+              <Panel>
                 <Table className="table-fixed">
                   <colgroup>
-                    <col className="w-32" />
-                    <col />
-                    <col className="w-[26%]" />
                     <col className="w-28" />
+                    <col />
+                    <col className="w-[24%]" />
+                    <col className="w-24" />
                     <col className="w-28" />
                   </colgroup>
                   <TableHeader>
@@ -480,78 +480,59 @@ export function Backups() {
                   </TableHeader>
                   <TableBody>
                     {files.map((file) => (
-                      <TableRow key={file.file} className="group">
-                        <TableCell className="py-2 align-top">
-                          <span className="block" title={timestamp(file.takenAt)}>
-                            {relativeTime(file.takenAt)}
-                          </span>
-                          {file.by && (
-                            <span className="block truncate text-hint text-muted-foreground">
-                              by {file.by}
-                            </span>
-                          )}
+                      <TableRow key={file.file} className="group h-11">
+                        <TableCell className="truncate py-0" title={timestamp(file.takenAt)}>
+                          {relativeTime(file.takenAt)}
                         </TableCell>
-                        <TableCell className="px-2 py-2 align-top">
+                        <TableCell className="px-2 py-0">
                           <DumpName file={file} />
                         </TableCell>
-                        <TableCell className="px-2 py-2 align-top">
+                        <TableCell className="px-2 py-0">
                           <DumpHolds file={file} />
-                          <span className="block truncate text-hint text-muted-foreground">
-                            {toolWords(file)}
-                          </span>
                         </TableCell>
-                        <TableCell className="numeric px-2 py-2 text-right align-top">
-                          <span className="block">{bytes(file.size)}</span>
-                          {tookWords(file.durationMs) && (
-                            <span className="block truncate text-hint text-muted-foreground">
-                              {tookWords(file.durationMs)}
-                            </span>
-                          )}
+                        <TableCell className="numeric px-2 py-0 text-right">
+                          {bytes(file.size)}
                         </TableCell>
-                        <TableCell className="px-2 py-1 align-top">
+                        <TableCell className="px-2 py-0">
                           <VerbActions dim verbs={verbsFor(file)} className="justify-end" />
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
-              </PanelBody>
+              </Panel>
             ) : (
-              // Too narrow for columns: a dump is its name with its commands,
-              // and one line of everything the columns said.
-              <ul className="-mx-4 divide-y divide-hairline border-y border-hairline">
+              // Too narrow for columns: a dump is a card of two lines, its
+              // name with its commands over when, how big and what it holds.
+              // Every card is those two lines, so the list is one height a row.
+              <ul className="space-y-2">
                 {files.map((file) => (
-                  <li key={file.file} className="group px-4 py-2 text-xs">
+                  <li
+                    key={file.file}
+                    data-slot="dump-card"
+                    className="group min-w-0 rounded-xl border bg-choice-surface px-3 py-2 text-xs"
+                  >
                     <div className="flex min-w-0 items-center gap-2">
                       <div className="min-w-0 flex-1">
                         <DumpName file={file} bare />
                       </div>
                       <VerbActions dim verbs={verbsFor(file)} />
                     </div>
-                    <p className="numeric flex flex-wrap gap-x-2.5 gap-y-0.5 text-hint text-muted-foreground">
+                    <p className="numeric truncate text-hint text-muted-foreground">
                       <span title={timestamp(file.takenAt)}>{relativeTime(file.takenAt)}</span>
-                      <span>{bytes(file.size)}</span>
-                      {holdsWords(file, engine.nouns, engine.can("dumpDatabases")) && (
-                        <span className="text-foreground">
-                          {holdsWords(file, engine.nouns, engine.can("dumpDatabases"))}
-                        </span>
+                      {" · "}
+                      {bytes(file.size)}
+                      {holdsLine(file, engine) && (
+                        <>
+                          {" · "}
+                          <span className="text-foreground">{holdsLine(file, engine)}</span>
+                        </>
                       )}
-                      {summaryWords(file, engine.can("dumpDatabases")) && (
-                        <span>{summaryWords(file, engine.can("dumpDatabases"))}</span>
-                      )}
-                      <span>{toolWords(file)}</span>
-                      {tookWords(file.durationMs) && <span>{tookWords(file.durationMs)}</span>}
                     </p>
-                    {file.note && (
-                      <p className="truncate pt-0.5 text-hint text-muted-foreground">{file.note}</p>
-                    )}
                   </li>
                 ))}
               </ul>
             )}
-            <FormNote className="wrap-anywhere">
-              Kept on this server in <span className="font-mono">{data.dir}</span>
-            </FormNote>
           </div>
         )}
       </Panel>
@@ -658,60 +639,86 @@ function toolWords(file: DbBackupFile): string {
   return [file.tool ?? file.format, file.toolVersion].filter(Boolean).join(" ")
 }
 
+/** What a dump holds, as its words in a line: what it was asked for, and what the tool said it wrote. */
+function holdsLine(file: DbBackupFile, engine: Engine): string {
+  const numbered = engine.can("dumpDatabases")
+  return [holdsWords(file, engine.nouns, numbered), summaryWords(file, numbered)]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 /**
  * A dump's own name, where it came from when that is worth saying, and its
- * note. A name too long for its column is cut in the middle: the end of it —
- * when it was taken, what kind of file it is — is what tells dumps apart.
+ * note beside it. A name too long for its column is cut in the middle: the
+ * end of it — when it was taken, what kind of file it is — is what tells
+ * dumps apart.
+ *
+ * The name is the button (§7): it opens what else is known about the dump —
+ * the moment it was taken and by whom, the tool that wrote it and how long
+ * that took, its note in full. Those were a second line under every cell of
+ * the row.
  */
 function DumpName({ file, bare }: { file: DbBackupFile; bare?: boolean }) {
+  const { engine } = useDatabase()
   const origin = originWord(file.origin)
   const { head, tail } = nameParts(file.file)
-  const name = (
-    <span className="flex min-w-0 font-mono" title={file.file}>
-      <span className="min-w-0 truncate">{head}</span>
-      {tail && <span className="shrink-0">{tail}</span>}
-    </span>
-  )
-  // Too narrow for columns, the name shares its line with the row's commands
-  // and the note has a line of its own under the figures.
-  if (bare) {
-    return (
-      <span className="flex min-w-0 items-center gap-2">
-        {name}
-        {origin && <Tag>{origin}</Tag>}
-      </span>
-    )
-  }
-  // In a column the name has the whole width: where the dump came from is
-  // said on the line under it, before its note.
+  const took = tookWords(file.durationMs)
+  const holds = holdsLine(file, engine)
   return (
-    <>
-      {name}
-      {(origin || file.note) && (
-        <span className="flex min-w-0 items-center gap-2">
-          {origin && <Tag className="shrink-0">{origin}</Tag>}
-          {file.note && (
-            <span className="min-w-0 truncate text-hint text-muted-foreground" title={file.note}>
-              {file.note}
-            </span>
-          )}
-        </span>
+    <span className="flex min-w-0 items-center gap-2">
+      <Popover>
+        <PopoverTrigger
+          aria-label={`About ${file.file}`}
+          title={file.file}
+          className="flex min-w-0 rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
+        >
+          <span className="min-w-0 truncate">{head}</span>
+          {tail && <span className="shrink-0">{tail}</span>}
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-80 space-y-2 p-3 text-xs">
+          <p className="font-mono break-all">{file.file}</p>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-hint">
+            <dt className="text-muted-foreground">Taken</dt>
+            <dd>
+              {timestamp(file.takenAt)}
+              {file.by && ` by ${file.by}`}
+            </dd>
+            <dt className="text-muted-foreground">Written by</dt>
+            <dd>
+              {toolWords(file)}
+              {took && `, in ${took}`}
+            </dd>
+            {holds && (
+              <>
+                <dt className="text-muted-foreground">Holds</dt>
+                <dd>{holds}</dd>
+              </>
+            )}
+            {file.note && (
+              <>
+                <dt className="text-muted-foreground">Note</dt>
+                <dd className="break-words">{file.note}</dd>
+              </>
+            )}
+          </dl>
+        </PopoverContent>
+      </Popover>
+      {origin && <Tag className="shrink-0">{origin}</Tag>}
+      {!bare && file.note && (
+        <span className="min-w-0 flex-1 truncate text-hint text-muted-foreground">{file.note}</span>
       )}
-    </>
+    </span>
   )
 }
 
-/** What a dump holds: what it was asked for, and what the tool said it wrote. */
+/** What a dump holds, on its line of the table. */
 function DumpHolds({ file }: { file: DbBackupFile }) {
   const { engine } = useDatabase()
-  const contents = holdsWords(file, engine.nouns, engine.can("dumpDatabases"))
-  const summary = summaryWords(file, engine.can("dumpDatabases"))
-  if (!contents && !summary) {
-    return <span className="block truncate text-muted-foreground">Not described</span>
-  }
+  const holds = holdsLine(file, engine)
+  if (!holds) return <span className="block truncate text-muted-foreground">Not described</span>
   return (
-    <span className="block truncate" title={[contents, summary].filter(Boolean).join(" · ")}>
-      {[contents, summary].filter(Boolean).join(" · ")}
+    <span className="block truncate" title={holds}>
+      {holds}
     </span>
   )
 }
