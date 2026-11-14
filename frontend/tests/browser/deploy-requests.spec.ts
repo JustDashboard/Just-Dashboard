@@ -285,14 +285,21 @@ test.describe("a deployment's traffic", () => {
       "true",
     )
 
-    // A rate rather than a count: "1,284" means nothing without the window it
-    // was counted over.
-    await expect(page.getByText("per minute")).toBeVisible()
-    await expect(page.getByText("21.4")).toBeVisible()
+    // The Overview's reading lines, in the Overview's words, where a row of
+    // four tiles stood: a rate rather than a count, since "1,284" means
+    // nothing without the window it was counted over.
+    const hour = page.getByRole("group", { name: "The last hour" })
+    const line = (name: string) =>
+      hour.locator('[data-slot="reading-line"]').filter({ hasText: name })
+    await expect(line("Traffic")).toContainText("21.4 requests a minute")
+    await expect(line("Traffic")).toContainText("402 page views in the last hour")
     // 13 of 1284 is about 1%, and the reading is the share, not the count.
-    await expect(page.getByText("13 of 1,284 answered 5xx")).toBeVisible()
+    await expect(line("Errors")).toContainText("1.0% of requests failed")
+    await expect(line("Errors")).toContainText("13 of 1,284 answered 5xx")
     // The tail, not the mean: a p50 of 24ms hides a p99 of 2.8 seconds.
-    await expect(page.getByText("19 in 20 inside this · half inside 24ms")).toBeVisible()
+    await expect(line("Response time")).toContainText("19 in 20 inside 412ms")
+    await expect(line("Response time")).toContainText("Half inside 24ms")
+    await expect(line("Served")).toContainText("39.4 MB sent")
 
     // Each reading carries its hour: the failures as a strip of minutes, the
     // rate and the p95 as lines, and what asked drawn as itself after the name.
@@ -303,13 +310,12 @@ test.describe("a deployment's traffic", () => {
     await expect(
       page.getByRole("img", { name: "How long 19 in 20 responses took, over the last hour" }),
     ).toBeVisible()
-    await expect(page.locator('[data-slot="stat-tile"] img[src="/logos/chrome.svg"]')).toBeVisible()
+    await expect(line("Traffic").locator('img[src="/logos/chrome.svg"]')).toBeVisible()
     // Four readings, none of them the container: what it did is the Events
-    // tab's, which counts the exit.
-    await expect(page.locator('[data-slot="stat-tile"]')).toHaveCount(4)
-    await expect(
-      page.locator('[data-slot="stat-tile"]').filter({ hasText: "Container" }),
-    ).toHaveCount(0)
+    // tab's, which counts the exit. No tile is left on the page's opening.
+    await expect(hour.locator('[data-slot="reading-line"]')).toHaveCount(4)
+    await expect(line("Container")).toHaveCount(0)
+    await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
     await expect(page.getByTitle("1 exit or restart in the last hour")).toBeVisible()
   })
 
@@ -679,7 +685,7 @@ test.describe("a deployment's traffic", () => {
     // …and who it tells, in Automation's own words: a rule naming no channel
     // reaches every one of them, and with none added yet nobody hears it.
     await expect(page.getByText("no channels yet — nobody is told")).toHaveClass(/text-warning/)
-    // Page views ride on the requests tile, and served bytes have their own.
+    // Page views ride on the traffic line, and served bytes have their own.
     await expect(page.getByText("402 page views in the last hour")).toBeVisible()
     await expect(page.getByText("Served", { exact: true })).toBeVisible()
     // The chart is the house one — stacked by status family, with the live
@@ -1906,7 +1912,11 @@ test.describe("a deployment's traffic", () => {
     for (const width of [390, 1280]) {
       await page.setViewportSize({ width, height: 900 })
       await page.goto("/deploy/7/logs")
-      await expect(page.getByRole("button", { name: "Requests", exact: true })).toBeVisible()
+      // A phone picks the view on the bar at the pane's foot, a desk on the
+      // strip at its head.
+      const view = (name: string) =>
+        page.getByRole(width === 390 ? "tab" : "button", { name, exact: true })
+      await expect(view("Requests")).toBeVisible()
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true)
@@ -1914,7 +1924,7 @@ test.describe("a deployment's traffic", () => {
         path: testInfo.outputPath(`deploy-requests-${width}.png`),
         fullPage: true,
       })
-      await page.getByRole("button", { name: "Insights", exact: true }).click()
+      await view("Insights").click()
       await expect(page.getByText("Pages", { exact: true })).toBeVisible()
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

@@ -753,6 +753,7 @@ export function RunPage() {
             selectedStep={selectedStepId}
             onSelectStep={setSelectedStepId}
             focusLine={focusLine}
+            deployment={deployment}
           />
         </div>
       </Section>

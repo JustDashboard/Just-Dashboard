@@ -1,6 +1,7 @@
 "use client"
 
-import { Suspense, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { ChartActivity, Cross, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -11,17 +12,16 @@ import { useAuth } from "@/hooks/use-auth"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
-import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/components/deploy/vocabulary"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { HUE } from "@/components/overview/readings"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { ProductLogo, pm2Product } from "@/components/product-logo"
+import { ProductLogo, ProductLogos, hasProductLogo, pm2Product } from "@/components/product-logo"
 import { Row, RowList, ROW_BLEED } from "@/components/row-list"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, LoadingPanel } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions, VerbMenu } from "@/components/verbs"
@@ -38,8 +38,8 @@ import {
 } from "@/components/ui/table"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { PM2Band } from "@/components/procs/pm2-band"
-import { PM2Missing } from "@/components/procs/pm2-missing"
-import { PM2DetailSheet } from "@/components/procs/pm2-detail"
+import { PM2FactsLine, PM2Idle, PM2Missing, PM2Unanswered } from "@/components/procs/pm2-missing"
+import { PM2ScaleDialog } from "@/components/procs/pm2-scale-dialog"
 import { PM2StartDialog } from "@/components/procs/pm2-start-dialog"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import {
@@ -50,6 +50,14 @@ import {
   type PendingMap,
 } from "@/components/procs/pm2-actions"
 import {
+  PM2_FILTER_KEYS,
+  pm2AppHref,
+  pm2LegacyHref,
+  pm2Matches,
+  pm2Positions,
+  type PM2StateFilter,
+} from "@/components/procs/pm2-facts"
+import {
   isCluster,
   memoryLimitShare,
   pm2AppKey,
@@ -57,7 +65,6 @@ import {
   pm2Failing,
   pm2Key,
   pm2Order,
-  pm2Select,
   savedDrift,
 } from "@/components/procs/pm2-shared"
 import { MiniBar } from "@/components/procs/process-table"
@@ -66,9 +73,7 @@ import { cpuTone } from "@/components/procs/shared"
 /** PM2 reads its list every five seconds, and so does this page. */
 const POLL = 5000
 
-type StateFilter = "" | "online" | "stopped" | "errored"
-
-const STATES: { value: Exclude<StateFilter, "">; label: string }[] = [
+const STATES: { value: Exclude<PM2StateFilter, "">; label: string }[] = [
   { value: "online", label: "Online" },
   { value: "stopped", label: "Stopped" },
   { value: "errored", label: "Errored" },
@@ -85,14 +90,16 @@ export default function PM2Page() {
 /**
  * What PM2 runs, what it takes of the machine, and whether it would come back.
  *
- * The page opens on PM2 as the thing it is about — its own mark on the
- * identity line the Overview gives the machine — and the daemon facts are
- * that line's facts: the account, the Node it runs, the boot hook, and when
- * the list was last saved, with the verdict at the right end. The verdict
- * reads the saved list itself: a list saved before the last application was
- * started restores everything but that one, and the line says so beside the
- * press that saves it again. With several accounts each daemon is a row of
- * its own under the line, and the line carries the worst verdict.
+ * The page opens on PM2 as the thing it is about, laid out as a project's
+ * header is: its own mark, the verdict beside its name, and the daemon facts
+ * under it — the account, the Node it runs, the boot hook, and when the list
+ * was last saved. The verdict reads the saved list itself: a list saved
+ * before the last application was started restores everything but that one,
+ * and the line says so beside the press that saves it again. At the line's
+ * end the one command, Start application, and the daemon's own verbs behind
+ * the menu, where they were a second grey button on the table's title. With
+ * several accounts each daemon is a row of its own under the line, and the
+ * line carries the worst verdict.
  *
  * Then what it takes: `PM2Band`, the applications as spans of one bar the
  * size of the machine, by processor and by memory. It replaced four tiles
@@ -107,17 +114,20 @@ export default function PM2Page() {
  * memory as a figure beside a short bar (memory against the limit PM2
  * restarts it at, when it has one), its uptime ticking, its restart count
  * rising when it moves, and an application that just arrived rising into
- * place.
+ * place. A row opens the application's own page (`pm2-app-page`).
+ *
+ * The line and the band are drawn while the list is being read, so the page
+ * has its shape before it has its data.
  */
 function PM2Applications() {
   const { can } = useAuth()
+  const router = useRouter()
   const { confirm, dialog } = useConfirm()
   const { snapshot } = useMetrics()
-  const [query, setQuery] = useSessionState("processes.pm2.query", "")
-  const [state, setState] = useSessionState<StateFilter>("processes.pm2.state.v2", "")
-  const [appFilter, setAppFilter] = useSessionState("processes.pm2.app", "")
-  const [selectedKey, selectKey] = useQuerySelection("app")
-  const [focusTab, setFocusTab] = useState<string>()
+  const [query, setQuery] = useSessionState(PM2_FILTER_KEYS.query, "")
+  const [state, setState] = useSessionState<PM2StateFilter>(PM2_FILTER_KEYS.state, "")
+  const [appFilter, setAppFilter] = useSessionState(PM2_FILTER_KEYS.app, "")
+  const [scaling, setScaling] = useState<PM2Process | null>(null)
   const [starting, setStarting] = useSessionState("processes.pm2.starting", false)
   const inventory = usePoll((signal) => get<PM2Inventory>("/pm2/", undefined, signal), POLL)
   const { pending, act } = usePM2Control(inventory.refresh)
@@ -151,46 +161,69 @@ function PM2Applications() {
     [processes],
   )
   const chosenApp = apps.find((a) => a.key === appFilter)
-  const matching = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return processes.filter((p) => {
-      if (state === "online" && p.status !== "online") return false
-      if (state === "stopped" && p.status !== "stopped") return false
-      if (state === "errored" && !pm2Failing(p)) return false
-      if (appFilter && pm2AppKey(p) !== appFilter) return false
-      if (!needle) return true
-      return (
-        p.name.toLowerCase().includes(needle) ||
-        p.scriptPath.toLowerCase().includes(needle) ||
-        p.daemonId.toLowerCase().includes(needle)
-      )
-    })
-  }, [processes, query, state, appFilter])
+  const matching = useMemo(
+    () => processes.filter((p) => pm2Matches(p, { query, state, app: appFilter })),
+    [processes, query, state, appFilter],
+  )
   const inspection = useInspectionOrder(matching, pm2Key, JSON.stringify([query, state, appFilter]))
   const visible = inspection.rows
 
-  const selected = useMemo(() => pm2Select(processes, selectedKey), [processes, selectedKey])
+  // `?app=` is where an application opened before it had a page of its own:
+  // the process page, the server map, the search palette and a port's owner
+  // linked there, and so did every shared link. It needs the list to turn an
+  // `account:id` into a name, so it waits for the first read.
+  const legacy = useSearchParams().get("app")
+  const listed = inventory.data?.available ? inventory.data.processes : undefined
+  useEffect(() => {
+    if (legacy && listed) router.replace(pm2LegacyHref(listed, legacy))
+  }, [legacy, listed, router])
 
   const open = (process: PM2Process, tab?: string) => {
-    setFocusTab(tab)
-    selectKey(pm2Key(process))
+    // The scale dialog opens where it was asked for; everything else is the
+    // application's page, on the log of the worker whose row was pressed.
+    if (tab === "scale") {
+      setScaling(process)
+      return
+    }
+    const shared = processes.some((p) => p.name === process.name && p.daemonId !== process.daemonId)
+    router.push(
+      pm2AppHref(process, {
+        tab,
+        account: shared,
+        worker: tab === "logs" && isCluster(process) ? process.id : undefined,
+      }),
+    )
   }
 
   const header = <PageContext eyebrow="Processes" title="PM2" />
+  const unread = !inventory.data ? (inventory.error ? "failed" : "loading") : undefined
 
-  if (inventory.loading && !inventory.data) {
+  if (unread) {
     return (
       <Page>
         {header}
-        <LoadingPanel />
-      </Page>
-    )
-  }
-  if (inventory.error && !inventory.data) {
-    return (
-      <Page>
-        {header}
-        <ErrorState error={inventory.error} />
+        <HostIdentity
+          mark="pm2"
+          title="PM2"
+          state={
+            unread === "loading" ? (
+              <span className="text-xs text-muted-foreground">
+                <TextShimmer>Reading its list…</TextShimmer>
+              </span>
+            ) : (
+              <Status state="failed" label="Not answering" />
+            )
+          }
+          facts={<PM2FactsLine />}
+        />
+        {inventory.error ? (
+          <PM2Unanswered error={inventory.error} onRetry={inventory.refresh} />
+        ) : (
+          <>
+            <PM2Band apps={[]} snapshot={snapshot} selected="" onSelect={() => {}} loading />
+            <LoadingPanel />
+          </>
+        )}
       </Page>
     )
   }
@@ -199,6 +232,14 @@ function PM2Applications() {
       <Page>
         {header}
         <PM2Missing />
+      </Page>
+    )
+  }
+  if (daemons.length === 0 && processes.length === 0) {
+    return (
+      <Page>
+        {header}
+        <PM2Idle />
       </Page>
     )
   }
@@ -226,45 +267,60 @@ function PM2Applications() {
       <Page className="animate-rise" {...inspection.bindings}>
         {header}
 
-        {daemons.length > 0 && (
-          <HostIdentity
-            mark="pm2"
-            title="PM2"
-            facts={
-              <>
-                {daemons.length === 1 ? (
-                  <DaemonFacts daemon={daemons[0]} nodeVersions={nodeVersions} />
-                ) : (
-                  <>
-                    <span className="numeric font-medium text-foreground">
-                      {daemons.length} daemons
-                    </span>
-                    <FactDot />
-                    <span className="truncate">{daemons.map((d) => d.account).join(", ")}</span>
-                    {nodeVersions.length > 0 && (
-                      <>
-                        <FactDot />
-                        <HostFact product="nodejs">Node {nodeVersions.join(", ")}</HostFact>
-                      </>
-                    )}
-                  </>
-                )}
-                <FactDot />
-                <span className="numeric">{plural(apps.length, "application")}</span>
-              </>
-            }
-            aside={
-              <span className="flex items-center gap-3">
-                <ResurrectVerdict daemons={daemons} processes={processes} />
-                {save && daemonsDrift(daemons, processes) && (
-                  <Button size="xs" variant="outline" onClick={save.run}>
-                    Save list
-                  </Button>
-                )}
-              </span>
-            }
-          />
-        )}
+        <HostIdentity
+          mark="pm2"
+          title="PM2"
+          state={
+            daemons.length > 0 ? (
+              <ResurrectVerdict daemons={daemons} processes={processes} />
+            ) : undefined
+          }
+          command={
+            <>
+              {/* On a phone the line's first row is the name's and the
+                  command's; saving is in the menu beside them. */}
+              {save && daemonsDrift(daemons, processes) && (
+                <Button size="sm" variant="outline" className="max-sm:hidden" onClick={save.run}>
+                  Save list
+                </Button>
+              )}
+              {can("system.admin") && daemons.length > 0 && (
+                <Button size="sm" aria-label="Start application" onClick={() => setStarting(true)}>
+                  <Plus className="size-3.5" />
+                  Start<span className="max-sm:hidden"> application</span>
+                </Button>
+              )}
+            </>
+          }
+          menu={
+            daemonVerbs.length > 0 ? (
+              <VerbMenu verbs={daemonVerbs} label="Startup and bulk" />
+            ) : undefined
+          }
+          facts={
+            <PM2FactsLine>
+              {daemons.length === 1 ? (
+                <DaemonFacts daemon={daemons[0]} nodeVersions={nodeVersions} />
+              ) : (
+                <>
+                  <span className="numeric font-medium text-foreground">
+                    {daemons.length} daemons
+                  </span>
+                  <FactDot />
+                  <span className="truncate">{daemons.map((d) => d.account).join(", ")}</span>
+                  {nodeVersions.length > 0 && (
+                    <>
+                      <FactDot />
+                      <HostFact product="nodejs">Node {nodeVersions.join(", ")}</HostFact>
+                    </>
+                  )}
+                </>
+              )}
+              <FactDot />
+              <span className="numeric">{plural(apps.length, "application")}</span>
+            </PM2FactsLine>
+          }
+        />
 
         {daemons.length > 1 && (
           <Panel plain>
@@ -303,27 +359,7 @@ function PM2Applications() {
                 </span>
               </>
             }
-            actions={
-              <>
-                {can("system.admin") && daemons.length > 0 && (
-                  <Button size="sm" onClick={() => setStarting(true)}>
-                    <Plus className="size-3.5" />
-                    Start application
-                  </Button>
-                )}
-                {daemonVerbs.length > 0 && (
-                  <VerbMenu
-                    verbs={daemonVerbs}
-                    trigger={
-                      <Button size="sm" variant="outline">
-                        Startup and bulk
-                      </Button>
-                    }
-                  />
-                )}
-                <WorkspaceHelp compact />
-              </>
-            }
+            actions={<WorkspaceHelp compact />}
           >
             {/* The states sit beside the title as what it counts and as
               filters: Online and Not running were two of the four tiles, and
@@ -362,7 +398,8 @@ function PM2Applications() {
               </ChipStrip>
             )}
           </PanelHeader>
-          <PanelToolbar>
+          {/* Nothing to search or narrow while PM2 runs nothing. */}
+          <PanelToolbar className={cn(processes.length === 0 && "hidden")}>
             <SearchInput
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -386,13 +423,22 @@ function PM2Applications() {
             {processes.length === 0 ? (
               <EmptyState
                 icon={ChartActivity}
-                title="PM2 is running but manages no applications"
+                mark={hasProductLogo("pm2") ? <ProductLogos ids={["pm2"]} /> : undefined}
+                title="PM2 runs nothing yet"
                 description={
                   can("system.admin")
-                    ? "Start one from a script or an ecosystem file, and save the startup list once it runs."
-                    : "Nothing has been started under PM2 yet."
+                    ? "Start an application from a script or an ecosystem file, then save the startup list."
+                    : "Nothing has been started under PM2."
                 }
-                className="mt-4"
+                action={
+                  can("system.admin") && daemons.length > 0 ? (
+                    <Button size="sm" variant="outline" onClick={() => setStarting(true)}>
+                      <Plus className="size-3.5" />
+                      Start application
+                    </Button>
+                  ) : undefined
+                }
+                className="m-4 border-0"
               />
             ) : visible.length === 0 ? (
               <EmptyState
@@ -404,6 +450,7 @@ function PM2Applications() {
             ) : (
               <PM2Rows
                 rows={visible}
+                all={processes}
                 several={daemons.length > 1}
                 unsaved={unsaved}
                 pending={pending}
@@ -432,14 +479,13 @@ function PM2Applications() {
           )}
         </Panel>
 
-        <PM2DetailSheet
-          process={selected}
-          processes={processes}
-          initialTab={focusTab}
-          onOpenChange={(o) => !o && selectKey(null)}
-          onSelect={(process) => selectKey(pm2Key(process))}
-          onChanged={inventory.refresh}
-        />
+        {scaling && (
+          <PM2ScaleDialog
+            process={scaling}
+            onClose={() => setScaling(null)}
+            onChanged={inventory.refresh}
+          />
+        )}
         <PM2StartDialog
           open={starting}
           daemons={daemons}
@@ -500,7 +546,7 @@ function daemonsDrift(daemons: PM2Daemon[], processes: PM2Process[]): boolean {
 }
 
 /**
- * Whether what PM2 runs survives a reboot, as the verdict at the line's end:
+ * Whether what PM2 runs survives a reboot, as the verdict beside PM2's name:
  * red where a hook or a saved list is missing on any account, because a
  * daemon with three online applications and no saved list restores nothing;
  * amber where the list was saved and has since gone out of date — what was
@@ -525,7 +571,7 @@ function ResurrectVerdict({
       : noHook.length > 0
         ? `No boot hook for ${noHook.map((d) => d.account).join(", ")}`
         : `List never saved for ${unsavedList.map((d) => d.account).join(", ")}`
-    return <Status state="failed" label={label} className="text-body" />
+    return <Status state="failed" label={label} />
   }
   const drifts = daemons.map((d) => savedDrift(d, processes))
   const lost = drifts.flatMap((d) => d?.unsaved ?? [])
@@ -539,7 +585,6 @@ function ResurrectVerdict({
             ? `${lost[0]} is not in the saved list`
             : `${lost.length} applications are not in the saved list`
         }
-        className="text-body"
       />
     )
   }
@@ -548,11 +593,11 @@ function ResurrectVerdict({
       <span
         title={`Deleted since the list was saved, and restored by a reboot: ${back.join(", ")}`}
       >
-        <Status tone="warning" label="Saved list out of date" className="text-body" />
+        <Status tone="warning" label="Saved list out of date" />
       </span>
     )
   }
-  return <Status state="active" label="Resurrects on boot" className="text-body" />
+  return <Status state="active" label="Resurrects on boot" />
 }
 
 type RowProps = {
@@ -584,11 +629,14 @@ type RowProps = {
  */
 function PM2Rows({
   rows,
+  all,
   several,
   unsaved,
   ...rest
 }: {
   rows: PM2Process[]
+  /** Every process PM2 lists, so a worker's number does not change with the filter. */
+  all: PM2Process[]
   several: boolean
   unsaved: Set<string>
 } & Pick<RowProps, "pending" | "confirm" | "act" | "onOpen" | "onChanged">) {
@@ -599,7 +647,7 @@ function PM2Rows({
   // against the host's total, a column of 3% applications is a column of
   // empty tracks.
   const heaviest = rows.reduce((top, p) => Math.max(top, p.memory), 0)
-  const positions = useMemo(() => clusterPositions(rows), [rows])
+  const positions = useMemo(() => pm2Positions(all), [all])
   const props = (process: PM2Process): RowProps => ({
     process,
     several,
@@ -669,16 +717,6 @@ function useStarts(rows: PM2Process[], now: number): Map<string, number> {
   return starts
 }
 
-function clusterPositions(rows: PM2Process[]): Map<string, [number, number]> {
-  const out = new Map<string, [number, number]>()
-  for (const app of pm2Apps(rows)) {
-    if (!isCluster(app.instances[0])) continue
-    const ordered = [...app.instances].sort((a, b) => a.id - b.id)
-    ordered.forEach((p, index) => out.set(pm2Key(p), [index + 1, ordered.length]))
-  }
-  return out
-}
-
 /** The application as what runs it — Node, Bun, Python — or a glyph for a binary. */
 function ApplicationMark({ process }: { process: PM2Process }) {
   return <ProductLogo id={pm2Product(process.interpreter)} size="sm" fallback={ChartActivity} />
@@ -702,7 +740,10 @@ function PM2Row(props: RowProps) {
     <TableRow
       data-workspace-item={pm2Key(process)}
       data-workspace-name={process.name}
-      className={cn("group", arrived && "animate-rise")}
+      // One height: a cell that stacks a figure over a hint is half a pixel
+      // taller than one that stacks a name over a path, and a row without
+      // either was shorter than its neighbours by that much.
+      className={cn("group h-13", arrived && "animate-rise")}
       onActivate={() => onOpen(process)}
     >
       <TableCell className="py-2">

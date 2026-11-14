@@ -14,13 +14,14 @@ import { cn } from "@/lib/utils"
 import type { DbAlertKind, NotificationChannel } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
+import { ChoiceRow } from "@/components/flow"
 import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
 import { ChannelGlyph } from "@/components/deploy/vocabulary"
 import { Meter } from "@/components/meter"
 import { ProductLogo } from "@/components/product-logo"
 import { Status, type DotTone } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VerbActions, type Verb } from "@/components/verbs"
 import {
   ALERT_KINDS,
@@ -110,12 +111,17 @@ function standing(
 }
 
 /**
- * One rule, read as its sentence, whole — it wraps rather than truncates,
- * because on a phone the sentence is the rule. Beside it, where it stands;
- * under it, the reading against the line on a meter where the kind has one,
- * the reading in words as the server wrote it, the channels it tells and when
- * it was last read. A rule for every database says so at the foot of its
- * second line; a backup rule names the jobs it follows.
+ * One rule, as a card of one height in every state: its kind's tile, its name
+ * over its condition, and where it stands in a column of its own, with the
+ * reading against the line as a small mark before the words where the kind
+ * has a line. Pressing the card edits the rule, for those who may.
+ *
+ * The row was a sentence over a meter over the server's own sentence, so a
+ * disk rule stood three lines tall beside a two-line server rule and a bar
+ * hung between rows. What the server wrote about the reading, when it last
+ * read, the jobs a backup rule follows and the channels it tells now open
+ * from the status, which is a button for exactly that; a status with nothing
+ * behind it stays a word.
  */
 export function AlertRow({
   rule,
@@ -124,6 +130,7 @@ export function AlertRow({
   empty,
   channels,
   verbs,
+  onEdit,
   className,
 }: {
   rule: DbAlertRule
@@ -136,67 +143,105 @@ export function AlertRow({
   /** The channels to name this rule's among; absent when the head names them for every rule. */
   channels?: NotificationChannel[]
   verbs?: Verb[]
+  /** Opens the rule's form; absent for a reader who may not change it. */
+  onEdit?: () => void
   className?: string
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  // The status and its mark stand beside the name only where the page is wide
+  // enough to keep the name whole; under that they are the card's second line,
+  // on every card, so the cards stay one height there too.
+  const wide = useMediaQuery("(min-width: 1024px)")
   const words = ALERT_KINDS[rule.kind]
   const focus = focusOf(subjects)
   const stand = standing(rule, subjects, Boolean(away))
   const meter = rule.enabled && !away ? meterOf(rule, focus) : undefined
-  const status = (
-    <Status key={stand.label} tone={stand.tone} label={stand.label} className="animate-rise" />
+  const said = rule.enabled
+    ? (away ?? (focus ? (focus.state === "unknown" ? focus.unknown : focus.detail) : empty))
+    : undefined
+  const checked = rule.enabled
+    ? subjects
+        .map((s) => s.checkedAt)
+        .filter(Boolean)
+        .sort()
+        .at(-1)
+    : undefined
+  const follows = isBackupKind(rule.kind) && subjects.length > 0
+  const word = (
+    <Status
+      key={stand.label}
+      tone={stand.tone}
+      label={stand.label}
+      className="min-w-0 animate-rise [&>span:last-child]:truncate"
+    />
   )
-  const said = away ?? (focus ? (focus.state === "unknown" ? focus.unknown : focus.detail) : empty)
-  const checked = subjects
-    .map((s) => s.checkedAt)
-    .filter(Boolean)
-    .sort()
-    .at(-1)
-  return (
-    <li
-      className={cn(
-        "grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0",
-        !rule.enabled && "opacity-80",
-        className,
-      )}
-    >
-      <KindTile kind={rule.kind} className={cn(!rule.enabled && "opacity-60")} />
-      <p className="min-w-0 pt-1.5 text-body leading-snug text-pretty">
-        <span className="font-medium">{words.label}</span>{" "}
-        <span className="text-foreground/85">{words.describe(rule)}</span>
-      </p>
-      <span className="flex items-start gap-3">
-        {wide && <span className="flex pt-1.5">{status}</span>}
-        {verbs && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${sentence(rule)}`} />}
-      </span>
-      <div className="col-span-2 col-start-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-hint text-muted-foreground">
-        {!wide && status}
-        {meter && (
-          <Meter
-            value={meter.value}
-            mark={meter.mark}
-            tone={stand.meter}
-            label={meter.label}
-            className="w-28 shrink-0 sm:w-40"
-          />
+  const every = rule.connectionId === null
+  const behind = Boolean(said || checked || follows || channels || every)
+  const status = behind ? (
+    <Popover>
+      <PopoverTrigger
+        title="What it read"
+        className="flex max-w-full min-w-0 rounded-sm text-left focus-ring"
+      >
+        {word}
+      </PopoverTrigger>
+      <PopoverContent
+        align={wide ? "end" : "start"}
+        aria-label={`What ${words.label} read`}
+        className="w-80 space-y-2 p-3 text-hint text-muted-foreground"
+      >
+        {said && <p className="text-pretty text-foreground/90">{said}</p>}
+        {follows && (
+          <p className="min-w-0 break-words">follows {subjects.map((s) => s.label).join(", ")}</p>
         )}
-        {isBackupKind(rule.kind) && subjects.length > 0 && (
-          <span className="min-w-0 truncate">
-            follows {subjects.map((s) => s.label).join(", ")}
-          </span>
-        )}
-        {rule.connectionId === null && <Tag>Every database</Tag>}
+        {/* Said on the card too, where a phone may cut it off the end of a long condition. */}
+        {every && <p>watches every database</p>}
         {channels && <ChannelNames ids={rule.channels} channels={channels} />}
-        {rule.enabled && checked && (
-          <span className="whitespace-nowrap">checked {relativeTime(checked)}</span>
-        )}
-      </div>
-      {rule.enabled && said && (
-        <p className="col-span-2 col-start-2 -mt-1 min-w-0 text-hint text-pretty text-muted-foreground">
-          {said}
-        </p>
+        {checked && <p className="whitespace-nowrap">checked {relativeTime(checked)}</p>}
+      </PopoverContent>
+    </Popover>
+  ) : (
+    <span className="flex max-w-full min-w-0">{word}</span>
+  )
+  const mark = (
+    <span className="flex w-16 shrink-0 items-center">
+      {meter && (
+        <Meter value={meter.value} mark={meter.mark} tone={stand.meter} label={meter.label} />
       )}
-    </li>
+    </span>
+  )
+  return (
+    <ChoiceRow
+      leading={<KindTile kind={rule.kind} className={cn(!rule.enabled && "opacity-60")} />}
+      title={words.label}
+      verb={`Edit ${sentence(rule)}`}
+      description={
+        <>
+          <span className="font-mono">{words.describe(rule)}</span>
+          {every && " · every database"}
+        </>
+      }
+      onSelect={onEdit}
+      disabled={!onEdit}
+      trailing={
+        wide && (
+          <span className="flex items-center gap-3">
+            {mark}
+            <span className="flex w-64 min-w-0">{status}</span>
+          </span>
+        )
+      }
+      actions={
+        verbs && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${sentence(rule)}`} />
+      }
+      className={cn(!rule.enabled && "opacity-80", className)}
+    >
+      {!wide && (
+        <div className="flex min-w-0 items-center gap-3 pl-11">
+          <span className="flex min-w-0 flex-1">{status}</span>
+          {mark}
+        </div>
+      )}
+    </ChoiceRow>
   )
 }
 

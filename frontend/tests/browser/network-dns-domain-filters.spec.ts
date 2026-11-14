@@ -5,16 +5,18 @@ import {
   type DNSServicePageControl,
 } from "./network-dns-services-fixture"
 
-const sheet = (page: Page) => page.locator("[data-slot=sheet-content]")
+// An engine's inventory and its retained reviews are a page of their own
+// (`/network/dns/services/<id>`).
+const shown = (page: Page) => page.locator("[data-slot=dns-engine]")
 const detail = (root: Locator, label: string) =>
   root
     .locator("dt")
     .filter({ hasText: new RegExp(`^${label}$`) })
     .locator("xpath=following-sibling::dd[1]")
 const createReview = (page: Page) =>
-  sheet(page).getByRole("button", { name: "Create retained review", exact: true })
+  shown(page).getByRole("button", { name: "Create retained review", exact: true })
 const applyReview = (page: Page) =>
-  sheet(page).getByRole("button", {
+  shown(page).getByRole("button", {
     name: "Apply reviewed native change",
     exact: true,
     includeHidden: true,
@@ -30,22 +32,24 @@ function configuredGroups(control: DNSServicePageControl) {
   }
 }
 
+/** The engine's page, opened from the Services list, on the view where a change is written. */
 async function openInventory(page: Page) {
-  await page.getByRole("button", { name: "Inspect Fixture DNS", exact: true }).click()
+  await page.getByRole("link", { name: "Inspect Fixture DNS", exact: true }).click()
   await expect(
-    sheet(page).getByRole("heading", { name: "Configured listeners", exact: true }),
+    shown(page).getByRole("heading", { name: "Configured listeners", exact: true }),
   ).toBeVisible()
+  await page.getByRole("tab", { name: /^Changes/ }).click()
 }
 
 async function draft(page: Page, remove = false) {
   await openInventory(page)
-  await sheet(page)
+  await shown(page)
     .getByRole("button", {
       name: remove ? "Review remove domain filter" : "Review add domain filter",
       exact: true,
     })
     .click()
-  await sheet(page).getByLabel("Filter domain", { exact: true }).fill("filter.example.test")
+  await shown(page).getByLabel("Filter domain", { exact: true }).fill("filter.example.test")
 }
 
 async function confirm(page: Page) {
@@ -61,11 +65,11 @@ for (const disposition of ["deny", "allow"] as const) {
     const control = await mockDNSServicePage(page)
     await draft(page)
     if (disposition === "allow") {
-      await sheet(page).getByLabel("Filter disposition", { exact: true }).click()
+      await shown(page).getByLabel("Filter disposition", { exact: true }).click()
       await page.getByRole("option", { name: "Allow", exact: true }).click()
     }
     await expect(
-      sheet(page).getByText("AdGuard matches this domain and its subdomains."),
+      shown(page).getByText("AdGuard matches this domain and its subdomains."),
     ).toBeVisible()
     await createReview(page).click()
     expect(control.mutations).toHaveLength(1)
@@ -73,15 +77,15 @@ for (const disposition of ["deny", "allow"] as const) {
       action: "filter_add",
       filter: { domain: "filter.example.test", disposition, match: "suffix" },
     })
-    await expect(detail(sheet(page), "Filter match")).toHaveText("This domain and its subdomains")
-    await expect(detail(sheet(page), "Native selected filter")).toHaveText("Absent")
+    await expect(detail(shown(page), "Filter match")).toHaveText("This domain and its subdomains")
+    await expect(detail(shown(page), "Native selected filter")).toHaveText("Absent")
     const dialog = await confirm(page)
     await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
     await expect(
-      sheet(page).getByRole("heading", { name: "Native readback", exact: true }),
+      shown(page).getByRole("heading", { name: "Native readback", exact: true }),
     ).toBeVisible()
-    await expect(detail(sheet(page), "Native selected filter")).toHaveText(["Absent", "Present"])
-    await expect(detail(sheet(page), "Selected filter comment")).toHaveText([
+    await expect(detail(shown(page), "Native selected filter")).toHaveText(["Absent", "Present"])
+    await expect(detail(shown(page), "Selected filter comment")).toHaveText([
       "Unreported",
       "Unreported",
     ])
@@ -96,10 +100,10 @@ for (const membership of ["zero", "empty"] as const) {
     configuredGroups(control)
     await draft(page)
     if (membership === "zero")
-      await sheet(page)
+      await shown(page)
         .getByRole("checkbox", { name: /Default filtering group · ID 0/ })
         .check()
-    await expect(sheet(page).getByText("Pi-hole matches only this exact domain.")).toBeVisible()
+    await expect(shown(page).getByText("Pi-hole matches only this exact domain.")).toBeVisible()
     await createReview(page).click()
     expect(control.mutations[0].body).toEqual({
       action: "filter_add",
@@ -110,15 +114,15 @@ for (const membership of ["zero", "empty"] as const) {
         groups: membership === "zero" ? [0] : [],
       },
     })
-    await expect(detail(sheet(page), "New filter group IDs")).toHaveText(
+    await expect(detail(shown(page), "New filter group IDs")).toHaveText(
       membership === "zero" ? "0" : "None · no memberships",
     )
     const dialog = await confirm(page)
     await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
-    await expect(detail(sheet(page), "Selected filter group IDs")).toHaveText(
+    await expect(detail(shown(page), "Selected filter group IDs")).toHaveText(
       membership === "zero" ? "0" : "None",
     )
-    await expect(detail(sheet(page), "Selected filter comment")).toHaveText([
+    await expect(detail(shown(page), "Selected filter comment")).toHaveText([
       "Unreported",
       "None (native null)",
     ])
@@ -138,8 +142,8 @@ for (const comment of [null, "", "Keep this native filter comment"] as const) {
       action: "filter_remove",
       filter: { domain: "filter.example.test", disposition: "deny", match: "exact" },
     })
-    await expect(detail(sheet(page), "Selected filter group IDs")).toHaveText("0 · 7")
-    await expect(detail(sheet(page), "Selected filter comment")).toHaveText(
+    await expect(detail(shown(page), "Selected filter group IDs")).toHaveText("0 · 7")
+    await expect(detail(shown(page), "Selected filter comment")).toHaveText(
       comment === null ? "None (native null)" : comment || "Empty native comment",
     )
     expect(applies(control)).toEqual([])
@@ -151,16 +155,16 @@ test("a refused filter review retains domain, disposition and group zero", async
   configuredGroups(control)
   control.stageFailure = true
   await draft(page)
-  await sheet(page)
+  await shown(page)
     .getByRole("checkbox", { name: /Default filtering group · ID 0/ })
     .check()
   await createReview(page).click()
-  await expect(sheet(page).getByText(/Fixture selected native policy review refused/)).toBeVisible()
-  await expect(sheet(page).getByLabel("Filter domain", { exact: true })).toHaveValue(
+  await expect(shown(page).getByText(/Fixture selected native policy review refused/)).toBeVisible()
+  await expect(shown(page).getByLabel("Filter domain", { exact: true })).toHaveValue(
     "filter.example.test",
   )
   await expect(
-    sheet(page).getByRole("checkbox", { name: /Default filtering group · ID 0/ }),
+    shown(page).getByRole("checkbox", { name: /Default filtering group · ID 0/ }),
   ).toBeChecked()
   expect(applies(control)).toEqual([])
 })
@@ -169,22 +173,22 @@ test("unknown native groups hold a Pi-hole filter draft after refresh", async ({
   const control = await mockDNSServicePage(page, { engine: "pihole" })
   configuredGroups(control)
   await draft(page)
-  await sheet(page)
+  await shown(page)
     .getByRole("checkbox", { name: /Default filtering group · ID 0/ })
     .check()
   control.view.snapshot!.appClientEvidence.state = "unknown"
   control.view.snapshot!.filterGroups = []
-  await sheet(page).getByRole("button", { name: "Refresh native reading", exact: true }).click()
+  await shown(page).getByRole("button", { name: "Refresh native reading", exact: true }).click()
   await expect(createReview(page)).toBeDisabled()
-  await expect(sheet(page).getByLabel("Filter domain", { exact: true })).toHaveValue(
+  await expect(shown(page).getByLabel("Filter domain", { exact: true })).toHaveValue(
     "filter.example.test",
   )
-  await expect(sheet(page).getByText(/Refresh the native group inventory/)).toBeVisible()
+  await expect(shown(page).getByText(/Refresh the native group inventory/)).toBeVisible()
   await expect(
-    sheet(page).getByText("Selected native group IDs: 0", { exact: false }),
+    shown(page).getByText("Selected native group IDs: 0", { exact: false }),
   ).toBeVisible()
   await expect(
-    sheet(page).getByRole("button", { name: /Remove unavailable group ID/ }),
+    shown(page).getByRole("button", { name: /Remove unavailable group ID/ }),
   ).toHaveCount(0)
   expect(control.mutations).toEqual([])
 })
@@ -195,33 +199,33 @@ test("a disappeared selected group remains correctable without losing the filter
   const control = await mockDNSServicePage(page, { engine: "pihole" })
   configuredGroups(control)
   await draft(page)
-  await sheet(page).getByLabel("Filter disposition", { exact: true }).click()
+  await shown(page).getByLabel("Filter disposition", { exact: true }).click()
   await page.getByRole("option", { name: "Allow", exact: true }).click()
-  await sheet(page)
+  await shown(page)
     .getByRole("checkbox", { name: /Default filtering group · ID 0/ })
     .check()
   control.view.snapshot!.filterGroups = control.view.snapshot!.filterGroups.filter(
     (group) => group.id !== 0,
   )
-  await sheet(page).getByRole("button", { name: "Refresh native reading", exact: true }).click()
-  const remove = sheet(page).getByRole("button", {
+  await shown(page).getByRole("button", { name: "Refresh native reading", exact: true }).click()
+  const remove = shown(page).getByRole("button", {
     name: "Remove unavailable group ID 0",
     exact: true,
   })
   await expect(remove).toBeVisible()
   await createReview(page).click()
   await expect(
-    sheet(page).getByRole("alert").filter({ hasText: "Check the native change fields" }),
+    shown(page).getByRole("alert").filter({ hasText: "Check the native change fields" }),
   ).toBeFocused()
   expect(control.mutations).toEqual([])
-  await expect(sheet(page).getByLabel("Filter domain", { exact: true })).toHaveValue(
+  await expect(shown(page).getByLabel("Filter domain", { exact: true })).toHaveValue(
     "filter.example.test",
   )
-  await expect(sheet(page).getByLabel("Filter disposition", { exact: true })).toHaveText("Allow")
+  await expect(shown(page).getByLabel("Filter disposition", { exact: true })).toHaveText("Allow")
   await remove.click()
   await expect(remove).toHaveCount(0)
   await expect(
-    sheet(page).getByRole("group", { name: "Filter group memberships", exact: true }),
+    shown(page).getByRole("group", { name: "Filter group memberships", exact: true }),
   ).toBeFocused()
   await createReview(page).click()
   expect(control.mutations).toHaveLength(1)
@@ -235,9 +239,9 @@ test("a disappeared selected group remains correctable without losing the filter
 test("read-only domain controls cannot create a review", async ({ page }) => {
   const control = await mockDNSServicePage(page, { management: false })
   await openInventory(page)
-  await sheet(page).getByRole("button", { name: "Review add domain filter", exact: true }).click()
+  await shown(page).getByRole("button", { name: "Review add domain filter", exact: true }).click()
   await expect(createReview(page)).toBeDisabled()
-  await expect(sheet(page).getByLabel("Filter domain", { exact: true })).toBeDisabled()
+  await expect(shown(page).getByLabel("Filter domain", { exact: true })).toBeDisabled()
   expect(control.mutations).toEqual([])
 })
 
@@ -245,10 +249,10 @@ test("Technitium keeps custom-domain controls outside its supported actions", as
   const control = await mockDNSServicePage(page, { engine: "technitium" })
   await openInventory(page)
   await expect(
-    sheet(page).getByRole("button", { name: "Review add domain filter", exact: true }),
+    shown(page).getByRole("button", { name: "Review add domain filter", exact: true }),
   ).toHaveCount(0)
   await expect(
-    sheet(page).getByRole("button", { name: "Review remove domain filter", exact: true }),
+    shown(page).getByRole("button", { name: "Review remove domain filter", exact: true }),
   ).toHaveCount(0)
   expect(control.mutations).toEqual([])
 })
@@ -272,7 +276,7 @@ for (const failure of [
     )
     control.changes = [change]
     await openInventory(page)
-    await sheet(page)
+    await shown(page)
       .getByRole("button", { name: "Read DNS change change-fixture", exact: true })
       .click()
     const dialog = await confirm(page)
@@ -288,7 +292,7 @@ for (const failure of [
     await expect(applyReview(page)).toBeDisabled()
     await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
     await expect(
-      sheet(page)
+      shown(page)
         .getByText(/Refresh the retained review and its native owner/)
         .last(),
     ).toBeVisible()
@@ -325,16 +329,16 @@ for (const ambiguity of ["duplicate", "other-target"] as const) {
     }
     control.changes = [change]
     await openInventory(page)
-    await sheet(page)
+    await shown(page)
       .getByRole("button", { name: "Read DNS change change-fixture", exact: true })
       .click()
-    await expect(detail(sheet(page), "Native selected filter")).toHaveText([
+    await expect(detail(shown(page), "Native selected filter")).toHaveText([
       "Present",
       ambiguity === "duplicate"
         ? "Ambiguous · multiple exact matches"
         : "No exact match · another native target policy exists",
     ])
-    await expect(detail(sheet(page), "Exact native matches")).toHaveText([
+    await expect(detail(shown(page), "Exact native matches")).toHaveText([
       "1",
       ambiguity === "duplicate" ? "2" : "0",
     ])
@@ -350,35 +354,35 @@ for (const engine of ["adguard", "pihole"] as const) {
       const control = await mockDNSServicePage(page, { engine })
       if (engine === "pihole") configuredGroups(control)
       await draft(page)
-      const form = sheet(page).getByRole("form", {
+      const form = shown(page).getByRole("form", {
         name: "Review native domain filter",
         exact: true,
       })
       await form.scrollIntoViewIfNeeded()
       await expect
         .poll(async () => {
-          const bounds = await sheet(page).boundingBox()
+          const bounds = await shown(page).boundingBox()
           return Boolean(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1)
         })
         .toBe(true)
       expect(
-        await sheet(page).evaluate((element) => element.scrollWidth - element.clientWidth),
+        await shown(page).evaluate((element) => element.scrollWidth - element.clientWidth),
       ).toBeLessThanOrEqual(1)
       await page.screenshot({
         path: testInfo.outputPath(`domain-filter-form-${engine}-${width}.png`),
       })
       await createReview(page).click()
       await expect(
-        sheet(page).getByRole("heading", { name: "Reviewed native change", exact: true }),
+        shown(page).getByRole("heading", { name: "Reviewed native change", exact: true }),
       ).toBeVisible()
       await expect
         .poll(async () => {
-          const bounds = await sheet(page).boundingBox()
+          const bounds = await shown(page).boundingBox()
           return Boolean(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1)
         })
         .toBe(true)
       expect(
-        await sheet(page).evaluate((element) => element.scrollWidth - element.clientWidth),
+        await shown(page).evaluate((element) => element.scrollWidth - element.clientWidth),
       ).toBeLessThanOrEqual(1)
       await page.screenshot({
         path: testInfo.outputPath(`domain-filter-review-${engine}-${width}.png`),

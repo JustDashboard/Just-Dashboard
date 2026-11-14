@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react"
 import { Bridge, Globe } from "@/components/icons"
-import { rate } from "@/lib/format"
+import { plural, rate } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, ProductGlyphs, imageProduct } from "@/components/product-logo"
@@ -84,6 +84,7 @@ export function Topology({
       start={{ title: "Outside", nodes: lane("outside") }}
       end={{ title: "Inside", nodes: lane("inside") }}
       hub={{
+        className: HUB_ROOM,
         mark: <WireHost />,
         eyebrow: "This server",
         title: <span className="block truncate">{overview.hostname || "This server"}</span>,
@@ -104,14 +105,63 @@ export function Topology({
                 ` · ${overview.gateway.forwards} forward${overview.gateway.forwards === 1 ? "" : "s"}`}
               {overview.gateway.nat > 0 && ` · NAT`}
             </span>
-            {overview.gateway.dropped > 0 && (
-              <span className="numeric block">
-                {overview.gateway.dropped.toLocaleString()} refused
-              </span>
-            )}
+            {/* The connections and what was refused were tiles of their own
+                under the picture; they are this server's, so they are said
+                on it. */}
+            <span className="numeric block" data-testid="hub-connections">
+              {plural(overview.connections.total, "connection")}
+              {" · "}
+              {overview.connections.fromInternet.toLocaleString()} from the internet
+            </span>
+            <span className="numeric block">
+              {overview.connections.listening.toLocaleString()} listening
+              {overview.gateway.dropped > 0 && (
+                <span title={refusedBy(overview)}>
+                  {" · "}
+                  {overview.gateway.dropped.toLocaleString()} refused
+                </span>
+              )}
+            </span>
           </>
         ),
       }}
+    />
+  )
+}
+
+/**
+ * Room over and under this server's mark for the lines that hang under it:
+ * on a server with one device a side the picture is no taller than the mark,
+ * and its words ran into the section below.
+ */
+const HUB_ROOM = "lg:py-28"
+
+/** What did the refusing, for the figure's hover: the lists and limits in force. */
+function refusedBy(overview: NetworkOverview) {
+  const { blocklists, limits } = overview.gateway
+  return blocklists + limits === 0
+    ? "no blocklist or rate limit yet"
+    : `by ${plural(blocklists, "blocklist")} and ${plural(limits, "limit")} since loaded`
+}
+
+/**
+ * The picture before its first read: the hub and as many grey rows a side as
+ * the last visit drew, so the blocks under it stand where they will.
+ */
+export function TopologyLoading({
+  outside = 3,
+  inside = 3,
+}: {
+  outside?: number
+  inside?: number
+}) {
+  return (
+    <WireFlow
+      loading
+      hubShare={0.9}
+      start={{ title: "Outside", nodes: [], loadingRows: outside }}
+      end={{ title: "Inside", nodes: [], loadingRows: inside }}
+      hub={{ className: HUB_ROOM, mark: <WireHost />, eyebrow: "This server" }}
     />
   )
 }

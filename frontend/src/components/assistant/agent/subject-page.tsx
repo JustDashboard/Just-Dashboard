@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -89,6 +88,9 @@ export function SubjectAssistant({
   const { confirm, dialog } = useConfirm()
   const settings = useAssistantSettings(true)
   const [settingUp, setSettingUp] = useState(false)
+  // The failed read a retry was pressed for: the button waits while that same
+  // failure is still the latest, and a new one hands it back.
+  const [retried, setRetried] = useState<unknown>()
   const view = settings.data
   const session = useAgentSession(scope)
   const allowed = can("service.control") && !refusal
@@ -151,9 +153,22 @@ export function SubjectAssistant({
     <div data-slot={slot} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
       {!view ? (
         settings.error ? (
-          <Notice tone="danger" title="The assistant's settings could not be read" className="mt-6">
-            {errorMessage(settings.error)}
-          </Notice>
+          // The assistant's off state with the read to try again, not the
+          // transport's error as a headline: the page does not know whether
+          // it is on, and the next step is to ask again.
+          <AssistantOff
+            className="m-auto"
+            settings={undefined}
+            onSetUp={() => setSettingUp(true)}
+            what={what}
+            failed={{
+              retrying: retried === settings.error,
+              onRetry: () => {
+                setRetried(settings.error)
+                settings.refresh()
+              },
+            }}
+          />
         ) : (
           <div aria-hidden className="mt-6 space-y-3">
             <Skeleton className="h-3 w-40" />

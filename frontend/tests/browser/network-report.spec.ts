@@ -100,7 +100,7 @@ for (const status of [409, 500]) {
       preferences.tailscale.prefs.advertiseRoutes = bodies.at(-1)!.advertiseRoutes
       await json(route, { note: "route offered" })
     })
-    await page.goto("/network/vpn")
+    await page.goto("/network/vpn?tab=tailscale")
     const draft = page.getByRole("textbox", { name: "A network to offer" })
     await draft.fill("10.99.0.0/24")
     await page.getByRole("button", { name: "Offer it", exact: true }).click()
@@ -276,7 +276,7 @@ test("failed Docker candidate reads offer retry without claiming every container
     )
   })
   await page.goto("/docker/networks")
-  await page.getByRole("button", { name: "lab", exact: true }).click()
+  await page.getByRole("link", { name: "lab", exact: true }).click()
   await page.getByRole("button", { name: "Attach a container", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Attach a container" })
   await expect(dialog.getByText("Could not list containers", { exact: true })).toBeVisible()
@@ -344,7 +344,7 @@ test("a failed later Docker candidate poll keeps the selected container and alia
   )
   await page.clock.install()
   await page.goto("/docker/networks")
-  await page.getByRole("button", { name: "lab", exact: true }).click()
+  await page.getByRole("link", { name: "lab", exact: true }).click()
   await page.getByRole("button", { name: "Attach a container", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Attach a container" })
   await dialog.getByRole("combobox").click()
@@ -439,7 +439,7 @@ test("an unreadable Tailscale preference refresh keeps its draft and sends no ro
     offers++
     await json(route, { note: "offered" })
   })
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=tailscale")
   const draft = page.getByRole("textbox", { name: "A network to offer" })
   await draft.fill("10.99.0.0/24")
   refreshFailed = true

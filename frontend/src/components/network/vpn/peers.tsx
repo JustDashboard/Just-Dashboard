@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
+import { useHubSession } from "@/components/network/hub-session"
 import { ClientConfig } from "@/components/network/vpn/client-config"
 import { EditPeer, KillSwitchFile, SiteVerify } from "@/components/network/vpn/peer-actions"
 import { PeerRecord } from "@/components/network/vpn/record"
@@ -253,11 +254,14 @@ export function PeerSheet({
   peer,
   onOpenChange,
   onChanged,
+  hub = false,
 }: {
   tunnel: WGInterface | undefined
   peer: WGPeer | undefined
   onOpenChange: (open: boolean) => void
   onChanged: () => void
+  /** The session was opened through Just Hub: no edit, and no configuration to show. */
+  hub?: boolean
 }) {
   const { confirm, dialog } = useConfirm()
   const { can } = useAuth()
@@ -331,9 +335,11 @@ export function PeerSheet({
             <Status tone={handshake.tone} label={handshake.label} />
             {made && (
               <span className="ml-auto flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-                  Edit
-                </Button>
+                {!hub && (
+                  <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                    Edit
+                  </Button>
+                )}
                 {destructive && (
                   <Button size="sm" variant="outline" onClick={remove}>
                     Remove
@@ -395,10 +401,23 @@ export function PeerSheet({
             <ClientConfig name={peer.name} config={config.config} qr={config.qr} />
           ) : peer.hasConfig ? (
             <div className="space-y-2">
+              {hub && (
+                <p className="text-hint text-muted-foreground">
+                  Its configuration holds its key, and is shown to a session signed in on this
+                  server itself.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => void show()} pending={loading} disabled={loading}>
-                  Show QR code
-                </Button>
+                {!hub && (
+                  <Button
+                    size="sm"
+                    onClick={() => void show()}
+                    pending={loading}
+                    disabled={loading}
+                  >
+                    Show QR code
+                  </Button>
+                )}
                 {destructive && (
                   <Button size="sm" variant="outline" onClick={forget}>
                     Forget the saved copy
@@ -417,7 +436,7 @@ export function PeerSheet({
               until it is removed.
             </p>
           )}
-          {made && peer.hasConfig && killSwitchOffered(peer) && (
+          {made && !hub && peer.hasConfig && killSwitchOffered(peer) && (
             <KillSwitchFile tunnel={tunnel} peer={peer} />
           )}
           {made && peer.kind === "site" && <SiteVerify tunnel={tunnel} peer={peer} />}
@@ -462,7 +481,10 @@ export function usePeerSheets(tunnels: WGInterface[], onChanged: () => void) {
   )
   const [adding, setAdding] = useState<{ tunnel: string; kind: "device" | "site" }>()
   const [opened, setOpened] = useState<{ tunnel: string; key: string }>()
-  const add = useCallback(
+  // A session opened through Just Hub is refused a new peer, a change to one
+  // and a peer's configuration, which holds its key: none of them is offered.
+  const hub = useHubSession()
+  const offer = useCallback(
     (tunnel: string, kind: "device" | "site") => setAdding({ tunnel, kind }),
     [],
   )
@@ -496,8 +518,9 @@ export function usePeerSheets(tunnels: WGInterface[], onChanged: () => void) {
         peer={openPeer}
         onOpenChange={(next) => !next && setOpened(undefined)}
         onChanged={onChanged}
+        hub={hub}
       />
     </>
   )
-  return { add, open, sheets }
+  return { add: hub ? undefined : offer, open, sheets }
 }

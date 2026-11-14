@@ -83,16 +83,15 @@ export function TailscaleMissing({ onInstalled }: { onInstalled: () => void }) {
  * the address it is waiting at as the line's command.
  *
  * Under the line: what Tailscale itself reports, what this server offers the
- * tailnet (`TailscaleOffers`), every other machine with how it is reached
- * (`TailnetMachines`), and a Headscale this server runs.
+ * tailnet (`TailscaleOffers`), and every other machine with how it is
+ * reached (`TailnetMachines`). A Headscale this server runs has the next
+ * view to itself.
  */
 export function TailscaleBlock({
   tailscale,
-  headscale,
   onChanged,
 }: {
   tailscale: TailscaleView
-  headscale: HeadscaleView
   onChanged: () => void
 }) {
   const self = tailscale.self
@@ -199,7 +198,6 @@ export function TailscaleBlock({
       {(tailscale.running || tailscale.peers.length > 0) && (
         <TailnetMachines machines={tailscale.peers} controlServer={tailscale.controlServer} />
       )}
-      {(headscale.installed || headscale.container) && <Headscale headscale={headscale} />}
     </section>
   )
 }
@@ -210,7 +208,7 @@ export function TailscaleBlock({
  * expiry and each node's routes as advertised against approved. Enrolment,
  * keys, approval and policy stay on the control server.
  */
-function Headscale({ headscale }: { headscale: HeadscaleView }) {
+export function Headscale({ headscale }: { headscale: HeadscaleView }) {
   const online = headscale.nodes.filter((n) => n.online).length
   return (
     <section aria-label="Headscale" className="flex min-w-0 flex-col gap-4">

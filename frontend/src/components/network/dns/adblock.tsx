@@ -9,6 +9,7 @@ import { Cpu, External } from "@/components/icons"
 import type { DNSView } from "@/lib/types"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
+import { useHubSession } from "@/components/network/hub-session"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { KIND_PRODUCT } from "@/components/network/dns/resolvers"
@@ -42,6 +43,8 @@ export function Adblock({
 }) {
   const { can } = useAuth()
   const admin = can("system.admin") && Boolean(onRequest)
+  // Connecting stores a credential: not offered to a session opened through Just Hub.
+  const hub = useHubSession(admin)
   const handoffs = usePoll(
     async (signal) => readDNSHandoffs(await get(`${DNS_SERVICE_BASE}/handoffs`, undefined, signal)),
     30_000,
@@ -131,7 +134,7 @@ export function Adblock({
                           </a>
                         </Button>
                       ) : null}
-                      {!connection && handoff?.endpoint ? (
+                      {!connection && handoff?.endpoint && !hub ? (
                         <Button
                           size="xs"
                           aria-label={`Connect ${blocker.name} at ${handoff.endpoint}`}

@@ -33,13 +33,20 @@ const HUB = "lg:py-16"
  * other way healthy".
  *
  * Every node says the same number of lines whatever it holds, and the
- * loading picture is drawn from the same nodes with grey where the words
- * will be (`WireFlow`'s own `loading` gives a node one line of detail, and
- * these have two), so a group of two members lands without moving the views
- * under it.
+ * loading picture is `WireFlow`'s own with those lines given to it
+ * (`loadingLines`), so a group lands without moving the views under it.
  */
-export function EgressPicture({ group, links }: { group?: EgressGroup; links: NetworkLink[] }) {
-  if (!group) return <LoadingPicture />
+export function EgressPicture({
+  group,
+  links,
+  expected = 2,
+}: {
+  group?: EgressGroup
+  links: NetworkLink[]
+  /** How many members the group is known to have before it is read. */
+  expected?: number
+}) {
+  if (!group) return <LoadingPicture members={Math.max(1, expected)} />
   const policy = egressPolicyShort(group.policy)
   const traffic: WireFlowNode = {
     id: "traffic",
@@ -140,70 +147,40 @@ function memberNode(group: EgressGroup, m: EgressMemberView, links: NetworkLink[
 
 function GroupMark() {
   return (
-    <WireMark tone="brand" size="lg" shape="square">
+    <WireMark tone="logo" size="lg" shape="square">
       <Lifebuoy aria-hidden />
     </WireMark>
   )
 }
 
-/** A line of words not read yet: grey, at the height the words will take. */
-function Bone({ className }: { className?: string }) {
-  return (
-    <span className="block">
-      <span
-        className={cn(
-          "inline-block h-2.5 animate-pulse rounded-md bg-muted align-middle",
-          className,
-        )}
-      />
-    </span>
-  )
-}
-
-function loadingNode(id: string, eyebrow: React.ReactNode, lines: number): WireFlowNode {
-  return {
-    id,
-    // No pointing at a node that is not there yet.
-    placeholder: true,
-    mark: <span className="block size-11 animate-pulse rounded-xl bg-muted" />,
-    eyebrow,
-    title: <Bone className="w-24" />,
-    hint: (
-      <>
-        <Bone className="w-28" />
-        {lines > 1 && <Bone className="w-20" />}
-      </>
-    ),
-    line: { state: "up" },
-  }
-}
-
-/** The picture's final shape before the group is read: one selection, the group, two members. */
-function LoadingPicture() {
+/**
+ * The picture's final shape before the group is read: one selection, the
+ * group, and as many members as it is known to have (two, the least a group
+ * can, where nothing says). A member says two lines of detail, its state
+ * and its path; the selection says one; the group two under its name.
+ */
+function LoadingPicture({ members }: { members: number }) {
   return (
     <div aria-busy aria-label="Reading the group">
       <WireFlow
+        loading
         start={{
           title: "Selected traffic",
-          nodes: [
-            loadingNode("traffic", <span className="max-lg:hidden">Selected traffic</span>, 1),
-          ],
+          nodes: [],
+          loadingRows: 1,
+          loadingLines: { eyebrow: <span className="max-lg:hidden">Selected traffic</span> },
         }}
         hub={{
           className: HUB,
           mark: <GroupMark />,
           eyebrow: "Group table",
-          title: <Bone className="w-24" />,
-          hint: (
-            <>
-              <Bone className="w-32" />
-              <Bone className="w-24" />
-            </>
-          ),
+          loadingLines: { hint: 2 },
         }}
         end={{
           title: "Members",
-          nodes: [loadingNode("member:1", "Tier 1", 2), loadingNode("member:2", "Tier 2", 2)],
+          nodes: [],
+          loadingRows: members,
+          loadingLines: (row) => ({ eyebrow: `Tier ${row + 1}`, hint: 2 }),
         }}
       />
     </div>

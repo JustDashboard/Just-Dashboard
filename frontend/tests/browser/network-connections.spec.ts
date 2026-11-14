@@ -110,6 +110,8 @@ for (const width of [1280, 390]) {
       const identity = page.locator("[data-slot=host-identity]").first()
       await expect(identity).toContainText("Reading the connection table")
       await expect(page.locator("[data-slot=wire-flow] [data-slot=skeleton]").first()).toBeVisible()
+      // The waiting picture is the shared one's own, not grey nodes of this page's.
+      await expect(page.locator("[data-slot=wire-flow]")).toHaveAttribute("data-loading", "true")
       await risen(page)
       const before = await identity.boundingBox()
       const picture = await page.locator("[data-slot=wire-flow]").boundingBox()

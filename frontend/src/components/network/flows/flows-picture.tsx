@@ -1,15 +1,24 @@
 "use client"
 
-import { Clock, ClockRewind, Cpu, Layers, Servers } from "@/components/icons"
+import { Clock, ClockRewind, Cpu, Layers, Servers, type Icon } from "@/components/icons"
 import { WireMark } from "@/components/deploy/wire"
 import { ProductGlyph } from "@/components/product-logo"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
 import { plural } from "@/lib/format"
 import { flowBytes, observerReading, type FlowReport } from "@/lib/network-flows"
-import { LinePlaceholder } from "@/components/network/identity-facts"
 import { UTCTime, dayWords } from "@/components/network/flows/marks"
+import type { FlowAnchor } from "@/components/network/flows/views"
 
 const SOURCES_DRAWN = 2
+
+/** What the recorder keeps: three things whose names are known before anything is read. */
+const KEPT: { title: string; glyph: Icon; eyebrow?: string }[] = [
+  { title: "Socket hours", glyph: Layers },
+  { title: "Recorded hours", glyph: Clock },
+  { title: "Kernel observer", glyph: Cpu, eyebrow: "Opt-in" },
+]
+/** Room for the caption's four lines under the recorder's mark. */
+const HUB_ROOM = "lg:py-[4.5rem]"
 
 /**
  * What the recorder samples, the recorder, and what it keeps.
@@ -20,9 +29,10 @@ const SOURCES_DRAWN = 2
  * landing. With recording off and nothing kept, the same picture says what
  * would be sampled and kept, every line dashed and still.
  *
- * Every node is a name and one line whatever it holds, and what has not been
- * read yet is a grey bar on that line, so the picture is one height loading,
- * off and recording and the table under it does not move. On a phone it is
+ * Every node is a name and one line whatever it holds, and before the first
+ * read the picture waits on `WireFlow`'s own rows with those lines and the
+ * names that are already known, so it is one height loading, off and
+ * recording and the table under it does not move. On a phone it is
  * rows of marks around the recorder (the sections under it name each again),
  * except in the off state, where the words are the page.
  */
@@ -32,6 +42,7 @@ export function FlowsPicture({
   loading,
   stale,
   words,
+  onJump,
 }: {
   data?: FlowReport
   /** The UTC day the page is reading, `2026-10-07`. */
@@ -41,15 +52,17 @@ export function FlowsPicture({
   stale?: boolean
   /** Keep every node's words on a phone: the off state, where they are the page. */
   words?: boolean
+  /** Open the view a node stands for, at its block. */
+  onJump: (anchor: FlowAnchor) => void
 }) {
+  if (loading && !data) return <Waiting words={words} />
   const settings = data?.settings
   const recording =
     !stale && Boolean(settings?.enabled) && ["recording", "partial"].includes(data?.status ?? "")
   const flowing = (has: boolean): WireLine =>
     has ? { state: "up", moving: recording } : { state: "idle" }
   const cycle = data?.lastCycle
-  const jump = (id: string) => () =>
-    document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" })
+  const jump = (anchor: FlowAnchor) => () => onJump(anchor)
 
   const sampled: WireFlowNode[] = cycle?.sources.length
     ? cycle.sources.map((source) => {
@@ -73,6 +86,8 @@ export function FlowsPicture({
             : source.status === "observed"
               ? { state: "up", moving: recording }
               : { state: "warning" },
+          onPress: jump("flow-sample"),
+          label: `Go to the latest sample of ${source.name}`,
         }
       })
     : [
@@ -113,26 +128,25 @@ export function FlowsPicture({
           <Layers aria-hidden />
         </WireMark>
       ),
-      title: "Socket hours",
-      name: "Socket hours",
-      hint: loading ? (
-        <LinePlaceholder className="h-2.5 w-28" />
-      ) : rows > 0 && data ? (
-        <span className="numeric">
-          {plural(rows, "row")} · {flowBytes(BigInt(data.retainedBytes))}
-          {data.prunedRows > 0 && ` · ${data.prunedRows} pruned`}
-          {data.retainedFrom && (
-            <>
-              {" "}
-              · from <UTCTime value={data.retainedFrom} form="date" />
-            </>
-          )}
-        </span>
-      ) : settings?.enabled ? (
-        "nothing kept yet"
-      ) : (
-        "a row for each socket and hour"
-      ),
+      title: KEPT[0].title,
+      name: KEPT[0].title,
+      hint:
+        rows > 0 && data ? (
+          <span className="numeric">
+            {plural(rows, "row")} · {flowBytes(BigInt(data.retainedBytes))}
+            {data.prunedRows > 0 && ` · ${data.prunedRows} pruned`}
+            {data.retainedFrom && (
+              <>
+                {" "}
+                · from <UTCTime value={data.retainedFrom} form="date" />
+              </>
+            )}
+          </span>
+        ) : settings?.enabled ? (
+          "nothing kept yet"
+        ) : (
+          "a row for each socket and hour"
+        ),
       line: flowing(rows > 0),
       onPress: rows > 0 ? jump("flow-rows") : undefined,
       label: "Go to the socket hours",
@@ -144,19 +158,18 @@ export function FlowsPicture({
           <Clock aria-hidden />
         </WireMark>
       ),
-      title: "Recorded hours",
-      name: "Recorded hours",
-      hint: loading ? (
-        <LinePlaceholder className="h-2.5 w-32" />
-      ) : hours > 0 ? (
-        <span className="numeric">
-          {hours} of 24 on {dayWords(day)}
-        </span>
-      ) : settings?.enabled ? (
-        `none on ${dayWords(day)}`
-      ) : (
-        "which hours were sampled"
-      ),
+      title: KEPT[1].title,
+      name: KEPT[1].title,
+      hint:
+        hours > 0 ? (
+          <span className="numeric">
+            {hours} of 24 on {dayWords(day)}
+          </span>
+        ) : settings?.enabled ? (
+          `none on ${dayWords(day)}`
+        ) : (
+          "which hours were sampled"
+        ),
       line: flowing(hours > 0),
       onPress: hours > 0 ? jump("flow-hours") : undefined,
       label: "Go to the recorded hours",
@@ -171,16 +184,10 @@ export function FlowsPicture({
           <Cpu aria-hidden />
         </WireMark>
       ),
-      eyebrow: "Opt-in",
-      title: "Kernel observer",
-      name: "Kernel observer",
-      hint: loading ? (
-        <LinePlaceholder className="h-2.5 w-24" />
-      ) : observer ? (
-        observer.label.toLowerCase()
-      ) : (
-        "payload bytes, when switched on"
-      ),
+      eyebrow: KEPT[2].eyebrow,
+      title: KEPT[2].title,
+      name: KEPT[2].title,
+      hint: observer ? observer.label.toLowerCase() : "payload bytes, when switched on",
       line:
         data?.kernelObserver.status === "recording"
           ? { state: "up", moving: recording }
@@ -204,26 +211,18 @@ export function FlowsPicture({
       end={{ title: "Kept", nodes: kept }}
       hub={{
         mark: (
-          <WireMark tone={recording ? "brand" : "neutral"} size="lg">
+          <WireMark tone={recording ? "success" : "neutral"} size="lg">
             <ClockRewind aria-hidden />
           </WireMark>
         ),
-        // Room for the caption's four lines under the mark.
-        className: "lg:py-[4.5rem]",
+        className: HUB_ROOM,
         eyebrow: "Recorder",
-        title: settings ? (
-          `every ${settings.intervalSeconds}s`
-        ) : (
-          <LinePlaceholder className="h-3 w-16" />
-        ),
+        // A read that failed before anything was known keeps both lines' room.
+        title: settings ? `every ${settings.intervalSeconds}s` : "not read",
         hint: (
           <>
             <span className="block">
-              {settings ? (
-                `keeps ${plural(settings.retentionDays, "day")}`
-              ) : (
-                <LinePlaceholder className="h-2.5 w-20" />
-              )}
+              {settings ? `keeps ${plural(settings.retentionDays, "day")}` : "\u00a0"}
             </span>
             <span className="block" title="Every restart begins a fresh byte baseline">
               {data ? (
@@ -231,11 +230,58 @@ export function FlowsPicture({
                   collector started <UTCTime value={data.collectorStartedAt} form="short" />
                 </>
               ) : (
-                <LinePlaceholder className="h-2.5 w-36" />
+                "\u00a0"
               )}
             </span>
           </>
         ),
+      }}
+    />
+  )
+}
+
+/**
+ * The picture before the first read: two sources not named yet, the
+ * recorder, and the three things it keeps under their own names and marks,
+ * each with the one line it will say.
+ */
+function Waiting({ words }: { words?: boolean }) {
+  return (
+    <WireFlow
+      loading
+      phone={words ? "stack" : "marks"}
+      start={{
+        title: "Sampled",
+        nodes: [],
+        loadingRows: SOURCES_DRAWN,
+        loadingLines: { eyebrow: false },
+      }}
+      end={{
+        title: "Kept",
+        nodes: [],
+        loadingRows: KEPT.length,
+        loadingLines: (row) => {
+          const { title, glyph: Glyph, eyebrow } = KEPT[row]
+          return {
+            mark: (size) => (
+              <WireMark size={size}>
+                <Glyph aria-hidden />
+              </WireMark>
+            ),
+            eyebrow: eyebrow ?? false,
+            title,
+          }
+        },
+      }}
+      hub={{
+        mark: (
+          <WireMark tone="neutral" size="lg">
+            <ClockRewind aria-hidden />
+          </WireMark>
+        ),
+        className: HUB_ROOM,
+        eyebrow: "Recorder",
+        loadingLines: { hint: 2 },
       }}
     />
   )

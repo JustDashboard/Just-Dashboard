@@ -1013,8 +1013,10 @@ test("the config editor offers nothing to save over a file it could not read", a
     gone ? fileGone(route) : json(route, { content: "server {\n    # served-from-disk\n}\n" }),
   )
   await page.goto("/proxy/sites")
+  // A site's file is a word in its row's menu.
   const card = page.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
-  await card.getByRole("button", { name: "Raw config" }).click()
+  await card.getByRole("button", { name: "More actions for app.example.com" }).click()
+  await page.getByRole("menuitem", { name: "Raw config" }).click()
 
   const sheet = page.getByRole("dialog")
   await expect(sheet.getByRole("alert")).toContainText("That file is not on disk.")

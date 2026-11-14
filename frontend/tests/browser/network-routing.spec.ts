@@ -210,13 +210,25 @@ test("a guarded row says why it stays to a keyboard, and the dashboard's own kee
   await mockNetwork(page, mutations)
   await page.goto("/network/routing")
   await loaded(page)
-  await page.getByRole("button", { name: "Why the route to default stays" }).focus()
-  await expect(page.getByRole("tooltip")).toContainText(
-    "The default route: how this server reaches the internet.",
-  )
+  // Each reason is asked for by its own words: a tooltip that is closing is still in the page
+  // for a moment while the next one opens, and "the tooltip" is then two.
+  const reason = (words: string) => page.getByRole("tooltip").filter({ hasText: words })
+  // And its mark is brought into view before it is focused. Focusing a control below the fold
+  // scrolls the page to it, and a tooltip closes when anything around its trigger scrolls, so
+  // the reason opened and was gone again whenever the scroll's event came after the focus.
+  const ask = async (name: string) => {
+    const mark = page.getByRole("button", { name })
+    await mark.scrollIntoViewIfNeeded()
+    await page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+    )
+    await mark.focus()
+  }
+  await ask("Why the route to default stays")
+  await expect(reason("The default route: how this server reaches the internet.")).toBeVisible()
   await page.keyboard.press("Escape")
-  await page.getByRole("button", { name: "Why rule 5270 stays" }).focus()
-  await expect(page.getByRole("tooltip")).toContainText("Tailscale's.")
+  await ask("Why rule 5270 stays")
+  await expect(reason("Tailscale's.")).toBeVisible()
   await page.keyboard.press("Escape")
 
   await page.getByRole("button", { name: "Remove the route to 192.168.1.0/24" }).click()

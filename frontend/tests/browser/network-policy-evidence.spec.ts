@@ -39,8 +39,12 @@ const openGateway = async (
   await mockNetwork(page, options.mutations, { overrides: data, session: options.session })
   await page.goto("/network/gateway")
   await loaded(page)
+  await openEvidence(page)
   return data
 }
+
+/** The evidence is behind the admission word in the identity line. */
+const openEvidence = (page: Page) => page.getByRole("button", { name: "Policy evidence" }).click()
 
 const chainReading = (page: Page, label: string) =>
   page
@@ -66,6 +70,9 @@ test("a missing IPv6 INPUT rule is identified independently and repaired only af
   await expect(page.getByText("Owned admission rules need attention", { exact: true })).toHaveCount(
     0,
   )
+  await expect(
+    page.getByRole("region", { name: "About the gateway" }).getByText("Admission missing"),
+  ).toBeVisible()
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("absent")
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("ip6tables INPUT")
   for (const label of ["IPv4 INPUT", "IPv4 FORWARD", "IPv6 FORWARD", "IPv6 DOCKER-USER"]) {
@@ -84,6 +91,10 @@ test("a missing IPv6 INPUT rule is identified independently and repaired only af
   await review.getByRole("button", { name: "Repair rules", exact: true }).click()
   await expect.poll(() => mutations.length).toBe(1)
   expect(mutations[0]).toMatchObject({ method: "POST", path: "/network/gateway/admission/repair" })
+  // The line's word turns with the repair, and the evidence behind it.
+  const identity = page.getByRole("region", { name: "About the gateway" })
+  await expect(identity.getByText("Admission present", { exact: true })).toBeVisible()
+  await openEvidence(page)
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("Owned rule present")
   await expect(page.getByRole("button", { name: "Repair owned rules", exact: true })).toHaveCount(0)
 })
@@ -113,9 +124,13 @@ test("a reader can inspect absent admission evidence while repair remains unavai
   await openGateway(page, "absent", { session: reader, mutations })
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("absent")
   await expect(page.getByRole("button", { name: "Repair owned rules", exact: true })).toHaveCount(0)
-  await expect(
-    page.getByRole("button", { name: "Forward a port", exact: true }).first(),
-  ).toBeDisabled()
+  // A reader is drawn no command it cannot use.
+  await expect(page.getByRole("button", { name: "Forward a port", exact: true })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Gateway actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Refresh" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Repair owned rules" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Share a network" })).toHaveCount(0)
   expect(mutations).toEqual([])
 })
 
@@ -159,6 +174,7 @@ test("an explicit INPUT drop remains visible beside an accept policy and unverif
   await expect(
     page.getByText("An explicit drop in ip6 filter INPUT refuses the owned marked traffic."),
   ).toBeVisible()
+  await openEvidence(page)
   await page.getByText("Checked policy layers", { exact: true }).click()
   await expect(page.getByText("ip6 filter INPUT: blocked", { exact: false })).toBeVisible()
   await expect(

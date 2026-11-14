@@ -243,7 +243,19 @@ function MountShare({
           value: g.volumes.length,
           color: STANDING_COLOR[g.standing],
           hatch: g.taken / g.volumes.length,
-          mark: <span className="numeric text-hint font-medium">{g.volumes.length}</span>,
+          // Its standing's dot before its count: a strip of bare figures
+          // ("10 1 2 2 1") said nothing about which was which.
+          mark: (
+            <span className="numeric inline-flex items-center gap-1.5 text-hint font-medium">
+              <span
+                aria-hidden
+                data-slot="standing-dot"
+                className="size-1.5 shrink-0 rounded-full"
+                style={{ background: STANDING_COLOR[g.standing] }}
+              />
+              {g.volumes.length}
+            </span>
+          ),
           name: <span className={cn(g.standing === "down" && "text-warning")}>{label}</span>,
           detail: g.size > 0 ? bytes(g.size) : undefined,
           figure: g.volumes.length,

@@ -885,7 +885,7 @@ only renderer/executor/validation authority for their feature.
   staging built; the step reads production's terms, never staging's, and ends the promotion as it
   would a deploy. Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`),
   the Promote confirmation says the tasks are rehearsed first while the terms are on, and the run page
-  reads the report as figures (`run-rehearsal.tsx`).
+  reads the report as a sentence and a line of facts (`run-rehearsal.tsx`).
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
   an active deployment lease, and a staging release an unfinished promotion is about to take its image
@@ -2636,7 +2636,8 @@ a minute, the failing share, processor and memory, each carrying its last hour a
 the page that has the rest); first sign-in, for a template that declares one; the delivery
 figures; the recent deployments; then release history, whose columns share the split of the lists
 above and whose single failure cause is a count instead of a full-width bar. The Overview keeps the
-delivery figures compact; the Deployments page retains the release-time trend. From `2xl`, recent
+delivery figures compact; the Deployments page leads with the same sentence over one line of facts
+and retains the release-time trend. From `2xl`, recent
 deployments sit beside the preview environments. For a project deploying a github.com repository, that
 **Pull requests** panel (`GET /deploy/{id}/pull-requests`, polled once a
 minute; hidden when the read fails, since the panel is a window onto GitHub rather than a fact about the
@@ -2700,8 +2701,8 @@ cannot clamp the shell's scroll position and move the controls. History rows app
 the arrival stagger when a filter changes. A run is one shared row
 (`run-row.tsx`): who started it as a face or a product, `#N Deploy` and the commit subject, then
 branch (or the requested tag or commit) · sha · author · trigger, and its state, duration and time in
-fixed columns, the duration with a bar that turns amber past twice the median of at least five
-finished runs listed. A failed run's row names its cause's title rather than its step. Its verbs are
+fixed columns, the duration in amber past twice the median of at least five
+finished runs listed (it also drew a bar of its time against the longest until 0.8.7). A failed run's row names its cause's title rather than its step. Its verbs are
 declared once in `run-verbs.tsx` and shared with the run page's header: Redeploy (live), Retry (only a
 `failed` or `cancelled` run — and, once the settings moved on since it, preceded by Deploy with current
 settings and relabelled "Retry with the settings it used", since Retry replays the run's own plan and

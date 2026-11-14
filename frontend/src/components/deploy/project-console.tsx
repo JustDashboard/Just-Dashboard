@@ -5,13 +5,12 @@ import { relativeTime } from "@/lib/format"
 import type { ContainerDetail } from "@/lib/types"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { ArrowRight, Slash, Terminal, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
+import { InfoTip } from "@/components/form"
 import { Pane, PaneFooter } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
-import { EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { XtermPane } from "@/components/xterm-pane"
@@ -24,6 +23,7 @@ import {
   runsAsRoot,
 } from "@/components/deploy/console-session"
 import { useProject } from "@/components/deploy/project-context"
+import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
 import { serviceProduct } from "@/components/deploy/service-product"
 import { GameConsole } from "@/components/deploy/game/console"
 
@@ -56,9 +56,9 @@ export function ProjectConsole() {
  * terminal takes the rest. Two strips stacked before the first line of output
  * were 76px of chrome on a phone.
  *
- * Where a shell cannot open, the reason stands on the page by itself: the
- * project's navigation already names the page, so a "Console" title over a
- * single notice said it twice.
+ * Where a shell cannot open, the page says so as Runtime does for a release
+ * with no containers — the project's mark, one sentence, where to look next —
+ * in the height the shell would take, so the page is one shape either way.
  */
 function DockerConsole() {
   const { can } = useAuth()
@@ -86,42 +86,35 @@ function DockerConsole() {
   const product = (image: string | undefined) =>
     serviceProduct(image, deployment.sourceKind, project.product)
 
+  const base = `/deploy/${project.projectId}`
   if (!can("terminal")) {
     return (
-      <Notice title="Terminal access is not granted" icon={Slash}>
-        Opening a shell inside a deployment requires the terminal capability.
-      </Notice>
+      <ProjectEmpty className={CONSOLE_HEIGHT} title="A shell here needs the terminal capability">
+        <EmptyStep href={`${base}/logs`}>Logs</EmptyStep>
+      </ProjectEmpty>
     )
   }
   if (runtime?.status !== "available") {
     return (
-      <Notice title="Runtime unavailable" tone="warning" icon={Warning}>
-        <p>
-          {runtime?.reason ??
-            "Docker runtime evidence could not be loaded, so there is no container to open."}
-        </p>
-        <Button size="xs" variant="outline" asChild className="mt-2">
-          <Link href="/docker">
-            Open Docker <ArrowRight />
-          </Link>
-        </Button>
-      </Notice>
+      <ProjectEmpty
+        className={CONSOLE_HEIGHT}
+        title="Docker did not answer, so there is no container to open"
+        reason={runtime?.reason}
+      >
+        <EmptyStep href={`${base}/runtime`}>Runtime</EmptyStep>
+        <EmptyStep href="/docker">Docker</EmptyStep>
+      </ProjectEmpty>
     )
   }
   if (!service) {
     return (
-      <EmptyState
-        icon={Terminal}
+      <ProjectEmpty
+        className={CONSOLE_HEIGHT}
         title="No running container"
-        description="A shell opens inside the live release once a deployment is running. Deploy first, or open the Runtime tab to see what Docker reports."
-        action={
-          <Button size="sm" variant="outline" asChild>
-            <Link href={`/deploy/${project.projectId}/runtime`}>
-              Runtime <ArrowRight className="size-3.5" />
-            </Link>
-          </Button>
-        }
-      />
+        reason="A shell opens inside the live release once one is running."
+      >
+        <EmptyStep href={`${base}/runtime`}>Runtime</EmptyStep>
+      </ProjectEmpty>
     )
   }
 
@@ -171,16 +164,23 @@ function DockerConsole() {
           }
         />
         <PaneFooter>
-          <p className="min-w-0 flex-1 text-hint text-muted-foreground">
-            Commands run inside <span className="font-mono">{service.name}</span>
-            {number !== undefined && <>, release #{number},</>} not on the host. The next release
-            replaces this container, and this shell and anything written in it go with it.
+          {/* One line: where the shell is. That it is not the host, and that
+              the next release takes the container and this shell with it, is
+              behind the mark beside it rather than a paragraph under every
+              session. */}
+          <p className="flex min-w-0 flex-1 items-center gap-1.5 text-hint text-muted-foreground">
+            <span className="min-w-0 truncate">
+              Inside <span className="font-mono text-foreground/80">{service.name}</span>
+              {number !== undefined && <span className="numeric"> · release #{number}</span>}
+            </span>
+            <InfoTip label="What this shell reaches">
+              Commands run inside the container, not on the host. The next release replaces this
+              container, and this shell and anything written in it go with it.
+            </InfoTip>
           </p>
           <div className="flex shrink-0 items-center gap-1">
             <Button size="xs" variant="ghost" asChild>
-              <Link href={`/deploy/${project.projectId}/logs?service=${service.containerId}`}>
-                Logs
-              </Link>
+              <Link href={`${base}/logs?service=${service.containerId}`}>Logs</Link>
             </Button>
             <Button size="xs" variant="ghost" asChild>
               <Link href={`/docker/containers/${service.containerId}`}>Open in Docker</Link>

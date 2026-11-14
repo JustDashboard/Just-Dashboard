@@ -543,7 +543,12 @@ test.describe("installed, measured and previewed", () => {
     // A forward whose admission rule is missing says so in its title.
     const game = page.getByRole("listitem").filter({ hasText: "Game server" })
     await expect(game.getByText("Admission missing")).toBeVisible()
-    await expect(page.getByText("Live counters belong to table generation 41")).toBeVisible()
+    // What the counters are is the note beside each section's total.
+    await page.getByRole("button", { name: "About these counters" }).first().focus()
+    await expect(page.getByRole("tooltip")).toContainText(
+      "Live counters belong to table generation 41",
+    )
+    await page.keyboard.press("Escape")
     // The one-to-one mapping reads as one, in its row and in the picture.
     await expect(page.getByText("Mail host · one-to-one with 203.0.113.25/32")).toBeVisible()
     await expect(
@@ -656,10 +661,22 @@ test.describe("installed, measured and previewed", () => {
     page,
   }) => {
     await open(page, "/network/gateway")
-    await expect(page.getByText("Each entry\u2019s flow, as modeled")).toBeVisible()
+    // The evidence is behind the admission word in the identity line.
+    await page.getByRole("button", { name: "Policy evidence" }).click()
+    const evidence = page.getByRole("dialog")
+    await expect(evidence.getByText("Each entry\u2019s flow, as modeled")).toBeVisible()
     await expect(
-      page.getByText("Game server · arriving: A checked layer may drop it"),
+      evidence.getByText("Game server · arriving: A checked layer may drop it"),
     ).toBeVisible()
+    await page.keyboard.press("Escape")
+    // And an entry's own part of it is behind the state word on its row,
+    // without opening the row's editor.
+    await page
+      .getByRole("button", { name: "Admission missing: evidence for :27015 → 10.0.1.9:27015" })
+      .click()
+    await expect(page.getByRole("dialog")).toContainText("Arriving: A checked layer may drop it")
+    await expect(page.getByRole("dialog")).toHaveCount(1)
+    await expect(page.getByRole("textbox", { name: "Name" })).toHaveCount(0)
   })
 })
 

@@ -56,6 +56,12 @@ type RowsProps = {
  * person or compose made, and on the default bridge nothing does, which is
  * why a container moved there by hand stops finding its database. A row
  * opens the container; a network's chip narrows the table to that network.
+ *
+ * A row is one height, whatever the container is on: two networks are the
+ * row's two lines, a third and later are counted after the first (each is on
+ * the container's own page and on that network's), and the names stay on one
+ * line with the rest behind a count. A container on two networks used to be
+ * a taller row, and one whose names wrapped a taller one again.
  */
 export function ContainerNetworkRows({ rows, ...rest }: RowsProps & { rows: Container[] }) {
   const arrived = useArrivals(rows.map((c) => c.id))
@@ -79,9 +85,11 @@ export function ContainerNetworkRows({ rows, ...rest }: RowsProps & { rows: Cont
       <TableHeader className={stickyTableHeader}>
         <TableRow>
           <TableHead>Container</TableHead>
-          <TableHead className="w-40">State</TableHead>
-          <TableHead className="w-80">Networks</TableHead>
-          <TableHead className="w-56">Answers to</TableHead>
+          {/* The sized columns leave the container its name at 1280, where
+              the table begins: at their full width they left it the logo. */}
+          <TableHead className="w-32 2xl:w-40">State</TableHead>
+          <TableHead className="w-64 2xl:w-80">Networks</TableHead>
+          <TableHead className="w-44 2xl:w-56">Answers to</TableHead>
           <TableHead className="w-48 text-right">Traffic</TableHead>
         </TableRow>
       </TableHeader>
@@ -98,6 +106,9 @@ export function ContainerNetworkRows({ rows, ...rest }: RowsProps & { rows: Cont
     </Table>
   )
 }
+
+/** Every cell of a row, at the one height a row has: two lines, whatever is in them. */
+const CELL = "h-16 py-0"
 
 function ContainerTableRow({
   container,
@@ -116,26 +127,30 @@ function ContainerTableRow({
       className={cn("group", arrived && "animate-rise")}
       onActivate={() => onOpen(container)}
     >
-      <TableCell className="py-2.5">
+      <TableCell className={CELL}>
         <ContainerTitle container={container} onOpen={() => onOpen(container)} />
       </TableCell>
-      <TableCell className="py-2.5">
+      <TableCell className={CELL}>
         <ContainerState container={container} />
       </TableCell>
-      <TableCell className="py-2.5">
+      <TableCell className={CELL}>
         <NetworkChips placed={placed} focused={focused} onNetwork={onNetwork} />
       </TableCell>
-      <TableCell className="py-2.5 whitespace-normal">
+      <TableCell className={CELL}>
         <Names container={container} placed={placed} />
       </TableCell>
-      <TableCell className="py-2.5">
+      <TableCell className={CELL}>
         <ContainerRate container={container} placed={placed} traffic={traffic.get(container.id)} />
       </TableCell>
     </TableRow>
   )
 }
 
-/** A container drawn down rather than across, nothing dropped. */
+/**
+ * A container drawn down rather than across, nothing dropped: its name and
+ * state, the networks it is on in a box two lines tall, then its names and
+ * its traffic on one line, so every container is the same row.
+ */
 function ContainerNarrowRow({
   container,
   arrived,
@@ -152,7 +167,9 @@ function ContainerNarrowRow({
       data-workspace-item={container.id}
       data-workspace-name={container.name}
       className={cn(
-        "group flex min-w-0 flex-col gap-2 py-3 transition-colors hover:bg-row-hover",
+        // A height rather than padding: the hairline over every row but the
+        // first is inside it, so the first is not a pixel shorter.
+        "group flex h-[9.5rem] min-w-0 flex-col justify-center gap-2 transition-colors hover:bg-row-hover",
         ROW_BLEED,
         arrived && "animate-rise",
       )}
@@ -161,14 +178,14 @@ function ContainerNarrowRow({
         onOpen(container)
       }}
     >
-      <div className="flex min-w-0 items-start justify-between gap-3">
+      <div className="flex h-10 min-w-0 items-center justify-between gap-3">
         <ContainerTitle container={container} onOpen={() => onOpen(container)} />
         <ContainerState container={container} />
       </div>
-      <div className="pl-11">
+      <div className="flex h-11 items-center pl-11">
         <NetworkChips placed={placed} focused={focused} onNetwork={onNetwork} />
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 pl-11">
+      <div className="flex h-7 min-w-0 items-center justify-between gap-x-4 pl-11">
         <Names container={container} placed={placed} />
         <ContainerRate container={container} placed={placed} traffic={traffic.get(container.id)} />
       </div>
@@ -240,10 +257,14 @@ function NetworkChips({
   if (placed.length === 0) {
     return <span className="text-hint text-muted-foreground">on no network</span>
   }
+  // Two lines is the row: with more than two networks the first keeps its
+  // line and the rest are counted on the second.
+  const shown = placed.length > 2 ? placed.slice(0, 1) : placed
+  const rest = placed.slice(shown.length)
   return (
-    <ul className="grid min-w-0 grid-cols-[minmax(0,11rem)_auto] items-center gap-x-4 gap-y-0.5">
-      {placed.map(({ network, endpoint }) => (
-        <li key={network.id} className="col-span-2 grid grid-cols-subgrid items-center">
+    <ul className="grid w-full min-w-0 grid-cols-[minmax(0,11rem)_auto] items-center gap-x-4">
+      {shown.map(({ network, endpoint }) => (
+        <li key={network.id} className="col-span-2 grid h-5.5 grid-cols-subgrid items-center">
           <button
             type="button"
             onClick={() => onNetwork(network)}
@@ -257,7 +278,7 @@ function NetworkChips({
                 ? "Show containers on every network"
                 : `Show the containers on ${network.name}`
             }
-            className="-mx-1 inline-flex min-w-0 items-center gap-1.5 rounded-sm px-1 text-body focus-ring transition-colors hover:bg-row-hover"
+            className="-mx-1 inline-flex h-5.5 min-w-0 items-center gap-1.5 rounded-sm px-1 text-body focus-ring transition-colors hover:bg-row-hover"
           >
             <HueKey color={networkHue(network.name)} />
             <span className="truncate" style={{ color: networkHue(network.name) }}>
@@ -270,6 +291,15 @@ function NetworkChips({
           </span>
         </li>
       ))}
+      {rest.length > 0 && (
+        <li
+          className="col-span-2 flex h-5.5 items-center text-hint text-muted-foreground"
+          title={rest.map((p) => p.network.name).join(", ")}
+        >
+          and {rest.length} more: <span className="ml-1 truncate">{rest[0].network.name}</span>
+          {rest.length > 1 && <span className="numeric ml-1 shrink-0">+{rest.length - 1}</span>}
+        </li>
+      )}
     </ul>
   )
 }
@@ -287,23 +317,34 @@ function Names({ container, placed }: { container: Container; placed: Placement[
     return (
       <span
         className={cn(
-          "text-hint",
+          "min-w-0 truncate text-hint",
           placed.some((p) => p.network.name === "bridge")
             ? "text-warning"
             : "text-muted-foreground",
         )}
+        title={why}
       >
         {why ?? "—"}
       </span>
     )
   }
+  // On one line: the service's short name first and whole, the container's
+  // after it and cut where the column ends, the rest behind a count.
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
-      {names.map((name) => (
-        <Tag key={name} mono>
-          {name}
+    <span
+      className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
+      title={names.join(", ")}
+    >
+      {names.slice(0, 2).map((name, index) => (
+        <Tag key={name} mono className={cn(index > 0 && "min-w-0 shrink")}>
+          <span className="truncate">{name}</span>
         </Tag>
       ))}
+      {names.length > 2 && (
+        <span className="numeric shrink-0 text-micro text-muted-foreground">
+          +{names.length - 2}
+        </span>
+      )}
     </span>
   )
 }
