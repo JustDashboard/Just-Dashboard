@@ -6,8 +6,10 @@ import {
   groupName,
   managerHref,
   processCaption,
+  processStateTone,
   uncontrollable,
 } from "./shared"
+import { toneFor } from "../tone"
 
 // Where a process row says what is supervising it. Every branch is an address
 // that has to exist: a wrong one is a dead link on a page that otherwise looks
@@ -125,4 +127,11 @@ describe("groupName", () => {
     expect(groupName({ ...base, manager: "container", name: "3f9a1c0b7d2e" })).toBe("3f9a1c0b7d2e")
     expect(groupName({ ...base, manager: "systemd", name: "nginx.service" })).toBe("nginx")
   })
+})
+
+test("a blocked or zombie process reads amber, not the danger ink", () => {
+  expect(toneFor(processStateTone("blocked"))).toBe("warning")
+  expect(toneFor(processStateTone("zombie"))).toBe("warning")
+  expect(toneFor(processStateTone("sleeping"))).toBe("stopped")
+  expect(toneFor(processStateTone("running"))).toBe("running")
 })
