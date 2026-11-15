@@ -58,6 +58,7 @@ import { VerbActions, type Verb } from "@/components/verbs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Explain } from "@/components/explain"
+import { HoverTip } from "@/components/deploy/settings/hover-tip"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -1053,10 +1054,7 @@ function DomainRow({
           disabled={!canAdmin}
           className="shrink-0"
         >
-          <Explain
-            face="wrap"
-            tip={httpsTip({ https: domain.https, tunnel, gated: httpsHeld && !tunnel })}
-          >
+          <HoverTip tip={httpsTip({ https: domain.https, tunnel, gated: httpsHeld && !tunnel })}>
             <Segment
               value="https"
               aria-label={`HTTPS on ${host}`}
@@ -1075,8 +1073,8 @@ function DomainRow({
               />
               HTTPS
             </Segment>
-          </Explain>
-          <Explain face="wrap" tip={passwordTip({ guarded: Boolean(protection), gated })}>
+          </HoverTip>
+          <HoverTip tip={passwordTip({ guarded: Boolean(protection), gated })}>
             <Segment
               value="password"
               aria-label={`Password on ${host}`}
@@ -1094,10 +1092,10 @@ function DomainRow({
               />
               Password
             </Segment>
-          </Explain>
+          </HoverTip>
           {/* Always drawn, so the rows' segments line up down the list and a
               wildcard's says why it is not offered. */}
-          <Explain face="wrap" tip={tunnelTip({ tunnel, wildcard, fenced })}>
+          <HoverTip tip={tunnelTip({ tunnel, wildcard, fenced })}>
             <Segment
               value="tunnel"
               aria-label={`Cloudflare Tunnel on ${host}`}
@@ -1113,7 +1111,7 @@ function DomainRow({
               />
               Tunnel
             </Segment>
-          </Explain>
+          </HoverTip>
         </ToggleGroup>
         <OwnershipSelect
           value={domain.ownership}

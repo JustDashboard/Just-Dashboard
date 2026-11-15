@@ -1231,10 +1231,12 @@ function Fanout({
         })
   const targets: WireFlowNode[] = [
     ...channels.map((channel): WireFlowNode => {
+      // The kind is the title and the name rides in the hint as one string:
+      // the cards below are where a channel is found by name.
       const title = kindTitle(channel.kind)
       const hint = channel.enabled
-        ? `${eventLabel(channel.events).toLowerCase()} · ${outcomeWords(channel)}`
-        : "paused"
+        ? `${channel.name} · ${eventLabel(channel.events).toLowerCase()} · ${outcomeWords(channel)}`
+        : `${channel.name} · paused`
       return {
         id: channelNodeId(channel.id),
         mark: (size) => (
@@ -1242,9 +1244,9 @@ function Fanout({
             <ChannelGlyph channel={channel} />
           </WireMark>
         ),
-        eyebrow: title,
-        title: channel.name,
-        name: `${title}: ${channel.name} · ${hint}`,
+        eyebrow: "Channel",
+        title,
+        name: `${title}: ${hint}`,
         hint,
         line: lineOf(channel),
       }
