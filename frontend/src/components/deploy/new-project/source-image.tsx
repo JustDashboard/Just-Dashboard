@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { deploymentName } from "@/components/deploy/vocabulary"
 import { ProductGlyph, ProductLogo, hostProduct, imageProduct } from "@/components/product-logo"
-import { CODE } from "@/components/deploy/run-evidence"
+import { CODE } from "@/components/code"
 import { useSourceInspection } from "./use-source-inspection"
 import {
   imageName,

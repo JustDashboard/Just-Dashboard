@@ -26,7 +26,7 @@ import {
   type ReleaseNodeState,
 } from "@/components/deploy/vocabulary"
 import { BranchChip, ShortSha } from "@/components/git/marks"
-import { CODE, ShellWords } from "@/components/deploy/run-evidence"
+import { CODE, ShellWords } from "@/components/code"
 import {
   CONFIGURE_STEPS,
   type ConfigureFlow,

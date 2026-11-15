@@ -14,7 +14,7 @@ import type { DeploymentPreflightFinding } from "@/lib/types"
 import { FindingRow, findingRemedy } from "@/components/deploy/deployment-findings"
 import { variableFixLabel } from "@/components/deploy/failure-cause"
 import { StepMark, type ReleaseNodeState } from "@/components/deploy/vocabulary"
-import { CODE, ShellWords } from "@/components/deploy/run-evidence"
+import { CODE, ShellWords } from "@/components/code"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
 import {

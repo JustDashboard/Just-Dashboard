@@ -46,13 +46,8 @@ import {
   settingsPathForField,
 } from "@/components/deploy/deployment-findings"
 import type { ConsoleRow } from "@/components/deploy/build-console"
-import {
-  CodeBlock,
-  EvidenceView,
-  JsonCode,
-  StepTile,
-  stepSummary,
-} from "@/components/deploy/run-evidence"
+import { CodeBlock, JsonCode } from "@/components/code"
+import { EvidenceView, StepTile, stepSummary } from "@/components/deploy/run-evidence"
 import { useBreakpoint } from "@/lib/breakpoints"
 
 /** Where a step sits in the run's time, as start and end in milliseconds. */

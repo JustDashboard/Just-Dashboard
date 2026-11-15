@@ -11,7 +11,7 @@ import {
 } from "@/components/deploy/new-project/configure-advanced"
 import { PublicAddress } from "@/components/deploy/new-project/public-address"
 import { checkTarget, composeNamedVolumes } from "@/components/deploy/new-project/plan-reading"
-import { ShellWords } from "@/components/deploy/run-evidence"
+import { ShellWords } from "@/components/code"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
