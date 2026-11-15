@@ -25,7 +25,7 @@ test("tabbing to an info mark below the fold shows its tooltip, and it stays", a
     ].filter((el) => el.tabIndex >= 0 && el.getClientRects().length > 0)
     const index = tabbable.findIndex(
       (el) =>
-        el.dataset.slot === "tooltip-trigger" &&
+        el.dataset.slot === "explain" &&
         el.querySelector("svg") !== null &&
         el.getBoundingClientRect().top > window.innerHeight + 40,
     )

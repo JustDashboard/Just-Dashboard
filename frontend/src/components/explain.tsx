@@ -130,6 +130,24 @@ export function Explain(props: ExplainProps) {
     },
     [key],
   )
+  // A tip a resting mouse opened is about what is under the mouse, and a
+  // scroll moves that away without the pointer leaving the mark, so it
+  // closes, as a tooltip does. One the keyboard opened stays: tabbing to a
+  // mark below the fold scrolls the page to it (tooltip-focus.spec.ts).
+  React.useEffect(() => {
+    if (opened !== "hover") return
+    // Only a scroll that moves the mark: a log scrolling itself beside it does not.
+    const onScroll = (event: Event) => {
+      const scrolled = event.target
+      if (
+        scrolled instanceof Document ||
+        (scrolled instanceof Node && scrolled.contains(mark.current))
+      )
+        close()
+    }
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true })
+    return () => window.removeEventListener("scroll", onScroll, { capture: true })
+  }, [opened, close])
   const after = (ms: number, run: () => void) => {
     clearTimeout(timer.current)
     timer.current = setTimeout(run, ms)
