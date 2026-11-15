@@ -312,7 +312,7 @@ export function EventsPage() {
         },
       ]}
     >
-      <Page className="animate-rise">
+      <Page rise>
         {header}
 
         <DockerIdentity
@@ -534,7 +534,7 @@ export function EventsPage() {
               </PanelBody>
               <PanelFooter className="text-hint text-muted-foreground">
                 <span>a loop still going first, then what failed, then the newest</span>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span>a row shows only its events below</span>
               </PanelFooter>
             </Panel>
@@ -630,17 +630,17 @@ export function EventsPage() {
               </PanelBody>
               <PanelFooter className="gap-x-2 gap-y-1 text-hint text-muted-foreground">
                 <Status {...socketReading(socket.state)} className="text-hint" />
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span className="numeric">{plural(all.length, "event")} on this page</span>
                 {meta?.since && (
                   <>
-                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-faint">·</span>
                     <span className="whitespace-nowrap" title={timestamp(meta.since)}>
                       kept since <span className="numeric">{clock(meta.since)}</span>
                     </span>
                   </>
                 )}
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span className="flex items-center gap-1 whitespace-nowrap">
                   in memory
                   <InfoTip label="How long this record is kept">

@@ -11,7 +11,6 @@ import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { DockerImage, ImageDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useImageActions } from "@/components/docker/image-actions"
@@ -45,6 +44,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const BACK = (
   <Link
@@ -275,7 +275,7 @@ function ImageMain({
 }) {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const tag = known ? primaryTag(known) : undefined
   const name = known ? (tag ?? `untagged ${shortId(known.id)}`) : "the image"
 
@@ -445,7 +445,7 @@ function ImageMain({
           <Tabs value={tab} onValueChange={setTab} className="gap-0">
             <TabsPrimitive.List
               aria-label={`Views of ${name}`}
-              className="z-20 flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline bg-background xl:sticky xl:top-0 [&::-webkit-scrollbar]:hidden"
+              className="z-sticky flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline bg-background xl:sticky xl:top-0 [&::-webkit-scrollbar]:hidden"
             >
               {VIEWS.map((view) => (
                 <TabsPrimitive.Trigger

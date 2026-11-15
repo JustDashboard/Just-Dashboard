@@ -6,7 +6,7 @@ import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { ImageDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ShellWords } from "@/components/deploy/run-evidence"
-import { Term } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import {
   imageNames,
   imageSteps,
@@ -378,7 +378,7 @@ export function ImageConfiguration({ detail }: { detail: ImageDetail }) {
               <Copy aria-hidden className={cn("size-3 shrink-0", rowReveal())} />
             </button>
           </Detail>
-          <Detail label={<Term name="tag">Tags</Term>}>
+          <Detail label={<Definition name="tag">Tags</Definition>}>
             {names.length === 0 ? (
               <span className="text-muted-foreground">none</span>
             ) : (

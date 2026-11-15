@@ -21,7 +21,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Hint, Term } from "@/components/docker/explain"
+import { FormNote } from "@/components/form"
+import { Definition } from "@/components/docker/explain"
 import {
   bindingFamily,
   PublishedPathSheet,
@@ -93,7 +94,7 @@ export function PortsTable({
     <div className="flex min-w-0 flex-col gap-3">
       <Panel>
         <PanelHeader
-          title={<Term name="port">Ports</Term>}
+          title={<Definition name="port">Ports</Definition>}
           actions={<span className="numeric text-hint text-muted-foreground">{rows.length}</span>}
         />
         <Table>
@@ -178,11 +179,11 @@ export function PortsTable({
         </Notice>
       )}
       {skippable && (
-        <Hint>
+        <FormNote>
           A port that is both published on every interface <em>and</em> proxied can be reached
           directly, skipping whatever the proxy site enforces in front of it. Binding it to
           127.0.0.1 leaves the proxy as the only way in.
-        </Hint>
+        </FormNote>
       )}
     </div>
   )
@@ -203,7 +204,7 @@ export function NetworksTable({
   return (
     <Panel>
       <PanelHeader
-        title={<Term name="network">Networks</Term>}
+        title={<Definition name="network">Networks</Definition>}
         actions={
           <span className="numeric text-hint text-muted-foreground">
             {detail.networkDetails.length}

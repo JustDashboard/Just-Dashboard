@@ -4,7 +4,7 @@ import { Box, Database, Layers, RefreshClockwise, Trash, Wrench } from "@/compon
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { LiveBytes } from "@/components/live-figure"
 import { ProductGlyphs, imageProducts } from "@/components/product-logo"
-import { Term } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"
 import {
   FRESHNESS_COLOR,
@@ -14,7 +14,7 @@ import {
   type Freshness,
 } from "@/components/docker/images"
 import { Button } from "@/components/ui/button"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Explain } from "@/components/explain"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useAuth } from "@/hooks/use-auth"
 import {
@@ -223,9 +223,9 @@ function DiskShare({
                 {bytes(usage.images.reclaimable)}.
               </p>
               <p>
-                This is wider than <Term name="dangling">pruning untagged images</Term>: it reaches
-                tagged ones too. Each comes back with a pull, and an image a container uses is never
-                removed. Containers, networks and the build cache are left alone.
+                This is wider than <Definition name="dangling">pruning untagged images</Definition>:
+                it reaches tagged ones too. Each comes back with a pull, and an image a container
+                uses is never removed. Containers, networks and the build cache are left alone.
               </p>
             </>
           ),
@@ -299,7 +299,7 @@ function DiskShare({
                         <p>
                           Removes every image no container is using (
                           {bytes(usage.images.reclaimable)}) and the whole{" "}
-                          <Term name="build cache">build cache</Term> (
+                          <Definition name="build cache">build cache</Definition> (
                           {bytes(usage.buildCache.reclaimable)}), along with stopped containers and
                           unused networks.
                         </p>
@@ -409,27 +409,28 @@ function KindMark({ kind, onReclaim }: { kind: Kind; onReclaim?: () => void }) {
 function KindName({ label, definition }: { label: string; definition?: DiskDefinition }) {
   if (!definition) return label
   return (
-    <HoverCard openDelay={200}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className="cursor-help rounded-sm font-medium underline decoration-muted-foreground/40 decoration-dotted underline-offset-4 focus-ring"
-        >
-          {label}
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 space-y-1 text-xs leading-relaxed">
-        <p className="text-body font-medium">{definition.label}</p>
-        <p className="text-muted-foreground">{definition.measures}</p>
-        {definition.excludes && (
-          <p className="text-muted-foreground">
-            <span className="font-medium">Not counted: </span>
-            {definition.excludes}
-          </p>
-        )}
-        <p className="text-micro text-muted-foreground">Read from {definition.source}.</p>
-      </HoverCardContent>
-    </HoverCard>
+    <Explain
+      face="term"
+      label={`What ${definition.label} counts`}
+      className="font-medium"
+      entry={{
+        title: definition.label,
+        body: (
+          <div className="space-y-1">
+            <p>{definition.measures}</p>
+            {definition.excludes && (
+              <p>
+                <span className="font-medium">Not counted: </span>
+                {definition.excludes}
+              </p>
+            )}
+            <p className="text-micro">Read from {definition.source}.</p>
+          </div>
+        ),
+      }}
+    >
+      {label}
+    </Explain>
   )
 }
 

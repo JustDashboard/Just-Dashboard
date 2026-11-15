@@ -10,12 +10,12 @@ import type { BackupResourceReport, Container, VolumeDetail } from "@/lib/types"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useConfirm } from "@/components/confirm-dialog"
 import { DockerTitle } from "@/components/docker/docker-identity"
-import { Hint, Term } from "@/components/docker/explain"
+import { FormNote } from "@/components/form"
+import { Definition } from "@/components/docker/explain"
 import { useVolumeVerbs } from "@/components/docker/volume-actions"
 import { VolumeBand } from "@/components/docker/volume-band"
 import { VolumeTable } from "@/components/docker/volume-table"
@@ -53,6 +53,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Reading register, design-system §15, on the Images page's shape: Docker's
@@ -79,8 +80,8 @@ export function VolumesPage() {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  const wide = useMediaQuery("(min-width: 1280px)")
-  const widest = useMediaQuery("(min-width: 1536px)")
+  const wide = useBreakpoint("xl")
+  const widest = useBreakpoint("2xl")
   // Kept under names a volume's page reads too: its rail is this table, narrowed
   // and ordered the way it was left.
   const [query, setQuery] = useSessionState(VOLUME_FILTER_KEYS.query, "")
@@ -458,8 +459,8 @@ export function VolumesPage() {
                   title="No volumes on this server"
                   description={
                     <>
-                      A <Term name="volume">volume</Term> is storage Docker manages, kept outside a
-                      container so it survives being recreated.
+                      A <Definition name="volume">volume</Definition> is storage Docker manages,
+                      kept outside a container so it survives being recreated.
                     </>
                   }
                   action={
@@ -576,10 +577,10 @@ function NewVolumeDialog({
           // made the volume and then failed making it again.
           onKeyDown={(e) => e.key === "Enter" && name.trim() && !busy && create()}
         />
-        <Hint>
+        <FormNote>
           Name it after what will be in it. Volumes outlive the containers that use them, and in six
           months the name is all you will have to go on.
-        </Hint>
+        </FormNote>
       </div>
     </Modal>
   )

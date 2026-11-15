@@ -1135,7 +1135,7 @@ function ServicesPanel({
         <span>failing first, then by name</span>
         {busy && (
           <>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>the verbs wait for the command above to finish</span>
           </>
         )}

@@ -22,7 +22,8 @@ import { ContainerInspectTab } from "@/components/docker/container-inspect-tab"
 import { ContainerShellTab } from "@/components/docker/container-shell-tab"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { containerEventsView } from "@/components/docker/container-events"
-import { Hint, Term } from "@/components/docker/explain"
+import { FormNote } from "@/components/form"
+import { Definition } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { containerVerdict, exitWords, restartWords } from "@/components/docker/container"
 import { ContainerIdentity } from "@/components/docker/container-identity"
@@ -480,23 +481,29 @@ function HowItRuns({ detail }: { detail: ContainerDetail }) {
         )}
         <div className="grid min-w-0 gap-x-8 gap-y-1.5 sm:grid-cols-2">
           <DetailList className="content-start">
-            <Detail label={<Term name="image">Image</Term>} className="font-mono break-all">
+            <Detail
+              label={<Definition name="image">Image</Definition>}
+              className="font-mono break-all"
+            >
               {detail.image}
             </Detail>
             <Detail label="Working dir" className="font-mono break-all">
               {detail.workingDir || "/"}
             </Detail>
-            <Detail label={<Term name="containerUser">User</Term>} className="font-mono">
+            <Detail
+              label={<Definition name="containerUser">User</Definition>}
+              className="font-mono"
+            >
               {detail.user || "the image's own"}
             </Detail>
-            <Detail label={<Term name="networkMode">Network mode</Term>}>
+            <Detail label={<Definition name="networkMode">Network mode</Definition>}>
               {detail.networkMode === "host" ? (
                 <span className="text-warning">host — the server&rsquo;s own network</span>
               ) : (
                 detail.networkMode
               )}
             </Detail>
-            <Detail label={<Term name="privileged">Privileged</Term>}>
+            <Detail label={<Definition name="privileged">Privileged</Definition>}>
               {detail.privileged ? (
                 <span className="text-destructive">yes — full host access</span>
               ) : (
@@ -518,7 +525,7 @@ function HowItRuns({ detail }: { detail: ContainerDetail }) {
             <Detail label="Created" className="numeric">
               {timestamp(detail.createdAt)}
             </Detail>
-            <Detail label={<Term name="restart">Restart policy</Term>}>
+            <Detail label={<Definition name="restart">Restart policy</Definition>}>
               <span title={detail.restartPolicy || "no"}>{restartWords(detail.restartPolicy)}</span>
             </Detail>
             {/* A restart count is a number until it is a symptom: anything
@@ -530,7 +537,7 @@ function HowItRuns({ detail }: { detail: ContainerDetail }) {
             >
               {detail.restartCount}
             </Detail>
-            <Detail label={<Term name="exitCode">Last exit</Term>}>
+            <Detail label={<Definition name="exitCode">Last exit</Definition>}>
               {running ? (
                 <span className="text-muted-foreground">still running</span>
               ) : (
@@ -735,11 +742,11 @@ function ComposeDriftMenu({
   }
   return (
     <span className="flex flex-wrap items-center gap-1.5">
-      <Hint className="basis-full text-warning">
+      <FormNote className="basis-full text-warning">
         This container is managed by <b>{detail.composeStack}</b>. Changes made here are replaced
         the next time the stack is deployed — edit the compose file instead if you want them to
         last.
-      </Hint>
+      </FormNote>
       <RenameButton detail={detail} onRenamed={onChanged} />
     </span>
   )

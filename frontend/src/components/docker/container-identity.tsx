@@ -103,7 +103,7 @@ export function ContainerIdentity({
                 <span className="truncate">
                   {stack}
                   {detail.composeService && (
-                    <span className="text-muted-foreground/70"> · {detail.composeService}</span>
+                    <span className="text-faint"> · {detail.composeService}</span>
                   )}
                 </span>
               </Link>

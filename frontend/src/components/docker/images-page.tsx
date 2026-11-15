@@ -9,12 +9,11 @@ import type { Container, DockerDiskUsage, DockerImage, ImageUpdateStatus } from 
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { BuildDialog } from "@/components/docker/build-dialog"
 import { DockerTitle } from "@/components/docker/docker-identity"
-import { Term } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import { useImageActions } from "@/components/docker/image-actions"
 import { ImageBand } from "@/components/docker/image-band"
 import { ImageTable } from "@/components/docker/image-table"
@@ -37,6 +36,7 @@ import { ChipCount, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { VerbMenu } from "@/components/verbs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Reading register, design-system §15, on the Packages page's shape: the
@@ -66,7 +66,7 @@ const NEXT_SORT: Record<ImageSort, ImageSort> = { size: "created", created: "nam
 export function ImagesPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   const [query, setQuery] = useSessionState("docker.images.query", "")
   const [use, setUse] = useViewState<Use>("docker.images.use", "all")
   const [state, setState] = useSessionState<Freshness | "">("docker.images.state", "")
@@ -155,8 +155,8 @@ export function ImagesPage() {
       workingLabel: "Removing untagged images…",
       description: (
         <p>
-          Removes <Term name="dangling">dangling images</Term> — layers left behind when a tag moved
-          to a newer copy. Nothing references them and no container can need them.
+          Removes <Definition name="dangling">dangling images</Definition> — layers left behind when
+          a tag moved to a newer copy. Nothing references them and no container can need them.
         </p>
       ),
       action: async () => {

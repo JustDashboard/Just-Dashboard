@@ -15,7 +15,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
-import { Hint } from "@/components/docker/explain"
+import { FormNote } from "@/components/form"
 import { ConflictList, NetworkChangeDialog } from "@/components/docker/network-conflicts"
 import { ownerLabel } from "@/components/docker/networks"
 import { Modal } from "@/components/modal"
@@ -194,7 +194,7 @@ export function AttachDialog({
             </SelectContent>
           </Select>
           {candidates.data && !candidates.error && available.length === 0 && (
-            <Hint>Every container is already on this network.</Hint>
+            <FormNote>Every container is already on this network.</FormNote>
           )}
         </div>
         <div className="space-y-1.5">
@@ -209,10 +209,10 @@ export function AttachDialog({
             placeholder="db"
             onChange={(e) => setAlias(e.target.value)}
           />
-          <Hint>
+          <FormNote>
             An additional hostname the others can use. Useful when an application&apos;s config
             expects a name that is not the container&apos;s.
-          </Hint>
+          </FormNote>
         </div>
         {picked && (
           <section aria-label="Before attaching" className="space-y-1.5">
@@ -394,7 +394,7 @@ export function PruneDialog({
             <section className="space-y-1.5">
               <p className="eyebrow">Removed</p>
               {plan.removed.length === 0 ? (
-                <Hint>No network is unused by every container and every deployment.</Hint>
+                <FormNote>No network is unused by every container and every deployment.</FormNote>
               ) : (
                 <ul aria-label="Networks removed" className="space-y-1">
                   {plan.removed.map((c) => (
@@ -422,10 +422,10 @@ export function PruneDialog({
                     </li>
                   ))}
                 </ul>
-                <Hint>
+                <FormNote>
                   Docker&apos;s own prune would remove these too. Each can still be removed on its
                   own after its preview.
-                </Hint>
+                </FormNote>
               </section>
             )}
           </>

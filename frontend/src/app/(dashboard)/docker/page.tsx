@@ -38,7 +38,7 @@ import { ContainerBand } from "@/components/docker/container-band"
 import { DiskSummary } from "@/components/docker/disk-panel"
 import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
 import { EnginePicture } from "@/components/docker/engine-picture"
-import { ExplainIcon } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import { StackChoiceRow } from "@/components/docker/stack-row"
 import { stackLines } from "@/components/docker/stack-readings"
 import { containerBucket, oomKilledIds, recentEntries } from "@/components/docker/containers"
@@ -211,7 +211,7 @@ export default function DockerOverviewPage() {
   // moment where the page should be teaching rather than reporting.
   if (read && containers.length === 0 && detected.length === 0 && stacks.data) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         {header}
         <FirstRun canDeploy={can("service.control")} />
         {dialog}
@@ -330,7 +330,7 @@ export default function DockerOverviewPage() {
                     {containers.length}
                   </span>
                 )}
-                <ExplainIcon name="container" />
+                <Definition name="container" />
               </span>
             }
             actions={
@@ -366,7 +366,7 @@ export default function DockerOverviewPage() {
                       {active.length} of {detected.length} up
                     </span>
                   )}
-                  <ExplainIcon name="compose" />
+                  <Definition name="compose" />
                 </span>
               }
               actions={

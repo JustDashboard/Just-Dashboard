@@ -265,7 +265,7 @@ function StackTags({ stack }: { stack: ComposeStack }) {
 function StackFigure({ line, kind }: { line: StackLine; kind: "cpu" | "memory" }) {
   if (line.stack.running === 0) return null
   if (kind === "cpu") {
-    if (!line.measured) return <span className="font-mono text-muted-foreground/60">—</span>
+    if (!line.measured) return <span className="font-mono text-faint">—</span>
     return (
       <span
         className="numeric font-mono text-body"
@@ -275,7 +275,7 @@ function StackFigure({ line, kind }: { line: StackLine; kind: "cpu" | "memory" }
       </span>
     )
   }
-  if (line.memory === 0) return <span className="font-mono text-muted-foreground/60">—</span>
+  if (line.memory === 0) return <span className="font-mono text-faint">—</span>
   return (
     <span className="numeric font-mono text-body" title="Memory, summed over its containers">
       {bytes(line.memory)}

@@ -340,7 +340,7 @@ export default function MetricsPage() {
         return true
       }}
     >
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext title="Metrics" />
 
         {/* What this machine is made of. The Overview's line says what it

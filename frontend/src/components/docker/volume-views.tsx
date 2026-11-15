@@ -4,7 +4,6 @@ import Link from "next/link"
 import { Archive, Box, CloudUpload, Database, Servers, Warning } from "@/components/icons"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import type { BackupJob, VolumeDetail } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { destinations } from "@/components/backups/marks"
 import { scheduleLabel, targetLabel } from "@/components/backups/shared"
 import { DatabaseStorageWarning, looksLikeDatabase } from "@/components/docker/shared"
@@ -28,6 +27,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { cn } from "@/lib/utils"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** A section's count, at the far end of its title line. */
 function Count({ children }: { children: React.ReactNode }) {
@@ -87,7 +87,7 @@ export function VolumeMounts({
   productOf: Map<string, string>
   stacks: Set<string>
 }) {
-  const roomy = useMediaQuery("(min-width: 640px)")
+  const roomy = useBreakpoint("sm")
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <PruneNotice volume={volume} stacks={stacks} />
@@ -226,7 +226,7 @@ export function VolumeBackups({
   local: boolean
   onBackUp?: () => void
 }) {
-  const roomy = useMediaQuery("(min-width: 640px)")
+  const roomy = useBreakpoint("sm")
   const covering = backup?.jobs ?? []
   return (
     <Panel plain>

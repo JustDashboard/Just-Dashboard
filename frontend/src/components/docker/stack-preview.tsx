@@ -55,7 +55,7 @@ const KIND: Record<
     text: "text-warning",
     icon: RefreshClockwise,
   },
-  create: { word: "Create", color: "var(--chart-2)", text: "text-[var(--chart-2)]", icon: Plus },
+  create: { word: "Create", color: "var(--chart-2)", text: "text-chart-2", icon: Plus },
   start: { word: "Start", color: "var(--success)", text: "text-success", icon: Play },
   unchanged: {
     word: "Unchanged",

@@ -23,8 +23,16 @@ test("a restart loop is the verdict and one row, not sixteen", async ({ page }) 
   await expect(feed.getByText(/^shop-db-1 restarted ×8 in \d+ min$/)).toBeVisible()
   // Folded: none of its exits is a row of its own until it is opened.
   await expect(feed.getByText("shop-db-1 exited with status 1")).toHaveCount(0)
+  // The row keeps its height: its events open in a popover off the button.
+  const row = feed
+    .getByRole("listitem")
+    .filter({ hasText: /^.*shop-db-1 restarted/ })
+    .first()
+  const before = await row.boundingBox()
   await feed.getByRole("button", { name: "Show the 16 events" }).click()
-  await expect(feed.getByText("shop-db-1 exited with status 1")).toHaveCount(8)
+  const folded = page.getByRole("dialog", { name: "The 16 events" })
+  await expect(folded.getByText("shop-db-1 exited with status 1")).toHaveCount(8)
+  expect((await row.boundingBox())!.height).toBe(before!.height)
 })
 
 test("the containers table reads each container's state, failures and who", async ({ page }) => {

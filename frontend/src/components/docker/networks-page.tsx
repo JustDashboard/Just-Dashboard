@@ -287,7 +287,7 @@ export function Networks() {
         },
       ]}
     >
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Docker" title="Networks" />
 
         {list.data && (
@@ -515,11 +515,11 @@ export function Networks() {
               </PanelBody>
               <PanelFooter className="text-hint text-muted-foreground">
                 <span className="numeric">{plural(visibleNetworks.length, "network")}</span>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span>in use first, then unused, then Docker&apos;s own</span>
                 {traffic.now > 0 && (
                   <>
-                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-faint">·</span>
                     <span>traffic is each bridge&apos;s, every two seconds</span>
                   </>
                 )}
@@ -604,7 +604,7 @@ export function Networks() {
               </PanelBody>
               <PanelFooter className="text-hint text-muted-foreground">
                 <span className="numeric">{plural(visibleContainers.length, "container")}</span>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span>a network&apos;s name narrows the table to it</span>
               </PanelFooter>
             </Panel>

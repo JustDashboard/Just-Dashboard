@@ -33,7 +33,7 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState } from "@/components/state"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
-import { ExplainIcon } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import { ContainerBand } from "@/components/docker/containers-band"
 import { ContainerRows } from "@/components/docker/containers-table"
 import { useContainerControl } from "@/components/docker/container-actions"
@@ -330,7 +330,7 @@ export default function ContainersPage() {
         },
       ]}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         {/* Containers are deployed from the Deploy pages — there is no
             standalone create flow here. */}
         <PageContext eyebrow="Docker" title="Containers" />
@@ -411,7 +411,7 @@ export default function ContainersPage() {
                 <span className="numeric text-body leading-none font-normal text-muted-foreground">
                   {containers.length}
                 </span>
-                <ExplainIcon name="container" />
+                <Definition name="container" />
               </span>
             }
             // Until the chips fit beside it, Recent's head says Live for both.
@@ -536,10 +536,10 @@ export default function ContainersPage() {
           </PanelBody>
           <PanelFooter className="text-hint text-muted-foreground">
             <span className="numeric">{plural(visible.length, "container")} shown</span>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>{SORT_WORDS[sort.key]}</span>
             {sort.key !== "state" && sort.dir !== FIRST_DIR[sort.key] && <span>, reversed</span>}
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>readings every 2 seconds</span>
           </PanelFooter>
         </Panel>
