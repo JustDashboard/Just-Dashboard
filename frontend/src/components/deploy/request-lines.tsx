@@ -1,9 +1,9 @@
 "use client"
 
-import { fieldPredicates } from "@/lib/log-filter"
-import { dockerSource, fileSource } from "@/lib/log-sources"
+import { fieldPredicates } from "@/lib/log/filter"
+import { dockerSource, fileSource } from "@/lib/log/sources"
 import type { DeploymentRequests, RequestEntry } from "@/lib/types"
-import { FactDot } from "@/components/metrics/host-identity"
+import { FactDot } from "@/components/identity-header"
 import { ProductGlyph } from "@/components/product-logo"
 import { LinesBlock, OutputLines } from "@/components/deploy/output-lines"
 import type { Answering } from "@/components/deploy/logs-model"

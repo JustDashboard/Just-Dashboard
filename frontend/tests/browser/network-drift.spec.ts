@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { admin, json, loaded, mockNetwork, type Mutation } from "./network-fixture"
-import type { DriftReport } from "../../src/lib/network-drift"
+import type { DriftReport } from "../../src/lib/network/drift"
 
 const resource = "/etc/just-dashboard/network/links.batch"
 const observation = {

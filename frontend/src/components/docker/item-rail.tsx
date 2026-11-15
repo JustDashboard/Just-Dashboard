@@ -3,8 +3,8 @@
 import { Fragment, useEffect, useRef } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/page"
-import { LoadingRows } from "@/components/state"
+import { SearchInput } from "@/components/search-input"
+import { LoadingRows } from "@/components/loading"
 
 /**
  * The list a Docker item was opened from, folded into a column beside it: a

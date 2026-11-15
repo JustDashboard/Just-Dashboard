@@ -8,7 +8,7 @@ import type {
   ExcalidrawImperativeAPI,
 } from "@excalidraw/excalidraw/types"
 import { fetchResponse } from "@/lib/api"
-import { blobDataURL, dataURLBytes, filesToFetch, filesToUpload } from "@/lib/board-files"
+import { blobDataURL, dataURLBytes, filesToFetch, filesToUpload } from "@/lib/board/files"
 
 /**
  * A drawing's images, kept on the server beside its scene. Each is sent once,

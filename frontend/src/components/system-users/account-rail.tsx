@@ -2,8 +2,8 @@
 
 import { useEffect, useRef } from "react"
 import { ShieldCheck } from "@/components/icons"
-import { SearchInput } from "@/components/page"
-import { LoadingRows } from "@/components/state"
+import { SearchInput } from "@/components/search-input"
+import { LoadingRows } from "@/components/loading"
 import { reachesRoot, rootSummary, signInSummary } from "@/components/system-users/access"
 import { AccountMark } from "@/components/system-users/marks"
 import type { DotTone } from "@/components/status-dot"

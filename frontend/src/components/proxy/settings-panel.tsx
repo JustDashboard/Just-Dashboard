@@ -9,17 +9,14 @@ import type { ProxySetting, ProxySettingEdit, ProxySettings, ProxyValidation } f
 import { usePoll } from "@/hooks/use-poll"
 import { Field, OptionList, OptionRow } from "@/components/form"
 import { Well } from "@/components/panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Segments } from "@/components/deploy/settings/segments"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { Segments } from "@/components/segments"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { relativePath } from "@/components/proxy/config-tree"
 import { refusalOf } from "@/components/proxy/engine-lifecycle"
 import { RefusedConfig } from "@/components/proxy/config-search"

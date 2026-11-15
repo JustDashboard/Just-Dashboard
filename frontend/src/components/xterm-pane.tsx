@@ -30,20 +30,20 @@ import { notify } from "@/lib/toast"
 import { wsUrl } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { TerminalActivity } from "@/lib/types"
-import { actionFor, formatChord, useKeymap } from "@/lib/terminal-keymap"
+import { actionFor, formatChord, useKeymap } from "@/lib/terminal/keymap"
 import {
   chooseDroppedImage,
   formatUploadSize,
   insertTerminalPath,
   interceptClipboardImagePaste,
   uploadTerminalImage,
-} from "@/lib/terminal-upload"
+} from "@/lib/terminal/upload"
 import {
   setTerminalSettings,
   terminalSettings,
   useSnippets,
   useTerminalSettings,
-} from "@/lib/terminal-settings"
+} from "@/lib/terminal/settings"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"

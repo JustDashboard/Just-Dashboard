@@ -21,9 +21,9 @@ import type {
   DeploymentVariable,
 } from "@/lib/types"
 import { browserInlined, pointsAtLocalhost } from "@/components/deploy/deployment-defaults"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 import { FileIcon } from "@/components/files/file-icon"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FormFact,
@@ -33,13 +33,13 @@ import {
   OptionList,
   OptionRow,
 } from "@/components/form"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, variableProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -83,11 +83,11 @@ import {
   readDotenv,
   REFUSAL_WORD,
 } from "@/components/deploy/settings/dotenv"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { RevealedValue, ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
 import { SharedReferencePicker, SharedVariables } from "@/components/deploy/shared-variables"
 import { StoreReferenceLabel, StoreReferencePicker } from "@/components/deploy/secret-store-picker"
-import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
+import { SettingSection, SettingsPage } from "@/components/settings/setting-card"
 import {
   ConfigurationState,
   useConfiguration,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { ArrowRight, Key, Location, Play, Plus, RefreshClockwise } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -23,7 +23,7 @@ import {
   type ExternalCheck,
   type ExternalEnrollment,
   type ExternalVantage,
-} from "@/lib/network-external"
+} from "@/lib/network/external"
 import { ExternalPicture } from "@/components/network/external/external-picture"
 import { ExternalSources } from "@/components/network/external/external-sources"
 import { CheckReading, ExternalChecks } from "@/components/network/external/external-checks"

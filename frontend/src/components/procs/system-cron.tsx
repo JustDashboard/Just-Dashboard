@@ -8,7 +8,8 @@ import { deferredToSystemd, isExampleLine, timerFor } from "@/lib/schedule"
 import type { CronJob, Crontab, SystemdTimer } from "@/lib/types"
 import type { PollState } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import {
   stickyTableHeader,

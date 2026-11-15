@@ -4,8 +4,8 @@ import { relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DeploymentEngineRun, DeploymentRelease, DeploymentSummary } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { ChoiceRow } from "@/components/flow"
-import { FactDot } from "@/components/metrics/host-identity"
+import { ChoiceRow } from "@/components/choice-row"
+import { FactDot } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { ProductGlyph, imageProduct } from "@/components/product-logo"
 import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
@@ -27,8 +27,8 @@ import {
   runTitle,
   runTriggerLine,
   shortRevision,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 
 type RunSource = Pick<
   DeploymentSummary,

@@ -1,5 +1,5 @@
 import type { Capability } from "@/lib/types"
-import { ACCOUNT_SECTION, NAV, navMatches, type NavEntry } from "@/components/nav"
+import { ACCOUNT_SECTION, NAV, navMatches, type NavEntry } from "@/components/shell/nav"
 
 /*
  * Where a missing address would have been: the page of the navigation whose

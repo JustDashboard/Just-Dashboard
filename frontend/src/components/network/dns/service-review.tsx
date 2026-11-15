@@ -17,9 +17,10 @@ import {
   type DNSServiceChange,
   type DNSServiceProvision,
   type DNSServiceSnapshot,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Detail, DetailList, Section } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Section } from "@/components/section"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"

@@ -16,7 +16,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import {
   readingLine,
   shareOf,
@@ -258,4 +258,3 @@ function BeforeAndAfter({ watch }: { watch: RollbackWatch }) {
     </ul>
   )
 }
-

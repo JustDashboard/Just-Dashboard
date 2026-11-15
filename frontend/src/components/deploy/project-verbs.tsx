@@ -35,7 +35,7 @@ import { FormFact } from "@/components/form"
 import { SourcePull } from "@/components/git/glyphs"
 import { ProductGlyph } from "@/components/product-logo"
 import type { ProjectOperation } from "@/components/deploy/project-context"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { runPlanIsStale } from "@/components/deploy/failure-cause"
 import {
   deploymentURL,

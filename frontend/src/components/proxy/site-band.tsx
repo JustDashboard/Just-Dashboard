@@ -8,7 +8,7 @@ import { NumberTicker } from "@/components/ui/number-ticker"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { siteProduct } from "@/components/proxy/marks"
 import { activeOwner } from "@/components/proxy/site-details"
-import { ProjectFavicon, ProjectMark, ProjectMarkOf } from "@/components/deploy/project-mark"
+import { ProjectFavicon, ProjectMark, ProjectMarkOf } from "@/components/project-mark"
 import { useProjects } from "@/hooks/use-projects"
 import {
   certCounts,

@@ -197,7 +197,7 @@ target — host and port as its heading, the grade as a word in its verdict's co
 what answered (its nginx site, which opens the site's page) and how old the report is — with the
 scan's summary at the right and a `⋯` of Scan again, Copy as Markdown, the JSON and `chain.pem`,
 Copy link and a request to the same name in the tester. Under the scan form the report draws the way
-the scan reached the name (`tls-chain-picture.tsx`, its verdicts in `lib/tls-chain.ts`): this server
+the scan reached the name (`tls-chain-picture.tsx`, its verdicts in `lib/tls/chain.ts`): this server
 as the visitor, the domain and the address it reached, what answered, the leaf, the intermediate (or
 the one missing, on a dashed amber line) and the root, each step on a tile in its verdict's colour,
 the leaf's term as a meter under its days. A failed scan is the same row cut short at the name, the

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { EMPTY_FILTER } from "@/lib/log-filter"
-import { lensFor } from "@/lib/log-lenses"
+import { EMPTY_FILTER } from "@/lib/log/filter"
+import { lensFor } from "@/lib/log/lenses"
 import {
   askOf,
   buildRows,

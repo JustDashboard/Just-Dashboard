@@ -2,7 +2,7 @@
 
 import { Database, Trash } from "@/components/icons"
 import { BarReading } from "@/components/bar-reading"
-import { LiveBytes } from "@/components/overview/readings"
+import { LiveBytes } from "@/components/live-figure"
 import { ProductGlyph } from "@/components/product-logo"
 import {
   STANDING_COLOR,

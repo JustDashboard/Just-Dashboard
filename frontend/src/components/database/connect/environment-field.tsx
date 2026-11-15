@@ -1,7 +1,7 @@
 "use client"
 
 import { Field } from "@/components/form"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { Input } from "@/components/ui/input"
 import { ENVIRONMENT, ENVIRONMENTS } from "@/components/database/connect/rules"
 import { environmentHue } from "@/components/database/kit"

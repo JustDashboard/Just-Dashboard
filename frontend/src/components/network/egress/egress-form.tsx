@@ -9,7 +9,7 @@ import {
   type EgressDraft,
   type EgressGroup,
   type EgressThresholds,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import type { NetworkLink } from "@/lib/types"
 import { Modal } from "@/components/modal"
 import { Field, FieldRow, FormNote } from "@/components/form"

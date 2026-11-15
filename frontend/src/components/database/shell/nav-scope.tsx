@@ -1,6 +1,6 @@
 "use client"
 
-import { useNavScope } from "@/components/nav-scope"
+import { useNavScope } from "@/components/shell/nav-scope"
 import { sectionHref } from "@/components/database/engine"
 import { EngineGlyph } from "@/components/database/kit/engine-mark"
 import { useDatabase } from "@/components/database/shell/database-context"

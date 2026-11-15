@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { RESOURCE_KIND_LABEL, lines, rcloneService } from "@/components/backups/shared"
 import { encrypts } from "@/components/backups/encryption"
 import {

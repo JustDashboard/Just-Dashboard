@@ -11,16 +11,12 @@ import {
   Trash,
 } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Field, FieldRow, FormSections } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { platformProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"

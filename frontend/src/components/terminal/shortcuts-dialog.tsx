@@ -15,7 +15,7 @@ import {
   resetAllShortcuts,
   resetShortcut,
   useKeymap,
-} from "@/lib/terminal-keymap"
+} from "@/lib/terminal/keymap"
 import { Button } from "@/components/ui/button"
 import { rowReveal } from "@/components/icon-action"
 

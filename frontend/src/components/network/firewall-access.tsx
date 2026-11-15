@@ -11,7 +11,8 @@ import type {
   FirewallStatus,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Hold, Notice, Spinner } from "@/components/state"
+import { Notice } from "@/components/state"
+import { Hold, Spinner } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Warning } from "@/components/icons"

@@ -11,7 +11,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import {
   asleepShare,
   sleepLead,

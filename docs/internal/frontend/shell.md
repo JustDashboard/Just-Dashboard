@@ -90,12 +90,12 @@ neither rule is met. The spelling of the calls is unchanged: the specs' mocks ma
 ### The tab's title
 
 The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host, name)` in
-`components/nav.ts`: "Files · Just Dashboard", the product's alone for an address under no section.
+`components/shell/nav.ts`: "Files · Just Dashboard", the product's alone for an address under no section.
 
 **The item leads.** The address of a detail page names only its section, so every page of every database
 read "Databases", every page of every project "Deployments" and a container "Docker", and four tabs or
 the Back menu's entries could not be told apart. The page knows the item, so the page says it
-(`components/tab-title.tsx`, a small store outside React that only the `<title>` reads):
+(`components/shell/tab-title.tsx`, a small store outside React that only the `<title>` reads):
 
 - `PageContext` hands the words of its `h1` to the tab as well as to a screen reader. The shell uses a
   heading only where the nav has no row for the address, so a list page keeps its rail entry's word and
@@ -135,7 +135,7 @@ navigation. Three levels exist: the top-level list, a section, and one deploymen
 or one database inside Databases — or, inside a group, the group, a section in it, and that section's
 pages (Monitoring → Processes → PM2; Administration → Proxy & TLS → Sites).
 
-`components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
+`components/shell/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
 `PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `navCurrent`, `sectionsFor`, `navLocation`, and for the sections an
 account hides `shownFor`, `hideableSections` and `sectionEntry` — so `app-sidebar.tsx` and
 `command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
@@ -298,7 +298,7 @@ an account with an authenticator lands on the code step. Opened at an IP address
 localhost, or in a browser without WebAuthn, the button is replaced by the reason
 (`passkeyPlace`), since a passkey needs the dashboard's name.
 
-`components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
+`components/shell/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
 `useNavScope(...)` and the rail draws what it publishes: one database's layout
 (`app/(dashboard)/databases/[id]/layout.tsx`, through `database/shell/nav-scope.tsx`), because the
 connection's name and which pages it has depend on its engine — the engine registry
@@ -453,7 +453,7 @@ opens with a small picture, display name, sign-in name and a role `Tag`, then th
 card on the product's ease, and its rows `rise` in an 18ms stagger starting from the row nearest the
 card; the stagger is `motion-safe` because the reduced-motion rule collapses durations, not delays.
 Menu rows are 32px on desktop and 44px on a phone, with the current page marked by `aria-current`, an
-accent wash and a brand glyph. The picture is `components/account/user-avatar.tsx`: the stored image when
+accent wash and a brand glyph. The picture is `components/user-avatar.tsx`: the stored image when
 there is one, otherwise the display name's initials in a hue taken from the username (`lib/hue.ts`'s
 `LANES`, so the same person keeps one colour in the rail, the users list and their profile). Pictures and
 initials are circular at every account-avatar size and carry `data-slot="user-avatar"`, the design

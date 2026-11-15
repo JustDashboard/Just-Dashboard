@@ -7,10 +7,10 @@ import { cn } from "@/lib/utils"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import type { DashboardUser, SessionInfo } from "@/lib/types"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { ProductGlyphs } from "@/components/product-logo"
 import { AccountWireMark } from "@/components/account/marks"
-import { displayNameOf } from "@/components/account/user-avatar"
+import { displayNameOf } from "@/components/user-avatar"
 
 /**
  * What a sign-in passes on its way to this server, drawn as the path a

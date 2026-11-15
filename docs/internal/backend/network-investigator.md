@@ -50,7 +50,7 @@ with its original scope. Reports are current responses, not durable diagnostic r
 runner owns persistence, cancellation, reruns and comparisons separately.
 
 Focused checks are beside `netpath`, `dockerx`, `netsec`, `netx` and the API handler; pure request/basis
-tests live in `frontend/src/lib/network-investigator.test.js`. The browser contract is
+tests live in `frontend/src/lib/network/investigator.test.js`. The browser contract is
 `tests/browser/network-investigator.spec.ts`, run against a fresh combined build. The native container
 fixture is opt-in and uses an existing local `python:3.11-slim` image; it creates one labeled container
 with `network=none`, native loopback DNS/TCP listeners, and no published ports. Compile it as the normal

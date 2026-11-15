@@ -28,7 +28,7 @@ the route every other feature takes.
 
 | Layer | File | What is there |
 | --- | --- | --- |
-| Sidebar entry | `frontend/src/components/nav.ts` | `NAV`, group "Protection": `{ title: "Backups", href: "/backups" }`. `SECTION_KEYS` in `frontend/src/lib/sidebar-sections.ts` is what lets an account hide it |
+| Sidebar entry | `frontend/src/components/shell/nav.ts` | `NAV`, group "Protection": `{ title: "Backups", href: "/backups" }`. `SECTION_KEYS` in `frontend/src/lib/sidebar-sections.ts` is what lets an account hide it |
 | Page route | `frontend/src/app/(dashboard)/backups/page.tsx` | The list page; `[job]/page.tsx` beside it is one job. A page file holds state, polling and composition |
 | Components | `frontend/src/components/backups/` | `job-form.tsx`, `job-card.tsx`, `import-dialog.tsx`; pure logic as `import-model.ts` with `import-model.test.js` beside it |
 | Types | `frontend/src/lib/types.ts` | `BackupJob`, `BackupResourceReport`: the API's shapes, written by hand |
@@ -56,7 +56,7 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 | Components | `components/<section>/`, named as the route's first segment | `/` → `overview/`, `processes` → `procs/`, `databases` → `database/`, `excalidraw` → `boards/`, `dashboard` → `update/`, `config/`, `account-link/`, `hub-link/` |
 | Shared UI | `components/ui/` for low-level controls; single files at the top of `components/` for primitives (`panel.tsx`, `page.tsx`, `state.tsx`) | `components/workspace/` is shared page behaviour, not a section |
 | Logic | `lib/<area>.ts` or `lib/<area>-<topic>.ts`, its test beside it as `.test.js` | Many areas have none and keep pure logic beside their components. Database modules are `lib/db-*.ts` and `lib/database-*.ts` |
-| Types | The API's types are in `lib/types.ts`, one file | Some areas keep theirs beside the code: `lib/network-investigator-types.ts`, and `types.ts` files under `components/database/` and `components/logs/` |
+| Types | The API's types are in `lib/types.ts`, one file | Some areas keep theirs beside the code: `lib/network/investigator-types.ts`, and `types.ts` files under `components/database/` and `components/logs/` |
 | API path | The first segment under `/api/v1` is the section | See the path column of the next table: Processes, Security, Proxy and System users each use several |
 | Handlers | `api/handlers_<area>*.go`; `mount<Area>Routes` is at the top of `handlers_<area>.go` | Databases are `handlers_db*.go`. Code that is not a handler drops the prefix: `database_*.go`, `deployment_*.go`, `boards_*.go`, `backup_*.go`, `map_*.go` |
 | Package | One package per feature under `backend/internal/` | Named for the mechanism, not the page: Security is `netsec`, Packages is `updates`, System users is `linuxusers`. Excalidraw and the Map have no package; they live in `api/` |
@@ -150,7 +150,7 @@ thing they hold.
 
 ## From a sidebar page to its code
 
-The rows follow `NAV` in `frontend/src/components/nav.ts`, group by group. "Path" is the first
+The rows follow `NAV` in `frontend/src/components/shell/nav.ts`, group by group. "Path" is the first
 segment under `/api/v1`.
 
 | Page | `app/` | `components/` | Path → `api/` files | Packages | Specs | Document |
@@ -231,7 +231,7 @@ Each is a checklist. The linked document owns the rule; this only says which fil
 [`../frontend/shell.md`](../frontend/shell.md)
 
 1. Create `app/<section>/<page>/page.tsx` and its panels under `components/<section>/`.
-2. Add it to `NAV` in `components/nav.ts`, with `capability` if the backend restricts it. A new
+2. Add it to `NAV` in `components/shell/nav.ts`, with `capability` if the backend restricts it. A new
    section also goes in `SECTION_KEYS` (`lib/sidebar-sections.ts`).
 3. Decide the page's register first ([`../frontend/patterns/registers.md`](../frontend/patterns/registers.md)),
    open its recipe in [`../frontend/recipes/`](../frontend/recipes/README.md), and take its
@@ -312,7 +312,7 @@ Read [`../security/invariants.md`](../security/invariants.md) before changing an
 | Go test support | `testdata/` in a package; `backend/internal/store/storetest/`, `backend/internal/auth/passkeytest/`, `backend/internal/proxysvc/acmetest/` | [`overview.md`](../overview.md) |
 | Browser fixtures | `frontend/tests/browser/*-fixture.ts`, `frontend/tests/browser/fixtures/` | [`overview.md`](../overview.md) |
 | Design-system lint | `frontend/eslint-rules/design-system.mjs`, turned on in `frontend/eslint.config.mjs`; `design-system.spec.ts` checks the rendered pages | [`standard.md`](../frontend/standard.md), [`design-system.md`](../frontend/design-system.md) |
-| Shell and navigation | `components/app-sidebar.tsx`, `components/nav.ts`, `components/command-palette.tsx`, `app/layout.tsx` | [`../frontend/shell.md`](../frontend/shell.md) |
+| Shell and navigation | `components/shell/app-sidebar.tsx`, `components/shell/nav.ts`, `components/shell/command-palette.tsx`, `app/layout.tsx` | [`../frontend/shell.md`](../frontend/shell.md) |
 | Polling and sockets | `hooks/use-poll.ts`, `hooks/use-socket.ts`, `lib/api.ts` | [`../frontend/patterns/data-flow.md`](../frontend/patterns/data-flow.md) |
 
 ## Keeping this page true

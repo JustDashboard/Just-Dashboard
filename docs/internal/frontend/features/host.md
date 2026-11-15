@@ -216,9 +216,9 @@ beside the five deployments whose volumes grow fastest ([capacity
 forecast](../../deployments/right-sizing.md#capacity-forecast))
 
 **Implementation:** metrics page, `components/metrics/` (`notable-moments.tsx` with
-`lib/metrics-moments.ts`, `top-processes.tsx`, `hardware-panels.tsx`, `moment-inspector.tsx`,
-`capacity-forecast.tsx` with `lib/capacity.ts`), `components/overview/readings.tsx` and
-`storage.tsx` (shared with the Overview), `lib/metrics-summary.ts`, `lib/metrics-export.ts`
+`lib/metrics/moments.ts`, `top-processes.tsx`, `hardware-panels.tsx`, `moment-inspector.tsx`,
+`capacity-forecast.tsx` with `lib/capacity.ts`), `components/live-figure.tsx` and
+`storage.tsx` (shared with the Overview), `lib/metrics/summary.ts`, `lib/metrics/export.ts`
 
 ## `/metrics/alerts`
 
@@ -778,7 +778,7 @@ tester run on the page and draw no working bar.
   and the page's one command, in `HostIdentity`'s project layout.
 - `container-band.tsx`, `engine-picture.tsx`, `engine-picture-model.ts` and `overview.ts` are the
   overview's. The band reads the containers socket, so its figures move with every frame.
-  `engine-picture.tsx` draws what the engine holds on `components/wire-flow.tsx`: compose projects and
+  `engine-picture.tsx` draws what the engine holds on `components/wire/wire-flow.tsx`: compose projects and
   the containers started by hand, Docker, and the networks and volumes it keeps, each node a link to
   its page. `engine-picture-model.ts` (unit-tested) works the nodes out: the state each line is drawn
   in, the order (what is failing first), which fold into a count, and which nodes light together. A

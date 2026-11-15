@@ -95,10 +95,10 @@ emits and the parser cannot read is a field silently dropped on the next save.
 **The log lenses are held to the browser from the Go side.** A lens change rewrites
 `backend/internal/logsx/testdata/lenses.golden.json` with
 `go test ./internal/logsx -run TestLensGolden -update` (the test fails on a stale file), and
-`frontend/src/lib/log-lenses.test.js` reads it to hold the registry to what the parsers emit both
+`frontend/src/lib/log/lenses.test.js` reads it to hold the registry to what the parsers emit both
 ways — every event labelled, every key a view, reading, group or column names one the lens's lines
 carry. `logsx/testdata/predicates.json` is one set of field-predicate
-vectors that `logsx` and `lib/log-filter.test.js` both run, so the server and a live tail cannot
+vectors that `logsx` and `lib/log/filter.test.js` both run, so the server and a live tail cannot
 disagree about a chip. A lens's own table tests use real lines from the formats it reads, and
 `readThrough` fails a lens that emits an event or attr it does not declare. In the browser,
 `tests/browser/logs-lens.spec.ts` drives the engine on `/logs` against `logs-lens-fixture.ts`, whose

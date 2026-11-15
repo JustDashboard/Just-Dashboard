@@ -3,15 +3,17 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Connection, Notes, RefreshClockwise, SettingsSliders, Wrench } from "@/components/icons"
-import { WireMark } from "@/components/deploy/wire"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { PageContext, SearchInput } from "@/components/page"
+import { WireMark } from "@/components/wire/wire"
+import { FactDot, HostIdentity } from "@/components/identity-header"
+import { PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
@@ -24,7 +26,7 @@ import {
   diagnosticReading,
   type DiagnosticRetention,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
+} from "@/lib/network/diagnostics"
 import {
   RUN_SCOPE_WORDS,
   runChips,
@@ -33,7 +35,7 @@ import {
   runRequestLine,
   runTool,
   type RunScope,
-} from "@/lib/network-runs-view"
+} from "@/lib/network/runs-view"
 import { useSessionState } from "@/lib/view-state"
 import { PhoneState, StateTile, toolGlyph } from "./diagnostic-marks"
 import { NetworkReadWarning } from "./read-warning"

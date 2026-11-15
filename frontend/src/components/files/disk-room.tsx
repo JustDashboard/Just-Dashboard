@@ -3,7 +3,7 @@
 import { useCallback } from "react"
 import { bytes } from "@/lib/format"
 import type { MountStats } from "@/lib/types"
-import type { MetricsState } from "@/lib/metrics-store"
+import type { MetricsState } from "@/lib/metrics/store"
 import { useMetricsValue } from "@/hooks/use-metrics"
 import { Meter, utilisationTone } from "@/components/meter"
 import { mountOf } from "@/components/files/media"

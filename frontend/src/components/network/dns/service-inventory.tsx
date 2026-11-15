@@ -12,7 +12,7 @@ import {
   type DNSNativeReading,
   type DNSServiceChange,
   type DNSServiceView,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import { Field, OptionRow } from "@/components/form"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"

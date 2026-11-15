@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react"
 import { ChevronDown, Cross, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { IconAction } from "@/components/icon-action"
-import { Spinner } from "@/components/state"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { Spinner } from "@/components/loading"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,

@@ -129,7 +129,7 @@ taking a frame:
   small one of its own — your domains wired
   to the live release by a still line and to the release you are going back to by a dotted one,
   which is the line that carries once Roll back is pressed. The same vocabulary
-  (`components/deploy/wire.tsx`) draws one more picture that sits *unframed* because it is inside a
+  (`components/wire/wire.tsx`) draws one more picture that sits *unframed* because it is inside a
   block that already has its edge: the way a request reaches a project on the overview — source,
   live release, runtime, domains, each drawn as its product — in the column beside the preview; each
   mark paints the ground under its tint so the line never shows through it. And two that are
@@ -254,7 +254,7 @@ lies over the work each is one pane with a `PaneBar` (`patterns/keyboard-and-pla
 **A picture of things wired through one hub is `WireFlow`.** Most of the pictures above have one
 shape — a column of things on the left, this server (or an engine, a tunnel, a resolver) in the middle,
 a column on the right, a line from each thing to the hub — and until 0.8.7 each drew it by hand on
-`deploy/wire`, 250 to 500 lines apiece. `components/wire-flow.tsx` draws it from data: each node is a
+`components/wire/wire`, 250 to 500 lines apiece. `components/wire/wire-flow.tsx` draws it from data: each node is a
 mark, an eyebrow, a name and a hint, optionally a link or a button; its line is a `WireLine` whose state
 is the vocabulary above (`up` and `moving` or still, `down` dashed, `warning` amber, `danger` red, `idle`
 dashed for configured but not in use); a column has a title (and a count beside it where it is part of

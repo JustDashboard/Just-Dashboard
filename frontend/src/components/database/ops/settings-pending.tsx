@@ -5,7 +5,7 @@ import { RotateClockwise } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { PendingStrip, type PendingItem } from "@/components/deploy/settings/pending-strip"
+import { PendingStrip, type PendingItem } from "@/components/settings/pending-strip"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -69,7 +69,7 @@ export function usePendingReport(key: string, report: PendingReport) {
 
 /**
  * What a database's settings hold that is not in force yet, as the strip at
- * the head of every settings page (`deploy/settings/pending-strip.tsx`, which
+ * the head of every settings page (`components/settings/pending-strip.tsx`, which
  * a project's settings draw for what is saved and not live).
  *
  * A database has one such state: a value the server has stored and reads only

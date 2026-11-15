@@ -3,8 +3,8 @@
 import { createRef, useMemo, useRef, useState, type RefObject } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { WireNode } from "@/components/deploy/wire"
-import { Section } from "@/components/page"
+import { WireNode } from "@/components/wire/wire"
+import { Section } from "@/components/section"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 
 export type WireTone = "default" | "warning" | "danger"
@@ -35,7 +35,7 @@ export type PictureLane = {
  * the process page draws what supervises and started a process on the left
  * and what it started and listens on the right, the service page what starts
  * a unit and what it runs. One layout, so a reader who has understood one
- * has understood the other (§ wiring pictures, `deploy/wire`).
+ * has understood the other (§ wiring pictures, `components/wire/wire`).
  *
  * A node's line pulses while something flows on it (`wire.carries`), is
  * dashed while the subject is not running, and takes the warning or danger

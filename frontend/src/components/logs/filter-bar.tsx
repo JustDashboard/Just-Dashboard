@@ -12,10 +12,10 @@ import {
   LOG_LEVELS,
   withFieldTokens,
   type LogLevel,
-} from "@/lib/log-filter"
-import { LENS_CHOICES, lensFor } from "@/lib/log-lenses"
+} from "@/lib/log/filter"
+import { LENS_CHOICES, lensFor } from "@/lib/log/lenses"
 import type { LogFilterState, LogMode } from "@/components/logs/types"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"

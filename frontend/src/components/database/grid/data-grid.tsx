@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { PaneHeader } from "@/components/panel"
 import { EmptyNote, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"

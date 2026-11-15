@@ -27,19 +27,20 @@ import {
   versionReading,
   type Rating,
   type Reading,
-} from "@/lib/tls-deep"
+} from "@/lib/tls/deep"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Toolbar } from "@/components/page"
+import { Toolbar } from "@/components/toolbar"
 import { RowList } from "@/components/row-list"
 import { FindingList } from "@/components/finding-list"
-import { ErrorState, Notice, Spinner } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { useNow } from "@/components/deploy/vocabulary"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
+import { useNow } from "@/hooks/use-now"
 import { Button } from "@/components/ui/button"
 import { siteSettingsHref } from "@/components/proxy/site-tabs"
 

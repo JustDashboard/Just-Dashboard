@@ -23,29 +23,30 @@ import {
   type ChartRow,
   type MetricsWindow,
   type StorageSeriesMeta,
-} from "@/lib/metrics-range"
-import { downloadText, rowsToCsv } from "@/lib/metrics-export"
+} from "@/lib/metrics/range"
+import { downloadText, rowsToCsv } from "@/lib/metrics/export"
 import {
   formatDelta,
   relativeChange,
   windowStat,
   windowStatSum,
   type WindowStat,
-} from "@/lib/metrics-summary"
-import { Page, PageContext, PageState, Section } from "@/components/page"
+} from "@/lib/metrics/summary"
+import { Page, PageContext, PageState } from "@/components/page"
+import { Section } from "@/components/section"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import type { Tone } from "@/components/tone"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import { RangePicker, windowPhrase } from "@/components/metrics/range-picker"
 import { HeadReading } from "@/components/metrics/chart-reading"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { MomentInspector } from "@/components/metrics/moment-inspector"
-import { getCrosshair, unpinCrosshair } from "@/lib/metrics-crosshair"
+import { getCrosshair, unpinCrosshair } from "@/lib/metrics/crosshair"
 import { NotableMoments } from "@/components/metrics/notable-moments"
 import { TopProcesses } from "@/components/metrics/top-processes"
 import { CapacityForecastSection } from "@/components/metrics/capacity-forecast"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { TileTrend } from "@/components/sparkline"
 import {
   InterfacesPanel,
   MemoryPanel,
@@ -61,10 +62,10 @@ import {
   LiveFigure,
   SeriesKey,
   StreamState,
-} from "@/components/overview/readings"
+} from "@/components/live-figure"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { FactDot, HostFact, HostIdentity, platformName } from "@/components/identity-header"
 import { HostAlertsLink } from "@/components/metrics/alerts-link"
 import { cpuProduct, platformProduct, virtualizationProduct } from "@/components/product-logo"
 import { IconAction } from "@/components/icon-action"

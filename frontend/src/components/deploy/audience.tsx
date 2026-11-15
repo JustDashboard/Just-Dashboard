@@ -8,7 +8,7 @@ import { agentProduct, networkOf, parseAgent, refererProduct, systemProduct } fr
 import { hueFor, LANES } from "@/lib/hue"
 import { BadgedLogo, NETWORK_GLYPH } from "@/components/client-mark"
 import { Meter } from "@/components/meter"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { TileTrend } from "@/components/sparkline"
 import { ProductGlyph } from "@/components/product-logo"
 import { RankList, SplitBar, percent } from "@/components/rank-list"
 import { StatButton, StatGrid, StatTile, TileBand as Band } from "@/components/stat-tile"

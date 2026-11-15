@@ -36,13 +36,13 @@ import {
 } from "@/components/deploy/game/identity"
 import { groupFacts, groupProperties } from "@/components/deploy/game/settings-model"
 import { HoverTip } from "@/components/deploy/settings/hover-tip"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import {
   SettingForm,
   SettingSection,
   SettingsPage,
   settingStatus,
-} from "@/components/deploy/settings/setting-card"
+} from "@/components/settings/setting-card"
 import { useConfiguration } from "@/components/deploy/settings/use-configuration"
 
 /**

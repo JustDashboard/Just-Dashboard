@@ -6,10 +6,10 @@ import { plural } from "@/lib/format"
 import type { ProtectionBlocklist, ProtectionLimit, ProtectionView } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Check, Globe, ListUnordered, LockOpen, Plus, ShieldCheck } from "@/components/icons"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
-import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
-import { fitColumn } from "@/components/wire-flow-model"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
+import { fitColumn } from "@/components/wire/wire-flow-model"
 import { compact, grown } from "@/components/network/gateway/reading"
 import {
   LIMITS_DRAWN,

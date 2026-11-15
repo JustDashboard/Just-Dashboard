@@ -33,7 +33,7 @@ import { useAddressStep } from "@/components/database/ops/settings-step"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { FormNote } from "@/components/form"
 import {
   Archive,
@@ -46,7 +46,7 @@ import {
 import { Panel, PanelHeader } from "@/components/panel"
 import { EmptyState } from "@/components/state"
 import { StatusDot, type DotTone } from "@/components/status-dot"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"

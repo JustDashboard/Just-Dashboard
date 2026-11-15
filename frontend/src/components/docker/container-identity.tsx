@@ -7,11 +7,11 @@ import { plural } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import type { ContainerDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { rowReveal } from "@/components/icon-action"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import {
   restartWords,
   sinceWords,

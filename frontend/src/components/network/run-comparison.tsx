@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Field } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Well } from "@/components/panel"
 import { ErrorState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ import {
   type DiagnosticComparison,
   type DiagnosticDifference,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
+} from "@/lib/network/diagnostics"
 
 export function RunComparison({ run, runs }: { run: DiagnosticRun; runs: DiagnosticRun[] }) {
   const candidates = runs.filter((other) => diagnosticCompatible(other, run))

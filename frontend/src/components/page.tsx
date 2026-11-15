@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils"
-import { ErrorState, LoadingPanel } from "@/components/state"
-import { TabHeading } from "@/components/tab-title"
+import { ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
+import { TabHeading } from "@/components/shell/tab-title"
 
 /**
  * The frame every page renders into.
@@ -78,7 +79,7 @@ export function Page({
  * are drawn here. The h1 still names the page for assistive technology, and
  * the same words name its tab where the nav cannot: on an item's own page the
  * address says only "Containers", and the heading says which one
- * (`components/tab-title.tsx`).
+ * (`components/shell/tab-title.tsx`).
  */
 export function PageContext({
   eyebrow,

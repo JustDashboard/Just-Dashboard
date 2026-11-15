@@ -4,9 +4,9 @@ import { useMemo } from "react"
 import { Globe, Layers, LockClosed, RotateClockwise, Router, Servers } from "@/components/icons"
 import { rate } from "@/lib/format"
 import type { NetworkLink } from "@/lib/types"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { ProductGlyph, hasProductLogo, imageProduct } from "@/components/product-logo"
-import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { RX, TX } from "@/components/network/rate-pair"
 import {
   LinkGlyph,

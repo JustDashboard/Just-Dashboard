@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { IconAction } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import {
   DataGrid,
   EMPTY_LAYOUT,

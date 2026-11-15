@@ -9,10 +9,11 @@ import type {
   Container,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
-import { ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyNote, LoadingRows } from "@/components/state"
+import { ChipStrip, FilterChip } from "@/components/chips"
+import { EmptyNote } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { FormNote } from "@/components/form"
 import {
   RESOURCE_KIND_GROUP,

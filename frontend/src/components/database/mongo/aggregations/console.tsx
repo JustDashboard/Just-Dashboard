@@ -9,9 +9,10 @@ import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact, FormFacts } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Well } from "@/components/panel"
-import { EmptyNote, EmptyState, LoadingRows } from "@/components/state"
+import { EmptyNote, EmptyState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import {
   Select,

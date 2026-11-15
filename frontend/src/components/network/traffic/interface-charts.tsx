@@ -12,11 +12,11 @@ import {
   rangeProblem,
   type Percentiles,
   type TrafficAnnotation,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import { usePoll } from "@/hooks/use-poll"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { useAuth } from "@/hooks/use-auth"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { ChartActivity } from "@/components/icons"
 import { Field } from "@/components/form"

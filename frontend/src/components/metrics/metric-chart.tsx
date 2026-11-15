@@ -31,7 +31,7 @@ import {
   pinCrosshair,
   unpinCrosshair,
   subscribeCrosshair,
-} from "@/lib/metrics-crosshair"
+} from "@/lib/metrics/crosshair"
 import type { MouseHandlerDataParam } from "recharts"
 import type { MetricEvent } from "@/lib/types"
 import { useNearViewport } from "@/hooks/use-near-viewport"

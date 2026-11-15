@@ -5,7 +5,7 @@ import { ChevronDown, RefreshClockwise, Stopwatch, Warning } from "@/components/
 import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
 import { bytes, clock, dayMinuteAt, duration, plural, relativeTime, timestamp } from "@/lib/format"
-import { journalSource } from "@/lib/log-sources"
+import { journalSource } from "@/lib/log/sources"
 import { latency } from "@/lib/requests"
 import type { LogSearchResult } from "@/lib/types"
 import {
@@ -23,10 +23,11 @@ import {
   type UnitRun,
 } from "@/lib/unit-runs"
 import { usePoll } from "@/hooks/use-poll"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { IconAction } from "@/components/icon-action"
 import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { RESULT_WORDS } from "@/components/procs/units"
 

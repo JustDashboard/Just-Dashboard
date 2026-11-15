@@ -70,7 +70,7 @@ rather than assembling its own recharts tree — adding a measurement should mea
   its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's
   container page and on a project's Runtime alike, since both take `useContainerScales`.
 - **A series' hue is the measurement's, not the chart's position.** The five readings' hues come from
-  one map (`HUE` in `components/overview/readings.tsx`) — processor `--chart-1`, memory `--chart-2`,
+  one map (`HUE` in `components/live-figure.tsx`) — processor `--chart-1`, memory `--chart-2`,
   load `--chart-3`, network `--chart-5`, disks `--chart-4` — and Metrics draws every line of a
   measurement in it, so Pressure's CPU, memory and I/O lines are the three tiles' colours; a chart's
   second line takes the hue furthest from its first (out `--chart-2` against in, write `--chart-3`
@@ -174,7 +174,7 @@ series.
 - `range-picker.tsx` — the window control (pan and zoom-out appear only once a window has been
   dragged).
 
-`lib/metrics-crosshair.ts` holds the hovered instant **outside React**, for the reason the live buffer is:
+`lib/metrics/crosshair.ts` holds the hovered instant **outside React**, for the reason the live buffer is:
 a pointer crossing a chart fires continuously, and a context above the router would re-render the terminal
 and the log tail on every mousemove. The value is a **timestamp**, not a row index — charts on a page do
 not share a row array.

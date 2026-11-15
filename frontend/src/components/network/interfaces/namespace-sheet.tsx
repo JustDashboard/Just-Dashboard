@@ -6,7 +6,7 @@ import type { NetworkLink, NetworkNamespaceDetail, NetworkPath } from "@/lib/typ
 import { usePoll } from "@/hooks/use-poll"
 import { SidePanel } from "@/components/side-panel"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Field, FieldRow } from "@/components/form"

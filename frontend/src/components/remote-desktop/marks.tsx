@@ -1,6 +1,6 @@
 "use client"
 
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { osProduct, type Reachability, type RdOS } from "@/lib/remote-desktop"

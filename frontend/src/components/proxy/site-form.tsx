@@ -91,7 +91,8 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Modal } from "@/components/modal"
 import { Group, Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -146,7 +147,7 @@ import {
   type PartMark,
 } from "@/components/proxy/site-settings"
 import { siteSettingsHref, type SettingsView } from "@/components/proxy/site-tabs"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingSection } from "@/components/settings/setting-card"
 import {
   applyPreset,
   BLANK,

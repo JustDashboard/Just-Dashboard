@@ -39,13 +39,15 @@ import type {
 } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { IconAction } from "@/components/icon-action"
-import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
+import { Toolbar } from "@/components/toolbar"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyphs, ProductLogo, ProductLogos } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -53,7 +55,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ArchivedProjects } from "@/components/deploy/archived-projects"
 import { FleetRightSize } from "@/components/deploy/right-size"
 import { ProjectCard, ProjectRow, runClock, stageOf } from "@/components/deploy/fleet-card"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { MiniReleasePath } from "@/components/deploy/run-pipeline"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import {
@@ -62,8 +64,8 @@ import {
   runCommit,
   runTitle,
   runTriggerLine,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import {
   FLEET_FILTERS,
   fleetCounts,

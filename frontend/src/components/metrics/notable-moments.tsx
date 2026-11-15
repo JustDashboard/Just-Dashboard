@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { clockAt, dayMinuteAt, percent, rate, relativeTime } from "@/lib/format"
 import type { MetricEvent } from "@/lib/types"
-import type { ChartRow } from "@/lib/metrics-range"
-import { windowStat, type WindowStat } from "@/lib/metrics-summary"
-import { groupIncidents, holds, type Incident, type Signal } from "@/lib/metrics-moments"
+import type { ChartRow } from "@/lib/metrics/range"
+import { windowStat, type WindowStat } from "@/lib/metrics/summary"
+import { groupIncidents, holds, type Incident, type Signal } from "@/lib/metrics/moments"
 import {
   clearCrosshair,
   getCrosshair,
@@ -13,13 +13,13 @@ import {
   setCrosshair,
   subscribeCrosshair,
   unpinCrosshair,
-} from "@/lib/metrics-crosshair"
+} from "@/lib/metrics/crosshair"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { RowList, ROW_BLEED } from "@/components/row-list"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { MagnifyingGlassPlus } from "@/components/icons"
 import { eventColor, type ChartRowLike } from "@/components/metrics/metric-chart"
-import { HUE } from "@/components/overview/readings"
+import { HUE } from "@/components/live-figure"
 import { cn } from "@/lib/utils"
 
 /**

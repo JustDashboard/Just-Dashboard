@@ -3,7 +3,7 @@ import type {
   DNSConnectionRequest,
   DNSServiceView,
   DNSEngine,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 
 export type DNSConnectionDraft = {
   name: string

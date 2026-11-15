@@ -64,7 +64,7 @@ bond membership and mode remain with the existing owner. Failed reads and reject
 the typed fields. A changed generation blocks apply until the operator reviews the latest owner
 and explicitly rebases the generation; rebasing preserves every draft field. An owner/profile change
 cannot be rebased into a different native profile.
-The leaf contract in `lib/network-native-profile.ts` validates every rendered metadata/evidence field,
+The leaf contract in `lib/network/native-profile.ts` validates every rendered metadata/evidence field,
 family method and preference, bounded string collection and route entry before a poll replaces its
 last successful data. Malformed items become a failed retained read and block apply. An already-open
 confirmation rechecks the latest rendered ownership, generation, read state and draft when clicked;
@@ -122,7 +122,7 @@ policy fingerprint. Failed launches/history reads retain
 dated evidence and the query draft. Reload never reruns a private question or grants direct-query
 disclosure consent.
 Native DNS service sheets are private administrator surfaces and issue no service reads for reader
-accounts. `lib/network-dns-services.ts` validates connection, inventory and retained-review envelopes;
+accounts. `lib/network/dns-services.ts` validates connection, inventory and retained-review envelopes;
 an incomplete response is a read error. Credentials, tokens, CA material and bootstrap passwords stay
 request-only and are cleared after submission; only bounded review IDs are stored in account-scoped
 session storage to hold an uncertain apply across navigation/reload. Retained history never starts or
@@ -141,7 +141,7 @@ compare the complete immutable request and selected metadata. Explicit null and 
 comments have distinct labels and remain unchanged in native readback.
 Unreadable native client memberships or group identities keep their own unknown evidence;
 their section headers withhold counts rather than presenting an unknown inventory as zero policy.
-Filter metadata uses the separate bounded `lib/network-dns-filters.ts` decoder and `/filters` read.
+Filter metadata uses the separate bounded `lib/network/dns-filters.ts` decoder and `/filters` read.
 It checks complete connection identity and generation, redacted HTTP(S) origins, closed per-engine
 entry kinds and configured/fingerprint consistency. Native unavailable or transport failures retain
 the previous same-owner data and observation time; a fresh partial reading shows unknown sections
@@ -201,7 +201,7 @@ are dated evidence, not proof of current attachment ownership.
   parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
   on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the
   same `Query`.
-- A log source is asked for by one id, built only in `lib/log-sources.ts` (`dockerSource`,
+- A log source is asked for by one id, built only in `lib/log/sources.ts` (`dockerSource`,
   `fileSource` → `file:<path>`, `journalSource`, `journalIdSource`, `kernelSource`, `stackSource`,
   `pm2Source`): an id spelled by hand — a bare path here, `file:` there — was a different session key for
   the same file and opened on the wrong remembered filter.
@@ -409,7 +409,7 @@ are dated evidence, not proof of current attachment ownership.
   reloaded — is announced by the action itself, and a bare "completed" beside it would be the untrue
   half.
 - **One reading out of the metrics store is read through `useMetricsValue(select, same)`**
-  (`hooks/use-metrics.ts`, over `reader` in `lib/metrics-store.ts`), not through `useMetrics()`. The
+  (`hooks/use-metrics.ts`, over `reader` in `lib/metrics/store.ts`), not through `useMetrics()`. The
   store builds a new state on every two-second frame, so a component that subscribes to all of it
   renders every two seconds whatever it draws. The Files page read the whole state for the free space
   on one disk and drew every row of the folder again on each frame: 0.9 to 1.7 s of script in ten idle
@@ -421,14 +421,14 @@ are dated evidence, not proof of current attachment ownership.
   build a row's verbs when one is pressed. A click then draws the two rows whose `active` moved instead
   of all of them. `files-ui.spec.ts` counts the rows React drew for a click and for a metrics frame; a
   new prop that is a fresh closure or object per render fails it.
-- `lib/metrics-store.ts` keeps the live series **outside React**: owning five minutes of history in a route
+- `lib/metrics/store.ts` keeps the live series **outside React**: owning five minutes of history in a route
   component threw it away on navigation, and pushing a 2 s frame through a context above the router
   re-rendered the terminal and log tail twice a second. Mirrored to sessionStorage so a reload keeps its
   chart, with points older than `STALE_MS` dropped on the way back in — a graph silently stitching this
   minute onto one from an hour ago is worse than one that starts empty. While the tab is hidden the store
   keeps taking frames but does not notify its readers; one notification on `visibilitychange` brings them
   up to date, so a background tab does not redraw charts nobody can see.
-- `lib/metrics-range.ts` defines the windows (`live`, `1h`, `6h`, `24h`, `7d`), their buckets and cadence,
+- `lib/metrics/range.ts` defines the windows (`live`, `1h`, `6h`, `24h`, `7d`), their buckets and cadence,
   and the `MetricsWindow` a dragged span becomes (fixed in the past, fetched once, never re-polled).
   **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude, and a chart drawing twenty coarse points and a hundred fine ones at equal spacing lies about

@@ -18,9 +18,9 @@ import {
   type DNSConnection,
   type DNSServiceChange,
   type DNSServiceView,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { IconAction } from "@/components/icon-action"
 import {
   ArrowLeft,
@@ -32,13 +32,15 @@ import {
   RefreshClockwise,
   Trash,
 } from "@/components/icons"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Tabs } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"

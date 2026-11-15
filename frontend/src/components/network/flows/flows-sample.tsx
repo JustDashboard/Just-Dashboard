@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { FlowCycle } from "@/lib/network-flows"
+import type { FlowCycle } from "@/lib/network/flows"
 import { UTCTime } from "@/components/network/flows/marks"
 
 /**

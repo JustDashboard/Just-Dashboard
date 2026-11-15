@@ -9,9 +9,9 @@ import type {
   DNSServiceSnapshot,
   DNSServiceView,
   DNSSelectedFilter,
-} from "../../src/lib/network-dns-services"
+} from "../../src/lib/network/dns-services"
 import { admin, mockNetwork, type Mutation } from "./network-fixture"
-import type { DNSFilterView } from "../../src/lib/network-dns-filters"
+import type { DNSFilterView } from "../../src/lib/network/dns-filters"
 import { overrides } from "./network-dns-fixture"
 
 const base = "/network/dns/services"

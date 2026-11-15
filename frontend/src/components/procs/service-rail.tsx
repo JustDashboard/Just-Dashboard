@@ -5,10 +5,10 @@ import { Servers } from "@/components/icons"
 import { bytes, duration, percent } from "@/lib/format"
 import type { SystemdUnit } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { cpuTone } from "@/components/procs/shared"
 import {
   failureWords,

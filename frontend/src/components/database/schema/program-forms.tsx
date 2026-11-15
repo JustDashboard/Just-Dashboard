@@ -3,11 +3,11 @@
 import { useId, useState } from "react"
 import { ArrowDown, ArrowUp, Plus, Trash } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { CodeEditor } from "@/components/code-editor"
 import { IconAction } from "@/components/icon-action"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {

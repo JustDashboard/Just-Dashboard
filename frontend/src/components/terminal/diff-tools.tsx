@@ -8,7 +8,8 @@ import { splitDiff, type FileDiff } from "@/lib/diff-files"
 import type { GitFileChange, GitStatus } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { DiffView } from "@/components/files/diff-view"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { IconAction } from "@/components/icon-action"
 
 /** More untracked files than this are listed without their contents. */

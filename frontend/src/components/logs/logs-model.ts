@@ -1,9 +1,9 @@
 import type { LogLine, LogSource } from "@/lib/types"
-import { fieldsEqual, fieldsOf, highlightRanges, lineValue, type LogLevel } from "@/lib/log-filter"
-import { logLineKey } from "@/lib/log-line-key"
-import { READINGS_MINUTES, type ReadingFigure } from "@/lib/log-insights"
-import { eventMeta, lensFor, type LensReading, type LensView, type LogLens } from "@/lib/log-lenses"
-import { journalSource } from "@/lib/log-sources"
+import { fieldsEqual, fieldsOf, highlightRanges, lineValue, type LogLevel } from "@/lib/log/filter"
+import { logLineKey } from "@/lib/log/line-key"
+import { READINGS_MINUTES, type ReadingFigure } from "@/lib/log/insights"
+import { eventMeta, lensFor, type LensReading, type LensView, type LogLens } from "@/lib/log/lenses"
+import { journalSource } from "@/lib/log/sources"
 import type { LogFields, LogFilterState } from "@/components/logs/types"
 
 /*

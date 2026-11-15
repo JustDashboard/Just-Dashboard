@@ -7,11 +7,11 @@ import { cn } from "@/lib/utils"
 import { plural } from "@/lib/format"
 import { Modal } from "@/components/modal"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { PendingStrip } from "@/components/deploy/settings/pending-strip"
-import { saveShortcut, useSaveBarHost } from "@/components/deploy/settings/save-bar"
+import { PendingStrip } from "@/components/settings/pending-strip"
+import { saveShortcut, useSaveBarHost } from "@/components/settings/save-bar"
 import {
   SETTINGS_VIEWS,
   SETTINGS_VIEW_LABEL,

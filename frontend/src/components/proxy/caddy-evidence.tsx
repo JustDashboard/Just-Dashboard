@@ -6,7 +6,8 @@ import { notify } from "@/lib/toast"
 import type { CertificateEvidence, EvidencePrune } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Hold, Notice } from "@/components/state"
+import { Notice } from "@/components/state"
+import { Hold } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 /**

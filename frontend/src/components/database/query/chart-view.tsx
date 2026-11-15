@@ -2,11 +2,11 @@
 
 import { useMemo, useState } from "react"
 import { LineChart } from "@/components/icons"
-import { BarList } from "@/components/bar-list"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { BarList } from "@/components/database/query/bar-list"
+import { ChartPanel } from "@/components/chart-panel"
 import type { Series } from "@/components/metrics/metric-chart"
 import { EmptyState } from "@/components/state"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { chartOf, drawnAtFirst } from "@/components/database/query/chart"
 import type { QueryResult } from "@/components/database/query/types"
 

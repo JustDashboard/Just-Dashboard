@@ -5,7 +5,7 @@ import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
-import { WireHost, WireNode } from "@/components/deploy/wire"
+import { WireHost, WireNode } from "@/components/wire/wire"
 import { ShieldCheck } from "@/components/icons"
 import {
   DRIFT_DOMAINS,
@@ -14,7 +14,7 @@ import {
   type DriftDomain,
   type DriftReport,
   type DriftRow,
-} from "@/lib/network-drift"
+} from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { DriftBlocks, ShortDigest } from "@/components/network/drift/marks"
 

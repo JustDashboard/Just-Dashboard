@@ -10,10 +10,10 @@ import type { ContainerHistory, TrafficPulse } from "@/lib/types"
 import { utilisationTone } from "@/components/meter"
 import { NoReading, ReadingLine } from "@/components/reading-line"
 import { StatusDot } from "@/components/status-dot"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { HUE } from "@/components/overview/readings"
+import { TileTrend } from "@/components/sparkline"
+import { HUE } from "@/components/live-figure"
 import { NumberTicker } from "@/components/ui/number-ticker"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { failingTone } from "@/components/deploy/fleet"
 
 /*

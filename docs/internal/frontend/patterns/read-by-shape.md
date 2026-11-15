@@ -11,7 +11,7 @@ WP-41 cuts this page down to the rule; until then it holds the text that was in 
 **A log line is read by its shapes, and coloured by the same rules as the rest of the product.**
 The logs console used to draw every line as one grey-white string with a 10px level tag in front of it,
 so a failed password, the address it came from and a 502 were found only by reading every line.
-`lib/log-tokens.ts` cuts a line into its shapes — syslog's `time host proc[pid]:`, the common log
+`lib/log/tokens.ts` cuts a line into its shapes — syslog's `time host proc[pid]:`, the common log
 format, logfmt pairs, a JSON object, bracketed and shouted levels, addresses, request lines, statuses,
 paths, ids — as spans over the original text, so the search's match ranges still land; and
 `components/logs/log-text.tsx` colours them from one map. The **status hues** go only to what is a

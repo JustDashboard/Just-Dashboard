@@ -8,7 +8,8 @@ import { ChevronDown, Download, Sparkles, StopCircle, Warning } from "@/componen
 import { cn } from "@/lib/utils"
 import type { DbExportFormat } from "@/lib/types"
 import { EmptyState, Notice } from "@/components/state"
-import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {

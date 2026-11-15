@@ -1,4 +1,4 @@
-import type { BoardSummary } from "@/lib/boards"
+import type { BoardSummary } from "@/lib/board/boards"
 import type { BackupJob, SystemdUnit, TerminalWorkspace } from "@/lib/types"
 
 /**

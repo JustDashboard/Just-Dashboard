@@ -6,10 +6,10 @@ import { Connection } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { StreamEntry } from "@/lib/types"
 import { stateLabel, stateStatus } from "@/lib/streams"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { ProductLogo, portProduct } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { routeLine, streamHref, type StreamTab } from "@/components/proxy/stream-facts"
 
 function dotTone(stream: StreamEntry): DotTone {

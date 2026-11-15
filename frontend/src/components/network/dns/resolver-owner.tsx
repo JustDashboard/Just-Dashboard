@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import type { ResolverOwner } from "@/lib/types"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"

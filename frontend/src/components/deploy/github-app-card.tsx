@@ -19,7 +19,8 @@ import { cn } from "@/lib/utils"
 import { Field, FormFact } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { ForgeFace } from "@/components/git/marks"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -41,7 +42,7 @@ import {
   WireMark,
   WireNode,
   WirePlaceholder,
-} from "@/components/deploy/wire"
+} from "@/components/wire/wire"
 
 /**
  * The dashboard's own identity on GitHub. Created once through GitHub's

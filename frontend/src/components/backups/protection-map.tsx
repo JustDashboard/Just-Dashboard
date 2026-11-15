@@ -9,7 +9,7 @@ import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ProductLogo } from "@/components/product-logo"
-import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { LastRun } from "@/components/backups/job-card"
 import {
   DestinationGlyph,
@@ -44,7 +44,7 @@ type KindGroup = {
  * Where this server's data goes: what it has, by kind, wired into this server,
  * and this server wired out to every place a job writes — in the vocabulary
  * Notifications, Credentials and the configuration's request path already
- * speak (`deploy/wire`), so a reader who has understood one of those pictures
+ * speak (`components/wire/wire`), so a reader who has understood one of those pictures
  * has understood this one.
  *
  * The lines are the state, and nothing else on them is decoration:

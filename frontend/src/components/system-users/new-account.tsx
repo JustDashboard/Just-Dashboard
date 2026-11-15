@@ -16,7 +16,7 @@ import {
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { SecretField } from "@/components/database/ops/access-parts"
 import { generatePassword } from "@/components/database/connect/rules"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { FlowActions, FlowHeader, FlowPanel, FlowPanelBody } from "@/components/flow"
 import { Field, FieldRow, FormNote, OptionRow } from "@/components/form"
 import { Page } from "@/components/page"

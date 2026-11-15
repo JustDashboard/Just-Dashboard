@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { ProductGlyph } from "@/components/product-logo"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import {
   MAIN_NODE,
   relativePath,

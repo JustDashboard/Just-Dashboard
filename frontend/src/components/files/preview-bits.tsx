@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FilePreview } from "@/lib/types"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Well } from "@/components/panel"
 import { fetchResponse } from "@/lib/api"
 

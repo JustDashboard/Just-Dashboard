@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { createRef, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react"
 import { ClientMark } from "@/components/client-mark"
-import { WireHost, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { Plus } from "@/components/icons"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { relativeTime } from "@/lib/format"

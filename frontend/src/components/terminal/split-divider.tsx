@@ -1,8 +1,8 @@
 "use client"
 
 import { useRef, useState } from "react"
-import type { Divider } from "@/lib/terminal-layout"
-import { SPLIT_GAP } from "@/lib/terminal-layout"
+import type { Divider } from "@/lib/terminal/layout"
+import { SPLIT_GAP } from "@/lib/terminal/layout"
 import { cn } from "@/lib/utils"
 
 export function SplitDivider({

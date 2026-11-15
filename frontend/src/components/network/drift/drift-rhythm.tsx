@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -14,7 +14,7 @@ import {
   type DriftMove,
   type DriftRow,
   type DriftStatus,
-} from "@/lib/network-drift"
+} from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { STATUS_FILL } from "@/components/network/drift/marks"
 

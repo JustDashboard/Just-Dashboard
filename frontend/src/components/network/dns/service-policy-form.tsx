@@ -8,7 +8,7 @@ import {
   readDNSRecords,
   type DNSChangeRequest,
   type DNSServiceView,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import {
   dnsClientAddress,
   dnsRecordZoneEditable,
@@ -19,7 +19,7 @@ import {
   type DNSDomainFilterErrors,
   type DNSRecordAction,
   type DNSRecordErrors,
-} from "@/lib/network-dns-service-policy"
+} from "@/lib/network/dns-service-policy"
 import { Field } from "@/components/form"
 import { ErrorState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"

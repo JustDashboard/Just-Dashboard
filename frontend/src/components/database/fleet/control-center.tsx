@@ -28,7 +28,7 @@ import { useFleetControl } from "@/components/database/fleet/use-fleet-control"
 import { EngineGlyph } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { IconAction } from "@/components/icon-action"
 import {
   Database,
@@ -38,12 +38,14 @@ import {
   RefreshClockwise,
   Sparkles,
 } from "@/components/icons"
-import { HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, SearchInput, Section } from "@/components/page"
+import { HostIdentity } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
+import { Section } from "@/components/section"
 import { ProductLogos } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"

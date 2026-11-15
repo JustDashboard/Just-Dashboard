@@ -9,7 +9,7 @@ import {
   udpRow,
 } from "./network-evidence-fixture"
 import { risen } from "./risen"
-import type { FlowReport, FlowRow } from "../../src/lib/network-flows"
+import type { FlowReport, FlowRow } from "../../src/lib/network/flows"
 
 const path = "/network/flows/"
 

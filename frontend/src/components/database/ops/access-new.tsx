@@ -3,7 +3,7 @@
 import { useEffect, useId, useState } from "react"
 import { UserPlus } from "@/components/icons"
 import { ApiError, errorMessage, post } from "@/lib/api"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import {
   Disclosure,
   Field,

@@ -1,6 +1,6 @@
 import type { DNSView } from "@/lib/types"
-import type { DNSEngine, DNSServiceProvision } from "@/lib/network-dns-services"
-import { dockerSource, journalSource } from "@/lib/log-sources"
+import type { DNSEngine, DNSServiceProvision } from "@/lib/network/dns-services"
+import { dockerSource, journalSource } from "@/lib/log/sources"
 import type { ServiceLogSource } from "@/components/logs/service-logs"
 import { KIND_PRODUCT } from "@/components/network/dns/resolvers"
 

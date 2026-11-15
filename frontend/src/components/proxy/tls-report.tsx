@@ -17,7 +17,7 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { downloadText } from "@/lib/metrics-export"
+import { downloadText } from "@/lib/metrics/export"
 import { duration, relativeTime, timestamp } from "@/lib/format"
 import {
   parseScanQuery,
@@ -43,7 +43,7 @@ import {
   STARTTLS_NAMES,
   STARTTLS_PORTS,
   termText,
-} from "@/lib/tls-report"
+} from "@/lib/tls/report"
 import {
   chainNodes,
   gradeVerdict,
@@ -51,7 +51,7 @@ import {
   serverProduct,
   type ChainNode,
   type ChainTone,
-} from "@/lib/tls-chain"
+} from "@/lib/tls/chain"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import type {
@@ -67,18 +67,20 @@ import type {
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Detail, DetailList, Page, PageContext } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { RowList } from "@/components/row-list"
 import { FindingList } from "@/components/finding-list"
-import { ErrorState, Notice, Spinner } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { CertLife } from "@/components/proxy/expiry-status"
 import { useProxyRead } from "@/components/proxy/proxy-context"
 import { sitePath } from "@/components/proxy/site-verbs"

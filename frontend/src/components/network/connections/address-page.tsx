@@ -22,15 +22,15 @@ import {
   recentHours,
   type AddressBlock,
   type ConnectionDetail,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import type { Connections, Peer, PortsMeta } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"

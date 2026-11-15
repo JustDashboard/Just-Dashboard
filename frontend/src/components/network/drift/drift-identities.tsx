@@ -1,7 +1,7 @@
 "use client"
 
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import type { DriftReport } from "@/lib/network-drift"
+import type { DriftReport } from "@/lib/network/drift"
 import { ShortDigest } from "@/components/network/drift/marks"
 
 /**

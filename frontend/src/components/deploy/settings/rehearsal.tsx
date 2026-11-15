@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { DbConnection, DeploymentEnvironmentConfiguration, RehearsalPolicy } from "@/lib/types"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { FactsLine } from "@/components/deploy/settings/facts-line"
+import { FactsLine } from "@/components/settings/facts-line"
 import {
   InputGroup,
   InputGroupAddon,
@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import {
   DEFAULT_REHEARSAL_POLICY,
   engineName,
@@ -29,11 +29,7 @@ import {
   rehearsalPolicyLine,
 } from "@/components/deploy/rehearsal-model"
 import { useSettingDraft } from "@/components/deploy/settings/use-configuration"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 
 /** The form's own shape: numbers as typed, so a field can be emptied. */
 type RehearsalDraft = {

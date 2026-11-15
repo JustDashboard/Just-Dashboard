@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import type { MetricEvent, RequestBucket, TrafficAlert } from "@/lib/types"
 import { latencyHead } from "@/lib/latency-words"
 import { latency } from "@/lib/requests"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
 import { Button } from "@/components/ui/button"
 

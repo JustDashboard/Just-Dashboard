@@ -3,7 +3,7 @@
 import { useId, useMemo, useState } from "react"
 import { ArrowRight, Plus, Trash } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FieldRow, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"

@@ -14,8 +14,8 @@ import {
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
-import { readIPAMView, selectedReservation } from "@/lib/network-ipam"
-import type { IPAMOwner, IPAMReservation, IPAMView } from "@/lib/network-ipam"
+import { readIPAMView, selectedReservation } from "@/lib/network/ipam"
+import type { IPAMOwner, IPAMReservation, IPAMView } from "@/lib/network/ipam"
 
 export function IPAMReservationPicker({
   open,

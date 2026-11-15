@@ -1,7 +1,7 @@
 "use client"
 
 import type { NetworkLink, NetworkLivePoint } from "@/lib/types"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"

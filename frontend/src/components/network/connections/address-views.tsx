@@ -7,7 +7,7 @@ import { networkOf } from "@/lib/clients"
 import { bytes, duration, plural, relativeTime } from "@/lib/format"
 import type { FirewallStatus, NetworkPath, Peer, PortRange } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { flowBytes, flowOwnerName, type FlowReport } from "@/lib/network-flows"
+import { flowBytes, flowOwnerName, type FlowReport } from "@/lib/network/flows"
 import {
   foldHistoricalFlows,
   hourBounds,
@@ -15,12 +15,12 @@ import {
   sourceCovers,
   type AddressBlock,
   type ConnectionDetail,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { NETWORK_GLYPH } from "@/components/client-mark"
-import { WireHost, WireMark } from "@/components/deploy/wire"
-import { useNow } from "@/components/deploy/vocabulary"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { WireHost, WireMark } from "@/components/wire/wire"
+import { useNow } from "@/hooks/use-now"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import {
   ProductGlyph,
@@ -29,7 +29,8 @@ import {
   processProduct,
 } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { toolHref } from "@/components/security/address-verbs"
 import {
@@ -39,7 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { WireFlow, type WireLine } from "@/components/wire-flow"
+import { WireFlow, type WireLine } from "@/components/wire/wire-flow"
 import {
   beat,
   reached,

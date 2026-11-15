@@ -9,7 +9,7 @@ import type { DbAlertKind, NotificationChannel } from "@/lib/types"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { ChannelGlyph } from "@/components/deploy/vocabulary"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { SidePanelFooter } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
 import {

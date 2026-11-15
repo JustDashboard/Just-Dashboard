@@ -13,13 +13,13 @@ import type {
   DeploymentRunSnapshot,
   DeploymentVariable,
 } from "@/lib/types"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { ProductGlyph, ProductLogo, programProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { Status } from "@/components/status-dot"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {

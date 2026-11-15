@@ -13,16 +13,17 @@ import {
   selectedDriftRepairRequest,
   type DriftDomain,
   type DriftReport,
-} from "@/lib/network-drift"
+} from "@/lib/network/drift"
 import { duration, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { useNow } from "@/hooks/use-now"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { LogoGlyph } from "@/components/logo"
 import { Page, PageContext } from "@/components/page"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Button } from "@/components/ui/button"

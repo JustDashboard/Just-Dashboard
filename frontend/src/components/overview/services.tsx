@@ -25,7 +25,7 @@ import type {
 import type { PollState } from "@/hooks/use-poll"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import { Bone } from "@/components/bone"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { LogoGlyph } from "@/components/logo"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import {

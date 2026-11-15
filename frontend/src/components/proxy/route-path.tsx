@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils"
-import { ChoiceList } from "@/components/flow"
+import { ChoiceList } from "@/components/choice-row"
 import { ArrowRight } from "@/components/icons"
 
 /** Keep both ends visible: a route is hard to read when squeezed into one truncated sentence. */

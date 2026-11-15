@@ -3,7 +3,7 @@
 import { createRef, useRef, type RefObject } from "react"
 import { cn } from "@/lib/utils"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark } from "@/components/deploy/wire"
+import { WireHost, WireMark } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
 
 // One product for each thing the first-run question offers, in the order the

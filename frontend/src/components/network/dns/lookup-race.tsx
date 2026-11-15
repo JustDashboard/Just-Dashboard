@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { Field, OptionRow } from "@/components/form"
 import { Notice } from "@/components/state"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Question } from "@/components/network/dns/lookup-question"
 
 /** The longest a row waits before it lands, so a resolver that timed out does not hold the race for seconds. */

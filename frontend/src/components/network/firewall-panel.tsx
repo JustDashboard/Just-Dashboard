@@ -21,15 +21,16 @@ import {
 import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { lensFor, type LensReading } from "@/lib/log-lenses"
+import { lensFor, type LensReading } from "@/lib/log/lenses"
 import type { FirewallRule, FirewallStatus, LogLine } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { ConfirmDialog, useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
 import { Address } from "@/components/security/marks"
 import { ProductLogo, ProductLogos, portProduct } from "@/components/product-logo"
-import { PageContext, SearchInput } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
 import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
@@ -60,13 +61,9 @@ import {
   useReadingPress,
 } from "@/components/security/log-section"
 import { useLensReadings, type LensReadingsState } from "@/components/logs/lens-readings"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { IconAction, DimActions } from "@/components/icon-action"

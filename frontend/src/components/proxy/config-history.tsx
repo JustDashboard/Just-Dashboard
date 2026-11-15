@@ -14,20 +14,14 @@ import type {
   ProxyValidation,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceRow } from "@/components/flow"
+import { ChoiceRow } from "@/components/choice-row"
 import { DiffView } from "@/components/files/diff-view"
 import { unifiedDiff } from "@/components/files/diff"
 import { Modal } from "@/components/modal"
 import { Pane, Well } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import {
-  EmptyNote,
-  EmptyState,
-  ErrorState,
-  LoadingPanel,
-  LoadingRows,
-  Notice,
-} from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingPanel, LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"

@@ -15,7 +15,7 @@ import type {
   DeploymentRateLimit,
   RequestFacet,
 } from "@/lib/types"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Well } from "@/components/panel"
@@ -31,14 +31,10 @@ import {
 } from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ListField } from "@/components/proxy/site-form"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { useProject } from "@/components/deploy/project-context"
-import { WirePlaceholder } from "@/components/deploy/wire"
+import { WirePlaceholder } from "@/components/wire/wire"
 import {
   EDGE_ACTIONS,
   EDGE_METHODS,

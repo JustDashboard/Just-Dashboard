@@ -2,7 +2,7 @@
 
 import { memo, useMemo, useSyncExternalStore } from "react"
 import { cn } from "@/lib/utils"
-import { getCrosshair, getServerCrosshair, subscribeCrosshair } from "@/lib/metrics-crosshair"
+import { getCrosshair, getServerCrosshair, subscribeCrosshair } from "@/lib/metrics/crosshair"
 import { seriesFormat, type ChartRowLike, type Series } from "@/components/metrics/metric-chart"
 
 /**

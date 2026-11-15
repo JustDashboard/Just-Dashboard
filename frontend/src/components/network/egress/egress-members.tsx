@@ -8,7 +8,7 @@ import {
   type EgressGroup,
   type EgressMemberView,
   type EgressPoint,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Notice } from "@/components/state"

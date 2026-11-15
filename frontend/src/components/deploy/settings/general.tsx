@@ -24,7 +24,7 @@ import type {
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { SourceBranch } from "@/components/git/glyphs"
 import { BranchChip, ShortSha } from "@/components/git/marks"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { ProductGlyph, hostProduct, imageProduct } from "@/components/product-logo"
 import { Status, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -39,7 +39,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { useProject } from "@/components/deploy/project-context"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import {
   DEPLOYMENT_NAME,
   WORKLOAD_GLYPH,
@@ -47,14 +47,14 @@ import {
   shortIdentity,
   sourceProduct,
 } from "@/components/deploy/vocabulary"
-import { WireLabel, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireLabel, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
   SettingForm,
   SettingSection,
   SettingsPage,
   settingStatus,
-} from "@/components/deploy/settings/setting-card"
+} from "@/components/settings/setting-card"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import { applyDetectionChanges } from "@/components/deploy/settings/detection-changes"

@@ -13,7 +13,8 @@ import {
   type ServiceLogsView,
 } from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
-import { LoadingRows, Notice } from "@/components/state"
+import { Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import type { Engine } from "@/components/database/engine"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { SectionFrame } from "@/components/database/kit"

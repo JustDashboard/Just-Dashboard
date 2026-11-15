@@ -2,7 +2,7 @@
 
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { RowLink } from "@/components/page"
+import { RowLink } from "@/components/row-link"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Status } from "@/components/status-dot"

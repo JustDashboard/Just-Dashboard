@@ -1,5 +1,5 @@
 import type { Tone } from "@/components/tone"
-import type { WireLine } from "@/components/wire-flow-model"
+import type { WireLine } from "@/components/wire/wire-flow-model"
 import {
   egressNames,
   type EgressDecision,
@@ -7,7 +7,7 @@ import {
   type EgressMemberView,
   type EgressPolicy,
   type EgressSimulation,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 
 /**
  * The words and lines the list's cards, a group's page and its picture say,

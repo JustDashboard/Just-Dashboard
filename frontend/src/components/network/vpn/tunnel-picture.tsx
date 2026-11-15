@@ -6,8 +6,8 @@ import { bytes, relativeTime } from "@/lib/format"
 import type { WGAlert, WGInterface, WGPeer } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireMark, WirePlaceholder } from "@/components/deploy/wire"
-import { WireFlow, type WireFlowColumn, type WireFlowNode } from "@/components/wire-flow"
+import { WireMark, WirePlaceholder } from "@/components/wire/wire"
+import { WireFlow, type WireFlowColumn, type WireFlowNode } from "@/components/wire/wire-flow"
 import {
   drawnPeers,
   findingWords,

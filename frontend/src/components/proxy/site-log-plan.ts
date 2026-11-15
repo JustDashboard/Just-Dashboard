@@ -1,7 +1,7 @@
 import type { ServiceLogSource } from "@/components/logs/service-logs"
 import type { LogFields } from "@/components/logs/types"
 import type { Listener, SiteSpec, VHost } from "@/lib/types"
-import { dockerSource, fileSource, journalSource } from "@/lib/log-sources"
+import { dockerSource, fileSource, journalSource } from "@/lib/log/sources"
 import { listenerUnit, upstreamListener, upstreamOwner } from "@/components/proxy/site-overview"
 
 /** Where nginx writes the errors of every site that names no file of its own. */

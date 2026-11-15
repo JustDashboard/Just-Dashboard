@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, duration, percent, plural } from "@/lib/format"
-import { dockerSource, journalSource, pm2Source } from "@/lib/log-sources"
+import { dockerSource, journalSource, pm2Source } from "@/lib/log/sources"
 import type {
   ContainerDetail,
   PM2Process,
@@ -29,7 +29,9 @@ import type { ConfirmFn } from "@/components/docker/shared"
 import { EnvironmentTable } from "@/components/docker/container-tables"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { Detail, DetailList, SearchInput, Section } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
+import { SearchInput } from "@/components/search-input"
+import { Section } from "@/components/section"
 import { Panel, PanelHeader, PanelToolbar } from "@/components/panel"
 import {
   ProductGlyph,
@@ -40,7 +42,7 @@ import {
 } from "@/components/product-logo"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { VerbBar } from "@/components/verbs"
 import { Button } from "@/components/ui/button"

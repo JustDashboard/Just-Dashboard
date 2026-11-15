@@ -2,7 +2,7 @@
 
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { FormSections } from "@/components/form"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
+import { SaveBarProvider } from "@/components/settings/save-bar"
 import { SectionFrame } from "@/components/database/kit"
 import { BlockedState } from "@/components/database/kit/blocked-state"
 import { SettingsPending } from "@/components/database/ops/settings-pending"
@@ -24,7 +24,7 @@ const MISSING: Record<SettingsPageKey, string> = {
 
 /**
  * One page of a database's settings, in the shape every settings page in the
- * product has (`deploy/settings/setting-card.tsx`): one centred column of
+ * product has (`components/settings/setting-card.tsx`): one centred column of
  * sections divided by hairlines, each head over its fields carrying what the
  * section currently is, the page's one Save floating at its foot while an
  * edit is held, and at the column's head what the server has stored and not

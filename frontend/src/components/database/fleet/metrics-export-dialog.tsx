@@ -10,7 +10,7 @@ import {
 } from "@/components/database/fleet/metrics-export"
 import { useApiOrigin } from "@/components/account/api-keys"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FormSection } from "@/components/form"
 import { Check, Copy } from "@/components/icons"
 import { Modal } from "@/components/modal"

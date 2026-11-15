@@ -1,5 +1,5 @@
 import type { ServiceLogSource } from "@/components/logs/service-logs"
-import { journalIdSource, journalSource, kernelSource } from "@/lib/log-sources"
+import { journalIdSource, journalSource, kernelSource } from "@/lib/log/sources"
 
 /**
  * Which log each Security page reads, out of what this host has.

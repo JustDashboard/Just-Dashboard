@@ -26,7 +26,7 @@ import {
   flowOwnerName,
   flowTotals,
   type FlowRow,
-} from "@/lib/network-flows"
+} from "@/lib/network/flows"
 import { UTCTime, counted } from "@/components/network/flows/marks"
 
 export type FlowFilters = { day: string; address: string; containerId: string }

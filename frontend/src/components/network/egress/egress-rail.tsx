@@ -2,9 +2,9 @@
 
 import { useEffect, useRef } from "react"
 import Link from "next/link"
-import type { EgressGroup } from "@/lib/network-egress"
+import type { EgressGroup } from "@/lib/network/egress"
 import { cn } from "@/lib/utils"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { EgressMark, TONE_TEXT } from "@/components/network/egress/marks"
 import { egressCarrying, egressHref } from "@/components/network/egress/reading"
 

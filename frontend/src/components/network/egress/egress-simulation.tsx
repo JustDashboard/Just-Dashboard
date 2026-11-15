@@ -7,7 +7,7 @@ import {
   egressSimulationReading,
   type EgressGroup,
   type EgressView,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import { Status } from "@/components/status-dot"
 import { Disclosure } from "@/components/form"
 import { CheckCircle, CrossCircle } from "@/components/icons"

@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, Trash } from "@/components/icons
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { IconAction } from "@/components/icon-action"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {

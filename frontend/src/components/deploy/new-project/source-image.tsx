@@ -8,17 +8,12 @@ import { bytes, plural, relativeTime } from "@/lib/format"
 import type { ComposeStack, Container, DockerImage } from "@/lib/types"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import { Field } from "@/components/form"
-import {
-  ChoiceList,
-  ChoiceRow,
-  FlowActions,
-  FlowPanel,
-  FlowPanelBody,
-  FlowPanelHeader,
-} from "@/components/flow"
+import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { SearchInput } from "@/components/page"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { SearchInput } from "@/components/search-input"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"

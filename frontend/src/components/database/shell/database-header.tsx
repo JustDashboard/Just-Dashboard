@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { LANES, hueFor } from "@/lib/hue"
 import { cn } from "@/lib/utils"
-import { HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { HostFact, HostIdentity } from "@/components/identity-header"
 import { Button } from "@/components/ui/button"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { EngineMark } from "@/components/database/kit/engine-mark"

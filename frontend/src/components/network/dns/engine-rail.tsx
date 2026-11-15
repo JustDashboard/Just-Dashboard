@@ -2,11 +2,11 @@
 
 import { useEffect, useRef } from "react"
 import Link from "next/link"
-import { dnsEngineName, type DNSConnection } from "@/lib/network-dns-services"
+import { dnsEngineName, type DNSConnection } from "@/lib/network/dns-services"
 import { cn } from "@/lib/utils"
 import { Globe } from "@/components/icons"
 import { ProductLogo } from "@/components/product-logo"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { StatusDot } from "@/components/status-dot"
 import { engineHref, type EngineTab } from "./engine-views"
 import { ENGINE_PRODUCT } from "./services"

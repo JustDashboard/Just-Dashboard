@@ -14,7 +14,7 @@ import { relativeTime, timestamp } from "@/lib/format"
 import type { AccountLinkScope } from "@/lib/types"
 import { MarkTile, type Mark } from "@/components/account-link/marks"
 import { Reading, ReadingList } from "@/components/account-link/reading"
-import { Section } from "@/components/page"
+import { Section } from "@/components/section"
 import { platformProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 

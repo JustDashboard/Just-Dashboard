@@ -19,28 +19,25 @@ import {
 } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { get, post } from "@/lib/api"
-import { lensFor } from "@/lib/log-lenses"
+import { lensFor } from "@/lib/log/lenses"
 import type { Job, NetworkConfirmationView, SSHDConfig, SSHSetting } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { FormSections, InfoTip } from "@/components/form"
 import { PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { FactDot, HostIdentity } from "@/components/identity-header"
+import { InitialsMark } from "@/components/user-avatar"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ReadingLines } from "@/components/reading-line"
 import { Row, RowList } from "@/components/row-list"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { ChipCount, FilterChip } from "@/components/tabs"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { ChipCount, FilterChip } from "@/components/chips"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { AUTH_LOG } from "@/components/security/host-logs"
 import {
   HostLogSection,

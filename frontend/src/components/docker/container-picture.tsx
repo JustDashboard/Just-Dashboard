@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
 import { ProductGlyph, containerProduct, hasProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { looksLikeDatabase } from "@/components/docker/shared"
 import { portRows, reachWords, type Verdict } from "@/components/docker/container"
 import { volumeHref } from "@/components/docker/volumes"
@@ -47,7 +47,7 @@ type Node = {
  * piece of memory mounted into it.
  *
  * The line is the state, in the vocabulary every picture in the product
- * speaks (`deploy/wire`): amber where a port answers the internet around the
+ * speaks (`components/wire/wire`): amber where a port answers the internet around the
  * firewall, red where Docker's own socket is mounted, dashed where a thing
  * does not outlive the container or the container is not running. A way in
  * pulses while the container moves more than a kilobyte a second; Docker

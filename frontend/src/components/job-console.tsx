@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Pane, PaneHeader } from "@/components/panel"
 
 /**

@@ -8,7 +8,7 @@ import type { UpdateRun } from "@/lib/types"
 import { phaseLabel } from "@/hooks/use-self-update"
 import { RunPhases, phaseStates } from "@/components/run-phases"
 import { RunTranscript } from "@/components/run-transcript"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 
 /**
  * An upgrade, watched rather than waited for — and watched across the moment

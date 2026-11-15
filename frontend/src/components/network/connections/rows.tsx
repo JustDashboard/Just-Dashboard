@@ -5,12 +5,12 @@ import Link from "next/link"
 import { Servers } from "@/components/icons"
 import { networkOf } from "@/lib/clients"
 import { relativeTime } from "@/lib/format"
-import { flowBytes } from "@/lib/network-flows"
-import type { HistoricalPeer } from "@/lib/network-traffic"
+import { flowBytes } from "@/lib/network/flows"
+import type { HistoricalPeer } from "@/lib/network/traffic"
 import type { Peer, PortRange } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { NETWORK_GLYPH } from "@/components/client-mark"
-import { ChoiceRow } from "@/components/flow"
+import { ChoiceRow } from "@/components/choice-row"
 import {
   ProductGlyph,
   ProductLogo,

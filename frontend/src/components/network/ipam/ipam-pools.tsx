@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu } from "@/components/verbs"
 import { plural } from "@/lib/format"
-import type { IPAMPool, IPAMView } from "@/lib/network-ipam"
+import type { IPAMPool, IPAMView } from "@/lib/network/ipam"
 import { exact, ownerProduct, poolBand, poolOwners } from "@/components/network/ipam/reading"
 
 /** The planner's own hue, and the one for what a native owner was seen holding. */

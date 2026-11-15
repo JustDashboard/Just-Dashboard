@@ -1,10 +1,10 @@
 "use client"
 
 import type { NetworkLink } from "@/lib/types"
-import { observationAge } from "@/lib/network-traffic"
+import { observationAge } from "@/lib/network/traffic"
 import { ChartActivity } from "@/components/icons"
-import { useNow } from "@/components/deploy/vocabulary"
-import { HostIdentity } from "@/components/metrics/host-identity"
+import { useNow } from "@/hooks/use-now"
+import { HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { linkGlyph, linkProduct } from "@/components/network/marks"
 import type { LiveTraffic } from "@/components/network/use-live-traffic"

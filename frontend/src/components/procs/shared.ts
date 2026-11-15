@@ -1,5 +1,5 @@
 import type { LogSource, LogSourceIndex, ProcessGroup, ProcessRow } from "@/lib/types"
-import { journalIdSource, journalSource } from "@/lib/log-sources"
+import { journalIdSource, journalSource } from "@/lib/log/sources"
 import type { Tone } from "@/components/tone"
 import { processProduct, unitProduct } from "@/components/product-logo"
 

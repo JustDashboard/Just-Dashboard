@@ -11,10 +11,10 @@ import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
 import { IconAction } from "@/components/icon-action"
 import { Well } from "@/components/panel"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { EngineMark } from "@/components/database/kit/engine-mark"
 import {
   connectFormats,

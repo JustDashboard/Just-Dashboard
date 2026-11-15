@@ -4,7 +4,7 @@ import type {
   DockerEvent,
   WorkloadProfile,
 } from "@/lib/types"
-import { dockerSource, fileSource } from "@/lib/log-sources"
+import { dockerSource, fileSource } from "@/lib/log/sources"
 import type { LogAsk } from "@/components/logs/logs-model"
 import type { ServiceLogSource } from "@/components/logs/service-logs"
 import {

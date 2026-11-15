@@ -5,10 +5,10 @@ import { Box, Database, NetworkDevice } from "@/components/icons"
 import { useViewState } from "@/lib/view-state"
 import type { ComposeStack, Container, DockerNetwork, VolumeDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { ProductGlyph, hasProductLogo, imageProducts } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
-import { WireFlow, type WireFlowNode, type WireState } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode, type WireState } from "@/components/wire/wire-flow"
 import {
   enginePicture,
   engineRelated,

@@ -22,7 +22,8 @@ import type {
   DeploymentRunsPage,
 } from "@/lib/types"
 import { Page, PageContext } from "@/components/page"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProjectStart } from "@/components/deploy/project-verbs"

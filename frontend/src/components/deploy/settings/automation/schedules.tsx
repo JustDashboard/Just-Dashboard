@@ -28,7 +28,7 @@ import type {
   DeploymentScheduleTest,
 } from "@/lib/types"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldRow,
@@ -41,7 +41,8 @@ import {
 import { OUTCOME_FILL, OutcomeStrip, type OutcomeTone } from "@/components/outcome-strip"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -80,8 +81,8 @@ import {
 } from "@/components/schedule-builder"
 import { contentsLabel, targetLabel } from "@/components/backups/shared"
 import { destinationProduct } from "@/components/backups/marks"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { SettingSection } from "@/components/settings/setting-card"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import {
   RunStatus,
   formatDuration,
@@ -89,8 +90,8 @@ import {
   isActiveRun,
   runDurationSeconds,
   runTitle,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { useProject } from "@/components/deploy/project-context"
 import type { Automation } from "@/components/deploy/settings/automation/use-automation"
 import {

@@ -7,7 +7,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { interfaceLogSources } from "@/components/network/interfaces/log-sources"
 
 /**

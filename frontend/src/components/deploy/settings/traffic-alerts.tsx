@@ -29,7 +29,8 @@ import { Meter } from "@/components/meter"
 import { ProductLogo } from "@/components/product-logo"
 import { ChannelGlyph } from "@/components/deploy/vocabulary"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 import { Button } from "@/components/ui/button"
@@ -41,7 +42,7 @@ import {
 } from "@/components/ui/input-group"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingSection } from "@/components/settings/setting-card"
 import type { Automation } from "@/components/deploy/settings/automation/use-automation"
 
 /**

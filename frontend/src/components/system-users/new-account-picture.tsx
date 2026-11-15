@@ -2,8 +2,8 @@
 
 import { useRef } from "react"
 import { Key, LockClosed, Shield, SettingsGear, Slash } from "@/components/icons"
-import { InitialsMark } from "@/components/account/user-avatar"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { InitialsMark } from "@/components/user-avatar"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
 import { groupGrant } from "@/components/system-users/access"
 import { GroupWireMark } from "@/components/system-users/wire-marks"

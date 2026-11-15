@@ -23,7 +23,7 @@ import { Meter, utilisationTone } from "@/components/meter"
 import { EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Filesystem } from "@/components/overview/storage"
-import { SeriesKey } from "@/components/overview/readings"
+import { SeriesKey } from "@/components/live-figure"
 import {
   ProductGlyph,
   ProductLogo,

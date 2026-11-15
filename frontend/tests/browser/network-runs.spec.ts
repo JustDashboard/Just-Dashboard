@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import type { DiagnosticComparison, DiagnosticRun } from "../../src/lib/network-diagnostics"
+import type { DiagnosticComparison, DiagnosticRun } from "../../src/lib/network/diagnostics"
 import { admin, json, mockNetwork } from "./network-fixture"
 import { risen } from "./risen"
 

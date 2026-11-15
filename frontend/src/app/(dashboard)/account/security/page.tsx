@@ -10,8 +10,8 @@ import {
 import { PasskeysSection } from "@/components/account/passkeys"
 import { useSessions } from "@/components/account/sessions"
 import { SignInPath } from "@/components/account/sign-in-path"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { SettingsColumn } from "@/components/settings-column"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { SettingsColumn } from "@/components/settings/settings-column"
 
 /**
  * What stands between a session and this server: first as a picture — this

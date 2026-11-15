@@ -41,7 +41,7 @@ import {
   keymap,
   useKeymap,
   type ShortcutAction,
-} from "@/lib/terminal-keymap"
+} from "@/lib/terminal/keymap"
 import { usePanelSize } from "@/lib/panel-size"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
@@ -54,7 +54,7 @@ import { SplitDivider } from "@/components/terminal/split-divider"
 import { SplitDropOverlay } from "@/components/terminal/split-drop-overlay"
 import { ProgramMark, ActivityMark } from "@/components/terminal/activity-mark"
 import { ProductGlyph } from "@/components/product-logo"
-import { windowLabel, windowProgram, windowActivity } from "@/lib/terminal-activity"
+import { windowLabel, windowProgram, windowActivity } from "@/lib/terminal/activity"
 import {
   canSplit,
   detachWindow,
@@ -70,7 +70,7 @@ import {
   TERMINAL_WINDOW_DRAG,
   type TerminalLayout,
   type SplitDirection,
-} from "@/lib/terminal-layout"
+} from "@/lib/terminal/layout"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -90,7 +90,8 @@ import { MissingOrError, MissingScreen } from "@/components/missing-thing"
 import { moduleOff } from "@/components/missing-thing-model"
 import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { ResizeHandle } from "@/components/resize-handle"
-import { EmptyState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 

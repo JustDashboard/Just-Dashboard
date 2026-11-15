@@ -18,7 +18,7 @@ import { ProductGlyph, hasProductLogo, issuerProduct } from "@/components/produc
 import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { stateWord } from "@/components/docker/container-cells"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { CertificateReading, ROUTE_LABEL, ROUTE_TONE } from "@/components/deploy/vocabulary"
 
 /** A live container of the release, as the map draws it. */
@@ -66,7 +66,7 @@ type Edge = {
  * How the live release runs, drawn as three lanes: the names it answers to,
  * the containers that answer, and where they keep what must survive them —
  * with a wire between each pair in the wiring vocabulary the rest of the
- * product speaks (`deploy/wire`, the database fleet's map).
+ * product speaks (`components/wire/wire`, the database fleet's map).
  *
  * The overview's picture is how a release is *made* — source, release,
  * runtime, domains. This is how it *runs*: which container a hostname's

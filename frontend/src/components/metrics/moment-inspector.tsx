@@ -8,7 +8,7 @@ import {
   subscribeCrosshair,
   pinCrosshair,
   unpinCrosshair,
-} from "@/lib/metrics-crosshair"
+} from "@/lib/metrics/crosshair"
 import { timestamp } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 

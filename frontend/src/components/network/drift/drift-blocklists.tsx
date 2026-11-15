@@ -5,7 +5,7 @@ import { ProductLogo } from "@/components/product-logo"
 import { Status, type DotTone } from "@/components/status-dot"
 import { ShieldCheck } from "@/components/icons"
 import { plural } from "@/lib/format"
-import { blocklistProduct, type DriftReport } from "@/lib/network-drift"
+import { blocklistProduct, type DriftReport } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { ShortDigest } from "@/components/network/drift/marks"
 

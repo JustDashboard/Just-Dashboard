@@ -38,7 +38,7 @@ import type {
   DeploymentTriggerOutcome,
 } from "@/lib/types"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Disclosure,
   Field,
@@ -55,9 +55,10 @@ import { Panel, Well } from "@/components/panel"
 import { ProductGlyph, ProductGlyphs, ProductLogo, hostProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -70,8 +71,8 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Textarea } from "@/components/ui/textarea"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { SettingSection } from "@/components/settings/setting-card"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { humanize, isActiveRun } from "@/components/deploy/vocabulary"
 import { useProject } from "@/components/deploy/project-context"
 import type { Automation } from "@/components/deploy/settings/automation/use-automation"

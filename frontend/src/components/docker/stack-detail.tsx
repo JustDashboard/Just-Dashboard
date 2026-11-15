@@ -40,7 +40,7 @@ import { ROOMY_BESIDE_RAIL, WIDE_BESIDE_RAIL } from "@/components/docker/beside-
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
 import { COMPOSE_ACTIONS, type ComposeActionKey } from "@/components/docker/stack-state"
 import { StackCompose, useComposeDraft } from "@/components/docker/stack-compose"
@@ -69,7 +69,7 @@ import {
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconAction } from "@/components/icon-action"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import {
@@ -79,9 +79,11 @@ import {
   imageProduct,
   imageProducts,
 } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"

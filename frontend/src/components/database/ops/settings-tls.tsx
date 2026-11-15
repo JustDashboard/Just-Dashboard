@@ -19,16 +19,12 @@ import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingPicture } from "@/components/settings/setting-picture"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { Field, FormFact, FormNote, InfoTip } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"

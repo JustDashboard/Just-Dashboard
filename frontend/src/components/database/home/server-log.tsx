@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { get } from "@/lib/api"
-import { LEVEL_MARK, type LogLevel } from "@/lib/log-filter"
-import { formatLogTime } from "@/lib/log-view"
+import { LEVEL_MARK, type LogLevel } from "@/lib/log/filter"
+import { formatLogTime } from "@/lib/log/view"
 import { plural, timestamp } from "@/lib/format"
 import type { DbLogSource, DbLogSources, LogLine } from "@/lib/types"
 import { cn } from "@/lib/utils"

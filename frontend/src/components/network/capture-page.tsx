@@ -12,12 +12,14 @@ import {
   Download,
   StopCircle,
 } from "@/components/icons"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Detail, DetailList, Page, PageContext } from "@/components/page"
+import { FactDot, HostIdentity } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -33,7 +35,7 @@ import {
   captureReading,
   type CaptureList,
   type CaptureRun,
-} from "@/lib/network-captures"
+} from "@/lib/network/captures"
 import {
   captureFilter,
   captureLine,
@@ -41,7 +43,7 @@ import {
   familyWord,
   neighbours,
   startedApart,
-} from "@/lib/network-runs-view"
+} from "@/lib/network/runs-view"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import type { NetworkLink } from "@/lib/types"
 import {

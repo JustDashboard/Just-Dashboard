@@ -11,13 +11,9 @@ import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { Switch } from "@/components/ui/switch"
 import { ConfirmDialog } from "@/components/confirm-dialog"
-import { WireHost, WireMark } from "@/components/deploy/wire"
-import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { WireHost, WireMark } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { forwardingNeeds, forwardingReading, needProduct } from "./route-reading"
 
 type Family = "ipv4" | "ipv6"

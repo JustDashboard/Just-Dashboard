@@ -40,7 +40,7 @@ import {
   runPromotion,
   type ProjectState,
 } from "@/components/deploy/vocabulary"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { serviceProduct } from "@/components/deploy/service-product"
 import { replicaReading } from "@/components/deploy/replicas-model"
 

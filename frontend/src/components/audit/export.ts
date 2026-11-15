@@ -1,5 +1,5 @@
 import type { AuditEntry } from "@/lib/types"
-import { csvCell } from "@/lib/metrics-export"
+import { csvCell } from "@/lib/metrics/export"
 
 /** The most one request for the trail may ask for (`auditPageMax` on the server). */
 export const EXPORT_PAGE = 500

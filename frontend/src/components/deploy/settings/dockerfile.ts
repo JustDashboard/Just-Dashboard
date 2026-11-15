@@ -62,7 +62,7 @@ function argumentPieces(rest: string): DockerfilePiece[] {
 
 /**
  * A Dockerfile as lines of coloured pieces, split by shape the way
- * `lib/log-tokens.ts` splits a log line. A line continued with a backslash
+ * `lib/log/tokens.ts` splits a log line. A line continued with a backslash
  * keeps the instruction it belongs to: its next line is arguments, not a new
  * instruction.
  */

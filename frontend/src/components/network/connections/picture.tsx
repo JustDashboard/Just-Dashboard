@@ -10,9 +10,9 @@ import { useViewState } from "@/lib/view-state"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { ProductGlyph, hasProductLogo, processProduct } from "@/components/product-logo"
 import { portsHref } from "@/components/proxy/ports-list"
-import { WireHost, WireMark } from "@/components/deploy/wire"
-import { Sparkline } from "@/components/metrics/sparkline"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireHost, WireMark } from "@/components/wire/wire"
+import { Sparkline } from "@/components/sparkline"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import {
   PLACES,
   beat,

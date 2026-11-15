@@ -6,8 +6,8 @@ import { plural, rate } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, ProductGlyphs, imageProduct } from "@/components/product-logo"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import { LinkGlyph, carrying, pulseDuration } from "@/components/network/marks"
 import { flowNeighbours, nodeFlows } from "@/components/network/topology-reading"
 import { deviceHref } from "@/components/network/interfaces/device-facts"
@@ -33,7 +33,7 @@ type Node = {
 
 /**
  * The server as a router, drawn in the wiring vocabulary every picture in the
- * product speaks (`deploy/wire`, the runtime map's lanes): what is outside it
+ * product speaks (`components/wire/wire`, the runtime map's lanes): what is outside it
  * on the left — the internet through its uplink, the tailnet, each WireGuard
  * or tunnel to another site — this server in the middle with its firewall
  * and gateway as its facts, and the networks it is the gateway of on the

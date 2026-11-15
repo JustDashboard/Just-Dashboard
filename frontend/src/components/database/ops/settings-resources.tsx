@@ -8,13 +8,9 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { LimitField, useContainerPeaks } from "@/components/deploy/settings/limit-field"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { FieldRow, FormFact, FormNote } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { CouldNotRead, FactsSkeleton } from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
 import { EngineMark } from "@/components/database/kit"

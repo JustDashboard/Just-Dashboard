@@ -799,7 +799,7 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   "status ≥ 500 and not 503" is the range meant — and different keys AND. `Match` is text, level and
   fields; the sites that test the text before parsing call `MatchParsed`. A predicate-only filter is not
   `Empty()`, so it takes the filtered prefill and `meta.filtered` is true. The browser evaluates the same
-  grammar over a live tail (`matchFields` in `lib/log-filter.ts`), and `testdata/predicates.json` is the
+  grammar over a live tail (`matchFields` in `lib/log/filter.ts`), and `testdata/predicates.json` is the
   one set of vectors both are held to.
 - **A search can answer "who" as well as "which lines"** (`facets.go`), counted in the same pass that
   collects the matches, from the same lens reading, so a bar in Insights and the lines under it cannot
@@ -919,17 +919,17 @@ lines the server replays that are already on screen rather than appending them a
 stops the reconnecting: "Stopped", with a Reconnect button, since a container that exited would otherwise
 replay its last lines once a second.
 
-`log-console.tsx` draws each line as columns — a level edge, the line number, the time (`lib/log-view.ts`:
+`log-console.tsx` draws each line as columns — a level edge, the line number, the time (`lib/log/view.ts`:
 off, clock, date, UTC, or the delta since the line above), then the **event word the lens named** in the
-level's column (`eventMeta` in `lib/log-lenses.ts`: "auth failed" says more than "err"), sized by
+level's column (`eventMeta` in `lib/log/lenses.ts`: "auth failed" says more than "err"), sized by
 `eventColumnFor` to the longest word on screen within 6–17 characters, or the level's word where no line
-names an event (`LEVEL_MARK` in `lib/log-filter.ts`, `LEVEL_WORD` in `log-text.tsx`); with Colour on, up
+names an event (`LEVEL_MARK` in `lib/log/filter.ts`, `LEVEL_WORD` in `log-text.tsx`); with Colour on, up
 to three of the lens's columns for values its text buries (a Postgres line's duration, user and
 database, drawn by `field-value.tsx`), shown only while some line on screen has one and only from 900 px
 of the console's own width — one drawn as its text (an upstream, a jail, a namespace) as wide as its
 longest value on screen within 6–24 characters (`columnWidthFor`), an address, a duration or a status by
 its kind; the journal unit or a stack's service in its lane's hue; then the message
-drawn by its shapes: `lib/log-tokens.ts` cuts the text into spans (time, host, program, pid, level, key,
+drawn by its shapes: `lib/log/tokens.ts` cuts the text into spans (time, host, program, pid, level, key,
 string, number, address, URL, path, method, status, id, failure and success words) over the original
 string, so the server's match ranges still intersect them, and `log-text.tsx` colours them from one map
 (design-system §14). In a narrow pane the message moves to a line of its own under the event word and
@@ -950,10 +950,10 @@ it ruled off every timer that fired; and in Live, consecutive repeats — same s
 words, the leading time aside — are one row with `×N` (the Repeats toggle), keeping the first line's key
 so an opened row stays open as the run grows.
 Tokens are cached by text, because a server's log repeats itself, and each row is memoised and keyed by
-its arrival (`lib/log-line-key.ts`, a `WeakMap` sequence on the line object) rather than its buffer
+its arrival (`lib/log/line-key.ts`, a `WeakMap` sequence on the line object) rather than its buffer
 position, because the live tail appends and trims: evicting old lines at the 4,000-line cap reuses the
 retained rows and keeps the opened line attached to its text, the weak keys hold no evicted history, and
-identical messages from separate arrivals keep separate keys. A "Colour" toggle, persisted with Wrap, Time and Repeats in `lib/log-view.ts`, shows every line exactly as
+identical messages from separate arrivals keep separate keys. A "Colour" toggle, persisted with Wrap, Time and Repeats in `lib/log/view.ts`, shows every line exactly as
 written. Those four are one group with one edge, each a segment filled while it is on, their words
 shown from a 48rem console; Pause, Copy and Clear after it are glyphs with no ground of their own,
 where a row of loose buttons, some on a ground and some not, read as four kinds of control. Below a
@@ -976,7 +976,7 @@ its family's colour, events by their tone); a press on a column narrows the wind
 across several to the span. At rest its head names the busiest column; under the pointer it reads the
 column out by series, in their colours.
 
-**A lens's presentation is data** (`lib/log-lenses.ts`, types only from `lib/log-fields.ts`, which names
+**A lens's presentation is data** (`lib/log/lenses.ts`, types only from `lib/log/fields.ts`, which names
 each attr's label and kind): per lens, its event labels and tones (`mark: false` for the high-volume
 neutral ones — a request, a connection — which keep the level word; `divider` for a run's start:
 systemd's `started` and an application's `startup`; a hint under 25 characters, one line of a tile),
@@ -1006,7 +1006,7 @@ list: the tiles, the chart's legend and the level chips already count them. A ne
 last answer on screen, dimmed and `aria-busy`, until the new one lands, and nothing remounts; an answer
 is never held over a change of source.
 `lens-readings.tsx` is the readings: those on one key share a search, those on levels another, and a
-distinct count asks on its own (`lib/log-insights.ts`), read again each minute over the lens's window
+distinct count asks on its own (`lib/log/insights.ts`), read again each minute over the lens's window
 and independent of the filter on screen and of the view, so they hold still while the reader moves
 between Live, History and Insights; each figure counts up as it lands (`NumberTicker`) and glides to the
 next minute's. Insights draws none of the lens's readings, which would be a second answer over another

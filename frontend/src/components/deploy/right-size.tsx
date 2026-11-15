@@ -10,7 +10,7 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentEnvironmentConfiguration } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Cpu, Layers, Box } from "@/components/icons"
-import { HUE } from "@/components/overview/readings"
+import { HUE } from "@/components/live-figure"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { Status, StatusDot } from "@/components/status-dot"
@@ -38,7 +38,7 @@ import {
   type FleetSizing,
   type SizingVerdict,
 } from "@/components/deploy/sizing-model"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 
 /**
  * Applying a suggestion is the configuration write Runtime settings make:

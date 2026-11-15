@@ -2,7 +2,7 @@
 
 import { rate } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { Sparkline } from "@/components/sparkline"
 import type { NetworkLivePoint } from "@/lib/types"
 
 export const RX = "var(--chart-5)"

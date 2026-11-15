@@ -2612,13 +2612,13 @@ permanently under the danger rule. Starting a run goes through `useProjectStart`
 own.
 
 **The project's pages are on the sidebar, not in a strip above them.** `ProjectShell` publishes them
-through `useNavScope` (`components/nav-scope.tsx`) and the rail draws a third level inside Deployments:
+through `useNavScope` (`components/shell/nav-scope.tsx`) and the rail draws a third level inside Deployments:
 Overview, Deployments, Logs, Runtime, Console, Players and Server settings for a game server, then a
 Settings group of the nine settings pages, each marked while it holds a saved change that is not live
 yet (`PENDING_KIND_PAGE` maps a pending change's kind to its page). The panel's head is the project's
 favicon or product and its name as written, and a run page keeps the project's panel with Deployments
 marked current, because that is where a run is opened from. The strip of eight tabs and
-the settings rail beside them are both gone; the lists themselves live in `components/nav.ts` as
+the settings rail beside them are both gone; the lists themselves live in `components/shell/nav.ts` as
 `PROJECT_NAV` and `PROJECT_SETTINGS_NAV`, which is also what the rail draws from the route alone until
 the project's read lands. Stop and Restart need the destructive capability, as the Docker container
 verbs do, and each asks first, since either is one press from a fleet card's menu; the menu hides

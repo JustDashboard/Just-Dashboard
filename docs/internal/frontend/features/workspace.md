@@ -77,7 +77,7 @@ embed; the shape library is kept on the server and packs from libraries.excalidr
 downloaded by it; Describe a diagram writes Mermaid through the assistant's provider; the menu and
 the empty canvas are the dashboard's
 
-**Implementation:** `components/boards/`, `lib/boards.ts`, `lib/board-*.ts`,
+**Implementation:** `components/boards/`, `lib/board/boards.ts`, `lib/board/*.ts`,
 `lib/drawing-preview.ts`; [drawing contract](../../boards.md)
 
 ## `/remote-desktop`
@@ -158,7 +158,7 @@ network), Caddy on its port with the certificate's issuer, and Next.js and Go on
 ports with a state dot — wired with pulsing beams that go still and amber during a restart, and the
 run record under it with its stages and whole transcript, followed across the restart it describes.
 Then the settings as one centred column of sections, the shape a project's settings have
-(`components/settings-column.tsx` around `SettingSection`): Certificate (three cards with their
+(`components/settings/settings-column.tsx` around `SettingSection`): Certificate (three cards with their
 products' logos; picking one carries the address, listening interface and allowlist with it, filled
 from the machine's own tailnet identity), Address, Access, Sessions, Features. Each head carries
 what the section currently is and *Edited* while it holds an unapplied change; no sentence stands
@@ -182,7 +182,7 @@ session_required`
 
 **Implementation:** `components/config/request-path.tsx`, `components/config/allowlist.tsx`,
 `components/config/restart-progress.tsx`, `components/config/uninstall.tsx`,
-`components/config/usage-ping.tsx`, `components/settings-column.tsx`,
+`components/config/usage-ping.tsx`, `components/settings/settings-column.tsx`,
 `components/run-transcript.tsx`, `components/run-phases.tsx`, `hooks/use-self-config.tsx`,
 `hooks/use-self-uninstall.tsx`, `lib/uninstall.ts` (`system.admin` only)
 
@@ -327,7 +327,7 @@ one line that says where it stands (*15 of 15 shown · 6 purposes*) with *Ask me
 experimental, as a grid of lit cards that throw their sections, over the rail's entries in their
 groups as full-width switch rows on hairlines, one draft saved through the floating Save bar. No page opens on tiles: each
 figure the old readings rows gave is said by a picture, a chip or a verdict, and every picture
-speaks the deployment pages' and Configuration's wiring vocabulary (`deploy/wire`, `AnimatedBeam`) —
+speaks the deployment pages' and Configuration's wiring vocabulary (`components/wire/wire`, `AnimatedBeam`) —
 a wire pulses while what it joins is in use, goes amber where something should be looked at, and is
 dashed where it has never carried anything. The reads behind every wire, chip and verdict are
 `components/account/access.ts` (unit-tested). Profile: the display name in the account's identity
@@ -511,8 +511,8 @@ of source that is absent is one line in the rail with the thing's mark and the p
 more (`MissingLine`, worded by `logKindMissing`): "Docker is not running" to `/docker`, "PM2 is
 not installed" to `/processes/pm2`, "No systemd on this server" to `/processes/services`
 
-**Implementation:** logs page, `components/logs/`, `lib/log-filter.ts`, `lib/log-lenses.ts`,
-`lib/log-sources.ts`; checked by `tests/browser/logs-ui.spec.ts`, `logs-lens.spec.ts`,
+**Implementation:** logs page, `components/logs/`, `lib/log/filter.ts`, `lib/log/lenses.ts`,
+`lib/log/sources.ts`; checked by `tests/browser/logs-ui.spec.ts`, `logs-lens.spec.ts`,
 `logs-views.spec.ts`, `logs-handoff.spec.ts`, `logs-buffer.spec.ts` and `missing-states.spec.ts`;
 backend contract in
 [`../backend/docker-files-logs.md`](../../backend/docker-files-logs.md#logs)
@@ -585,7 +585,7 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   twice. A session is labelled after its
   *current* window — the one last on screen in any browser (the pane sends a `focus` frame), or
   failing that the newest. The page offers no renaming; a name given through the API (`named`) is
-  still shown as given. `lib/terminal-activity.ts` holds the rule
+  still shown as given. `lib/terminal/activity.ts` holds the rule
   once for the strip and the rail. The state arrives two ways: polled with the window list and the
   session listing (every five seconds), and pushed over each visited window's attach socket as a
   `state` frame the moment it changes, which is what makes a tab's mark and title move with the
@@ -639,7 +639,7 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   the fade alone read as a gap rather than as more tabs. A vertical mouse wheel scrolls the strip sideways,
   the active tab scrolls itself into view, and **New window** sits outside the scroller, right after
   the last visible tab, so it never scrolls away with the tabs it adds to.
-- **Directional splits** use `lib/terminal-layout.ts`'s binary layout trees, grouped per session in
+- **Directional splits** use `lib/terminal/layout.ts`'s binary layout trees, grouped per session in
   `terminal.layouts`. Each new split adds a direct-PTY window above/below/left/right of the focused
   leaf; a new window or agent launch creates an independent tab. Closed leaves collapse their parent,
   and a listing from another browser reconciles missing/new windows. Each group's optional `tab`
@@ -762,10 +762,10 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 - `ResizeHandle` is an invisible eight-pixel hit target over each panel's own border. The border is the
   visual affordance, so the layout draws no extra divider. Arrow keys and double-click reset remain the
   non-drag alternatives.
-- `lib/terminal-settings.ts` keeps scrollback and behaviour in localStorage — on the screen, not the
+- `lib/terminal/settings.ts` keeps scrollback and behaviour in localStorage — on the screen, not the
   account, because it belongs to the machine you are sitting at. Font metrics are deliberately fixed: user-selectable line height,
   spacing and fonts made the emulator grid cease to be a stable terminal grid.
-- `lib/terminal-keymap.ts` is every shortcut, all rebindable. A chord must get past the browser, the page
+- `lib/terminal/keymap.ts` is every shortcut, all rebindable. A chord must get past the browser, the page
   and the shell, and no default suits everybody. Ctrl+Alt is the default family (neither browser nor shell
   wants it); Ctrl+Shift is the emulator's own. Matching is on `event.code`, the **physical** key, so a binding recorded on QWERTY
   survives a Romanian layout. Actions carry a **scope** — `navigation` is the page's (it alone knows the

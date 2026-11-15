@@ -19,7 +19,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { hasProductLogo, ProductGlyph } from "@/components/product-logo"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { ProjectFavicon } from "@/components/project-mark"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
 import type { SearchKind } from "./model"
 

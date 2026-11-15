@@ -9,7 +9,7 @@ outside its role's column is noise: fold it into the nearest role when the page 
 | Page | section gap | 24, 32 from `md` | `Page` (`gap-6 md:gap-8`) | `components/page.tsx` |
 | Page | workbench | 0, 12 from `lg`, no gap | `<Page fill="workspace">` (coming, WP-09; hand-spelled today) | `components/page.tsx` |
 | Section | head to body | 12 under the hairline | `PanelHeader plain` (`pb-3`) | `components/panel.tsx` |
-| Settings | rhythm | 32 between sections, 16 head to fields, 20 between fields | `SettingsColumn`, `FormSection` | `components/settings-column.tsx`, `components/form.tsx` |
+| Settings | rhythm | 32 between sections, 16 head to fields, 20 between fields | `SettingsColumn`, `FormSection` | `components/settings/settings-column.tsx`, `components/form.tsx` |
 | Surface | gutter | 20 | `px-5` | `Panel`, `Row`, `StatTile` |
 | Surface | overlay padding | 16 | `p-4` | sheet, popover, a modal's body, a pane |
 | Surface | dialog padding | 24 | `p-6` | `ui/dialog.tsx` |

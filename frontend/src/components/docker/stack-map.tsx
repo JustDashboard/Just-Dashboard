@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { pulseDuration } from "@/components/network/marks"
 import { looksLikeDatabase } from "@/components/docker/shared"
 import {

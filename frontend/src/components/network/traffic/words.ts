@@ -9,7 +9,7 @@ import {
   type Percentiles,
   type TCPLatency,
   type TCPPoint,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import type { EBPFView, ShapeDevice } from "@/lib/types"
 import type { DotTone } from "@/components/status-dot"
 import { formatKbit } from "./shaping-math"

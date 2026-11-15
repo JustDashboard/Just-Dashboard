@@ -11,7 +11,7 @@ import {
   type RdComputerView,
 } from "@/lib/remote-desktop"
 import { cn } from "@/lib/utils"
-import { ChoiceRow } from "@/components/flow"
+import { ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { VerbMenu } from "@/components/verbs"

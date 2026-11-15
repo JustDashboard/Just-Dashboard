@@ -4,8 +4,9 @@ import { useState } from "react"
 import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingPanel } from "@/components/state"
-import { FilterChip } from "@/components/tabs"
+import { EmptyNote } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
+import { FilterChip } from "@/components/chips"
 import {
   Table,
   TableBody,

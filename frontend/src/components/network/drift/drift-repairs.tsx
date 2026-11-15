@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { DiffCount } from "@/components/docker/stack-diff"
 import { diffCounts, lineDiff } from "@/components/docker/stack-views"
 import { plural } from "@/lib/format"
-import type { DriftReport, DriftRow, OwnedRepair } from "@/lib/network-drift"
+import type { DriftReport, DriftRow, OwnedRepair } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { DriftMark, ShortDigest } from "@/components/network/drift/marks"
 

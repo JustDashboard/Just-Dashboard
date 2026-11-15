@@ -13,10 +13,11 @@ import {
   Trash,
 } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Address } from "@/components/security/marks"
-import { EmptyState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { accountHref, reachesRoot, signInSummary } from "@/components/system-users/access"
 import { ActivityPanel, HistoryPanel } from "@/components/system-users/account-activity"

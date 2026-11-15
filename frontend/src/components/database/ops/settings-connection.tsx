@@ -6,13 +6,9 @@ import { errorMessage, put } from "@/lib/api"
 import { calendarDate, timestamp } from "@/lib/format"
 import type { DbConnection } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import {

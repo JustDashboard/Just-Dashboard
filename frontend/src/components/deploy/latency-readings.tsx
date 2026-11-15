@@ -6,8 +6,8 @@ import { Stopwatch } from "@/components/icons"
 import { LATENCY_SHARE } from "@/lib/latency-words"
 import { latency, latencyTone } from "@/lib/requests"
 import { cn } from "@/lib/utils"
-import { HUE } from "@/components/overview/readings"
-import { WireMark } from "@/components/deploy/wire"
+import { HUE } from "@/components/live-figure"
+import { WireMark } from "@/components/wire/wire"
 
 /**
  * How long things took, as the sentence a person would say: half were inside

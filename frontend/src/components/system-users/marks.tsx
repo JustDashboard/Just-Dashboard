@@ -1,7 +1,7 @@
 "use client"
 
 import { SettingsGear, Shield, ShieldCheck, UserMinus } from "@/components/icons"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import type { SystemUser } from "@/lib/types"
 

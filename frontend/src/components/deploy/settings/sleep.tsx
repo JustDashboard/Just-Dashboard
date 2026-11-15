@@ -15,8 +15,8 @@ import {
   sleepPolicyLine,
   type SleepDraft,
 } from "@/components/deploy/sleep-model"
-import { FactsLine } from "@/components/deploy/settings/facts-line"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { FactsLine } from "@/components/settings/facts-line"
+import { SettingSection } from "@/components/settings/setting-card"
 
 /** The Runtime form's field ids for the sleep terms, as the server's refusal names them. */
 export const SLEEP_FIELD_IDS: Record<string, string> = {

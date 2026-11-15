@@ -3,7 +3,7 @@
 import { Box } from "@/components/icons"
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { timeAt } from "@/components/bar-reading-model"
-import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
+import { HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
 import { ProductGlyph, containerProduct, imageProduct } from "@/components/product-logo"
 import { DOT_COLOR, Status, type DotTone } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"

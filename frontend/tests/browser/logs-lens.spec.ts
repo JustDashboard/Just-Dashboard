@@ -8,7 +8,7 @@ import { risen } from "./risen"
  * a record's continuation folded under it, a repeat counted rather than
  * printed, the lens's questions one press each and sent to the server, a line
  * opened where it is, and Insights ranking what the window adds up to. The
- * lens's own rules are unit-tested (`src/lib/log-lenses.test.js`,
+ * lens's own rules are unit-tested (`src/lib/log/lenses.test.js`,
  * `log-insights.test.js`); this checks what reaches the reader and what
  * reaches the server.
  */

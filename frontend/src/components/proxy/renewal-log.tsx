@@ -3,12 +3,12 @@
 import { useMemo } from "react"
 import { get } from "@/lib/api"
 import type { CertbotState, LogSource } from "@/lib/types"
-import { fileSource, journalSource } from "@/lib/log-sources"
+import { fileSource, journalSource } from "@/lib/log/sources"
 import { usePoll } from "@/hooks/use-poll"
 import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Hold, LoadingRows } from "@/components/state"
+import { Hold, LoadingRows } from "@/components/loading"
 
 /** certbot's own log, where every run — the timer's and a click's — writes what it did. */
 export const LETSENCRYPT_LOG = "/var/log/letsencrypt/letsencrypt.log"

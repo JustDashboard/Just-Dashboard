@@ -3,7 +3,7 @@
 import { Plus, RefreshClockwise, Route } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { NetworkRouting } from "@/lib/types"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"

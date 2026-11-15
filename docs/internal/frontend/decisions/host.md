@@ -635,7 +635,7 @@ and with its hour like the four, so the band keeps the tiles' columns. The hours
 `TileTrend`, which leaves out a line that never moves on a scale of its own; the page's own copy of
 it had drawn a steady network as a band filled to the top.
 What made the four "alive" is the sanctioned motion and nothing new: each figure is a `NumberTicker`
-(`LiveFigure` in `components/overview/readings.tsx`) that counts up once on arrival and then glides
+(`LiveFigure` in `components/live-figure.tsx`) that counts up once on arrival and then glides
 to each two-second frame, its unit held outside the count so 980 KB/s becoming 1.0 MB/s swaps
 rather than counting down; the CPU figure carries a bar per core from the same frame (the busiest of
 neighbours when there are more than 32), which says whether 90% is every core or one pinned; and

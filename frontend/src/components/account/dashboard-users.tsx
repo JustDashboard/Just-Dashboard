@@ -10,12 +10,13 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { DimActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -37,11 +38,11 @@ import {
   peopleVerdict,
   type UserScope,
 } from "@/components/account/access"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { FactDot, HostIdentity } from "@/components/identity-header"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
-import { AvatarRun, UserAvatar, displayNameOf } from "@/components/account/user-avatar"
+import { AvatarRun, UserAvatar, displayNameOf } from "@/components/user-avatar"
 
 export function useDashboardUsers(enabled = true) {
   return usePoll(

@@ -2,10 +2,11 @@
 
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
-import type { PathResult } from "@/lib/network-investigator-types"
+import type { PathResult } from "@/lib/network/investigator-types"
 import { PathReport } from "@/components/network/path-report"
 import { SidePanel } from "@/components/side-panel"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 /** One published binding, as the inbound path is asked for it. */

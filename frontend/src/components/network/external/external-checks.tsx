@@ -23,7 +23,7 @@ import {
   stageReading,
   type ExternalCheck,
   type ExternalVantage,
-} from "@/lib/network-external"
+} from "@/lib/network/external"
 import {
   checkOutcome,
   checkTarget,

@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 
 /**
  * "There is a newer version", where the operator will see it.

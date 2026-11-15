@@ -31,9 +31,11 @@ import type {
 } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { ChoiceList, GroupRule } from "@/components/flow"
-import { EmptyNote, EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
-import { ChipCount, ChipStrip, tabClasses } from "@/components/tabs"
+import { ChoiceList, GroupRule } from "@/components/choice-row"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { LoadingPanel, LoadingRows } from "@/components/loading"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount, ChipStrip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Status } from "@/components/status-dot"
 import { VerbActions } from "@/components/verbs"
@@ -64,8 +66,8 @@ import {
   runFailed,
   runTitle,
   sourceProduct,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { Insights } from "@/components/deploy/insights"
 import { deployWithCurrentSettings, runPlanIsStale } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
@@ -73,7 +75,7 @@ import { useReleaseWatch } from "@/components/deploy/release-watch"
 import { watchOpen } from "@/components/deploy/rollback-watch-model"
 import { PromoteDialog } from "@/components/deploy/promote-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { RunRow } from "@/components/deploy/run-row"
 import { RunStrip } from "@/components/deploy/run-marks"
 import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run-verbs"

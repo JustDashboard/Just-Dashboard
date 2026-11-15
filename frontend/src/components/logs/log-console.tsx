@@ -38,9 +38,9 @@ import {
   lineValue,
   segmentLine,
   type LogLevel,
-} from "@/lib/log-filter"
-import { eventMeta } from "@/lib/log-lenses"
-import { fieldOf, type LogFieldKind } from "@/lib/log-fields"
+} from "@/lib/log/filter"
+import { eventMeta } from "@/lib/log/lenses"
+import { fieldOf, type LogFieldKind } from "@/lib/log/fields"
 import {
   EVENT_WORD,
   LEVEL_WORD,
@@ -50,8 +50,8 @@ import {
 } from "@/components/logs/log-text"
 import { FieldValue } from "@/components/logs/field-value"
 import { buildRows, columnWidthFor, eventColumnFor, type Row } from "@/components/logs/logs-model"
-import { LOG_TIMES, TIME_WIDTH, formatLogTime, setLogView, useLogView } from "@/lib/log-view"
-import type { LogTime } from "@/lib/log-view"
+import { LOG_TIMES, TIME_WIDTH, formatLogTime, setLogView, useLogView } from "@/lib/log/view"
+import type { LogTime } from "@/lib/log/view"
 import { useMetrics } from "@/hooks/use-metrics"
 import type { LogFilterState } from "@/components/logs/types"
 import { PaneFooter } from "@/components/panel"

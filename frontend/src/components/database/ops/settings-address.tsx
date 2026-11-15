@@ -7,14 +7,10 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { DbConnection } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
-import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingPicture } from "@/components/settings/setting-picture"
+import { WireHost, WireMark, WireNode } from "@/components/wire/wire"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"

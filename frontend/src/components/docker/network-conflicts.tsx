@@ -10,7 +10,7 @@ import {
   type NetworkConflict,
 } from "@/lib/docker-networks"
 import { usePoll } from "@/hooks/use-poll"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"

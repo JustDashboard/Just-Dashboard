@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 
 export type RailTunnel = { name: string; line: string; tone: DotTone; archived: boolean }

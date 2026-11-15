@@ -6,13 +6,13 @@ import { notify } from "@/lib/toast"
 import type { DashboardUser } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { Field, FieldRow, InfoTip } from "@/components/form"
-import { useSaveBarEntry } from "@/components/deploy/settings/save-bar"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { FactDot } from "@/components/metrics/host-identity"
-import { EditedTag } from "@/components/settings-column"
+import { useSaveBarEntry } from "@/components/settings/save-bar"
+import { SettingSection } from "@/components/settings/setting-card"
+import { FactDot } from "@/components/identity-header"
+import { EditedTag } from "@/components/settings/settings-column"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
+import { UserAvatar, displayNameOf } from "@/components/user-avatar"
 
 /** The square the picture is drawn into before upload. */
 const AVATAR_EDGE = 256

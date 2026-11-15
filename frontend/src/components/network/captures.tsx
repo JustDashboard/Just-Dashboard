@@ -4,8 +4,8 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
-import { WireMark } from "@/components/deploy/wire"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { WireMark } from "@/components/wire/wire"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import {
   Crosshair,
   Download,
@@ -21,10 +21,12 @@ import {
   Wrench,
   type Icon,
 } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { PageContext, SearchInput } from "@/components/page"
+import { FactDot, HostIdentity } from "@/components/identity-header"
+import { PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -45,13 +47,13 @@ import {
   type CaptureDraft,
   type CaptureList,
   type CaptureRun,
-} from "@/lib/network-captures"
+} from "@/lib/network/captures"
 import {
   captureLine,
   captureMatches,
   captureStateWord,
   captureTotals,
-} from "@/lib/network-runs-view"
+} from "@/lib/network/runs-view"
 import type { NetworkLink } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { CaptureCreate } from "./capture-create"

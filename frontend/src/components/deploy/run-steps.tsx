@@ -12,10 +12,10 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { Section } from "@/components/page"
+import { Section } from "@/components/section"
 import { Group } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import { ChipCount } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Disclosure } from "@/components/form"
 import { TranscriptRow } from "@/components/transcript-line"

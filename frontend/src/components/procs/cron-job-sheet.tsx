@@ -5,7 +5,7 @@ import Link from "next/link"
 import { Clock, Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { describeCron, nextCronRun, supportsCronTimeZone } from "@/lib/cron"
-import { exactValue } from "@/lib/log-filter"
+import { exactValue } from "@/lib/log/filter"
 import {
   countdown,
   cronLineName,
@@ -17,10 +17,10 @@ import {
 import type { CronJob } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ShellWords } from "@/components/deploy/run-evidence"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { IconAction } from "@/components/icon-action"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Well } from "@/components/panel"
 import { ProductLogo, programProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"

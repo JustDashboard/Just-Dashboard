@@ -229,7 +229,7 @@ closed supported actions; broader zone/view/client editing remains outside this 
 Record/client controls in `service-policy-form.tsx` extend that scope with A/AAAA local overrides,
 explicit unsigned Primary-zone records and TTL, and existing Pi-hole client group assignments.
 The closed actions are `override_add`, `override_remove`, `record_add`, `record_remove` and
-`client_groups`, validated by `lib/network-dns-service-policy.ts` and the retained DTO parser.
+`client_groups`, validated by `lib/network/dns-service-policy.ts` and the retained DTO parser.
 Authoritative zone reads show unsupported RR types without offering edits. Empty group membership
 is an explicit request. Drafts survive field/native refusals; error summaries focus and link to the
 associated controls. Retained review polls `/changes/{id}/current` for the selected native policy,

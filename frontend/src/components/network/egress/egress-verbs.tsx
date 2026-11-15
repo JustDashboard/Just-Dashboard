@@ -10,7 +10,7 @@ import {
   egressPolicySummary,
   type EgressGroup,
   type EgressView,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import { useConfirm } from "@/components/confirm-dialog"
 import type { Verb } from "@/components/verbs"
 import {

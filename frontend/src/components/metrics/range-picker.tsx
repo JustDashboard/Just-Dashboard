@@ -14,7 +14,7 @@ import {
   type MetricsWindow,
   type RangeKey,
   type RangeSpec,
-} from "@/lib/metrics-range"
+} from "@/lib/metrics/range"
 import type { WindowControls } from "@/hooks/use-metrics-window"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"

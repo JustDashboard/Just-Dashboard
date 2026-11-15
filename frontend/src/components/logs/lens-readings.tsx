@@ -4,14 +4,14 @@ import { useMemo } from "react"
 import { get } from "@/lib/api"
 import type { LogSearchResult } from "@/lib/types"
 import type { LogFilterState } from "@/components/logs/types"
-import { fieldsOf } from "@/lib/log-filter"
+import { fieldsOf } from "@/lib/log/filter"
 import {
   readingFigure,
   readingFilter,
   readingSearches,
   type ReadingFigure,
-} from "@/lib/log-insights"
-import type { LensReading, LogLens } from "@/lib/log-lenses"
+} from "@/lib/log/insights"
+import type { LensReading, LogLens } from "@/lib/log/lenses"
 import {
   READINGS_WINDOWS,
   readingShown,
@@ -19,8 +19,8 @@ import {
   type ReadingsWindow,
 } from "@/components/logs/logs-model"
 import { usePoll } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { useColumnWidth } from "@/hooks/use-column-width"
+import { TileTrend } from "@/components/sparkline"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
 import { NumberTicker } from "@/components/ui/number-ticker"
 
@@ -55,7 +55,7 @@ export type LensReadingsState = {
  * echo of the question.
  *
  * The readings on one key share a search, those on levels share another,
- * and a distinct count asks on its own (`lib/log-insights.ts`), so a lens's
+ * and a distinct count asks on its own (`lib/log/insights.ts`), so a lens's
  * five tiles cost two or three scans, read again each minute. A page with a
  * `StatGrid` of its own takes the tiles from here and draws them into it
  * with `ReadingTile`; `LensReadings` is the grid for a page without one.

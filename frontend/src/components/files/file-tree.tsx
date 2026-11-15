@@ -28,7 +28,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { RowActions } from "@/components/icon-action"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"

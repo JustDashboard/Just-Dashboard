@@ -5,7 +5,7 @@ import type { Listener } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
 import { DashboardMark } from "@/components/backups/marks"
-import { useProjectFavicon } from "@/components/deploy/project-mark"
+import { useProjectFavicon } from "@/components/project-mark"
 import { Status } from "@/components/status-dot"
 import {
   dangerousService,

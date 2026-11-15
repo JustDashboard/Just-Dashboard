@@ -18,7 +18,7 @@ import {
 } from "@/lib/capacity"
 import { Meter, utilisationTone } from "@/components/meter"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Section } from "@/components/page"
+import { Section } from "@/components/section"
 import { Row, RowList } from "@/components/row-list"
 import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
