@@ -46,7 +46,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
         // theirs inset: the group says "focus is in this field", the inset
         // ring says which control has it.
         // No shadow, and the control edge, for the reasons `Input` gives.
-        "group/input-group flex h-11 w-full min-w-0 items-stretch overflow-hidden rounded-md border border-[color:var(--control-edge,var(--input))] bg-input/30 focus-ring-within transition-colors sm:h-9 pointer-coarse:h-11",
+        "group/input-group flex h-11 w-full min-w-0 items-stretch overflow-hidden rounded-md border border-control-edge bg-input/30 focus-ring-within transition-colors sm:h-9 pointer-coarse:h-11",
         "has-[[data-slot=input-group-control][aria-invalid=true]]:border-destructive",
         className,
       )}

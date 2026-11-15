@@ -56,6 +56,13 @@
      the faded spellings of the muted ink resolve to it too (see below). */
   --faint: oklch(0.62 0.0129 286.0665);
   --destructive: oklch(0.6368 0.2078 25.3313);
+  /* The danger button's three opaque steps. White on the token itself is
+     3.8:1, under AA for a 13px label, so the face at rest is the red a sixth
+     of the way to black (5.5:1) and pressed it settles further (8.2:1); the
+     token is its hover. */
+  --destructive-foreground: oklch(1 0 0);
+  --destructive-face: color-mix(in oklab, var(--destructive) 85%, #000);
+  --destructive-active: color-mix(in oklab, var(--destructive) 70%, #000);
 
   /* ---- The brand blue, at rest and lit ------------------------------------
    *
@@ -506,6 +513,9 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-face: var(--destructive-face);
+  --color-destructive-active: var(--destructive-active);
   /* The brand blue and its two interaction steps, so `bg-brand`,
      `bg-brand-hover` and `border-signal` are real utilities. Brand is the
      command face at rest, signal is it lit — see the note above. */

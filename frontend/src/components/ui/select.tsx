@@ -73,7 +73,7 @@ function SelectTrigger({
         variant="outline"
         size={size === "sm" ? "sm" : "default"}
         className={cn(
-          "w-fit min-w-0 justify-between border-[color:var(--control-edge,var(--input))] text-body font-normal data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 *:data-[slot=select-value]:truncate max-sm:h-11 max-sm:text-base pointer-coarse:text-base [&_svg:not([class*='text-'])]:text-muted-foreground",
+          "w-fit min-w-0 justify-between border-control-edge text-body font-normal data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 *:data-[slot=select-value]:truncate max-sm:h-11 max-sm:text-base pointer-coarse:text-base [&_svg:not([class*='text-'])]:text-muted-foreground",
           size === "sm" && "max-sm:h-10",
           className,
         )}

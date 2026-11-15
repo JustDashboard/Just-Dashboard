@@ -27,7 +27,7 @@ import { useFieldControl } from "@/components/form"
  *
  * No shadow: a field is a control on the page, and nothing on the page lifts.
  * The edge is the control edge, the one border that has to reach 3:1 against
- * the ground (WCAG 1.4.11); it falls back to `--input` until that token lands.
+ * the ground (WCAG 1.4.11).
  */
 function Input({ className, type, ...rest }: React.ComponentProps<"input">) {
   // Inside a `Field`: its id, its hint and error ids, and whether it is wrong.
@@ -37,7 +37,7 @@ function Input({ className, type, ...rest }: React.ComponentProps<"input">) {
       type={type}
       data-slot="input"
       className={cn(
-        "h-11 w-full min-w-0 rounded-md border border-[color:var(--control-edge,var(--input))] bg-input/30 px-3 py-1 text-base focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:text-body",
+        "h-11 w-full min-w-0 rounded-md border border-control-edge bg-input/30 px-3 py-1 text-base focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:text-body",
         "aria-invalid:border-destructive aria-invalid:ring-destructive/40 pointer-coarse:h-11",
         className,
         // The zoom guard goes after the caller's classes, so even a prefixed

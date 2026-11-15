@@ -13,8 +13,7 @@ import { hitAreaClasses } from "@/components/ui/button"
  * toggle) is as easy to hit as one inside a row that takes the tap.
  *
  * No shadow, and the track's edge is the control edge, so an unchecked switch
- * reads as a control on the card rather than a dent in it. It falls back to
- * `--input` until the token lands.
+ * reads as a control on the card rather than a dent in it.
  */
 function Switch({
   className,
@@ -28,7 +27,7 @@ function Switch({
       data-slot="switch"
       data-size={size}
       className={cn(
-        "peer group/switch inline-flex shrink-0 items-center rounded-full border border-[color:var(--control-edge,var(--input))] focus-ring transition-all disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-[1.15rem] data-[size=default]:w-8 data-[size=sm]:h-3.5 data-[size=sm]:w-6 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=unchecked]:bg-input/80",
+        "peer group/switch inline-flex shrink-0 items-center rounded-full border border-control-edge focus-ring transition-all disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-[1.15rem] data-[size=default]:w-8 data-[size=sm]:h-3.5 data-[size=sm]:w-6 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=unchecked]:bg-input/80",
         hitAreaClasses,
         className,
       )}
