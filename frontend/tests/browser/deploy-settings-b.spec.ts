@@ -509,7 +509,7 @@ test.describe("Tailnet only", () => {
     await who.fill("ALICE@example.com")
     await who.press("Enter")
     await expect(tailnet.getByText("alice@example.com is already on the list")).toBeVisible()
-    const list = tailnet.getByRole("list", { name: "Admitted on the tailnet" })
+    const list = tailnet.getByRole("list", { name: "Who may open it" })
     await expect(list.getByRole("listitem")).toHaveText(["alice@example.com", "tag:ci"])
     await expect(tailnet.getByText("Only 2 logins and tags")).toBeVisible()
     await expect(tailnet.getByText(/The application is told X-Tailnet-Login/)).toBeVisible()

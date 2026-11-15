@@ -75,7 +75,6 @@ import {
 } from "@/components/ui/input-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
-import { Tag } from "@/components/tag"
 import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE, hostOf } from "@/components/deploy/vocabulary"
 import {
   SettingForm,
@@ -118,8 +117,8 @@ import {
   HSTS_MAX_AGES,
   HSTS_PRELOAD_MAX_AGE,
   HeaderListField,
-  ListField,
 } from "@/components/proxy/site-form"
+import { ListField } from "@/components/list-field"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
 import { siteHref } from "@/components/proxy/site-tabs"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -338,9 +337,15 @@ function TailnetForm({
             {value.on && (
               <div className="flex flex-col gap-4">
                 <TailnetAddress live={live} saved={Boolean(savedTailnet)} />
-                <TailnetAllowField
+                <ListField
+                  id="tailnet-allow"
+                  label="Who may open it"
+                  placeholder="alice@example.com or tag:ci"
                   values={value.allow}
                   onChange={(allow) => draft.set({ ...value, allow })}
+                  parse={readTailnetEntry}
+                  hint="Tailscale logins and tags. Empty lets everyone on the tailnet in."
+                  info="A login is the account a person signs in to Tailscale with, alice@example.com or alice@github. A tag is a machine's ACL tag, tag:ci; a tagged machine is admitted by its tags alone."
                   disabled={!canAdmin}
                 />
                 <FormNote>
@@ -433,103 +438,6 @@ function TailnetAddress({
         </div>
       </div>
     </div>
-  )
-}
-
-/**
- * Who may open the environment: Tailscale logins and tags, each read the
- * way the server reads it as it is typed, so an entry that would be refused
- * never reaches the list. A login is kept in lower case, since providers do
- * not agree on one; a tag as written, since the tailnet's policy compares
- * tags exactly.
- */
-function TailnetAllowField({
-  values,
-  onChange,
-  disabled,
-}: {
-  values: string[]
-  onChange: (values: string[]) => void
-  disabled: boolean
-}) {
-  const [typed, setTyped] = useState("")
-  const [problem, setProblem] = useState<string>()
-  const add = () => {
-    const read = readTailnetEntry(typed, values)
-    if ("error" in read) {
-      setProblem(read.error)
-      return
-    }
-    onChange([...values, read.entry])
-    setTyped("")
-    setProblem(undefined)
-  }
-  return (
-    <Field
-      label="Who may open it"
-      htmlFor="tailnet-allow"
-      hint="Tailscale logins and tags. Empty lets everyone on the tailnet in."
-      info="A login is the account a person signs in to Tailscale with, alice@example.com or alice@github. A tag is a machine's ACL tag, tag:ci; a tagged machine is admitted by its tags alone."
-      error={problem}
-    >
-      <div className="space-y-2">
-        {values.length > 0 && (
-          <ul aria-label="Admitted on the tailnet" className="flex flex-wrap items-center gap-1.5">
-            {values.map((value) => (
-              <li key={value}>
-                <Tag mono className="gap-1.5 pr-0.5">
-                  {value}
-                  {!disabled && (
-                    <IconAction
-                      type="button"
-                      label={`Remove ${value}`}
-                      size="icon-xs"
-                      className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                      onClick={() => onChange(values.filter((entry) => entry !== value))}
-                    >
-                      <Trash />
-                    </IconAction>
-                  )}
-                </Tag>
-              </li>
-            ))}
-          </ul>
-        )}
-        {!disabled && (
-          <div className="flex items-center gap-2">
-            <Input
-              id="tailnet-allow"
-              value={typed}
-              onChange={(event) => {
-                setTyped(event.target.value)
-                setProblem(undefined)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  add()
-                }
-              }}
-              placeholder="alice@example.com or tag:ci"
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={Boolean(problem)}
-              className="font-mono text-xs"
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={add}
-              disabled={!typed.trim()}
-              aria-label="Add to who may open it"
-            >
-              <Plus className="size-3.5" />
-            </Button>
-          </div>
-        )}
-      </div>
-    </Field>
   )
 }
 
