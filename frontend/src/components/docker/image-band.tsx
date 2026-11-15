@@ -569,7 +569,7 @@ const ANSWER_WORD: Record<Freshness, string> = {
 function AnswerMark({ state, count }: { state: Freshness; count: number }) {
   const faint = state === "unknown" || state === "unused" || state === "untagged"
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5 @sm/reading:mr-1.5">
       <span
         aria-hidden
         className={cn("size-1.5 shrink-0 rounded-full", faint && "ring-1 ring-muted-foreground/50")}

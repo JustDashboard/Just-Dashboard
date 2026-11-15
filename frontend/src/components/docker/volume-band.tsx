@@ -252,7 +252,7 @@ function MountShare({
           // said nothing about which was which, and the dots said it in
           // colour alone (PGH-20).
           mark: (
-            <span className="numeric inline-flex items-center gap-1.5 text-hint font-medium whitespace-nowrap">
+            <span className="numeric inline-flex items-center gap-1.5 text-hint font-medium whitespace-nowrap @md/reading:mr-1.5">
               <span
                 aria-hidden
                 data-slot="standing-dot"
@@ -260,7 +260,7 @@ function MountShare({
                 style={{ background: STANDING_COLOR[g.standing] }}
               />
               {g.volumes.length}
-              <span className="-ml-0.5 hidden font-normal text-muted-foreground @xs/reading:inline">
+              <span className="-ml-0.5 hidden font-normal text-muted-foreground @md/reading:inline">
                 {STANDING_WORD[g.standing]}
               </span>
             </span>
