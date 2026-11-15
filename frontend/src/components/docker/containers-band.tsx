@@ -13,7 +13,7 @@ import { spanWords, type EventEntry } from "@/lib/docker-events"
 import { bytes, percent, plural } from "@/lib/format"
 import type { Container, ContainerStats, DockerEvent, Snapshot } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { exitWords } from "@/components/docker/containers"
+import { exitWords } from "@/components/docker/words"
 
 /** How many containers each block names; the rest of the host is one muted span. */
 const SHOWN = 5

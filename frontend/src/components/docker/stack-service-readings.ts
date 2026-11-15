@@ -9,6 +9,7 @@ import type { DotTone } from "@/components/status-dot"
 import { foldRestarts, type EventEntry } from "@/lib/docker-events"
 import { duration } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
+import { changeWords, DELIBERATE_EXITS as DELIBERATE, exitWords } from "@/components/docker/words"
 
 /**
  * What a stack's page reads off the stack, the containers socket and the
@@ -60,7 +61,6 @@ export function bucketTone(bucket: ServiceBucket): DotTone {
  * service failed — 137 says so only when the OOM killer sent it, which the
  * event log knows and the listing does not.
  */
-const DELIBERATE = new Set([0, 130, 137, 143])
 
 /** The status in Docker's "Exited (137) 2 hours ago" or "Restarting (1) 8 seconds ago". */
 export function exitCodeOf(status: string | undefined): number | undefined {
@@ -72,24 +72,6 @@ export function exitCodeOf(status: string | undefined): number | undefined {
 export function exitedWhen(status: string | undefined): string | undefined {
   const match = status?.match(/^Exited\s*\(-?\d+\)\s*(.+)$/i)
   return match?.[1]?.trim().replace(/^About an? /i, "a ") || undefined
-}
-
-/** An exit status in words, for somebody who has not memorised the signals. */
-export function exitWords(code: number | undefined, oomKilled = false): string | undefined {
-  if (oomKilled) return "killed for memory"
-  if (code === undefined) return undefined
-  switch (code) {
-    case 0:
-      return "exited cleanly"
-    case 130:
-      return "interrupted"
-    case 137:
-      return "killed"
-    case 143:
-      return "stopped"
-    default:
-      return `exit ${code}`
-  }
 }
 
 /** A run of restarts, from the event log: what the listing's one word cannot say. */
@@ -515,41 +497,6 @@ export function serviceChanges(events: DockerEvent[]): ServiceChange[] {
     })
   }
   return out.sort((a, b) => b.at - a.at)
-}
-
-function changeWords(
-  event: DockerEvent,
-  oomKilled: boolean,
-): { verb: string; tone: DotTone } | undefined {
-  const action = event.action
-  if (action.startsWith("health_status")) {
-    return action.endsWith("unhealthy")
-      ? { verb: "failing its check", tone: "danger" }
-      : { verb: "passing its check again", tone: "running" }
-  }
-  switch (action) {
-    case "start":
-      return { verb: "started", tone: "running" }
-    case "unpause":
-      return { verb: "resumed", tone: "running" }
-    case "restart":
-      return { verb: "restarted", tone: "warning" }
-    case "oom":
-      return { verb: "out of memory", tone: "danger" }
-    case "die": {
-      if (oomKilled) return { verb: "killed for memory", tone: "danger" }
-      const code = event.exitCode ? Number(event.exitCode) : undefined
-      if (event.level === "error" && code !== undefined && !DELIBERATE.has(code))
-        return { verb: `exited ${code}`, tone: "danger" }
-      return { verb: exitWords(code) ?? "exited", tone: "stopped" }
-    }
-    case "pause":
-      return { verb: "paused", tone: "stopped" }
-    case "destroy":
-      return { verb: "removed", tone: "stopped" }
-    default:
-      return undefined
-  }
 }
 
 /** Where a published port is bound, in the three answers that differ. */

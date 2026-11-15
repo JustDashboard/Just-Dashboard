@@ -39,11 +39,11 @@ import {
   containerWord,
   exitCodeOf,
   exitedWhen,
-  exitWords,
   type ContainerSort,
   type NetRate,
   type SortKey,
 } from "@/components/docker/containers"
+import { exitWords } from "@/components/docker/words"
 import { useBreakpoint } from "@/lib/breakpoints"
 
 export type RowsProps = {
