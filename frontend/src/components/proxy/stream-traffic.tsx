@@ -161,7 +161,10 @@ export function StreamReadings({
     traffic && traffic.sessions > 0 ? `${percent(n / traffic.sessions)} of sessions` : words
   const length = traffic && traffic.sessions > 0 ? lengthWords(traffic.duration) : undefined
   return (
-    <ReadingLines aria-label={`What ${name} carried`} className="xl:grid-cols-1 2xl:grid-cols-2">
+    // Two columns from `xl`, as every other page's readings, so each line's
+    // mark sits beside its words: one column beside the rail pinned the
+    // sparklines 400px from what they draw.
+    <ReadingLines aria-label={`What ${name} carried`}>
       <ReadingLine
         mark={
           <WireMark size="md" hue={HUE.cpu}>
