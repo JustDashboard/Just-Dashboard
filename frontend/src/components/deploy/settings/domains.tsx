@@ -38,7 +38,6 @@ import type {
   DeploymentRouteHSTS,
   DeploymentTailnetAddress,
   Exposure,
-  ForwardAuthProvider,
 } from "@/lib/types"
 import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
 import {
@@ -74,6 +73,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Segments } from "@/components/segments"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
 import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE, hostOf } from "@/components/deploy/vocabulary"
 import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
@@ -1976,28 +1976,18 @@ function RouteSignIn({
       >
         {gate && (
           <div className="flex flex-col gap-3">
-            <ToggleGroup
-              type="single"
-              aria-label="Auth server"
+            <Segments
+              label="Auth server"
               value={gate.provider}
-              onValueChange={(value) =>
-                value && update(chooseSsoProvider(gate, value as ForwardAuthProvider))
-              }
-              variant="outline"
-              size="sm"
-              className="w-full flex-wrap"
+              options={SSO_PROVIDERS.map((provider) => ({
+                value: provider.value,
+                label: provider.label,
+              }))}
+              onChange={(value) => update(chooseSsoProvider(gate, value))}
+              fill
+              className="flex-wrap"
               disabled={disabled}
-            >
-              {SSO_PROVIDERS.map((provider) => (
-                <ToggleGroupItem
-                  key={provider.value}
-                  value={provider.value}
-                  className="flex-1 text-hint"
-                >
-                  {provider.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            />
             <Field
               label="Check address"
               htmlFor="route-sso-verify"
@@ -2028,25 +2018,17 @@ function RouteSignIn({
                 disabled={disabled}
               />
             </Field>
-            <ToggleGroup
-              type="single"
-              aria-label="Who signs in"
+            <Segments
+              label="Who signs in"
               value={gate.previewsOnly ? "previews" : "everywhere"}
-              onValueChange={(value) =>
-                value && update({ previewsOnly: value === "previews" || undefined })
-              }
-              variant="outline"
-              size="sm"
-              className="w-full"
+              options={[
+                { value: "everywhere", label: "Here and on previews" },
+                { value: "previews", label: "Previews only" },
+              ]}
+              onChange={(value) => update({ previewsOnly: value === "previews" || undefined })}
+              fill
               disabled={disabled}
-            >
-              <ToggleGroupItem value="everywhere" className="flex-1 text-hint">
-                Here and on previews
-              </ToggleGroupItem>
-              <ToggleGroupItem value="previews" className="flex-1 text-hint">
-                Previews only
-              </ToggleGroupItem>
-            </ToggleGroup>
+            />
             <FormNote>
               The application is sent Remote-User and Remote-Email, taken from the server&apos;s{" "}
               {preset.sends}, and never the visitor&apos;s own. Names that redirect answer before

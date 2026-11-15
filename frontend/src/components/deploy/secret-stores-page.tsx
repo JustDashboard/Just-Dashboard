@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Segments } from "@/components/segments"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import { SecretStoreMark } from "@/components/deploy/secret-store-picker"
@@ -820,27 +820,17 @@ function StoreForm({
               </Field>
             </FieldRow>
             <Field label="Cloud" htmlFor="store-cloud">
-              <ToggleGroup
+              <Segments
                 id="store-cloud"
-                type="single"
-                variant="outline"
-                aria-label="Azure cloud"
+                label="Azure cloud"
+                size="field"
                 value={draft.settings.cloud ?? "public"}
-                onValueChange={(next) => {
-                  if (next) setting({ cloud: next as SecretStoreSettings["cloud"] })
-                }}
-                className="w-full sm:w-auto"
-              >
-                {AZURE_CLOUDS.map((option) => (
-                  <ToggleGroupItem
-                    key={option.value}
-                    value={option.value}
-                    className="h-11 flex-1 sm:h-9 sm:flex-none"
-                  >
-                    {option.label}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
+                options={AZURE_CLOUDS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+                onChange={(next) => setting({ cloud: next as SecretStoreSettings["cloud"] })}
+              />
             </Field>
           </>
         )}
@@ -940,29 +930,23 @@ function StoreForm({
 
       <FormSection title="Sign-in">
         {vaultLike && (
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            aria-label="Sign in with"
+          <Segments
+            label="Sign in with"
+            size="field"
             value={draft.settings.auth ?? "token"}
-            onValueChange={(next) => {
-              if (!next) return
+            options={[
+              { value: "token", label: "Token" },
+              { value: "approle", label: "AppRole" },
+            ]}
+            onChange={(next) =>
               // Signing in another way needs that way's credentials.
               onChange({
                 ...draft,
-                settings: { ...draft.settings, auth: next as "token" | "approle" },
+                settings: { ...draft.settings, auth: next },
                 credentials: next === saved?.settings.auth && editing ? undefined : {},
               })
-            }}
-            className="w-full sm:w-auto"
-          >
-            <ToggleGroupItem value="token" className="h-11 flex-1 sm:h-9 sm:flex-none">
-              Token
-            </ToggleGroupItem>
-            <ToggleGroupItem value="approle" className="h-11 flex-1 sm:h-9 sm:flex-none">
-              AppRole
-            </ToggleGroupItem>
-          </ToggleGroup>
+            }
+          />
         )}
         {vaultLike && draft.settings.auth === "approle" && (
           <Field label="AppRole mount" htmlFor="store-auth-mount">

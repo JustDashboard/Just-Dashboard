@@ -76,7 +76,7 @@ import {
 } from "@/components/ui/input-group"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Textarea } from "@/components/ui/textarea"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Segments } from "@/components/segments"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
 import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
@@ -2272,24 +2272,14 @@ function MailFields({
           <FormNote tone="warning">{host} is not a hostname or an address.</FormNote>
         )}
         <Field label="Security" hint={security?.hint}>
-          <ToggleGroup
-            type="single"
-            value={security?.value}
-            onValueChange={(next: Security) => next && config({ smtpSecurity: next })}
-            variant="outline"
-            aria-label="Security"
-            className="w-full"
-          >
-            {SECURITY.map((item) => (
-              <ToggleGroupItem
-                key={item.value}
-                value={item.value}
-                className="h-11 flex-1 text-xs sm:h-9"
-              >
-                {item.label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <Segments
+            label="Security"
+            size="field"
+            value={security?.value ?? ""}
+            options={SECURITY.map((item) => ({ value: item.value, label: item.label }))}
+            onChange={(next: Security) => config({ smtpSecurity: next })}
+            fill
+          />
         </Field>
         <FieldRow>
           <Field
