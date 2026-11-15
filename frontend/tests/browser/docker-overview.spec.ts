@@ -419,8 +419,9 @@ test("networks and volumes that cannot be read leave the rest of the picture sta
   await expect(drawn(page)).toBeVisible()
 
   await expect(node(page, "stack:shop")).toBeVisible()
+  // Not read, not "none": a dashed node level with the hub says so (PGH-25).
   await expect(page.getByRole("region", { name: "Networks and volumes" })).toContainText(
-    "No networks or volumes to read",
+    "Networks and volumes not read",
   )
 })
 

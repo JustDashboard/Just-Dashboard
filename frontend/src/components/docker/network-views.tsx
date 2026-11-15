@@ -17,7 +17,7 @@ import type { Container, DockerNetwork, NetworkDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { DimActions, IconAction } from "@/components/icon-action"
-import { LogoGlyph } from "@/components/logo"
+import { DashboardMark } from "@/components/logo"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelHeader } from "@/components/panel"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
@@ -364,9 +364,7 @@ function MemberRow({
       verb={`Open ${member.name}`}
       leading={
         member.dashboard ? (
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background">
-            <LogoGlyph small className="h-4 text-brand" />
-          </span>
+          <DashboardMark />
         ) : (
           <ProductLogo id={container ? containerProduct(container) : "docker"} size="sm" />
         )

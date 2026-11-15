@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { ChoiceList } from "@/components/choice-row"
-import { FactDot } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { StreamState } from "@/components/live-figure"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
@@ -261,6 +261,7 @@ export function StacksTab() {
         {header}
 
         <DockerIdentity
+          page="Stacks"
           version={engine.data?.serverVersion}
           host={host ?? undefined}
           state={
@@ -278,18 +279,16 @@ export function StacksTab() {
               <span>No stacks deployed</span>
             ) : (
               <>
-                <span className="numeric">
+                <Fact className="numeric">
                   {deployed} of {plural(stacks.length, "stack")} deployed
-                </span>
-                <FactDot />
-                <span className="numeric">
+                </Fact>
+                <Fact className="numeric">
                   {running} of {plural(services, "service")} running
-                </span>
+                </Fact>
                 {published > 0 && (
-                  <span className="contents max-sm:hidden">
-                    <FactDot />
-                    <span className="numeric">{plural(published, "port")} published</span>
-                  </span>
+                  <Fact className="numeric max-sm:hidden">
+                    {plural(published, "port")} published
+                  </Fact>
                 )}
               </>
             )

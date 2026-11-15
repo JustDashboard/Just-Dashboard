@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Code, FolderOpen, MoreHorizontal, Play, Terminal } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
-import { DashboardMark } from "@/components/backups/marks"
+import { DashboardMark } from "@/components/logo"
 import { ChoiceRow } from "@/components/choice-row"
 import { ProductLogos, imageProducts } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
@@ -97,9 +97,12 @@ export function StackChoiceRow({
       }
       title={
         <span className="flex min-w-0 items-center gap-2">
+          {/* The project's hue as a stripe, as the networks list draws its
+              own: a round dot beside a name reads as a status dot, and the
+              stack already has one (PGH-26). */}
           <span
             aria-hidden
-            className="size-1.5 shrink-0 rounded-full"
+            className="h-3.5 w-0.5 shrink-0 rounded-full"
             style={{ background: stackLane(stack.name) }}
           />
           <span className="truncate">{stack.name}</span>
@@ -161,8 +164,12 @@ export function StackChoiceRow({
             </span>
             {/* A box of one width whether or not the stack can be deployed
                 from here, so the columns before it line up down the list. */}
+            {/* Held open on a phone too, where the memory figure ends the
+                name's line: without it a row with no Deploy let the figure
+                take the button's place, and the figures left their column
+                (PGH-29). */}
             <span
-              className="flex justify-end md:w-[4.75rem]"
+              className={cn("flex justify-end md:w-[4.75rem]", onDeploy && "max-md:w-8")}
               aria-busy={deploying ? true : undefined}
             >
               <DeployButton line={line} deploying={deploying} onDeploy={onDeploy} />

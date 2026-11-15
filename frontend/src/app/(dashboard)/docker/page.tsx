@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Box, Clipboard, Layers, Sparkles } from "@/components/icons"
+import { Box, Clipboard, Layers, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import type {
@@ -24,8 +24,8 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/hooks/use-now"
-import { ChoiceList } from "@/components/choice-row"
-import { FactDot } from "@/components/identity-header"
+import { ChoiceList, ChoiceListSkeleton } from "@/components/choice-row"
+import { Fact } from "@/components/fact-line"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -262,33 +262,24 @@ export default function DockerOverviewPage() {
             ) : (
               <>
                 {info.data?.Driver && (
-                  <span className="contents max-sm:hidden">
-                    <span>
-                      {info.data.Driver}
-                      {info.data.CgroupVersion && ` on cgroup v${info.data.CgroupVersion}`}
-                    </span>
-                    <FactDot />
-                  </span>
+                  <Fact className="max-sm:hidden">
+                    {info.data.Driver}
+                    {info.data.CgroupVersion && ` on cgroup v${info.data.CgroupVersion}`}
+                  </Fact>
                 )}
-                <span className="numeric">
+                <Fact className="numeric">
                   {running} of {plural(containers.length, "container")} running
-                </span>
+                </Fact>
                 {detected.length > 0 && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">
-                      {active.length} of {plural(detected.length, "project")} up
-                    </span>
-                  </>
+                  <Fact className="numeric">
+                    {active.length} of {plural(detected.length, "project")} up
+                  </Fact>
                 )}
                 {info.data?.Images !== undefined && (
-                  <span className="contents max-sm:hidden">
-                    <FactDot />
-                    <span className="numeric">
-                      {plural(info.data.Images, "image")}
-                      {disk.data && ` · ${bytes(disk.data.layersSize)}`}
-                    </span>
-                  </span>
+                  <Fact className="numeric max-sm:hidden">
+                    {plural(info.data.Images, "image")}
+                    {disk.data && ` · ${bytes(disk.data.layersSize)}`}
+                  </Fact>
                 )}
               </>
             )
@@ -325,22 +316,11 @@ export default function DockerOverviewPage() {
             title={
               <span className="inline-flex items-center gap-1.5">
                 Containers
-                {read && (
-                  <span className="numeric text-body leading-none font-normal text-muted-foreground">
-                    {containers.length}
-                  </span>
-                )}
                 <Definition name="container" />
               </span>
             }
-            actions={
-              <Link
-                href="/docker/containers"
-                className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                All containers <ArrowRight className="size-3" />
-              </Link>
-            }
+            count={read && containers.length}
+            link={{ href: "/docker/containers", label: "All containers" }}
           />
           <PanelBody className="pt-8 pb-0">
             <EnginePicture
@@ -361,33 +341,18 @@ export default function DockerOverviewPage() {
               title={
                 <span className="inline-flex items-center gap-1.5">
                   Compose projects
-                  {stacks.data && (
-                    <span className="numeric text-body leading-none font-normal text-muted-foreground">
-                      {active.length} of {detected.length} up
-                    </span>
-                  )}
                   <Definition name="compose" />
                 </span>
               }
-              actions={
-                <Link
-                  href="/docker/stacks"
-                  className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                >
-                  Manage <ArrowRight className="size-3" />
-                </Link>
-              }
+              count={stacks.data && `${active.length} of ${detected.length} up`}
+              link={{ href: "/docker/stacks", label: "Manage" }}
             />
             <PanelBody flush>
               {!stacks.data && stacks.error ? (
                 <ErrorState error={stacks.error} onRetry={stacks.refresh} className="mt-3" />
               ) : !stacks.data ? (
-                // The cards' own height, so the list lands where it waited.
-                <ul aria-hidden className="grid gap-2 pt-3">
-                  {[0, 1, 2].map((row) => (
-                    <li key={row} className="h-14 animate-pulse rounded-xl bg-muted/40" />
-                  ))}
-                </ul>
+                // The cards' own shape, so the list lands where it waited.
+                <ChoiceListSkeleton rows={3} lines={2} className="pt-3" />
               ) : detected.length === 0 ? (
                 <EmptyState
                   icon={Layers}
@@ -421,17 +386,7 @@ export default function DockerOverviewPage() {
             disk.data && (
               // Plain, like everything around it: a bar and a legend are a reading.
               <Panel plain className="animate-rise">
-                <PanelHeader
-                  title="Disk"
-                  actions={
-                    <Link
-                      href="/docker/images"
-                      className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                    >
-                      Images <ArrowRight className="size-3" />
-                    </Link>
-                  }
-                />
+                <PanelHeader title="Disk" link={{ href: "/docker/images", label: "Images" }} />
                 <PanelBody className="space-y-3">
                   <DiskSummary usage={disk.data} />
                   <p className="text-hint text-muted-foreground">
