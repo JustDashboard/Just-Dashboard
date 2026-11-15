@@ -159,9 +159,9 @@ describe("StateMark", () => {
     expect(html).toContain("bg-destructive")
   })
 
-  test("a rail's tile is 28px with the small corner, a header's 48px", () => {
+  test("a rail's tile is 28px with the small corner, a header's 40px", () => {
     expect(draw(StateMark, { glyph: Box, tone: "running", size: "sm" })).toContain("size-7")
-    expect(draw(StateMark, { glyph: Box, tone: "running", size: "lg" })).toContain("size-12")
+    expect(draw(StateMark, { glyph: Box, tone: "running", size: "lg" })).toContain("size-10")
   })
 
   test("StateCorner is the corner alone", () => {

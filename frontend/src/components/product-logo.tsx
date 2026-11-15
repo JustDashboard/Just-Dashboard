@@ -1339,13 +1339,15 @@ export function ProductLogos({
 
 /**
  * The tile sizes a mark with its state in the corner comes in, one ladder for
- * every such mark: `sm` a rail's or a sheet's line, `md` a list row's, `lg`
- * an identity header's. Each takes the corner dot of its own size.
+ * every such mark: `sm` a rail's or a sheet's line (28px), `md` a list row's
+ * (36px), `lg` an identity header's (40px). Each takes the corner dot of its own size.
  */
 const STATE_MARK = {
   sm: "size-7 rounded-md [&_svg]:size-3.5 [&_img]:size-4",
   md: "size-9 rounded-lg [&_svg]:size-4 [&_img]:size-5",
-  lg: "size-12 rounded-xl [&_svg]:size-6 [&_img]:size-7",
+  // The identity line's own tile (`IdentityHeader`'s, beside a state), so the
+  // header keeps its height from the loading form to the read one.
+  lg: "size-10 rounded-lg [&_svg]:size-5 [&_img]:size-6",
 } as const
 
 /**

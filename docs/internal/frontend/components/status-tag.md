@@ -101,11 +101,11 @@ names it, or a mark's corner.
   positioned parent (`relative`). `true` is the small size. `"md"` and `"lg"` grow the ring and the
   dot with the mark:
 
-  | Size          | Ring | Dot | For a tile of |
-  | ------------- | ---- | --- | ------------- |
-  | `sm` (`true`) | 10px | 6px | 28 to 32px    |
-  | `md`          | 12px | 8px | 36px          |
-  | `lg`          | 16px | 8px | 48px          |
+  | Size | Ring | Dot | For a tile of |
+  | --- | --- | --- | --- |
+  | `sm` (`true`) | 10px | 6px | 28 to 32px |
+  | `md` | 12px | 8px | 36px |
+  | `lg` | 16px | 8px | 40px |
 
 - `label` adds the state as sr-only words. Pass it only where the row does not already say the
   state in words, for example the dirty dot on a view link or the map rail's system dot. Where the
@@ -128,7 +128,7 @@ reads green, grey and red before a name is read. It has one size ladder:
 | --- | --- | --- |
 | `sm` | 28px | a rail's line, a sheet's |
 | `md` | 36px | a list row |
-| `lg` | 48px | an identity header |
+| `lg` | 40px | an identity header, the tile `IdentityHeader` draws beside a state |
 
 `StateCorner` is the corner alone, for a tile that is not a `ProductLogo`, such as a project's mark.
 

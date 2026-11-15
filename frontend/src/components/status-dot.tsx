@@ -16,7 +16,7 @@ export { DOT_COLOR, toneFor, type DotTone, type Verdict } from "@/components/ton
 /**
  * The ring a dot on a mark sits in, and the dot inside it, per size of mark:
  * `sm` for a 28–32px tile (the 41 hand copies of this were all this one),
- * `md` for a row's 36px tile, `lg` for an identity header's 48px one. The ring
+ * `md` for a row's 36px tile, `lg` for an identity header's 40px one. The ring
  * is the ground the mark sits on, so the dot reads as cut out of the tile's
  * corner rather than stuck on it.
  */
