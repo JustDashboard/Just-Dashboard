@@ -204,8 +204,8 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
         head={head}
         identity={
           named && !stats.data && !stats.error ? (
-            // The loaded line's form: its command's place and, on a phone,
-            // its verbs' row, so nothing under it moves when it is read.
+            // The loaded line's form, with a place for its command and verbs
+            // (empty until they are known), so nothing under it moves when it is read.
             <HostIdentity
               loading
               className="border-b-0 pb-0"

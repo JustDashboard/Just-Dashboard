@@ -403,7 +403,10 @@ test.describe("database alerts", () => {
       .getByRole("radiogroup", { name: "Which databases the alert watches" })
       .getByRole("radio", { name: "Every database" })
       .click()
-    await again.getByRole("button", { name: /^Backup failed/ }).click()
+    await again
+      .getByRole("radiogroup", { name: "Alert kind" })
+      .getByRole("radio", { name: /^Backup failed/ })
+      .click()
     await again.getByLabel("Cooldown in minutes").fill("abc")
     await again.getByRole("button", { name: "Add alert" }).click()
     // Refused before it is sent, beside the field that caused it.

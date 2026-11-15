@@ -197,8 +197,8 @@ function Session({ pid }: { pid: string | null }) {
         head={head}
         identity={
           pid !== null && !activity.data && !activity.error ? (
-            // The loaded line's form: on a phone its verbs' row, so
-            // nothing under it moves when it is read.
+            // The loaded line's form, with a place for its verbs (empty
+            // until they are known), so nothing under it moves when it is read.
             <HostIdentity
               loading
               className="border-b-0 pb-0"

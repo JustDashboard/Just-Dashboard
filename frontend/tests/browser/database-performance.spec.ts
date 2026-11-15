@@ -3585,8 +3585,8 @@ for (const width of [1280, 390]) {
     await visit(page, "/databases/1/performance/tables/public.sessions_log")
     await expect(page.getByText("Reading its figures…")).toBeVisible()
     const tableLine = await topOf(page, line)
-    // The loading line holds the verbs' place (their own row on a phone), so
-    // the views under it stay where they are when the line is read.
+    // The loading line holds a place for the verbs, so at 390 too the views
+    // under it stay where they are when the line is read.
     const tableStrip = await topOf(page, strip)
     tables.release(null)
     await expect(about(page, "About public.sessions_log")).toContainText("a vacuum is due")

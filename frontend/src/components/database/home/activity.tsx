@@ -114,7 +114,9 @@ export function HistoryFact({
   return (
     <span
       data-slot="history-fact"
-      className="min-w-0 truncate text-hint text-muted-foreground"
+      // A row of its own on a phone: the words grow when the record lands, and
+      // sharing the range's row they wrapped it onto a line more.
+      className="min-w-0 truncate text-hint text-muted-foreground max-sm:w-full"
       title={`Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed.`}
     >
       {held > 0 && (
