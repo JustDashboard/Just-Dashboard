@@ -145,11 +145,13 @@ function UserCard({
     <ChoiceRow
       verb={`Edit ${name}`}
       onSelect={onEdit}
-      className={user.disabled ? "opacity-60" : undefined}
       leading={<UserAvatar user={user} scope="admin" size="md" />}
       title={
         <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-          <span className="truncate">{name}</span>
+          {/* An account that cannot sign in is said in words on the line
+              under it and set in the faint ink here — not faded, which took
+              its readings under 4.5:1. */}
+          <span className={cn("truncate", user.disabled && "text-faint")}>{name}</span>
           {me && <Tag>you</Tag>}
         </span>
       }
@@ -160,15 +162,23 @@ function UserCard({
           {user.mustChangePassword && " · chooses a new password at next sign-in"}
         </>
       }
-      trailing={wide ? readings : undefined}
+      // The switch is an inline control, so it stands before the arrow and
+      // the menu after it: → then ⋯, the order every card ends in.
+      trailing={
+        <>
+          {wide && readings}
+          <DimActions>
+            <Switch
+              checked={!user.disabled}
+              disabled={me}
+              aria-label={`${name} can sign in`}
+              onCheckedChange={(v) => onUpdate({ disabled: !v })}
+            />
+          </DimActions>
+        </>
+      }
       actions={
-        <DimActions className="gap-2">
-          <Switch
-            checked={!user.disabled}
-            disabled={me}
-            aria-label={`${name} can sign in`}
-            onCheckedChange={(v) => onUpdate({ disabled: !v })}
-          />
+        <DimActions>
           <VerbMenu verbs={verbs} label={`More actions for ${name}`} />
         </DimActions>
       }

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Plus, Trash } from "@/components/icons"
+import { Plus, Trash } from "@/components/icons"
 import { ApiError, del, get, post } from "@/lib/api"
 import type { Board, BoardPreview, BoardResource, BoardSummary } from "@/lib/board/boards"
 import { plural, relativeTime } from "@/lib/format"
@@ -10,7 +10,7 @@ import type { DbFleet, DbFleetEntry, DeploymentFleet, DeploymentSummary } from "
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { CONTROL } from "@/components/choice-row"
+import { OpenCard } from "@/components/open-card"
 import { LogoGlyph } from "@/components/logo"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
@@ -18,9 +18,7 @@ import { SearchInput } from "@/components/search-input"
 import { Section } from "@/components/section"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { BlurFade } from "@/components/ui/blur-fade"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { DrawingPreview } from "@/components/boards/drawing-preview"
 import { EngineGlyph } from "@/components/database/kit/engine-mark"
@@ -328,58 +326,32 @@ function DrawingCard({
   const count = board.preview?.count ?? 0
   return (
     <li className="min-w-0">
-      <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
-        <SpotlightBorder className="h-full">
-          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
-          <div
-            onClick={(event) => {
-              const target = event.target as HTMLElement
-              if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
-              onOpen()
-            }}
-            className="group/choice flex h-full min-w-0 cursor-pointer flex-col rounded-xl"
-          >
-            <DrawingPreview
-              preview={board.preview}
-              className="h-48 w-full overflow-hidden rounded-t-xl border-b border-hairline"
-            />
-            <div className="flex min-w-0 items-start gap-2 px-3.5 py-3">
-              <div className="min-w-0 flex-1">
-                <button
-                  type="button"
-                  // The card's own handler already answers the pointer; this
-                  // one is for the keyboard and must not open it twice.
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onOpen()
-                  }}
-                  className="block max-w-full truncate rounded-sm text-left text-title leading-5 font-semibold focus-ring"
-                >
-                  {board.name}
-                </button>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  {count > 0 && (
-                    <>
-                      <span className="numeric">{plural(count, "shape")}</span>
-                      {" · "}
-                    </>
-                  )}
-                  {"edited "}
-                  {relativeTime(board.updatedAt)}
-                </p>
-              </div>
-              <div className="-mt-1 -mr-1.5 flex shrink-0 items-center">
-                {verbs.length > 0 && <VerbMenu verbs={verbs} label={`More for ${board.name}`} />}
-                <ArrowRight
-                  aria-hidden
-                  className="size-3.5 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-                />
-              </div>
-            </div>
-            <LinkedLine resources={board.preview?.resources ?? []} linked={linked} />
-          </div>
-        </SpotlightBorder>
-      </BlurFade>
+      <OpenCard
+        index={index}
+        onOpen={onOpen}
+        href={`/excalidraw/${board.id}`}
+        title={board.name}
+        media={
+          <DrawingPreview
+            preview={board.preview}
+            className="h-48 w-full overflow-hidden rounded-t-xl border-b border-hairline"
+          />
+        }
+        subtitle={
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            {count > 0 && (
+              <>
+                <span className="numeric">{plural(count, "shape")}</span>
+                {" · "}
+              </>
+            )}
+            {"edited "}
+            {relativeTime(board.updatedAt)}
+          </p>
+        }
+        menu={verbs.length > 0 && <VerbMenu verbs={verbs} label={`More for ${board.name}`} />}
+        foot={<LinkedLine resources={board.preview?.resources ?? []} linked={linked} />}
+      />
     </li>
   )
 }
@@ -393,7 +365,7 @@ function LinkedLine({ resources, linked }: { resources: BoardResource[]; linked:
   if (resources.length === 0) return null
   const named = resources.map((r) => nameOf(r, linked))
   return (
-    <div className="mt-auto flex min-w-0 items-center gap-2 border-t border-hairline px-3.5 py-2 text-xs text-muted-foreground">
+    <div className="flex min-w-0 items-center gap-2 border-t border-hairline px-3.5 py-2 text-xs text-muted-foreground">
       <span className="flex shrink-0 items-center gap-1">
         {resources.slice(0, 5).map((r) => (
           <ResourceGlyph key={`${r.kind}:${r.id ?? ""}`} resource={r} linked={linked} />

@@ -2,22 +2,20 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Check, Logout } from "@/components/icons"
+import { ArrowRight, Logout } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { cn } from "@/lib/utils"
 import type { DbConnection, DeploymentFleet } from "@/lib/types"
 import { PURPOSES, STABLE_PURPOSES, hiddenFor, type PurposeKey } from "@/lib/sidebar-sections"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { usePoll } from "@/hooks/use-poll"
 import { Page } from "@/components/page"
-import { ChoiceCard } from "@/components/choice-card"
-import { ProductLogo } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { displayNameOf } from "@/components/user-avatar"
-import { ExperimentalMark, useSectionCount } from "@/components/account/workspace"
+import { useSectionCount } from "@/components/account/workspace"
+import { PurposeCard } from "@/components/onboarding/purpose-card"
 import { Logo } from "@/components/logo"
 import { ServerPicture } from "@/components/onboarding/server-picture"
 import { BlurFade } from "@/components/ui/blur-fade"
@@ -197,48 +195,19 @@ function Purposes({
       className="grid min-w-0 gap-2.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3"
     >
       {PURPOSES.map((purpose, index) => {
-        const on = chosen.includes(purpose.key)
         const reading = readings[purpose.key]
         return (
           <BlurFade key={purpose.key} delay={index * 0.04} className="h-full">
-            <ChoiceCard
-              selected={on}
-              onClick={() => toggle(purpose.key)}
-              className="min-h-18 flex-row items-center gap-3.5 px-4 py-3 sm:min-h-44 sm:flex-col sm:items-stretch sm:justify-between sm:gap-6 sm:p-6"
-            >
-              <span className="flex shrink-0 items-start justify-between gap-3">
-                <span className="flex gap-2">
-                  {purpose.products.map((product) => (
-                    <ProductLogo key={product} id={product} className="max-sm:size-9" />
-                  ))}
-                </span>
-                <Tick on={on} className="max-sm:hidden" />
-              </span>
-              <span className="grid min-w-0 flex-1 gap-1.5">
-                <span className="text-base leading-tight font-semibold sm:text-lg">
-                  {purpose.title}
-                </span>
-                {reading && <Status tone="running" label={reading} className="text-hint" />}
-                {purpose.stage === "experimental" && <ExperimentalMark />}
-              </span>
-              <Tick on={on} className="sm:hidden" />
-            </ChoiceCard>
+            <PurposeCard
+              size="hero"
+              purpose={purpose}
+              selected={chosen.includes(purpose.key)}
+              onSelect={() => toggle(purpose.key)}
+              reading={reading && <Status tone="running" label={reading} className="text-hint" />}
+            />
           </BlurFade>
         )
       })}
     </div>
-  )
-}
-
-function Tick({ on, className }: { on: boolean; className?: string }) {
-  return (
-    <Check
-      aria-hidden
-      className={cn(
-        "size-5 shrink-0 text-brand transition-opacity",
-        on ? "opacity-100" : "opacity-0",
-        className,
-      )}
-    />
   )
 }
