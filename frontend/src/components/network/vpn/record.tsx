@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { get, put, del } from "@/lib/api"
-import { bytes, plural, rate, relativeTime } from "@/lib/format"
+import { bytes, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { WGEndpointEvidence, WGEvent, WGHistory, WGInterface, WGPeer } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useConfirm } from "@/components/confirm-dialog"
-import { RX, TX } from "@/components/network/rate-pair"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import {
   HISTORY_WINDOWS,
@@ -31,13 +30,9 @@ import {
   quotaPercent,
   verdictTone,
 } from "./record-logic"
+import { axisRate, formatRate, inOutSeries } from "@/components/in-out"
 
-const TREND_SERIES = [
-  { key: "rx", label: "From it", color: RX, kind: "area" as const },
-  { key: "tx", label: "To it", color: TX, kind: "area" as const },
-]
-const formatRate = (value: number) => rate(value)
-const axisRate = (value: number) => `${bytes(value, 0)}/s`
+const TREND_SERIES = inOutSeries({ rx: "From it", tx: "To it" })
 const iso = (unix: number) => new Date(unix * 1000).toISOString()
 
 export function WindowToggle({

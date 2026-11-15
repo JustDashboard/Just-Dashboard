@@ -157,7 +157,7 @@ test("a fetched list says its schedule, failures and what its last change did", 
       ipv4Networks: 9,
       ipv6Networks: 3,
     }),
-  ).toBe("2.1M IPv4 addresses (0.05% of IPv4) · 1.2K IPv6 /48s")
+  ).toBe("2.1M IPv4 addresses (0.05% of IPv4) · 1.2k IPv6 /48s")
 })
 
 test("expiries, profiles and recorded series become what the server and charts take", async () => {

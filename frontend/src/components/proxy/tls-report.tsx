@@ -17,7 +17,6 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { downloadText } from "@/lib/metrics/export"
 import { duration, relativeTime, timestamp } from "@/lib/format"
 import {
   parseScanQuery,
@@ -105,6 +104,8 @@ import {
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { DeepScanSection } from "@/components/proxy/tls-ciphers"
 import { ScanHistoryPanel, useScanHistory } from "@/components/proxy/tls-history"
+import { Ago } from "@/components/ago"
+import { saveText } from "@/lib/download"
 
 /**
  * What a visitor actually gets, graded.
@@ -931,7 +932,7 @@ function ReportFacts({
           {scan.http.server}
         </HostFact>,
       )
-    facts.push(<CheckedAgo key="checked" at={scan.checkedAt} />)
+    facts.push(<Ago key="checked" at={scan.checkedAt} verb="checked" />)
     if (past)
       facts.push(
         <span key="past" className="font-medium text-warning">
@@ -1029,7 +1030,7 @@ function reportVerbs({
       label: "Download JSON",
       icon: Download,
       run: () =>
-        downloadText(
+        saveText(
           reportFileName(scan, "tls.json"),
           JSON.stringify(scan, null, 2),
           "application/json",
@@ -1042,7 +1043,7 @@ function reportVerbs({
       label: "Download chain.pem",
       icon: Download,
       run: () =>
-        downloadText(reportFileName(scan, "chain.pem"), chainPem(scan), "application/x-pem-file"),
+        saveText(reportFileName(scan, "chain.pem"), chainPem(scan), "application/x-pem-file"),
     })
   verbs.push(COPY_LINK)
   if (admin && scan.origin?.site && !scan.starttls)
@@ -1837,12 +1838,6 @@ function PlainChain({ http }: { http: HTTPScan }) {
       ))}
     </ol>
   )
-}
-
-/** "checked 3 minutes ago", kept true while the page stays open. */
-function CheckedAgo({ at }: { at: string }) {
-  useNow(30_000)
-  return <span title={timestamp(at)}>checked {relativeTime(at)}</span>
 }
 
 /**

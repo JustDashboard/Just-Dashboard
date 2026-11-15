@@ -46,15 +46,3 @@ function cellValue(value: unknown): string {
 export function csvCell(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 }
-
-/** Hands the browser a file to save. */
-export function downloadText(filename: string, text: string, type = "text/csv") {
-  const url = URL.createObjectURL(new Blob([text], { type }))
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  document.body.append(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
-}

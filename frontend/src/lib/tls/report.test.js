@@ -211,8 +211,8 @@ describe("a certificate's term", () => {
   test("the figure left is whole days, then hours for the last two", () => {
     const now = Date.parse("2026-09-28T00:00:00Z")
     expect(certificateLeft({ daysLeft: 30, notAfter: "2026-10-28T00:00:00Z" }, now)).toBe("30d")
-    // A time the server never set is left out of its answer.
-    expect(certificateLeft({ daysLeft: 0 }, now)).toBe("<1h")
+    // A time the server never set is left out of its answer: under a day, not an hour.
+    expect(certificateLeft({ daysLeft: 0 }, now)).toBe("<1d")
     expect(termLeft({}, now)).toBe(0)
     expect(certificateLeft({ daysLeft: 1, notAfter: "2026-09-29T05:30:00Z" }, now)).toBe("29h")
     expect(certificateLeft({ daysLeft: 0, notAfter: "2026-09-28T00:20:00Z" }, now)).toBe("<1h")

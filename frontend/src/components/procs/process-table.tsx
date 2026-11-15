@@ -70,6 +70,7 @@ import {
 } from "@/components/procs/shared"
 import { WorkloadBand } from "@/components/procs/workloads"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
+import { useDebounced } from "@/hooks/use-debounced"
 
 export type ProcessSort = "auto" | "cpu" | "memory" | "io" | "uptime"
 
@@ -986,13 +987,4 @@ function ProcessTableSettings({
       </DropdownMenuContent>
     </DropdownMenu>
   )
-}
-
-function useDebounced<T>(value: T, delay: number): T {
-  const [settled, setSettled] = useState(value)
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSettled(value), delay)
-    return () => window.clearTimeout(timer)
-  }, [value, delay])
-  return settled
 }

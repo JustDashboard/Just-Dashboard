@@ -1,30 +1,39 @@
+import { certificateTone, certificateWords } from "@/lib/certificates"
 import type { Certificate } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Meter } from "@/components/meter"
-import { Status } from "@/components/status-dot"
+import { Status, type Verdict } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 
 /**
  * A certificate's expiry as a verdict — a dot and a word, not a filled pill.
- * A test certificate says so before anything about its days: browsers refuse
- * it whatever they are, and what to do about it is replace it, not renew it.
+ * The word and the verdict are lib/certificates' `certificateWords` (short)
+ * and `certificateTone`, which every certificate reading shares: a test
+ * certificate says so before anything about its days, and the last day is
+ * counted in hours ("10h left"), not "0d left".
  */
-export function ExpiryStatus({ cert }: { cert?: Certificate }) {
-  if (!cert) return <Status state="created" label="unchecked" />
-  if (cert.error) return <Status verdict="critical" label="unreadable" />
-  if (cert.staging) return <Status verdict="critical" label="test certificate" />
-  if (cert.expired) return <Status verdict="critical" label="expired" />
-  if (cert.expiring) return <Status verdict="warning" label={`${cert.daysLeft}d left`} />
-  return <Status verdict="ok" label={`${cert.daysLeft}d left`} />
+export function ExpiryStatus({ cert, now }: { cert?: Certificate; now?: number }) {
+  if (!cert) return <Status state="created" label="Unchecked" />
+  return (
+    <Status
+      verdict={certificateTone(cert)}
+      label={certificateWords(cert, { form: "short", now })}
+    />
+  )
 }
 
 /** The tone a certificate's figures take: red once refused, amber inside the renewal window. */
 export function expiryTone(
   cert: Pick<Certificate, "expired" | "expiring" | "error" | "staging">,
 ): Tone {
-  if (cert.error || cert.expired || cert.staging) return "danger"
-  if (cert.expiring) return "warning"
-  return "default"
+  return TONE_OF[certificateTone({ ...cert, daysLeft: 0 })]
+}
+
+const TONE_OF: Record<Verdict, Tone> = {
+  ok: "default",
+  notice: "default",
+  warning: "warning",
+  critical: "danger",
 }
 
 /**

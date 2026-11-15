@@ -44,6 +44,7 @@ import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
+import { decodeSegment } from "@/lib/route-params"
 
 const BACK_HREF = "/security/intrusion?tab=fail2ban"
 
@@ -74,7 +75,7 @@ const BACK = (
  */
 export function JailPage() {
   const params = useParams<{ jail: string }>()
-  const name = decodeURIComponent(params.jail ?? "")
+  const name = decodeSegment(params.jail)
   const router = useRouter()
   const { can } = useAuth()
   const admin = can("system.admin")

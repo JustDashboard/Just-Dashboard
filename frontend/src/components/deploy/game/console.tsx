@@ -7,7 +7,6 @@ import { post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { clock, plural } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
-import { downloadText } from "@/lib/metrics/export"
 import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import type { GameConsoleResult } from "@/lib/types"
@@ -36,6 +35,7 @@ import {
   GameIdentitySkeleton,
   useGameOverview,
 } from "@/components/deploy/game/identity"
+import { saveText } from "@/lib/download"
 
 /**
  * The console's height: the window below the project's header and this page's
@@ -206,7 +206,7 @@ export function GameConsole({ projectId }: { projectId: number }) {
               <IconAction
                 label="Download the transcript"
                 disabled={lines.length === 0}
-                onClick={() => downloadText("game-console.log", `${transcript()}\n`, "text/plain")}
+                onClick={() => saveText("game-console.log", `${transcript()}\n`, "text/plain")}
               >
                 <Download />
               </IconAction>

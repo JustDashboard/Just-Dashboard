@@ -62,6 +62,7 @@ import { PrivateTrustNote } from "@/components/proxy/local-ca-panel"
 import { certificateProduct } from "@/components/proxy/marks"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { streamHref } from "@/components/proxy/stream-facts"
+import { decodeSegment } from "@/lib/route-params"
 
 const BACK = (
   <Link
@@ -93,7 +94,7 @@ export function CertificatePage() {
   const params = useParams<{ name: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decodeURIComponent(params.name ?? "")
+  const name = decodeSegment(params.name)
   const path = search.get("path")
   const work = useCertificateWork()
   const certs = work.certs

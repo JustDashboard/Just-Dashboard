@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
-import { engineHref, engineIdOf, engineSibling, engineTabOf } from "./engine-views"
+import { engineHref, engineSibling, engineTabOf } from "./engine-views"
+import { decodeSegment } from "@/lib/route-params"
 
 test("an engine's address opens on the overview, and names any other view", () => {
   expect(engineHref("dns-1")).toBe("/network/dns/services/dns-1")
@@ -19,9 +20,9 @@ test("a retained change's review is in Changes, whatever view the address names"
 
 test("an id that needs escaping goes into the address escaped and comes back whole", () => {
   expect(engineHref("a/b c")).toBe("/network/dns/services/a%2Fb%20c")
-  expect(engineIdOf("a%2Fb%20c")).toBe("a/b c")
-  expect(engineIdOf("%E0%A4%A")).toBe("%E0%A4%A")
-  expect(engineIdOf(undefined)).toBe("")
+  expect(decodeSegment("a%2Fb%20c")).toBe("a/b c")
+  expect(decodeSegment("%E0%A4%A")).toBe("%E0%A4%A")
+  expect(decodeSegment(undefined)).toBe("")
 })
 
 test("the rail is walked one engine at a time and stops at its ends", () => {

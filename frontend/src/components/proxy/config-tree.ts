@@ -1,4 +1,4 @@
-import { duration } from "@/lib/format"
+import { ago } from "@/lib/format"
 import type { Tone } from "@/components/tone"
 import type { DotTone } from "@/components/status-dot"
 import type { ProxyConfigEntry, ProxyEffectiveConfig, ProxyPlacedDirective } from "@/lib/types"
@@ -308,10 +308,13 @@ export function diffStat(diff: string): { added: number; removed: number } {
   return { added, removed }
 }
 
-/** "read 12s ago", in its largest unit, as the config test's age is said. */
+/**
+ * "read 12s ago": lib/format's `ago`, in its largest unit.
+ *
+ * @deprecated use `<Ago at verb="read" />` (components/ago), or `ago` for the words.
+ */
 export function readLabel(at: number, now: number): string {
-  const age = Math.max(0, (now - at) / 1000)
-  return age < 5 ? "read just now" : `read ${duration(age).split(" ")[0]} ago`
+  return `read ${ago(at, now)}`
 }
 
 /** The main file's place in the include map: the root every lane starts from. */

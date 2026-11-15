@@ -23,16 +23,6 @@ export function egressHref(name: string, tab?: string): string {
   return tab && tab !== "members" ? `${base}?tab=${tab}` : base
 }
 
-/** The route's segment as a group's name. */
-export function egressNameOf(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
-}
-
 /** The group a name opens: the server refuses two names that differ only in case. */
 export function findEgressGroup<T extends Pick<EgressGroup, "name">>(
   groups: T[],

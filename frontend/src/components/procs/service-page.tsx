@@ -72,6 +72,7 @@ import {
   unitTone,
   type UnitBucket,
 } from "@/components/procs/units"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = [
   "overview",
@@ -118,7 +119,7 @@ export function ServicePage() {
   const params = useParams<{ unit: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decodeName(params.unit)
+  const name = decodeSegment(params.unit)
   const requested = search.get("tab")
   const [remembered, remember] = useViewState<string>("processes.services.page.tab", "overview")
   const [chosen, setChosen] = useState<string>(requested ?? remembered)
@@ -227,16 +228,6 @@ export function ServicePage() {
       </Page>
     </Workspace>
   )
-}
-
-/** The route's segment as a unit name; a name cannot hold `%`, so decoding twice is harmless. */
-function decodeName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
 }
 
 /**

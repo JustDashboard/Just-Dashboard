@@ -1,9 +1,8 @@
 "use client"
 
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { tabClasses } from "@/components/tabs"
 import { ChipCount } from "@/components/chips"
-import { grouped } from "@/components/database/data/view"
 import {
   CollectionKindTag,
   CollectionMark,

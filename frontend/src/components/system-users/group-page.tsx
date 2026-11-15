@@ -18,7 +18,6 @@ import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { accountHref } from "@/components/system-users/access"
 import {
-  decodeSegment,
   StepArrows,
   useAddressTab,
   ViewTabs,
@@ -52,6 +51,7 @@ import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { SystemGroup, SystemUser } from "@/lib/types"
 import { useSessionState, useViewState } from "@/lib/view-state"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["overview", "members", "settings"] as const
 type Tab = (typeof TABS)[number]

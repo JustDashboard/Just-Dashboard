@@ -38,7 +38,7 @@ import {
 } from "@/components/database/data/kinds"
 import { ACTIONS_OF, actionsOf } from "@/components/database/data/table-verbs"
 import type { DbCatalog, DbCatalogObject, DbCatalogSchema } from "@/components/database/data/types"
-import { compactCount, grouped } from "@/components/database/data/view"
+import { compactCount, grouped } from "@/lib/format"
 
 /** How many rows of a group are drawn before the reader asks for more. */
 const GROUP_STEP = 300

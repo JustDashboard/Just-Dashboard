@@ -12,7 +12,7 @@ import {
   RefreshClockwise,
   SidebarLeftClose,
 } from "@/components/icons"
-import { bytes } from "@/lib/format"
+import { bytes, compactCount, grouped } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { SearchInput } from "@/components/search-input"
@@ -27,7 +27,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { compactCount, grouped } from "@/components/database/data/view"
 import { nameHue } from "@/components/database/home/kinds"
 import type { SectionId } from "@/components/database/engine"
 import {

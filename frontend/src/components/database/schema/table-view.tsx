@@ -19,7 +19,7 @@ import {
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
@@ -43,7 +43,6 @@ import {
 import { VerbActions, VerbMenu, type Verb } from "@/components/verbs"
 import { rowObjectKind } from "@/components/database/data/kinds"
 import { TableDefinition } from "@/components/database/data/structure"
-import { grouped } from "@/components/database/data/view"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {

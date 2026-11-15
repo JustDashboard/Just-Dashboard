@@ -18,7 +18,7 @@ import {
   type RowSource,
   type RowState,
 } from "@/components/database/data/rows"
-import { grouped } from "@/components/database/data/view"
+import { grouped } from "@/lib/format"
 
 /** The same three words and hues the row panel and the grid's gutter use. */
 const STATE_WORD: Record<RowState, string> = {

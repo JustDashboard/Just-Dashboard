@@ -17,7 +17,6 @@ import {
 } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
 import { plural } from "@/lib/format"
-import { downloadText } from "@/lib/metrics/export"
 import type { PortsFirewall, PortsMeta, SeenListener } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
@@ -110,6 +109,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { saveText } from "@/lib/download"
 
 /** The firewall's verdicts are read at the list's own cadence. */
 const POLL_MS = 15_000
@@ -349,8 +349,8 @@ function PortsView() {
   }
   const exportRows = (format: "csv" | "json") => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
-    if (format === "csv") downloadText(`listening-sockets-${stamp}.csv`, toCsv(visible))
-    else downloadText(`listening-sockets-${stamp}.json`, toJson(visible), "application/json")
+    if (format === "csv") saveText(`listening-sockets-${stamp}.csv`, toCsv(visible), "text/csv")
+    else saveText(`listening-sockets-${stamp}.json`, toJson(visible), "application/json")
   }
   const verbsFor = useSocketVerbs({ firewall: firewall.data, confirm, onDone: refreshNow })
   const open_ = (socket: Socket) => router.push(portHref(socket, all))

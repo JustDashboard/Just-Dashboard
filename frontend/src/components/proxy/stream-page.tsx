@@ -75,6 +75,7 @@ import {
   windowRead,
 } from "@/components/proxy/stream-traffic"
 import { TestResults, useStreamVerbs } from "@/components/proxy/stream-verbs"
+import { decodeSegment } from "@/lib/route-params"
 
 const BACK = (
   <Link
@@ -90,16 +91,6 @@ const TAB_LABEL: Record<StreamTab, string> = {
   clients: "Clients",
   connections: "Connected now",
   settings: "Settings",
-}
-
-/** The route's segment as a stream name; a name cannot hold `%`, so decoding twice is harmless. */
-function decodeName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
 }
 
 function dotTone(stream: StreamEntry): DotTone {
@@ -132,7 +123,7 @@ export function StreamPage() {
   const params = useParams<{ name: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decodeName(params.name)
+  const name = decodeSegment(params.name)
   const { can } = useAuth()
   const admin = can("system.admin")
   const asked = streamTab(search.get("tab"))

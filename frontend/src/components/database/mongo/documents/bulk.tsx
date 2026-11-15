@@ -9,7 +9,6 @@ import { Field, FormFact, FormFacts, FormNote, OptionList, OptionRow } from "@/c
 import { Modal } from "@/components/modal"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { grouped } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
 import {
   countDocuments,
@@ -20,6 +19,7 @@ import {
 import { CodeField } from "@/components/database/mongo/code-field"
 import { isEmptyDocument, shapeProblem } from "@/components/database/mongo/shell"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
+import { grouped } from "@/lib/format"
 
 export type BulkMode = "update" | "delete"
 

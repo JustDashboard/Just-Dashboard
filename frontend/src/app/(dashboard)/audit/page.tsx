@@ -7,7 +7,6 @@ import { useHeldList } from "@/components/workspace/held-list"
 import { CrossCircle, Download, FileText, Notes, RefreshClockwise } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { calendarDate, clock, plural, relativeTime, timestamp } from "@/lib/format"
-import { downloadText } from "@/lib/metrics/export"
 import type { MetricsState } from "@/lib/metrics/store"
 import { notify } from "@/lib/toast"
 import type { AuditEntry } from "@/lib/types"
@@ -55,6 +54,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { VerbMenu, type Verb } from "@/components/verbs"
+import { saveText } from "@/lib/download"
 
 const PAGE_SIZE = 100
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -223,7 +223,11 @@ export default function AuditPage() {
         )
         return
       }
-      downloadText(exportName({ username, action, failed: onlyFailed }, new Date()), auditCsv(rows))
+      saveText(
+        exportName({ username, action, failed: onlyFailed }, new Date()),
+        auditCsv(rows),
+        "text/csv",
+      )
       notify.success(`Exported ${plural(rows.length, "entry", "entries")}`, {
         description:
           matching > rows.length

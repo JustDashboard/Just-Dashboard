@@ -60,6 +60,7 @@ import {
   queryParams,
   type RequestQuery,
 } from "@/components/deploy/logs-model"
+import { localInputValue } from "@/lib/format"
 
 const RAIL = { min: 208, max: 420, base: 272 }
 
@@ -102,11 +103,6 @@ function detectedLensOf(
   if (!source) return undefined
   if (source.kind === "journal" && unit) return units.find((u) => u.name === unit)?.lens
   return source.lens
-}
-
-function toLocalInput(date: Date) {
-  const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 23)
 }
 
 /**
@@ -680,8 +676,8 @@ function LogsScreen() {
               until={until}
               onCustomRange={(from, to) => {
                 setRange("custom")
-                setSince(toLocalInput(from))
-                setUntil(toLocalInput(to))
+                setSince(localInputValue(from))
+                setUntil(localInputValue(to))
               }}
               context={context}
               onContextChange={setContext}

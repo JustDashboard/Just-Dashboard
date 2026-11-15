@@ -1,5 +1,4 @@
-import { bytes } from "@/lib/format"
-import { compactCount } from "@/components/database/data/view"
+import { bytes, compactCount, grouped } from "@/lib/format"
 
 /**
  * One fact in a line of them: a figure or a name in the foreground, with the
@@ -17,8 +16,6 @@ export type Fact = {
   mono?: boolean
   title?: string
 }
-
-const grouped = (value: number) => value.toLocaleString("en-US")
 
 const plural = (count: number, one: string, many: string) => (count === 1 ? one : many)
 

@@ -11,9 +11,9 @@ import { TranscriptRow, useTranscriptDrip } from "@/components/transcript-line"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { getText } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { downloadText } from "@/lib/metrics/export"
 import { extendTranscript, isTrimmed, transcriptLines } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
+import { saveText } from "@/lib/download"
 
 /**
  * A restart's or an upgrade's transcript, read line by line.
@@ -164,7 +164,7 @@ export function RunTranscript({
             label="Download the transcript"
             disabled={!lines.length}
             onClick={() =>
-              downloadText(
+              saveText(
                 `${label.toLowerCase().replace(/\s+/g, "-")}.log`,
                 `${plain()}\n`,
                 "text/plain",

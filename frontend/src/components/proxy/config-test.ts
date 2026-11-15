@@ -1,4 +1,4 @@
-import { duration, plural } from "@/lib/format"
+import { ago, plural } from "@/lib/format"
 import type { ProxyValidation } from "@/lib/types"
 import type { ProxyStatus } from "@/components/proxy/proxy-context"
 
@@ -51,12 +51,12 @@ export function testMeaning(
 }
 
 /**
- * "tested 14s ago", in its largest unit: the first seconds read as now rather
- * than as a counter starting at 0s, and "3h 7s" as the 3h it is.
+ * "tested 14s ago": lib/format's `ago`, in its largest unit.
+ *
+ * @deprecated use `<Ago at verb="tested" />` (components/ago), or `ago` for the words.
  */
 export function testedLabel(checkedAt: number, now: number): string {
-  const age = Math.max(0, (now - checkedAt) / 1000)
-  return age < 5 ? "tested just now" : `tested ${duration(age).split(" ")[0]} ago`
+  return `tested ${ago(checkedAt, now)}`
 }
 
 /**
