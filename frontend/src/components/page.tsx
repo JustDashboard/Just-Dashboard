@@ -40,6 +40,13 @@ import { TabHeading } from "@/components/shell/tab-title"
  *
  * `rise` is the page arriving (the `rise` animation), said once here rather
  * than as `className="animate-rise"` on each page.
+ *
+ * The gutter is named `--page-inset` (20, 32 from `md`) on the page element,
+ * so what bleeds to the screen's edge inside it (a `ChipStrip` on a phone)
+ * bleeds by the page's own gutter rather than a copy of the number. The
+ * padding is said again at `md` as it was with `md:px-8`, so a page that
+ * overrides only the base padding (`p-0 lg:px-3`) keeps the same inset from
+ * `md` that it had.
  */
 export function Page({
   className,
@@ -84,7 +91,7 @@ export function Page({
         "group/page mx-auto flex w-full min-w-0 flex-col",
         fill === "workspace"
           ? cn("h-full min-h-0 max-w-none overflow-hidden", !bleed && "lg:p-3")
-          : "max-w-[1440px] gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
+          : "max-w-[1440px] gap-6 px-(--page-inset) py-6 [--page-inset:1.25rem] md:gap-8 md:px-(--page-inset) md:py-8 md:[--page-inset:2rem]",
         fill === true && "h-full min-h-0 overflow-hidden",
         fill === "xl" && "xl:h-full xl:min-h-0 xl:overflow-hidden",
         rise && "animate-rise",
