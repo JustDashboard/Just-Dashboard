@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
 import type { Tone } from "@/components/tone"
 import { Explain } from "@/components/explain"
-import { Well } from "@/components/panel"
+import { PanelHeader, Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -304,13 +304,14 @@ export function FieldRow({
 /**
  * A titled part of a longer form.
  *
- * The title is `text-title` semibold in the foreground, not the eyebrow's 10px
- * muted small caps. §8 makes this argument once already, about a panel's name:
- * a heading set at the size of the rows underneath it is legible but is not a
- * heading. The eyebrow was worse than that — a Configure screen of nine
- * sections put every one of its heads at 10px grey *under* the 13px white
- * field labels they opened, so the loudest line in each block was a label and
- * the page had no structure a reader could see from a metre away.
+ * Its head is the section head, `PanelHeader` plain: `text-title` at 600 in
+ * the foreground over a hairline, not the eyebrow's 10px muted small caps. §8
+ * makes this argument once already, about a panel's name: a heading set at
+ * the size of the rows underneath it is legible but is not a heading. The
+ * eyebrow was worse than that — a Configure screen of nine sections put every
+ * one of its heads at 10px grey *under* the 13px white field labels they
+ * opened, so the loudest line in each block was a label and the page had no
+ * structure a reader could see from a metre away.
  *
  * It went to 14 first, and 14 was not enough: an `OptionRow`'s title is 14 to
  * outrank the fields it governs, so "Public address" and "Publish on a public
@@ -319,8 +320,7 @@ export function FieldRow({
  * option (14) → field (13) → hint (11) with four visible steps and nothing
  * invented for any of them. It meets a `Modal`'s own title at the same size in
  * a dialog, which is correct and not a collision: that one sits in a bordered
- * header strip above the body, and these are inside it under hairlines. A
- * page section (`aside`) is a rung higher again, for the reason given there.
+ * header strip above the body, and these are inside it under hairlines.
  */
 export function FormSection({
   id,
@@ -328,6 +328,7 @@ export function FormSection({
   hint,
   actions,
   aside,
+  level,
   className,
   children,
   "data-slot": slot,
@@ -335,6 +336,13 @@ export function FormSection({
   /** A scroll target, for a page that sends a reader to one of its sections. */
   id?: string
   title: React.ReactNode
+  /**
+   * @deprecated A line under a title is a description, and titles carry none
+   * (§5). Put a sentence the reader needs before acting in a `Notice` or in
+   * the field's own hint, and a reading of the section's state (the address
+   * it answers at, how many are watched) at the head's end in `actions`.
+   * Drawn under the title until the callers have moved.
+   */
   hint?: React.ReactNode
   actions?: React.ReactNode
   /** Names the section for a caller composing it, as `SettingSection` does. */
@@ -352,16 +360,42 @@ export function FormSection({
    * above it as from its own — is answered by spacing instead: 64px and a
    * hairline between sections, 16px between a head and its fields.
    *
-   * The head is a `Section`'s 16, a rung above the 15 of a dialog's section,
-   * because it names a part of the page. Under it the `hint` carries what the
-   * section currently *is* — the address it answers at, the certificate on
-   * disk — at 12, as data between the title and the 11px hints in the fields
-   * (§5). `actions` sit at the head's far end.
+   * The hairline is the one `FormSections` draws between sections, so the
+   * head itself draws none: a rule above each head and another under it put
+   * two rules 32px apart at every break of the settings column.
    */
   aside?: boolean
+  /**
+   * The heading element. A page section (`aside`) is an h2, the level under
+   * the page's title; a part of a dialog or sheet is an h3, under its title.
+   */
+  level?: 2 | 3
   className?: string
   children: React.ReactNode
 }) {
+  const head = (
+    <PanelHeader
+      plain
+      level={level ?? (aside ? 2 : 3)}
+      title={title}
+      actions={actions}
+      className={aside ? "border-b-0 pb-0" : undefined}
+      hint={
+        hint && (
+          // Under the title in its own column, still above the rule, so the
+          // actions landing beside the title move neither it nor the fields.
+          <div
+            className={cn(
+              "mt-0.5 min-w-0 text-muted-foreground",
+              aside ? "text-xs leading-relaxed" : "text-hint",
+            )}
+          >
+            {hint}
+          </div>
+        )
+      }
+    />
+  )
   if (aside) {
     return (
       <section
@@ -372,35 +406,14 @@ export function FormSection({
           className,
         )}
       >
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-2">
-          <div className="min-w-0 space-y-1">
-            {/* The level under the page's title: these sections are the
-                page's structure, and as h3 they skipped one. */}
-            <h2 className="text-base font-semibold tracking-tight">{title}</h2>
-            {hint && <div className="text-xs leading-relaxed text-muted-foreground">{hint}</div>}
-          </div>
-          {actions && <div className="flex flex-wrap items-center gap-1.5">{actions}</div>}
-        </div>
+        {head}
         <div className="min-w-0 space-y-5">{children}</div>
       </section>
     )
   }
   return (
     <section id={id} data-slot={slot} className={cn("min-w-0 space-y-3", className)}>
-      <div
-        className={cn(
-          "flex min-w-0 flex-wrap justify-between gap-x-4 gap-y-1 border-b border-hairline pb-2",
-          // Bottom-aligned, the actions sit on the hint's line; with no hint
-          // that put a 32px button's label several pixels above the title's.
-          hint ? "items-end" : "items-center",
-        )}
-      >
-        <div className="min-w-0">
-          <h3 className="min-w-0 text-title font-semibold tracking-tight">{title}</h3>
-          {hint && <p className="mt-0.5 text-hint text-muted-foreground">{hint}</p>}
-        </div>
-        {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
-      </div>
+      {head}
       {children}
     </section>
   )
