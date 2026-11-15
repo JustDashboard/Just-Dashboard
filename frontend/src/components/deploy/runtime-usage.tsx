@@ -187,9 +187,9 @@ export function RuntimeUsage({
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
             {picker && <div className="min-w-0 max-sm:w-full">{picker}</div>}
             <span className="numeric text-hint text-muted-foreground">{span.head}</span>
-            {/* The range's own Live stop says the feed is live; the status
-                is only drawn when it says something the range does not. */}
-            {!(streaming && running && feed.live) && (
+            {/* The range has its own Live stop, so a live feed needs no status
+                word beside it; the status stays for what the range cannot say. */}
+            {!(running && feed.live) && (
               <Status
                 tone={!running ? "stopped" : feed.live ? "running" : "notice"}
                 live={running && feed.live}
