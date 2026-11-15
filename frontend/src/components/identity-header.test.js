@@ -23,7 +23,7 @@ describe("IdentityHeader", () => {
     expect(html).toContain("w-64")
     // The tile and the command: skeletons the size of what lands.
     expect(html).toContain("size-10 shrink-0 rounded-lg")
-    expect(html).toContain("h-8 w-28")
+    expect(html).toContain("h-(--control-compact) w-28")
   })
 
   test("a title already known while loading is drawn as itself", () => {
@@ -44,10 +44,11 @@ describe("IdentityHeader", () => {
     expect(html).not.toContain("max-sm:order-1")
   })
 
-  test("a line with only the menu keeps it beside the title", () => {
-    const html = draw({ title: "api", facts: "x", menu: h("button", null, "⋯") })
-    expect(html).toContain("max-sm:order-1")
-    expect(html).not.toContain("max-sm:order-last")
+  test("a line with a place for verbs keeps a control's height for them, filled or not", () => {
+    const empty = draw({ title: "api", facts: "x", state: "ok", menu: false })
+    expect(empty).toContain("max-sm:min-h-(--control-compact)")
+    const none = draw({ title: "api", facts: "x", state: "ok" })
+    expect(none).not.toContain("max-sm:order-last")
   })
 
   test("facts written as facts are drawn as a FactLine", () => {

@@ -149,7 +149,11 @@ export function IdentityHeader({
         facts={lineFacts}
         state={loading && state === true ? <Bone className="w-24 text-xs" /> : state}
         command={
-          loading && command === true ? <Skeleton className="h-8 w-28 rounded-md" /> : command
+          loading && command === true ? (
+            <Skeleton className="h-(--control-compact) w-28 rounded-md" />
+          ) : (
+            command
+          )
         }
         menu={menu}
         aside={aside}
@@ -252,8 +256,10 @@ function FactsBone() {
  * state takes the next, the facts run the full width under them, and the
  * command and its menu are the foot. Beside the title, "View deployment" cut
  * the project's address to eleven characters on every deploy page; the name
- * is the one part of the line that must never give way. A line with only
- * the `⋯` menu keeps it beside the title: an icon costs the name nothing.
+ * is the one part of the line that must never give way. The foot keeps a
+ * control's height whenever the line has a place for verbs, so a loading
+ * line that passes `menu={false}` or `command` is as tall as the line it
+ * becomes (D11).
  */
 function ProjectLine({
   tile,
@@ -283,8 +289,11 @@ function ProjectLine({
   className?: string
 }) {
   const Line = label ? "section" : "div"
-  // Something wider than an icon at the end: on a phone it takes the foot.
-  const footed = Boolean(command || aside)
+  // A line that has a place for verbs (even `menu={false}`, a place with
+  // nothing in it yet) keeps a control's height for them at its foot on a
+  // phone, so a line drawn before its verbs are known is as tall as the one
+  // that replaces it.
+  const footed = command !== undefined || menu !== undefined || aside !== undefined
   const line = (
     <Line
       aria-label={label}
@@ -323,7 +332,7 @@ function ProjectLine({
         className={cn(
           "flex shrink-0 items-center gap-2 sm:row-span-2",
           footed
-            ? "max-sm:order-last max-sm:col-span-3 max-sm:mt-1 max-sm:flex-wrap"
+            ? "max-sm:order-last max-sm:col-span-3 max-sm:mt-1 max-sm:min-h-(--control-compact) max-sm:flex-wrap"
             : "max-sm:order-1",
           // Important, so the row of its own wins over the phone's place for
           // it whichever of the two rules the sheet happens to write last.

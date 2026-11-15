@@ -134,8 +134,10 @@ shape while it loads and nothing under the line moves when the words land (D11).
 - The identity line gives the name its own row: the tile and the title share the first row, the
   state takes the next, the facts run the full width, and the command and its `⋯` are the foot. Before
   this, "View deployment" beside the address cut it to eleven characters on all 16 deploy project
-  pages (MOB-13). A line with only `⋯` keeps it beside the title, because an icon costs the name
-  nothing.
+  pages (MOB-13). The foot keeps a control's height whenever the line has a place for verbs, even
+  an empty one (`menu={false}`), so a loading line that says where its verbs will be is as tall as
+  the line that replaces it. A loading form whose loaded line has verbs passes `command` (drawn as
+  a bone) or `menu={false}`; one that passes neither grows by a row when the verbs land.
 - Facts wrap between facts, never inside one, and no dot is left at a line's end (`FactLine`).
 
 ## Accessibility

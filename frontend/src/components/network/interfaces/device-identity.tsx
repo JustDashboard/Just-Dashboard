@@ -230,7 +230,9 @@ export function DeviceIdentity({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : undefined
+          ) : (
+            false
+          )
         }
       />
       {dialog}
@@ -247,6 +249,8 @@ export function DeviceIdentityLoading({ name }: { name: string }) {
       className="border-b-0 pb-0"
       title={<span className="truncate font-mono">{name}</span>}
       state
+      // The device's verbs are the line's foot on a phone; their place is kept.
+      menu={false}
     />
   )
 }

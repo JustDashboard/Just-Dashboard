@@ -228,5 +228,7 @@ export function TunnelIdentity({
 
 /** The line's place while the tunnels are read: WireGuard's mark and bones in the line's boxes. */
 export function IdentitySkeleton({ mark }: { mark: string }) {
-  return <HostIdentity loading mark={mark} state />
+  // `menu={false}`: the tunnel's verbs land at the line's foot on a phone, and
+  // their place is kept while it is read.
+  return <HostIdentity loading mark={mark} state menu={false} />
 }
