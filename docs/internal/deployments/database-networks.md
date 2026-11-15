@@ -176,7 +176,8 @@ No hosted-provider account or live provider credentials are required by the loca
   the repair gives a committed literal link back once and leaves a key's draft, a link removed since and
   a value set since alone. `deployment_database_repair_test.go` repairs a Settings link a person's
   session wrote once and leaves one a deploy key wrote, or one with no audit entry, literal;
-  `deploy-settings-b.spec.ts` checks the page sends the link as `reference`.
+  `deploy-settings-b.spec.ts` checks the page sends the link as `reference` and, removing it, names
+  the variable that carries it and deletes it with the link.
 - Component/API tests cover reference parsing, replacement identity, scoped status, stale observations,
   the reported engine and recorded reconciliation reason with its bound, safe removal plans,
   linked-database deletion, early preview credential refusal and generated-file containment.
