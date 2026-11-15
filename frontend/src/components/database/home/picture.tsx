@@ -308,13 +308,12 @@ export function HomePicture({
                       <WireMark tone="logo" size="lg">
                         <EngineGlyph engine={engine} />
                       </WireMark>
-                      <span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background">
-                        <StatusDot
-                          state={
-                            running ? "running" : status.state === "broken" ? "failed" : "stopped"
-                          }
-                        />
-                      </span>
+                      <StatusDot
+                        corner="lg"
+                        state={
+                          running ? "running" : status.state === "broken" ? "failed" : "stopped"
+                        }
+                      />
                     </span>
                   }
                   eyebrow={summary?.version ?? engine.label}

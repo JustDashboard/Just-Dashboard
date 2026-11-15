@@ -52,6 +52,7 @@ import { useKnownClients } from "@/components/database/use-known-clients"
 import { ProductGlyph } from "@/components/product-logo"
 import { ProjectFavicon } from "@/components/project-mark"
 import { Read, Stale } from "@/components/database/kit/read"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * Who is holding whom up.
@@ -123,7 +124,7 @@ export function LocksView({ activity }: { activity: PollState<DbActivityResponse
                   <p className="text-body">
                     <span className="numeric font-medium">{plural(waiting, "session")}</span>{" "}
                     <span className="text-muted-foreground">
-                      {waiting === 1 ? "is" : "are"} waiting behind{" "}
+                      {agree(waiting, "is", "are")} waiting behind{" "}
                       {tree.length === 1 ? "one other" : `${tree.length} others`}.
                     </span>
                   </p>

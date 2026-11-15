@@ -9,7 +9,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { InfoTip } from "@/components/form"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { Button } from "@/components/ui/button"
-import { Block, FactRow, FactRows, FactsSkeleton } from "@/components/database/home/blocks"
+import { Block, FactsSkeleton } from "@/components/database/home/blocks"
 import { housekeeping } from "@/components/database/home/housekeeping"
 import { read, record } from "@/components/database/home/read"
 import { compact } from "@/components/database/home/readings"
@@ -22,6 +22,7 @@ import { Read, staleOf } from "@/components/database/kit/read"
 import { useTopStatements } from "@/components/database/kit/top-statements"
 import { NotAvailable } from "@/components/database/ops/performance-parts"
 import { EmptyNote } from "@/components/state"
+import { Detail, DetailList } from "@/components/detail-list"
 
 /** How many rows a ranked block shows. */
 const TOP = 6
@@ -358,20 +359,20 @@ export function FileFacts() {
     >
       <Read rise poll={file} what="the file" skeleton={<FactsSkeleton rows={7} />}>
         {(data) => (
-          <FactRows>
-            <FactRow label="Path" className="font-mono wrap-anywhere">
+          <DetailList ruled size="body">
+            <Detail label="Path" className="font-mono wrap-anywhere">
               {data.path}
-            </FactRow>
-            <FactRow label="Size">
+            </Detail>
+            <Detail label="Size">
               {bytes(data.fileBytes)}
               {data.walBytes > 0 ? ` · ${bytes(data.walBytes)} write-ahead log` : ""}
-            </FactRow>
+            </Detail>
             {data.modified && (
-              <FactRow label="Last written">
+              <Detail label="Last written">
                 <span title={timestamp(data.modified)}>{relativeTime(data.modified)}</span>
-              </FactRow>
+              </Detail>
             )}
-            <FactRow label="Holds">
+            <Detail label="Holds">
               {(["table", "index", "view", "trigger"] as const)
                 .filter((kind) => data.objects[kind])
                 .map(
@@ -381,15 +382,15 @@ export function FileFacts() {
                     }`,
                 )
                 .join(" · ") || "nothing yet"}
-            </FactRow>
-            <FactRow label="Journal">
+            </Detail>
+            <Detail label="Journal">
               {data.journalMode} · synchronous {data.synchronous}
-            </FactRow>
-            <FactRow label="Foreign keys">{data.foreignKeys ? "enforced" : "not enforced"}</FactRow>
-            <FactRow label="Auto-vacuum">{data.autoVacuum}</FactRow>
-            <FactRow label="Text">{data.encoding}</FactRow>
-            <FactRow label="SQLite">{data.version}</FactRow>
-          </FactRows>
+            </Detail>
+            <Detail label="Foreign keys">{data.foreignKeys ? "enforced" : "not enforced"}</Detail>
+            <Detail label="Auto-vacuum">{data.autoVacuum}</Detail>
+            <Detail label="Text">{data.encoding}</Detail>
+            <Detail label="SQLite">{data.version}</Detail>
+          </DetailList>
         )}
       </Read>
     </Block>

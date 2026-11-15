@@ -68,6 +68,7 @@ import type { BackupJob, DbConnection, Job } from "@/lib/types"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Stale } from "@/components/database/kit/read"
+import { Detail, DetailList } from "@/components/detail-list"
 
 /** The width of the list itself from which a dump is a row of a table rather than a block of lines. */
 const TABLE_FROM = 600
@@ -452,7 +453,7 @@ export function Backups() {
               // Framed, because it is a table (§2), and one line to a dump:
               // who took it, the tool that wrote it and how long it took are
               // behind its name.
-              <Panel>
+              <Panel framed>
                 <Table className="table-fixed">
                   <colgroup>
                     <col className="w-28" />
@@ -586,7 +587,8 @@ function DumpsSilhouette({ table }: { table: boolean }) {
   return (
     <div role="status" aria-label="Reading the dumps" className="pt-3">
       {table ? (
-        <Panel aria-hidden>
+        // Framed as the table it stands for is.
+        <Panel framed aria-hidden>
           <div className="flex h-10 items-center border-b border-hairline px-4">
             <Skeleton className="h-2.5 w-12" />
           </div>
@@ -713,30 +715,22 @@ function DumpName({ file, bare }: { file: DbBackupFile; bare?: boolean }) {
         </PopoverTrigger>
         <PopoverContent align="start" className="w-80 space-y-2 p-3 text-xs">
           <p className="font-mono break-all">{file.file}</p>
-          <dl className="grid grid-cols-start-main gap-x-3 gap-y-1 text-hint">
-            <dt className="text-muted-foreground">Taken</dt>
-            <dd>
+          <DetailList>
+            <Detail label="Taken">
               {timestamp(file.takenAt)}
               {file.by && ` by ${file.by}`}
-            </dd>
-            <dt className="text-muted-foreground">Written by</dt>
-            <dd>
+            </Detail>
+            <Detail label="Written by">
               {toolWords(file)}
               {took && `, in ${took}`}
-            </dd>
-            {holds && (
-              <>
-                <dt className="text-muted-foreground">Holds</dt>
-                <dd>{holds}</dd>
-              </>
-            )}
+            </Detail>
+            {holds && <Detail label="Holds">{holds}</Detail>}
             {file.note && (
-              <>
-                <dt className="text-muted-foreground">Note</dt>
-                <dd className="break-words">{file.note}</dd>
-              </>
+              <Detail label="Note" className="break-words">
+                {file.note}
+              </Detail>
             )}
-          </dl>
+          </DetailList>
         </PopoverContent>
       </Popover>
       {origin && <Tag className="shrink-0">{origin}</Tag>}

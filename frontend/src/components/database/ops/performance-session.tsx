@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams } from "next/navigation"
 import { CodeBracket, Copy, Cross, StopCircle } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { duration, timestamp } from "@/lib/format"
+import { duration, plural, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -152,7 +152,7 @@ function Session({ pid }: { pid: string | null }) {
     ? activity.error
       ? "The sessions could not be read"
       : "Reading the sessions…"
-    : `${rows.length} of ${total} ${total === 1 ? "session" : "sessions"}${
+    : `${rows.length} of ${plural(total, "session")}${
         state
           ? ` · ${SESSION_STATES.find((entry) => entry.id === state)?.label.toLowerCase()}`
           : idleOpen

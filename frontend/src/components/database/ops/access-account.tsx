@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Key, Trash } from "@/components/icons"
 import { ApiError, errorMessage, put } from "@/lib/api"
-import { calendarDate, timestamp } from "@/lib/format"
+import { calendarDate, plural, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -207,7 +207,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       : roles.data
         ? show || filter.search
           ? `${shown.length} of ${accountCounts(all).all}${show ? ` · ${SHOW_WORDS[show]}` : ""}`
-          : `${accountCounts(all).all} ${accountCounts(all).all === 1 ? "account" : "accounts"}`
+          : `${plural(accountCounts(all).all, "account")}`
         : "Reading the accounts…",
     filtered: Boolean(show),
     onClearFilters: () => filter.setShow(""),

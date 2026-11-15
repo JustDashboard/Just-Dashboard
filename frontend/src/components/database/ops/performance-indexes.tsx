@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { bytes } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { RowLink } from "@/components/row-link"
@@ -56,27 +56,28 @@ import {
 import type { DbIndexStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { Read, Stale } from "@/components/database/kit/read"
+import { agree } from "@/components/database/kit/figures"
 
 const FLAGS: { id: IndexFlag; chip: string; words: (count: number) => string }[] = [
   {
     id: "invalid",
     chip: "Invalid",
-    words: (n) => `${n === 1 ? "is" : "are"} invalid, and used by no query`,
+    words: (n) => `${agree(n, "is", "are")} invalid, and used by no query`,
   },
   {
     id: "duplicate",
     chip: "Duplicate",
-    words: (n) => `${n === 1 ? "repeats" : "repeat"} another index exactly`,
+    words: (n) => `${agree(n, "repeats", "repeat")} another index exactly`,
   },
   {
     id: "covered",
     chip: "Covered",
-    words: (n) => `${n === 1 ? "is" : "are"} the leading columns of a wider index`,
+    words: (n) => `${agree(n, "is", "are")} the leading columns of a wider index`,
   },
   {
     id: "unused",
     chip: "Unused",
-    words: (n) => `${n === 1 ? "has" : "have"} never been scanned`,
+    words: (n) => `${agree(n, "has", "have")} never been scanned`,
   },
 ]
 
@@ -249,7 +250,7 @@ export function IndexesView() {
               {flag && counts[flag] > 0 && (
                 <p className="text-body">
                   <span className="numeric font-medium">
-                    {counts[flag].toLocaleString()} {counts[flag] === 1 ? "index" : "indexes"}
+                    {plural(counts[flag], "index", "indexes")}
                   </span>{" "}
                   <span className="text-muted-foreground">
                     {FLAGS.find((entry) => entry.id === flag)?.words(counts[flag])}, holding{" "}

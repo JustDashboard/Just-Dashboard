@@ -55,6 +55,7 @@ import {
 import { TaskDialog } from "@/components/database/ops/settings-dialog"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { ErrorState } from "@/components/state"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * The three things done to one extension, each in the dialog its kind takes:
@@ -307,7 +308,7 @@ export function EnableExtension({ extension, onClose, onDone }: DialogProps) {
           {missing.length > 0 && !cascade && (
             <FormNote tone="warning">
               Without it the server refuses: {listWords(missing)}{" "}
-              {missing.length === 1 ? "is" : "are"} not enabled in {conn.database || conn.name}.
+              {agree(missing.length, "is", "are")} not enabled in {conn.database || conn.name}.
             </FormNote>
           )}
           {chosen?.superuser && !chosen.trusted && !data.superuser && (

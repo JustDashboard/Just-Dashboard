@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
-import { percent, relativeTime } from "@/lib/format"
+import { percent, plural, relativeTime } from "@/lib/format"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -69,6 +69,7 @@ import type {
   DbStatements,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { counted } from "@/components/database/kit/figures"
 
 /** How many statements the page reads to find its own among, and lists beside it. The server's cap. */
 const LISTED = 200
@@ -278,9 +279,7 @@ function Statement({ address }: { address: string | null }) {
                   <Fig>{shareWords(listed.share)}</Fig> of runtime
                 </span>
                 <FactDot />
-                <span className="numeric">
-                  {listed.calls.toLocaleString()} {listed.calls === 1 ? "call" : "calls"}
-                </span>
+                <span className="numeric">{plural(listed.calls, "call")}</span>
                 <FactDot />
                 <span className="numeric">{millis(listed.meanMs)} a call</span>
                 {missing && (
@@ -299,9 +298,7 @@ function Statement({ address }: { address: string | null }) {
                   time
                 </span>
                 <FactDot />
-                <span className="numeric">
-                  {recorded.calls.toLocaleString()} {recorded.calls === 1 ? "call" : "calls"}
-                </span>
+                <span className="numeric">{plural(recorded.calls, "call")}</span>
               </>
             ) : (
               <span>&nbsp;</span>
@@ -393,7 +390,7 @@ function railRow(
     sub:
       statement.calls === undefined || statement.meanMs === undefined
         ? "not among the top statements"
-        : `${compact(statement.calls)} ${statement.calls === 1 ? "call" : "calls"} · ${millis(statement.meanMs)} each`,
+        : `${counted(statement.calls, "call")} · ${millis(statement.meanMs)} each`,
     figure: statement.share === undefined ? undefined : shareWords(statement.share),
   }
 }
@@ -520,8 +517,7 @@ function Figures({
             />
           }
         >
-          {statement.calls.toLocaleString()} {statement.calls === 1 ? "call" : "calls"},{" "}
-          {statement.rows.toLocaleString()} {statement.rows === 1 ? "row" : "rows"}
+          {plural(statement.calls, "call")}, {plural(statement.rows, "row")}
         </ReadingLine>
         <ReadingLine
           mark={

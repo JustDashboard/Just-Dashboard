@@ -5,7 +5,6 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
 import { sectionHref } from "@/components/database/engine"
-import { FactRow, FactRows } from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
 import { EngineMark } from "@/components/database/kit"
 import type { WatchedJob } from "@/components/database/ops/backups-job"
@@ -77,6 +76,7 @@ import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { BackupJob, Job } from "@/lib/types"
 import { Stale } from "@/components/database/kit/read"
+import { Detail, DetailList } from "@/components/detail-list"
 
 /** The width of the panel from which a base backup is a row of a table rather than a block of lines. */
 const TABLE_FROM = 600
@@ -598,8 +598,8 @@ function ArchiveReading({
         </Notice>
       )}
 
-      <FactRows aria-label="The archive">
-        <FactRow label="Archiving">
+      <DetailList ruled size="body" aria-label="The archive">
+        <Detail label="Archiving">
           <span className="flex flex-wrap items-baseline gap-x-2">
             <Status tone={health.tone} label={health.word} />
             {archiver?.lastArchived && (
@@ -616,8 +616,8 @@ function ArchiveReading({
               </span>
             )}
           </span>
-        </FactRow>
-        <FactRow label="Base backups">
+        </Detail>
+        <Detail label="Base backups">
           <span className="numeric">
             {plural(backups.length, "base backup")} · {bytes(stored)} ·{" "}
             {archive.schedule ? (
@@ -629,18 +629,18 @@ function ArchiveReading({
               "taken by hand only"
             )}
           </span>
-        </FactRow>
-        <FactRow label="Keeps">{keepsWords(archive.retentionDays)}</FactRow>
-        <FactRow label="Kept in" className="font-mono text-xs wrap-anywhere">
+        </Detail>
+        <Detail label="Keeps">{keepsWords(archive.retentionDays)}</Detail>
+        <Detail label="Kept in" className="font-mono text-xs wrap-anywhere">
           {locationWords(archive)}
-        </FactRow>
-        <FactRow label="Encrypted">
+        </Detail>
+        <Detail label="Encrypted">
           OpenPGP, to a key made for this archive{" "}
           <span className="font-mono text-xs text-muted-foreground" title={archive.keyFingerprint}>
             {archive.keyFingerprint.slice(-19)}
           </span>
-        </FactRow>
-      </FactRows>
+        </Detail>
+      </DetailList>
 
       {backups.length === 0 ? (
         <FormNote>

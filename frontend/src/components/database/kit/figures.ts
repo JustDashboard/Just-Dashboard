@@ -45,3 +45,11 @@ export function capitalize(word: string): string {
 export function counted(n: number, singular: string, many?: string): string {
   return `${compactCount(n, { exactBelow: 10_000 })} ${n === 1 ? singular : (many ?? `${singular}s`)}`
 }
+
+/**
+ * The verb that agrees with a count: "is" for one, "are" for the rest. A
+ * dozen sentences wrote `n === 1 ? "is" : "are"` by hand.
+ */
+export function agree(n: number, one: string, many: string): string {
+  return n === 1 ? one : many
+}

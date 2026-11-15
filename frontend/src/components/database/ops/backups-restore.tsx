@@ -26,6 +26,7 @@ import type {
 } from "@/components/database/ops/backups-types"
 import { TaskDialog } from "@/components/database/ops/settings-dialog"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { agree } from "@/components/database/kit/figures"
 
 type Target = "this" | "new"
 
@@ -167,7 +168,7 @@ export function RestoreDump({
           {beyond && (
             <p>
               <b>
-                It writes into {beyond}, which {reach.others.length === 1 ? "is" : "are"} not the
+                It writes into {beyond}, which {agree(reach.others.length, "is", "are")} not the
                 database this connection is on.
               </b>{" "}
               Whatever else uses those numbers gets the dump&rsquo;s keys back.

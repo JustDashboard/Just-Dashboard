@@ -1,4 +1,5 @@
 import type { DbTLS } from "@/lib/types"
+import { plural } from "@/lib/format"
 
 /**
  * What the TLS section says and asks, worked out from what the server reported.
@@ -51,7 +52,7 @@ export function certificateLife(
   if (left < 0) return "Expired"
   if (left === 0) return "Ends today"
   const renewIn = daysUntil(tls.renewAt, now)
-  const base = `${left} ${left === 1 ? "day" : "days"} left`
+  const base = `${plural(left, "day")} left`
   return renewIn !== undefined && renewIn > 0 ? base : `${base}, renews on its own`
 }
 
