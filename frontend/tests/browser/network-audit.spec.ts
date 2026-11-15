@@ -440,7 +440,7 @@ test("failed polling marks retained gateway readings until a fresh read succeeds
   await expect(page.getByText("Showing the last known network state", { exact: true })).toBeVisible(
     { timeout: 15_000 },
   )
-  await expect(page.getByText("Gateway read failed", { exact: true })).toBeVisible()
+  await expect(page.getByText("Gateway read failed.", { exact: true })).toBeVisible()
   await expect(page.getByText("Where traffic goes", { exact: true })).toBeVisible()
   fail = false
   await page.getByRole("button", { name: "Refresh", exact: true }).click()
