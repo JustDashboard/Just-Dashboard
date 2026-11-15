@@ -18,6 +18,9 @@ import { cn } from "@/lib/utils"
  * a word with a number, not a thing to press. Chosen, the edge steps up to
  * `--border-strong` under the accent ground, so a row of them reads chosen
  * against unchosen at a glance and not by comparing two greys.
+ *
+ * It is drawn 28px tall at every pointer, so a row of filters keeps its
+ * proportions, and presses as 44px under a finger (`hit-area`).
  */
 export function FilterChip({
   selected,
@@ -30,10 +33,11 @@ export function FilterChip({
       aria-pressed={selected}
       data-selected={selected || undefined}
       className={cn(
-        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-hint font-medium whitespace-nowrap transition-colors",
+        "hit-area inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-hint font-medium whitespace-nowrap transition-colors",
         "focus-ring",
         selected
-          ? "border-border-strong bg-accent text-foreground"
+          ? // A count inside the chosen chip takes the label's ink.
+            "border-border-strong bg-accent text-foreground [--count-ink:currentColor]"
           : "border-input text-muted-foreground hover:bg-row-hover hover:text-foreground",
         className,
       )}
@@ -42,6 +46,11 @@ export function FilterChip({
   )
 }
 
+// How far the strip reaches past its box on a phone: the page's own inset, so
+// the chip cut at the edge is cut by the screen. `--page-inset` is the page's
+// gutter; until the page names it, the 20px Page draws below `md`.
+const BLEED = "max-sm:-mx-[var(--page-inset,1.25rem)] max-sm:px-[var(--page-inset,1.25rem)]"
+
 /**
  * A run of `FilterChip`s.
  *
@@ -49,16 +58,29 @@ export function FilterChip({
  * five chips broke into ragged lines with "Pending changes" alone on the last,
  * and three lines of filters pushed the list they filter down a screen. It
  * bleeds to the edges of the page's gutter so the chip cut off at the edge is
- * the affordance, as `ui/tabs` does, with no scrollbar to eat the strip's
- * height. The vertical step is room for the focus ring, which the scroller
- * would otherwise clip. From `sm` it wraps as a row of chips always has.
+ * the affordance, with no scrollbar to eat the strip's height. From `sm` it
+ * wraps as a row of chips always has.
+ *
+ * The bleed is sideways only. It used to step out above and below too, for
+ * room to draw the focus ring the scroller would clip, and the negative margin
+ * that took replaced the gap of the stack the strip stood in: the certificate
+ * sources sat flush on the first certificate. The ring is drawn inside the chip
+ * on a phone instead.
+ *
+ * `bleed={false}` keeps the strip in its box, for a strip inside a form, a
+ * dialog or a pane, which has no page gutter to reach into.
  */
-export function ChipStrip({ className, ...props }: React.ComponentProps<"div">) {
+export function ChipStrip({
+  bleed = true,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & { bleed?: boolean }) {
   return (
     <div
       className={cn(
         "flex min-w-0 [scrollbar-width:none] items-center gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden",
-        "max-sm:-mx-5 max-sm:-my-1 max-sm:px-5 max-sm:py-1",
+        "max-sm:[&_:focus-visible]:outline-offset-[-2px]",
+        bleed && BLEED,
         "sm:flex-wrap sm:overflow-visible",
         className,
       )}
@@ -68,15 +90,15 @@ export function ChipStrip({ className, ...props }: React.ComponentProps<"div">) 
 }
 
 /**
- * A count beside a chip's or a tab's label. Muted inside an unselected control
- * and inherited inside a selected one, so the number never competes with the
- * word — and plain tabular text rather than a second small container, because
- * a chip with a chip inside it is exactly the stacking this pass removed.
- * One step behind the word, and no more: at 60% of an unselected tab's muted
- * ink the count measured 3.4:1 at 10px, where WCAG AA asks 4.5:1. At 80% it
- * is 5.2:1 on the page and 4.9:1 on the faintest ground a tab sits on.
+ * A count beside a chip's or a tab's label, in the faint ink, and the label's
+ * own ink inside a chosen chip or tab (they set `--count-ink`) — so the number
+ * never competes with the word. Plain tabular text rather than a second small
+ * container, because a chip with a chip inside it is exactly the stacking this
+ * pass removed. It used to be faded with opacity, which the one-mode rule
+ * forbids: `--faint` is the dimmest ink that passes 4.5:1.
+ *
  * A chip that is a legend — the request log's status families — passes its
- * colour for the chosen state, so "5xx 13" says which thirteen.
+ * colour as a class, so "5xx 13" says which thirteen.
  */
 export function ChipCount({
   children,
@@ -86,6 +108,15 @@ export function ChipCount({
   className?: string
 }) {
   return (
-    <span className={cn("numeric text-micro tabular-nums opacity-80", className)}>{children}</span>
+    <span
+      data-slot="chip-count"
+      className={cn(
+        "numeric text-micro tabular-nums",
+        "text-[color:var(--count-ink,var(--faint))]",
+        className,
+      )}
+    >
+      {children}
+    </span>
   )
 }

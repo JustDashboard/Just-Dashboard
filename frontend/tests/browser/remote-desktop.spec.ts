@@ -985,8 +985,8 @@ test("on a phone a session is one pane at a time, and the screen keeps its conne
   const area = await page.locator("[data-workspace-shell-scroll]").boundingBox()
   expect(workspace).toEqual(area)
   const bar = page.getByRole("navigation", { name: "Remote session" })
-  await expect(bar.getByRole("tab")).toHaveText(["Screen", "Tools", "Computers"])
-  await expect(bar.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "true")
+  await expect(bar.getByRole("button")).toHaveText(["Screen", "Tools", "Computers"])
+  await expect(bar.getByRole("button", { name: "Screen" })).toHaveAttribute("aria-current", "page")
   const foot = await bar.boundingBox()
   expect(Math.round(foot!.y + foot!.height)).toBe(844)
   // No sheet and no button for one: the bar has the stop.
@@ -1003,7 +1003,7 @@ test("on a phone a session is one pane at a time, and the screen keeps its conne
   // The frame's own first measure may say the size once more.
   await page.waitForTimeout(600)
   const said = sizes.length
-  await bar.getByRole("tab", { name: "Tools" }).click()
+  await bar.getByRole("button", { name: "Tools" }).click()
   const tools = page.getByRole("complementary", { name: "Session" })
   await expect(tools.getByRole("radiogroup", { name: "How the screen is drawn" })).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
@@ -1011,7 +1011,7 @@ test("on a phone a session is one pane at a time, and the screen keeps its conne
   // Text typed for the computer's clipboard waits there across a look at the others.
   await tools.getByLabel("Text to paste on studio-mac").fill("from the phone")
 
-  await bar.getByRole("tab", { name: "Computers" }).click()
+  await bar.getByRole("button", { name: "Computers" }).click()
   const computers = page.getByRole("navigation", { name: "Computers" })
   await expect(computers.getByRole("link", { name: /office-pc/ })).toHaveAttribute(
     "href",
@@ -1023,7 +1023,7 @@ test("on a phone a session is one pane at a time, and the screen keeps its conne
   )
   await expect(tools).toBeHidden()
 
-  await bar.getByRole("tab", { name: "Tools" }).click()
+  await bar.getByRole("button", { name: "Tools" }).click()
   await expect(tools.getByLabel("Text to paste on studio-mac")).toHaveValue("from the phone")
   // A screen that is not drawn has no size to send, and its tunnel stays up.
   await page.waitForTimeout(600)
@@ -1033,13 +1033,13 @@ test("on a phone a session is one pane at a time, and the screen keeps its conne
 
   // Picking the other way to draw the screen goes back to look at it.
   await tools.getByRole("radio", { name: /Stream/ }).click()
-  await expect(bar.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "true")
+  await expect(bar.getByRole("button", { name: "Screen" })).toHaveAttribute("aria-current", "page")
   await expect(page.locator('iframe[data-slot="remote-stream"]')).toBeVisible()
   // A stream's state is a longer word, under the name rather than beside it.
   await expect(strip.getByText("ready to stream")).toBeVisible()
   expect(await name.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
   expect((await strip.boundingBox())!.height).toBeLessThanOrEqual(44)
-  await bar.getByRole("tab", { name: "Tools" }).click()
+  await bar.getByRole("button", { name: "Tools" }).click()
   await expect(tools.getByRole("radiogroup", { name: "Stream quality" })).toBeVisible()
   await expect(
     tools.getByRole("switch", { name: "Show this computer's pointer too" }),

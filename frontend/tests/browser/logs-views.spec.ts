@@ -594,7 +594,7 @@ test("on a phone a request record is the pane, reached from the sources on the b
   const rail = page.locator('[aria-label="Log sources"]')
   await expect(rail).toBeHidden()
 
-  await bar.getByRole("tab", { name: "Sources" }).click()
+  await bar.getByRole("button", { name: "Sources" }).click()
   const record = rail.getByRole("button").filter({ hasText: "api.example.com" })
   await record.scrollIntoViewIfNeeded()
   await record.click()

@@ -2797,7 +2797,7 @@ test("on a phone the collections and the open one are two panes of the MongoDB w
   await mockMongo(page)
   await page.goto(`${DATA}?db=${DB}`)
   await expect(rail(page)).toBeVisible()
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Collections", "Documents"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Collections", "Documents"])
   const foot = (await paneBar(page).boundingBox())!
   expect(Math.round(foot.y + foot.height)).toBe(844)
 
@@ -2813,9 +2813,9 @@ test("on a phone the collections and the open one are two panes of the MongoDB w
     .click()
   await expect(page.locator("[data-slot=mongo-documents]")).toBeVisible()
   await expect(rail(page)).toHaveCount(0)
-  await expect(paneBar(page).getByRole("tab", { name: "Documents" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button", { name: "Documents" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
 })
 

@@ -26,5 +26,5 @@ export const paneBar = (page: Page) => page.locator("[data-slot=pane-bar]")
 
 /** Shows one of the frame's panes on a phone. */
 export async function showPane(page: Page, name: string) {
-  await paneBar(page).getByRole("tab", { name, exact: true }).click()
+  await paneBar(page).getByRole("button", { name, exact: true }).click()
 }

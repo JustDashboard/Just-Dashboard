@@ -1261,7 +1261,7 @@ test("full editors and the search palette fit desktop and phone widths", async (
   await expect(page.getByRole("complementary", { name: "File explorer" })).toBeHidden()
   await page
     .getByRole("navigation", { name: "File editor" })
-    .getByRole("tab", { name: "Files" })
+    .getByRole("button", { name: "Files" })
     .click()
   const tree = page.getByRole("complementary", { name: "File explorer" })
   await expect(tree).toBeVisible()
@@ -2489,7 +2489,7 @@ test.describe("Files on a phone", () => {
   test.use({ viewport: PHONE, hasTouch: true })
 
   const bar = (page: Page) => page.getByRole("navigation", { name: "Files", exact: true })
-  const stop = (page: Page, name: string) => bar(page).getByRole("tab", { name, exact: true })
+  const stop = (page: Page, name: string) => bar(page).getByRole("button", { name, exact: true })
   const strip = (page: Page) => page.locator("[data-slot='pane-header']").first()
   const listing = (page: Page) => page.getByRole("region", { name: "Folder contents" })
   const places = (page: Page) => page.getByRole("navigation", { name: "Places" })
@@ -2549,7 +2549,7 @@ test.describe("Files on a phone", () => {
     ).toBeInViewport()
 
     await expectBarAtTheFoot(bar(page))
-    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-current", "page")
     await expectFullPane(listing(page), bar(page))
     await expect(places(page)).toBeHidden()
     await expect(inspector(page)).toBeHidden()
@@ -2569,7 +2569,7 @@ test.describe("Files on a phone", () => {
 
     await places(page).locator("button[title='/etc']").click()
     await expect(page.getByRole("button", { name: "Folders in /etc" })).toBeVisible()
-    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-current", "page")
     await expect(listing(page)).toBeVisible()
     await expect(places(page)).toBeHidden()
 
@@ -2583,7 +2583,7 @@ test.describe("Files on a phone", () => {
     await stop(page, "Places").click()
     await strip(page).getByRole("button", { name: "Back to previous folder" }).click()
     await expect(page.locator(`tr[data-entry-path='${home}/photos']`)).toBeVisible()
-    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-current", "page")
   })
 
   test("the sidebar and details put away at a desk are still on a phone's bar", async ({
@@ -2812,7 +2812,7 @@ test.describe("the file editor on a phone", () => {
   test.use({ viewport: PHONE, hasTouch: true })
 
   const bar = (page: Page) => page.getByRole("navigation", { name: "File editor", exact: true })
-  const stop = (page: Page, name: string) => bar(page).getByRole("tab", { name, exact: true })
+  const stop = (page: Page, name: string) => bar(page).getByRole("button", { name, exact: true })
   const editor = (page: Page) => page.getByRole("region", { name: "File editor" })
   const tree = (page: Page) => page.getByRole("complementary", { name: "File explorer" })
   const menu = (page: Page) => page.getByRole("button", { name: "More editor commands" })
@@ -2830,7 +2830,7 @@ test.describe("the file editor on a phone", () => {
     await openEditor(page)
     await risen(page)
     await expectBarAtTheFoot(bar(page))
-    await expect(stop(page, "Editor")).toHaveAttribute("aria-selected", "true")
+    await expect(stop(page, "Editor")).toHaveAttribute("aria-current", "page")
     await expect(tree(page)).toBeHidden()
     await expect(page.getByRole("button", { name: /file tree/ })).toBeHidden()
     await expectFullPane(editor(page), bar(page))
@@ -3154,7 +3154,7 @@ test.describe("Files at a desk", () => {
     expect(Math.round((await boxOf(strip)).y)).toBe(Math.round(frame.y))
     await page
       .getByRole("navigation", { name: "Files", exact: true })
-      .getByRole("tab", { name: "Details" })
+      .getByRole("button", { name: "Details" })
       .click()
     await expect(page.locator("[data-files-inspector]")).toBeVisible()
   })

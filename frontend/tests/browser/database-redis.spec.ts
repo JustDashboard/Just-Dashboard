@@ -2491,7 +2491,7 @@ test("on a phone the keys and the open key are two panes, and what the database 
   await mockRedis(page)
   await page.goto(KEYS)
   await expect(rail(page)).toBeVisible()
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Keys", "Keyspace"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Keys", "Keyspace"])
   const foot = (await paneBar(page).boundingBox())!
   expect(Math.round(foot.y + foot.height)).toBe(844)
 
@@ -2505,15 +2505,15 @@ test("on a phone the keys and the open key are two panes, and what the database 
   await rail(page).getByRole("button", { name: "Open leaderboard" }).click()
   await expect(pane(page).getByRole("heading", { name: "leaderboard" })).toBeVisible()
   await expect(rail(page)).toHaveCount(0)
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Keys", "Key"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Keys", "Key"])
 
   // The console and its reference are two panes too.
   await page.goto(CONSOLE)
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Console", "Commands"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Console", "Commands"])
   await showPane(page, "Commands")
-  await expect(paneBar(page).getByRole("tab", { name: "Commands" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button", { name: "Commands" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
 })
 

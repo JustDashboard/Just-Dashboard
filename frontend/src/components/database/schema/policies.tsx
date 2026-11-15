@@ -440,7 +440,7 @@ function RolePicker({
       {chosen.length === 0 ? (
         <span className="text-hint text-muted-foreground">Everybody</span>
       ) : (
-        <ChipStrip role="group" aria-label={label} className="max-sm:mx-0 max-sm:px-0">
+        <ChipStrip role="group" aria-label={label} bleed={false}>
           {chosen.map((role) => (
             <FilterChip
               key={role}
@@ -571,7 +571,7 @@ export function PolicyDialog({
           label="Start from"
           hint="Fills the form below. The statement is shown before it runs."
         >
-          <ChipStrip role="group" aria-label="Templates" className="max-sm:mx-0 max-sm:px-0">
+          <ChipStrip role="group" aria-label="Templates" bleed={false}>
             {TEMPLATES.map((one) => (
               <FilterChip
                 key={one.id}
