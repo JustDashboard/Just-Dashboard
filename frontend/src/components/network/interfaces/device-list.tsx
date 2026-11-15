@@ -1,13 +1,13 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import type { NetworkLink, NetworkLivePoint } from "@/lib/types"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { AddressLine } from "@/components/network/address"
-import { RatePair } from "@/components/network/rate-pair"
-import { LinkMark, OWNER_LABEL, ROLE_HUE, kindLabel } from "@/components/network/marks"
+import { LinkMark, OWNER_LABEL, kindLabel } from "@/components/network/marks"
 import { describeDevice, deviceHref, deviceState, groupDevices } from "./device-facts"
 
 export { GROUPS } from "./device-facts"
@@ -75,16 +75,8 @@ function DeviceRow({ link, points }: { link: NetworkLink; points?: NetworkLivePo
   const state = deviceState(link)
   return (
     <ChoiceRow
-      leading={
-        <span className="relative flex">
-          <LinkMark link={link} />
-          <span
-            aria-hidden
-            className="absolute -bottom-0.5 -left-0.5 h-3 w-0.5 rounded-full"
-            style={{ background: ROLE_HUE[link.role] }}
-          />
-        </span>
-      }
+      // The role is said by the Tag and the section, not by a tick under the mark.
+      leading={<LinkMark link={link} />}
       title={
         <span className="inline-flex min-w-0 items-center gap-2">
           <span className="truncate font-mono">{link.name}</span>
@@ -104,7 +96,7 @@ function DeviceRow({ link, points }: { link: NetworkLink; points?: NetworkLivePo
       }
       trailing={
         <span className="flex items-center gap-4">
-          <RatePair rx={link.rxRate} tx={link.txRate} points={points} />
+          <InOut rx={link.rxRate} tx={link.txRate} unit="rate" layout="stacked" trend={points} />
           <Status tone={state.tone} label={state.label} className="hidden w-20 md:inline-flex" />
         </span>
       }

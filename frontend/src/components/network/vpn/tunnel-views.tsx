@@ -1,5 +1,6 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import { useState } from "react"
 import { DesktopDevice, Location } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -137,12 +138,7 @@ export function TunnelTraffic({
                   ) : (
                     <DesktopDevice aria-hidden className="size-3.5 text-muted-foreground" />
                   ),
-                hint: (
-                  <span className="font-mono">
-                    <span className="text-chart-5">↓ {bytes(peer.rxBytes)}</span>{" "}
-                    <span className="text-chart-2">↑ {bytes(peer.txBytes)}</span>
-                  </span>
-                ),
+                hint: <InOut rx={peer.rxBytes} tx={peer.txBytes} unit="bytes" />,
                 value: bytes(peer.rxBytes + peer.txBytes),
                 share: total > 0 ? (peer.rxBytes + peer.txBytes) / total : 0,
                 onClick: onPeer ? () => onPeer(peer) : undefined,

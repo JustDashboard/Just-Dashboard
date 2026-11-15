@@ -32,7 +32,7 @@ test("the page says how old its reading is, with packets and TCP's health in wor
   })
   await open(page, [])
   await visit(page, "/network/traffic")
-  const identity = page.getByRole("region", { name: "About the uplink" })
+  const identity = page.getByRole("region", { name: "About the traffic" })
   await expect(identity).toContainText(/read \ds ago/)
   await expect(identity).toContainText("sampled every 2s")
   const context = page.getByLabel("Live context")
@@ -51,7 +51,7 @@ test("a stopped sampler reads as stale, not as a quiet link", async ({ page }) =
   await open(page, [])
   await page.route("**/api/v1/network/traffic/live**", liveRoute(40))
   await visit(page, "/network/traffic")
-  const identity = page.getByRole("region", { name: "About the uplink" })
+  const identity = page.getByRole("region", { name: "About the traffic" })
   await expect(identity).toContainText(/stale, read 4\ds ago/)
   await expect(identity).toContainText("the sampler has not stepped; figures are stale")
 })
@@ -178,7 +178,7 @@ test("every container can be listed and one opens its page: chart, service and p
   await expect(identity).toContainText("registry:2")
   const talked = page.getByLabel("Who registry talked to")
   await expect(talked).toContainText("198.51.100.99")
-  await expect(talked).toContainText("47.7 MiB")
+  await expect(talked).toContainText("47.7 MB")
   await expect(talked).toContainText("192.0.2.53")
   await expect
     .poll(() =>

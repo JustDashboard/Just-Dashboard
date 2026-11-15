@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { Servers } from "@/components/icons"
@@ -20,8 +21,6 @@ import {
   type Place,
   type Program,
 } from "@/components/network/connections/model"
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 /** The programs drawn before the rest fold into "N more programs". */
 const PROGRAMS = 5
