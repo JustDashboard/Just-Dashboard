@@ -4,7 +4,7 @@
 
 The frontend keeps a commit-message draft per checkout for the tab, walks changed files with
 Alt+Up/Down, and returns focus to the selected file when Escape closes its preview. These read and
-navigation interactions are specified in [workspace interactions](../frontend/workspace-interactions.md).
+navigation interactions are specified in [workspace interactions](../frontend/patterns/keyboard-and-place.md).
 
 Inline file edits keep each draft and its opened content/revision in memory per checkout and path.
 Selecting another file or preview, History, Blame, Close and dashboard navigation preserve them;
@@ -188,7 +188,7 @@ per checkout, with Git's native locks still protecting against terminal clients.
 
 The job frontend selects runs through `?run=` and remembers archive selection per run. Shift ranges
 and keyboard selection operate on the rendered entries; review and restore still use the route
-contracts below. See [workspace interactions](../frontend/workspace-interactions.md).
+contracts below. See [workspace interactions](../frontend/patterns/keyboard-and-place.md).
 
 Backup sources and local targets pass through the configured file resolver on create/update and again
 before test/execution. Local artifacts are independently contained for inspection, restore and

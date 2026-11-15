@@ -1,4 +1,7 @@
-# Frontend data flow and theming
+# Data flow
+
+API and socket state, metrics state, confirmations, progress and updates (this page was
+`patterns/data-flow.md` until 0.9.0).
 
 A dialog's action in flight uses `components/operation-progress.tsx` for a named working bar and
 elapsed time, and only a dialog does: `Modal` takes the reading as its `progress` prop and draws it
@@ -18,7 +21,7 @@ duplicate and extraction, Git workspace actions, exports, backup runs, diagnosti
 refreshes, the proxy request tester and job consoles — keep their own feedback (pending controls,
 toasts, transcripts) and draw no working bar.
 
-The [operation progress audit](../../audits/2026-10-14-operation-progress/README.md) records the
+The [operation progress audit](../../../audits/2026-10-14-operation-progress/README.md) records the
 original placements; [dialog progress](https://github.com/JustDashboard/Just-Dashboard/tree/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-16-dialog-progress) has the current
 footer recordings.
 
@@ -53,7 +56,7 @@ administrator capability. Interface sheets are keyed by device, and address/MTU 
 after a successful write. Their bridge selector reaches the existing guarded membership route, and
 the create dialog includes the IPv6 GRE/GRETAP kinds the backend supports.
 Administrator sheets for unmanaged devices read the existing
-[native persistent profile](../backend/network-native-managers.md). A response
+[native persistent profile](../../backend/network-native-managers.md). A response
 must name the requested device before it can create or refresh a draft. The editor keeps configured,
 runtime and boot evidence separate, and exposes only the supported IPv4/IPv6 address, DNS/domain
 and route intent. New routes inherit the observed VRF table, with table 254 for ordinary profiles;
@@ -287,7 +290,7 @@ are dated evidence, not proof of current attachment ownership.
   restores native Back/Forward. `useHeldList` preserves existing row order in React state while
   polling updates values, and exposes counted new arrivals for explicit reveal. Git commit messages
   and per-run backup archive selections are session drafts. See
-  [`workspace-interactions.md`](workspace-interactions.md) for the complete contract.
+  [`keyboard-and-place.md`](keyboard-and-place.md) for the complete contract.
 - `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
   thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
   sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were
@@ -398,8 +401,8 @@ are dated evidence, not proof of current attachment ownership.
   capability checks.
 - `ConfirmDialog` collects a phrase only for permanent deletion of an archived deployment project,
   deletion of an entire database, or Docker stack removal. The server checks those phrases too
-  ([`invariants.md`](../security/invariants.md),
-  [`permanent-deletion.md`](../deployments/permanent-deletion.md)). Other destructive actions use the
+  ([`invariants.md`](../../security/invariants.md),
+  [`permanent-deletion.md`](../../deployments/permanent-deletion.md)). Other destructive actions use the
   ordinary dialog; `phrase` stays optional.
   The dialog toasts "<title> completed" when the action resolves, unless the action resolves to
   `"reported"`: an outcome that is only partly what the title promises — a site deleted but nginx not
@@ -487,7 +490,7 @@ are dated evidence, not proof of current attachment ownership.
   nobody. Colours live on `:root` in `globals.css`. `lib/themes.ts` is now one function —
   `themeBootstrapScript()`, inlined in `<head>` with the request's CSP nonce — which puts `.dark` on the
   root element before first paint so the generated shadcn primitives' `dark:` variants resolve, sets
-  `color-scheme`, and clears the stored light/dark preference from anyone upgrading. `hooks/use-theme.tsx`,
+  `color-scheme`, and clears the stored light/dark preference from anyone upgrading. the theme hook,
   the top bar's toggle, the palette's theme commands and `/appearance` are all gone; `<html>` keeps
   `suppressHydrationWarning` because the class is still applied by script.
 

@@ -16,12 +16,19 @@ To find where a feature's files are, start from
 - Read the relevant sections of [`docs/internal/README.md`](docs/internal/README.md) before changing
   architecture, security, backend features, frontend behavior, releases, or deployment code. For the
   deployment subsystem, follow [`docs/internal/deployments/`](docs/internal/deployments/README.md).
-- A request to *redesign a page with the design system* means running that page's register's ordered
-  passes in [`docs/internal/frontend/design-system.md`](docs/internal/frontend/design-system.md).
-  **Decide the register first** — §16 has the table and the test, which is what the reader came to do
-  rather than what the page contains. A page that *reports* takes §15's passes with the host Overview
-  as the reference; a page where the reader is *deciding* a sequence takes §17's, with `/deploy/new`
-  as the reference. Read §16 and the relevant passes before touching any UI for that request.
+- A request to *redesign a page with the design system* means holding that page to
+  [`docs/internal/frontend/standard.md`](docs/internal/frontend/standard.md) (the operator's
+  decisions and D1 to D14, which win over every other frontend page) and running its register's
+  ordered passes. **Decide the register first**: [`patterns/registers.md`](docs/internal/frontend/patterns/registers.md)
+  (§16) has the table and the test, which is what the reader came to do rather than what the page
+  contains. A page that *reports* takes the passes in
+  [`recipes/reading-page.md`](docs/internal/frontend/recipes/reading-page.md) (§15) with a project's
+  Overview (`/deploy/[id]`) as the reference; a page where the reader is *deciding* a sequence takes
+  [`recipes/flow-page.md`](docs/internal/frontend/recipes/flow-page.md) (§17), with `/deploy/new` as
+  the reference. Read the register and the passes before touching any UI for that request. Code cites
+  the design system as `§n`; [`design-system.md`](docs/internal/frontend/design-system.md) is the
+  index from each number to its page. A shared component follows
+  [`contributing-a-component.md`](docs/internal/frontend/contributing-a-component.md).
 - Do not add or change CI: no GitHub Actions workflows, no `.github/` automation, no hosted checks of
   any kind, unless the operator asks for them by name. Verification happens locally with the commands
   below; a red check on GitHub that nobody asked for is confusion, not safety.

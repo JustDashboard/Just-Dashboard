@@ -6,7 +6,7 @@ The frontend can pin a shared chart instant, inspect adjacent samples and link t
 journal History window. Audit/Security filters and package inspectors also preserve URL questions,
 while counted incoming audit, connection and login rows wait for explicit reveal. These client
 interactions use the existing reads described here; see
-[workspace interactions](../frontend/workspace-interactions.md).
+[workspace interactions](../frontend/patterns/keyboard-and-place.md).
 
 `internal/metrics` samples on the server's own timer into SQLite: a live socket only describes the time
 since a tab was opened, and charts that start empty every visit cannot show last night's spike.
