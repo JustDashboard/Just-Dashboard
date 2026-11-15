@@ -24,6 +24,7 @@ import { tabClasses } from "@/components/tabs"
 import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SearchInputSkeleton } from "@/components/search-input"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -505,7 +506,7 @@ function InventoryLoading() {
   return (
     <div className="min-w-0 space-y-4" aria-busy="true" data-slot="cert-list-loading">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Skeleton className="h-8 w-full sm:w-72" />
+        <SearchInputSkeleton />
         <Skeleton className="h-8 w-[10.5rem]" />
       </div>
       <Skeleton className="h-7 w-24" />

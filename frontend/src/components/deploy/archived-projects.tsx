@@ -17,7 +17,7 @@ import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { FormFact } from "@/components/form"
 import { DimActions } from "@/components/icon-action"
 import { Page, PageContext } from "@/components/page"
-import { SearchInput } from "@/components/search-input"
+import { SearchInput, SearchInputSkeleton } from "@/components/search-input"
 import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -262,7 +262,7 @@ export function ArchivedSkeleton() {
       <PageContext eyebrow={BACK} title="Archived" />
       <Panel plain>
         <PanelToolbar>
-          <Skeleton aria-hidden className="h-10 w-full rounded-md sm:h-8 sm:w-72" />
+          <SearchInputSkeleton />
         </PanelToolbar>
         <PanelBody flush className="pt-3">
           <ArchivedRows />

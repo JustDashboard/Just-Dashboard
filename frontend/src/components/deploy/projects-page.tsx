@@ -42,7 +42,7 @@ import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { IconAction } from "@/components/icon-action"
 import { Page, PageContext } from "@/components/page"
-import { SearchInput } from "@/components/search-input"
+import { SearchInput, SearchInputSkeleton } from "@/components/search-input"
 import { Toolbar } from "@/components/toolbar"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyphs, ProductLogo, ProductLogos } from "@/components/product-logo"
@@ -103,7 +103,7 @@ const GRID = "grid gap-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
 export function FleetSkeleton({ layout = "grid" }: { layout?: "grid" | "list" }) {
   return (
     <>
-      <Skeleton aria-hidden className="h-10 w-full rounded-md sm:h-8 sm:w-72" />
+      <SearchInputSkeleton />
       {layout === "grid" ? (
         <ul aria-hidden className={GRID}>
           {[0, 1, 2].map((index) => (
