@@ -2,34 +2,27 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import {
-  ChevronDown,
-  CloudUpload,
-  MoreHorizontal,
-  Plus,
-  RefreshClockwise,
-  Table,
-} from "@/components/icons"
+import { CloudUpload, Plus, RefreshClockwise, Table } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { hueFor, LANES } from "@/lib/hue"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
-import { IconAction, rowReveal } from "@/components/icon-action"
-import { SearchInput } from "@/components/search-input"
+import { IconAction } from "@/components/icon-action"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { Stale } from "@/components/stale"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
-import { VerbMenu, type Verb } from "@/components/verbs"
+import type { Verb } from "@/components/verbs"
+import { ContainerPicker } from "@/components/database/kit/container-picker"
 import { useDatabase } from "@/components/database/shell/database-context"
+import {
+  RAIL_ACTION,
+  RailFind,
+  RailGroupHead,
+  RailHead,
+  RailNoMatch,
+  RailRow,
+  RailSkeleton,
+  RailTitle,
+} from "@/components/database/workbench/rail"
 import {
   KindGlyph,
   ROW_GROUPS,
@@ -37,13 +30,11 @@ import {
   type RowObjectKind,
 } from "@/components/database/data/kinds"
 import { ACTIONS_OF, actionsOf } from "@/components/database/data/table-verbs"
-import type { DbCatalog, DbCatalogObject, DbCatalogSchema } from "@/components/database/data/types"
+import type { DbCatalog, DbCatalogObject } from "@/components/database/data/types"
 import { compactCount, grouped } from "@/lib/format"
 
 /** How many rows of a group are drawn before the reader asks for more. */
 const GROUP_STEP = 300
-/** Past this many schemas the picker grows a box to find one in. */
-const SEARCH_FROM = 12
 
 /** How the rail names a table to itself: the schema and the name, never the name alone. */
 export function tableKey(schema: string, table: string) {
@@ -119,16 +110,24 @@ export function TableRail({
       aria-label={`${engine.nouns.objects} of this ${engine.nouns.container}`}
       className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}
     >
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-hairline bg-surface-header pr-1.5 pl-2">
+      <RailHead>
         {engine.can("schemas") && data ? (
-          <SchemaPicker schemas={data.schemas} current={schema} />
+          <ContainerPicker
+            items={data.schemas.map((entry) => ({
+              name: entry.name,
+              system: entry.system,
+              figure: entry.tables >= 0 ? grouped(entry.tables) : undefined,
+            }))}
+            current={schema}
+            noun={engine.nouns.container}
+            nouns={engine.nouns.containers}
+            hrefOf={(name) => href("data", { schema: name, table: null })}
+          />
         ) : (
-          <span className="min-w-0 flex-1 truncate px-1 text-body font-medium capitalize">
-            {engine.nouns.objects}
-          </span>
+          <RailTitle className="capitalize">{engine.nouns.objects}</RailTitle>
         )}
         {canCreate && known && (
-          <IconAction label={`New ${engine.nouns.object}`} className="size-7 max-sm:size-8" asChild>
+          <IconAction label={`New ${engine.nouns.object}`} className={RAIL_ACTION} asChild>
             <Link href={newTable}>
               <Plus />
             </Link>
@@ -137,7 +136,7 @@ export function TableRail({
         {onImportNew && known && (
           <IconAction
             label={`Import a file as a new ${engine.nouns.object}`}
-            className="size-7 max-sm:size-8"
+            className={RAIL_ACTION}
             onClick={onImportNew}
           >
             <CloudUpload />
@@ -145,25 +144,20 @@ export function TableRail({
         )}
         <IconAction
           label={`Read the ${engine.nouns.objects} again`}
-          className="size-7 max-sm:size-8"
+          className={RAIL_ACTION}
           onClick={catalog.refresh}
         >
           <RefreshClockwise />
         </IconAction>
-      </div>
-      {/* 28px from `sm` too, which `dense` asks for and `Input`'s own `sm:h-9`
-          overrode: the band is then the grid toolbar's height beside it. */}
-      <div className="shrink-0 border-b border-hairline p-1">
-        <SearchInput
-          dense
-          value={query}
-          placeholder={`Find a ${engine.nouns.object}`}
-          aria-label={`Find a ${engine.nouns.object}`}
-          className="sm:h-7"
-          containerClassName="sm:w-full"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
+      </RailHead>
+      {/* The list is the last reading: the read just asked for failed. */}
+      <Stale
+        form="strip"
+        error={data ? catalog.error : undefined}
+        subject={`the ${engine.nouns.objects}`}
+        onRetry={catalog.refresh}
+      />
+      <RailFind value={query} onChange={setQuery} placeholder={`Find a ${engine.nouns.object}`} />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {!data && catalog.error ? (
@@ -175,7 +169,7 @@ export function TableRail({
             <ErrorState error={catalog.error} onRetry={catalog.refresh} className="m-1" />
           )
         ) : !data ? (
-          <RailSkeleton />
+          <RailSkeleton groups={2} />
         ) : !known ? (
           saidBeside ? (
             <EmptyNote className="px-2 py-6">Nothing is listed.</EmptyNote>
@@ -224,12 +218,7 @@ export function TableRail({
             }
           />
         ) : matched === 0 ? (
-          <div className="px-2 py-6 text-center">
-            <p className="text-body text-muted-foreground">Nothing here is called that.</p>
-            <Button size="xs" variant="ghost" className="mt-2" onClick={() => setQuery("")}>
-              Clear the search
-            </Button>
-          </div>
+          <RailNoMatch onClear={() => setQuery("")} />
         ) : (
           groups.map(({ group, kind, objects, total: all }) =>
             // A kind the engine has and this schema does not is not listed while searching.
@@ -274,78 +263,44 @@ function RailGroup({
   const spec = ROW_OBJECT_KINDS[kind]
   const shown = objects.slice(0, limit)
   return (
-    <section aria-label={spec.plural} className="pt-2">
+    <section aria-label={spec.plural} className="pt-1.5">
       {/* The count stands at the row's end, over the rows' own figures, as the
           Schema page's tree draws it. */}
-      <h3 className="flex items-baseline gap-1.5 px-2 pb-1">
-        <span className="eyebrow min-w-0 flex-1 truncate">{spec.plural}</span>
-        <span className="numeric text-hint text-muted-foreground">{grouped(objects.length)}</span>
-      </h3>
+      <RailGroupHead label={spec.plural} count={grouped(objects.length)} />
       {error && <EmptyNote className="px-2 py-2 text-left text-hint">Not read: {error}</EmptyNote>}
       <ul>
         {shown.map((object) => {
           const selected =
             current !== null && current.table === object.name && current.schema === object.schema
-          const pending = staged[tableKey(object.schema, object.name)] ?? 0
           const rows = object.estimatedRows
+          const counted = rows !== undefined && rows >= 0
           return (
-            // The row's menu takes the place of its count rather than a column
-            // of its own: reserved, that column left every figure floating a
-            // button's width short of the edge the tree's heads end on.
-            <li
+            <RailRow
               key={`${object.schema}.${object.name}`}
-              data-current={selected || undefined}
-              className={cn(
-                "group grid h-7 grid-cols-1 items-center rounded-md transition-colors max-sm:h-9",
-                selected ? "bg-accent" : "hover:bg-row-hover",
-              )}
-            >
-              <Link
-                href={href("data", { schema: object.schema, table: object.name })}
-                aria-current={selected ? "page" : undefined}
-                title={object.comment || object.detail || undefined}
-                className="col-start-1 row-start-1 flex h-full min-w-0 items-center gap-1.5 rounded-md pr-2 pl-2 focus-ring-inset [@media(hover:none)]:pr-10"
-              >
-                <KindGlyph kind={kind} />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">{object.name}</span>
-                {pending > 0 && (
-                  <span className="shrink-0 font-mono text-hint text-(--git-modified)">
-                    ~{pending}
-                    <span className="sr-only"> unapplied changes</span>
-                  </span>
-                )}
-                {/* As wide as the menu at least, so the menu never covers the name. */}
-                <span
-                  className={cn(
-                    "numeric min-w-5 shrink-0 text-right text-hint text-muted-foreground transition-opacity",
-                    "group-hover:opacity-0 [@media(hover:hover)]:group-has-[[data-state=open]]:opacity-0 [@media(hover:hover)]:group-has-[button:focus-visible]:opacity-0",
-                  )}
-                  title={
-                    rows !== undefined && rows >= 0 ? `About ${grouped(rows)} rows` : undefined
-                  }
-                >
-                  {rows !== undefined && rows >= 0 ? compactCount(rows) : null}
-                </span>
-              </Link>
-              <VerbMenu
-                verbs={verbsFor(object, kind)}
-                label={`Actions for ${object.name}`}
-                trigger={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={`Actions for ${object.name}`}
-                    {...{ [ACTIONS_OF]: actionsOf(object) }}
-                    className={cn(
-                      "col-start-1 row-start-1 mr-0.5 justify-self-end max-sm:size-8",
-                      rowReveal(),
-                    )}
-                  >
-                    <MoreHorizontal className="size-3.5" />
-                  </Button>
-                }
-              />
-            </li>
+              href={href("data", { schema: object.schema, table: object.name })}
+              current={selected}
+              title={object.comment || object.detail || undefined}
+              mark={<KindGlyph kind={kind} />}
+              name={object.name}
+              staged={{
+                count: staged[tableKey(object.schema, object.name)] ?? 0,
+                label: "unapplied changes",
+              }}
+              figures={
+                counted
+                  ? [
+                      {
+                        key: "rows",
+                        text: compactCount(rows),
+                        title: `About ${grouped(rows)} rows`,
+                      },
+                    ]
+                  : []
+              }
+              verbs={verbsFor(object, kind)}
+              menuLabel={`Actions for ${object.name}`}
+              triggerProps={{ [ACTIONS_OF]: actionsOf(object) }}
+            />
           )
         })}
       </ul>
@@ -365,126 +320,5 @@ function RailGroup({
         </EmptyNote>
       )}
     </section>
-  )
-}
-
-function RailSkeleton() {
-  // The coming silhouette: a heading, then rows of a glyph, a name and a figure.
-  const widths = ["w-28", "w-20", "w-32", "w-24", "w-16", "w-28", "w-24", "w-20"]
-  return (
-    <div aria-hidden className="space-y-2.5 px-2 pt-3">
-      <Skeleton className="h-2.5 w-12" />
-      {widths.map((width, index) => (
-        <div key={index} className="flex items-center gap-2">
-          <Skeleton className="size-3.5 rounded-sm" />
-          <Skeleton className={cn("h-3", width)} />
-          <Skeleton className="ml-auto h-2.5 w-6" />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * Which schema the rail lists, and the way to another.
- *
- * A schema is a place, so choosing one is a step of history and the address
- * afterwards names the schema alone: no table is open in it yet. The engine's
- * own namespaces are listed last, under their own word — they are read here
- * like any other, and nobody should land in `pg_catalog` by scrolling.
- */
-function SchemaPicker({ schemas, current }: { schemas: DbCatalogSchema[]; current: string }) {
-  const { engine, href } = useDatabase()
-  const [query, setQuery] = useState("")
-  const needle = query.trim().toLowerCase()
-  const match = (schema: DbCatalogSchema) => !needle || schema.name.toLowerCase().includes(needle)
-  const own = schemas.filter((schema) => !schema.system && match(schema))
-  const system = schemas.filter((schema) => schema.system && match(schema))
-  return (
-    <DropdownMenu onOpenChange={(open) => !open && setQuery("")}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={`${engine.nouns.container}: ${current || "default"}`}
-          className="h-7 min-w-0 flex-1 justify-start gap-1.5 px-1.5"
-        >
-          <SchemaMark name={current} />
-          <span className="min-w-0 truncate font-mono text-xs">{current || "default"}</span>
-          <ChevronDown className="ml-auto size-3 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        {schemas.length > SEARCH_FROM && (
-          <div className="p-1 pb-2">
-            <Input
-              value={query}
-              placeholder={`Find a ${engine.nouns.container}`}
-              aria-label={`Find a ${engine.nouns.container}`}
-              className="h-7 sm:h-7"
-              onChange={(event) => setQuery(event.target.value)}
-              // The menu reads typed letters as type-ahead; in the box they are text.
-              onKeyDown={(event) => event.key !== "Escape" && event.stopPropagation()}
-            />
-          </div>
-        )}
-        <div className="max-h-72 overflow-y-auto">
-          {own.map((schema) => (
-            <SchemaItem key={schema.name} schema={schema} current={current} href={href} />
-          ))}
-          {system.length > 0 && (
-            <>
-              {own.length > 0 && <DropdownMenuSeparator />}
-              <DropdownMenuLabel>The engine&rsquo;s own</DropdownMenuLabel>
-              {system.map((schema) => (
-                <SchemaItem key={schema.name} schema={schema} current={current} href={href} />
-              ))}
-            </>
-          )}
-          {own.length + system.length === 0 && (
-            <p className="px-2 py-3 text-center text-hint text-muted-foreground">
-              No {engine.nouns.container} is called that
-            </p>
-          )}
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-function SchemaItem({
-  schema,
-  current,
-  href,
-}: {
-  schema: DbCatalogSchema
-  current: string
-  href: ReturnType<typeof useDatabase>["href"]
-}) {
-  return (
-    <DropdownMenuItem asChild className={cn(schema.name === current && "bg-accent")}>
-      {/* One line, as the rail's own rows are: a count under the name made
-          every option two lines tall for a figure of a few digits. */}
-      <Link href={href("data", { schema: schema.name, table: null })}>
-        <SchemaMark name={schema.name} />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-        {schema.tables >= 0 && (
-          <span className="numeric shrink-0 text-hint text-muted-foreground">
-            {grouped(schema.tables)}
-          </span>
-        )}
-      </Link>
-    </DropdownMenuItem>
-  )
-}
-
-/** A schema's own colour, stable for its name, as a small square before it. */
-function SchemaMark({ name }: { name: string }) {
-  return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-sm"
-      style={{ background: hueFor(name.toLowerCase(), LANES) }}
-    />
   )
 }

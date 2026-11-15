@@ -2,16 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import {
-  CodeBracket,
-  FloppyDisk,
-  GridSquare,
-  Pin,
-  SidebarLeftClose,
-  SidebarLeftOpen,
-  Sparkles,
-  TextFormat,
-} from "@/components/icons"
+import { CodeBracket, FloppyDisk, GridSquare, Pin, Sparkles, TextFormat } from "@/components/icons"
 import { del, errorMessage, post, put } from "@/lib/api"
 import { usePanelSize } from "@/lib/panel-size"
 import { notify } from "@/lib/toast"
@@ -22,13 +13,19 @@ import { useColumnWidth } from "@/hooks/use-column-width"
 import { Field, FormFact, Statement } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { PaneBar } from "@/components/phone-panes"
-import { ResizeHandle } from "@/components/resize-handle"
 import type { Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
+import {
+  WORKBENCH_PAGE,
+  WorkbenchFrame,
+  WorkbenchSide,
+  sideVerbs,
+  useSideColumn,
+} from "@/components/database/workbench/chrome"
+import { clamp } from "@/components/database/workbench/side-model"
 import { AssistantSettingsSheet } from "@/components/assistant/settings-sheet"
 import { useAssistantSettings } from "@/components/assistant/settings"
 import { askAgent, useAgentSession } from "@/components/assistant/agent/sessions"
@@ -93,14 +90,11 @@ import { useRunner } from "@/components/database/query/use-runner"
 /** The panes of the query page where it shows one at a time. */
 type QueryPane = "editor" | "results" | "saved" | "assistant"
 
-const RAIL = { fallback: 272, min: 208, max: 480 }
 const ASSISTANT = { fallback: 380, min: 300, max: 640 }
 const SPLIT = { fallback: 0.58, min: 0.15, max: 0.8 }
 const DEFAULT_LIMIT = 500
 const NO_STANDING: Standing = { target: null, at: 0, of: 0 }
 const RAIL_VIEWS: readonly RailView[] = ["saved", "history", "schema", "snippets"]
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 /**
  * The SQL editor: statements in tabs, run against this connection, with what
@@ -228,16 +222,13 @@ export function SqlQuery() {
 
   const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
   const [main, mainWidth] = useColumnWidth<HTMLDivElement>()
-  const railBeside = frameWidth === 0 || frameWidth >= 720
+  // Every database workbench's rule and widths (`useSideColumn`).
+  const rail = useSideColumn("databases.query.rail", frameWidth)
+  const railBeside = rail.beside
   const [railPinned, setRailPinned] = useViewState("databases.query.rail", true)
   const [railOver, setRailOver] = useState(false)
   const railShown = railBeside ? railPinned : railOver
-  const [railWidth, setRailWidth, resetRailWidth] = usePanelSize(
-    "databases.query.rail",
-    RAIL.fallback,
-  )
-  const railMax = Math.max(RAIL.min, Math.min(RAIL.max, frameWidth - 420))
-  const railColumn = clamp(railWidth, RAIL.min, railMax)
+  const railColumn = rail.width
   const [railStored, setRailView] = useViewState<RailView>("databases.query.rail.view", "schema")
   const railView = RAIL_VIEWS.includes(railStored) ? railStored : "schema"
   const [split, setSplit] = useViewState("databases.query.split", SPLIT.fallback)
@@ -697,16 +688,7 @@ export function SqlQuery() {
           },
         ]
       : []),
-    ...(railBeside
-      ? [
-          {
-            key: "rail",
-            label: railShown ? "Hide the rail" : "Show the rail",
-            icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
-            run: () => setRailPinned(!railPinned),
-          },
-        ]
-      : []),
+    ...sideVerbs(rail, railShown, "rail", () => setRailPinned(!railPinned)),
   ]
 
   return (
@@ -718,12 +700,6 @@ export function SqlQuery() {
         ref={frame}
         section="query"
         slot="sql-workbench"
-        style={
-          {
-            "--jd-query-rail": `${railColumn}px`,
-            "--jd-query-assistant": `${assistantColumn}px`,
-          } as React.CSSProperties
-        }
         verbs={
           // Beside the editor the assistant is a column to open; where the
           // frame shows one pane at a time it is a stop of the bar.
@@ -761,14 +737,7 @@ export function SqlQuery() {
         }
       >
         {railShown && (
-          <div
-            className={cn(
-              "flex min-h-0 flex-col border-hairline bg-card",
-              railBeside
-                ? "relative w-(--jd-query-rail) shrink-0 border-r"
-                : "absolute inset-0 z-30",
-            )}
-          >
+          <WorkbenchSide column={rail} label="Rail width">
             <QueryRail
               view={railView}
               onView={setRailView}
@@ -794,19 +763,7 @@ export function SqlQuery() {
               picked={picked}
               onPickSchema={(name) => select({ schema: name })}
             />
-            {railBeside ? (
-              <ResizeHandle
-                side="left"
-                label="Rail width"
-                value={railColumn}
-                min={RAIL.min}
-                max={railMax}
-                onChange={(px, commit) => setRailWidth(clamp(px, RAIL.min, railMax), commit)}
-                onReset={resetRailWidth}
-                className="absolute inset-y-0 -right-1 z-20"
-              />
-            ) : null}
-          </div>
+          </WorkbenchSide>
         )}
 
         <div ref={main} className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -969,28 +926,19 @@ export function SqlQuery() {
         </div>
 
         {assistantShown && (
-          <div
-            className={cn(
-              "flex min-h-0 flex-col border-hairline bg-card",
-              assistantBeside
-                ? "relative w-(--jd-query-assistant) shrink-0 border-l"
-                : "absolute inset-0 z-30",
-            )}
+          <WorkbenchSide
+            side="right"
+            label="Assistant width"
+            column={{
+              beside: assistantBeside,
+              width: assistantColumn,
+              min: ASSISTANT.min,
+              max: assistantMax,
+              setWidth: (px, commit) =>
+                setAssistantWidth(clamp(px, ASSISTANT.min, assistantMax), commit),
+              reset: resetAssistantWidth,
+            }}
           >
-            {assistantBeside && (
-              <ResizeHandle
-                side="right"
-                label="Assistant width"
-                value={assistantColumn}
-                min={ASSISTANT.min}
-                max={assistantMax}
-                onChange={(px, commit) =>
-                  setAssistantWidth(clamp(px, ASSISTANT.min, assistantMax), commit)
-                }
-                onReset={resetAssistantWidth}
-                className="absolute inset-y-0 -left-1 z-20"
-              />
-            )}
             <QueryAssistant
               session={assistant}
               settings={assistantSettings}
@@ -1008,7 +956,7 @@ export function SqlQuery() {
               }}
               onClose={() => showAssistant(false)}
             />
-          </div>
+          </WorkbenchSide>
         )}
       </WorkbenchFrame>
 

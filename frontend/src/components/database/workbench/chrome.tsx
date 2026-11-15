@@ -11,8 +11,17 @@ import {
 } from "react"
 import { createPortal } from "react-dom"
 import Link from "next/link"
-import { ArrowLeft, MoreHorizontal, RefreshClockwise } from "@/components/icons"
+import {
+  ArrowLeft,
+  MoreHorizontal,
+  RefreshClockwise,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+} from "@/components/icons"
+import { useBreakpoint } from "@/lib/breakpoints"
+import { usePanelSize } from "@/lib/panel-size"
 import { cn } from "@/lib/utils"
+import { ResizeHandle } from "@/components/resize-handle"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FactDot } from "@/components/identity-header"
 import { Button } from "@/components/ui/button"
@@ -31,6 +40,7 @@ import { connectionFacts } from "@/components/database/shell/facts"
 import { DatabaseStatusMark } from "@/components/database/shell/status"
 import type { DatabaseVerbTools } from "@/components/database/shell/types"
 import { menuStore, type MenuStore } from "@/components/database/workbench/menu-store"
+import { RAIL_SIZE, clamp, sideBeside, sideMax } from "@/components/database/workbench/side-model"
 
 /**
  * The one head of a database's workbench, and the frame it heads.
@@ -283,5 +293,227 @@ function HeadMenu() {
       />
       {dialog}
     </>
+  )
+}
+
+/* ------------------------------------------------------------ side column */
+
+/**
+ * A side column's width and whether it stands beside the work: one rule for
+ * every database workbench (`side-model.ts`). The width is the reader's, kept
+ * under `key` — each page keeps its own key, so a width saved before this
+ * survives — and held to the one scale and to what the frame leaves the work.
+ */
+export function useSideColumn(
+  key: string,
+  frameWidth: number,
+  size: { base: number; min: number; max: number } = RAIL_SIZE,
+) {
+  const windowWide = useBreakpoint("lg")
+  const [stored, setStored, reset] = usePanelSize(key, size.base)
+  const max = sideMax(frameWidth, size)
+  const width = clamp(stored, size.min, max)
+  const beside = sideBeside(frameWidth, clamp(stored, size.min, size.max), windowWide)
+  return {
+    beside,
+    width,
+    min: size.min,
+    max,
+    setWidth: (px: number, commit?: boolean) => setStored(clamp(px, size.min, max), commit),
+    reset,
+  }
+}
+
+/** What `useSideColumn` hands its column. */
+export type SideColumn = ReturnType<typeof useSideColumn>
+
+/**
+ * The head menu's word for a side column beside the work: "Hide the tables",
+ * "Show the keys". Over the work the phone's bar is how it is reached, so
+ * there is no word for it then.
+ */
+export function sideVerbs(
+  column: { beside: boolean },
+  shown: boolean,
+  noun: string,
+  toggle: () => void,
+): Verb[] {
+  if (!column.beside) return []
+  return [
+    {
+      key: "rail",
+      label: `${shown ? "Hide" : "Show"} the ${noun}`,
+      icon: shown ? SidebarLeftClose : SidebarLeftOpen,
+      run: toggle,
+    },
+  ]
+}
+
+/**
+ * A side column of the workbench: beside the work with a hairline and a
+ * handle to widen it, or laid over the whole of the work where the frame has
+ * no room for both (a phone's pane). The rails of Data, Query, Schema,
+ * MongoDB and Redis, and the assistant beside the editor.
+ *
+ * Over the work it is on the card's ground at one layer (`z-30`): the engines
+ * had laid theirs at `z-20` and the Redis columns on no ground at all.
+ */
+export function WorkbenchSide({
+  column,
+  side = "left",
+  label,
+  className,
+  onClick,
+  children,
+}: {
+  column: Pick<SideColumn, "beside" | "width" | "min" | "max" | "setWidth" | "reset">
+  /** Which edge of the frame it stands at. */
+  side?: "left" | "right"
+  /** The handle's name: "Tables width". */
+  label: string
+  className?: string
+  onClick?: React.MouseEventHandler<HTMLDivElement>
+  children: React.ReactNode
+}) {
+  const handle = column.beside && (
+    <ResizeHandle
+      side={side}
+      label={label}
+      value={column.width}
+      min={column.min}
+      max={column.max}
+      onChange={column.setWidth}
+      onReset={column.reset}
+      className={cn("absolute inset-y-0 z-20", side === "left" ? "-right-1" : "-left-1")}
+    />
+  )
+  return (
+    // A click handler only to hear a link inside it act, which the keyboard
+    // reaches as the link itself.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
+    <div
+      data-slot="workbench-side"
+      data-side={side}
+      data-over={column.beside ? undefined : ""}
+      style={column.beside ? { width: column.width } : undefined}
+      onClick={onClick}
+      className={cn(
+        "flex min-h-0 min-w-0 flex-col border-hairline bg-card",
+        column.beside
+          ? cn("relative shrink-0", side === "left" ? "border-r" : "border-l")
+          : "absolute inset-0 z-30",
+        className,
+      )}
+    >
+      {side === "right" && handle}
+      {children}
+      {side === "left" && handle}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------ object head */
+
+/**
+ * The object head's band alone — its ground, hairline and 40px — for a strip
+ * that lays out its own contents (`WorkbenchHead`, a pipeline's head).
+ */
+export const OBJECT_HEAD =
+  "flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline bg-surface-header px-3 py-1"
+
+/**
+ * The strip at the top of the work: the object that is open — a table, a
+ * collection, a key, a database while nothing in it is — and the views of it.
+ *
+ * Six of these were built by hand across Data, Schema, MongoDB and Redis, the
+ * same 40px band with three grounds (the pipeline's and the key's had none),
+ * two name sizes and two ways of offering the views (a tablist on SQL, a row
+ * of pressed buttons on MongoDB). One band: the header ground with a hairline
+ * under it, 40px with the hairline so it lines up with the rail's head beside
+ * it; the kind's mark, the name in mono at the body size (the schema before
+ * it giving way by truncating, never leaving), one kind tag, the views as a
+ * tablist (`ViewTabList` inside the caller's `Tabs`), then the verbs at the
+ * end. `facts` is a second line under it, for an object whose facts are what
+ * it is read for (a key's type, size and expiry).
+ */
+export function ObjectHead({
+  mark,
+  name,
+  prefix,
+  kind,
+  title,
+  views,
+  verbs,
+  facts,
+  identityClassName,
+  className,
+  ...props
+}: {
+  mark?: React.ReactNode
+  name: string
+  /** The container it is in, drawn before the name with a dot: a table's schema. */
+  prefix?: string
+  /** What sort of object, where it is not the ordinary one: a Tag. */
+  kind?: React.ReactNode
+  title?: string
+  /** The views of the object: a `ViewTabList`. */
+  views?: React.ReactNode
+  verbs?: React.ReactNode
+  /** A second line of what the object is. */
+  facts?: React.ReactNode
+  /** The identity's own room, where the views beside it need a share of a narrow strip. */
+  identityClassName?: string
+  className?: string
+} & Omit<React.ComponentProps<"div">, "title">) {
+  const full = prefix ? `${prefix}.${name}` : name
+  return (
+    <div
+      data-slot="object-head"
+      className={cn(
+        "@container/object shrink-0 border-b border-hairline bg-surface-header",
+        className,
+      )}
+      {...props}
+    >
+      {/* 40px with its hairline, as the rail's head beside it is: tabs of a
+          full 40 over the rule put the strip a pixel below the rail's. */}
+      <div className="flex min-h-[39px] items-stretch px-1.5 @max-[34rem]/object:flex-wrap">
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-1.5 py-1 pr-2 pl-1.5",
+            !views && "flex-1",
+            identityClassName,
+          )}
+        >
+          {mark}
+          {/* Named whole: read part by part, its two halves are two words. */}
+          <h2
+            aria-label={prefix ? full : undefined}
+            title={title ?? full}
+            className="flex min-w-0 items-baseline font-mono text-body font-medium"
+          >
+            {prefix && (
+              <>
+                <span className="min-w-[3ch] shrink-[2] truncate text-muted-foreground">
+                  {prefix}
+                </span>
+                <span className="text-muted-foreground">.</span>
+              </>
+            )}
+            <span className="min-w-[4ch] truncate">{name}</span>
+          </h2>
+          {kind && <span className="flex shrink-0 items-center">{kind}</span>}
+        </div>
+        {views && (
+          <div className="flex min-w-0 shrink-0 items-stretch [&_[role=tab]]:h-[39px]">{views}</div>
+        )}
+        {verbs && <div className="ml-auto flex shrink-0 items-center gap-1 py-1 pl-2">{verbs}</div>}
+      </div>
+      {facts && (
+        <div className="flex min-w-0 items-center gap-2 px-3 pb-1.5 text-hint text-muted-foreground">
+          {facts}
+        </div>
+      )}
+    </div>
   )
 }

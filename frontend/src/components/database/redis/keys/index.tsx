@@ -1,14 +1,11 @@
 "use client"
 
 import { useState } from "react"
-import { Key, Layers, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { usePanelSize } from "@/lib/panel-size"
+import { Key, Layers } from "@/components/icons"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PaneBar } from "@/components/phone-panes"
-import type { Verb } from "@/components/verbs"
-import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, Notice } from "@/components/state"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { keyFromAddress, keyToAddress } from "@/components/database/redis/bytes"
@@ -20,10 +17,13 @@ import { NewKeyDialog } from "@/components/database/redis/keys/new-key"
 import type { RedisBytes } from "@/components/database/redis/types"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
-import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
-
-const RAIL = { base: 320, min: 240, max: 560 }
-const NO_VERBS: Verb[] = []
+import {
+  WORKBENCH_PAGE,
+  WorkbenchFrame,
+  WorkbenchSide,
+  sideVerbs,
+  useSideColumn,
+} from "@/components/database/workbench/chrome"
 
 /**
  * The key browser: the keys of one logical database beside the one that is
@@ -56,9 +56,12 @@ export function RedisKeys() {
   const [creating, setCreating] = useState(false)
   const [bulk, setBulk] = useState(false)
 
-  // The rail beside the key where there is room for both, and over it where
-  // there is not: a phone shows the keys until one is opened, then the key.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  // The rail beside the key where the frame has room for both, and over it
+  // where it has not: a phone shows the keys until one is opened, then the
+  // key. The rule and the widths are every database workbench's.
+  const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
+  const column = useSideColumn("databases.redis.rail", frameWidth)
+  const wide = column.beside
   const [railShown, setRailShown] = useViewState(`databases.${id}.redis.rail`, true)
   // On a phone the frame shows one pane at a time, with a bar at its foot:
   // the keys while none is open, then the key. Closing a key goes back to
@@ -71,8 +74,6 @@ export function RedisKeys() {
     setRailOver(selected === undefined)
   }
   const railVisible = wide ? railShown : railOver
-  const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("databases.redis.rail", RAIL.base)
-  const railPx = Math.min(Math.max(railWidth, RAIL.min), RAIL.max)
 
   // How the rail is arranged, and the walk its tree is drawn from. Both are
   // held here because the pane reads the walk too: with no key open it says
@@ -103,10 +104,6 @@ export function RedisKeys() {
   }
   const close = () => select(keyToAddress(undefined))
 
-  // The rail is brought back from the head's menu beside the key, and by
-  // the bar on a phone: the pane's own strip starts with what is open.
-  const railToggle = null
-
   const sentinel = server.data?.mode === "sentinel"
 
   return (
@@ -133,21 +130,10 @@ export function RedisKeys() {
         // then the rail and the key as two columns of one working surface,
         // with a hairline between them.
         <WorkbenchFrame
+          ref={frame}
           section="data"
           slot="redis-keys"
-          style={{ "--jd-redis-rail": `${railPx}px` } as React.CSSProperties}
-          menu={
-            wide
-              ? [
-                  {
-                    key: "rail",
-                    label: railShown ? "Hide the keys" : "Show the keys",
-                    icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
-                    run: () => setRailShown(!railShown),
-                  },
-                ]
-              : NO_VERBS
-          }
+          menu={sideVerbs(column, railShown, "keys", () => setRailShown(!railShown))}
           bar={
             !wide && (
               <PaneBar<"keys" | "key">
@@ -169,7 +155,7 @@ export function RedisKeys() {
           }
         >
           {railVisible && (
-            <div className="relative flex shrink-0 border-hairline max-lg:absolute max-lg:inset-0 max-lg:z-20 lg:w-(--jd-redis-rail) lg:border-r">
+            <WorkbenchSide column={column} label="Keys panel width">
               <KeyRail
                 redis={redis}
                 selected={selected}
@@ -181,19 +167,8 @@ export function RedisKeys() {
                 onRefresh={refresh}
                 onNew={() => setCreating(true)}
                 onBulk={() => setBulk(true)}
-                onHide={() => (wide ? setRailShown(false) : setRailOver(false))}
               />
-              <ResizeHandle
-                side="left"
-                label="Keys panel width"
-                value={railPx}
-                min={RAIL.min}
-                max={RAIL.max}
-                onChange={(px, commit) => setRailWidth(px, commit)}
-                onReset={resetRailWidth}
-                className="absolute inset-y-0 -right-1 z-20"
-              />
-            </div>
+            </WorkbenchSide>
           )}
           {selected !== undefined ? (
             <KeyPane
@@ -206,7 +181,6 @@ export function RedisKeys() {
               key={`${redis.target.db ?? "own"}:${JSON.stringify(selected)}`}
               redis={redis}
               name={selected}
-              leading={railToggle}
               confirm={confirm}
               onRail={refresh}
               onOpen={open}
@@ -219,7 +193,6 @@ export function RedisKeys() {
             <Keyspace
               redis={redis}
               walk={walk}
-              leading={railToggle}
               onNamespace={(pattern) => {
                 select({ pattern })
                 if (!wide) setRailOver(true)
