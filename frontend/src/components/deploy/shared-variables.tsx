@@ -325,7 +325,7 @@ export function SharedVariables({
         onOpenChange={(next) => !next && close()}
         title={draft?.editing ? `Edit ${draft.name}` : `Add ${word} variable`}
         description="A value defined once and read by reference."
-        width="md"
+        size="md"
         footer={
           <>
             <FormNote className="mr-auto max-sm:hidden">

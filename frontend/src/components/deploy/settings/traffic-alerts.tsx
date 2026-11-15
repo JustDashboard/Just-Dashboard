@@ -328,7 +328,7 @@ export function TrafficAlerts({
         onOpenChange={(open) => !open && setEditing(undefined)}
         title={editing?.rule ? "Edit alert" : "Add alert"}
         description="A rule over this deployment's request record, told to your notification channels once when it crosses its line and once when it comes back."
-        width="md"
+        size="md"
       >
         {editing && (
           <AlertForm

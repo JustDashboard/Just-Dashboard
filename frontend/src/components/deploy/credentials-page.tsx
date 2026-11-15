@@ -35,14 +35,14 @@ import type {
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, Notice } from "@/components/state"
-import { Hold, LoadingRows } from "@/components/loading"
+import { Hold } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldCheck,
@@ -596,14 +596,7 @@ export function CredentialsPage() {
 
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Credentials"
-      />
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Credentials" />
 
       <GitHubAppPanel
         admin={admin}
@@ -618,26 +611,24 @@ export function CredentialsPage() {
       <Panel plain>
         <PanelHeader
           title="Saved credentials"
+          count={
+            list && list.length > 0 ? (
+              <>
+                {plural(list.length, "credential")}
+                {/* A host is optional for every kind but a registry login.
+                    Left out on a phone, where it pushed the command under
+                    the title. */}
+                {hosts.size > 0 && <span className="max-sm:hidden"> · {plural(hosts.size, "host")}</span>}
+              </>
+            ) : undefined
+          }
           actions={
-            <span className="flex flex-wrap items-center gap-3">
-              {list && list.length > 0 && (
-                <span className="numeric text-hint text-muted-foreground">
-                  {plural(list.length, "credential")}
-                  {/* A host is optional for every kind but a registry login.
-                      Left out on a phone, where it pushed the command under
-                      the title. */}
-                  {hosts.size > 0 && (
-                    <span className="max-sm:hidden"> · {plural(hosts.size, "host")}</span>
-                  )}
-                </span>
-              )}
-              {admin && (
-                <Button size="sm" onClick={() => open(emptyDraft("git_bearer"))}>
-                  <Plus className="size-3.5" />
-                  Add credential
-                </Button>
-              )}
-            </span>
+            admin && (
+              <Button size="sm" onClick={() => open(emptyDraft("git_bearer"))}>
+                <Plus className="size-3.5" />
+                Add credential
+              </Button>
+            )
           }
         />
         <PanelBody>
@@ -646,7 +637,7 @@ export function CredentialsPage() {
           ) : credentials.error ? (
             <ErrorState error={credentials.error} onRetry={credentials.refresh} />
           ) : credentials.loading && !list ? (
-            <LoadingRows rows={3} />
+            <ChoiceListSkeleton rows={3} />
           ) : (list?.length ?? 0) === 0 ? (
             // The empty list is the same picker the sheet opens on: the four
             // kinds, each pressed straight into its form.
@@ -683,9 +674,9 @@ export function CredentialsPage() {
       <SidePanel
         open={Boolean(draft)}
         onOpenChange={(open) => !open && closeDraft()}
-        title={draft?.id ? "Edit credential" : "Add credential"}
+        title={draft?.id ? `Edit ${editing?.name ?? "credential"}` : "Add credential"}
         description="A token or key the server uses to read a private repository or registry."
-        width="md"
+        size="md"
         footer={
           <>
             <Button variant="outline" onClick={closeDraft} disabled={saving}>
@@ -838,7 +829,11 @@ function CredentialCard({
             <span className="flex w-24 justify-end">{tag}</span>
             {!onEdit && <span aria-hidden className="w-3.5 shrink-0" />}
           </>
-        ) : undefined
+        ) : (
+          // The arrow's slot, kept for the App's row on a phone as well, so
+          // the verbs after it end on one edge down the list.
+          !onEdit && <span aria-hidden className="w-3.5 shrink-0" />
+        )
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${credential.name}`} />}
     >

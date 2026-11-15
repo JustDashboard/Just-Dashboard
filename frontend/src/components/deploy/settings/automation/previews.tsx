@@ -16,7 +16,7 @@ import type {
   DeploymentRunsPage,
   DeploymentTrigger,
 } from "@/lib/types"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { ForgeFace } from "@/components/git/marks"
 import { Modal } from "@/components/modal"
@@ -24,7 +24,6 @@ import { Well } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -372,7 +371,7 @@ export function Previews({
         )}
 
         {previews.loading && !previews.data ? (
-          <LoadingRows rows={2} />
+          <ChoiceListSkeleton rows={2} />
         ) : previews.error && !previews.data ? (
           <ErrorState error={previews.error} onRetry={previews.refresh} />
         ) : list.length === 0 ? (
@@ -440,7 +439,7 @@ export function Previews({
         onOpenChange={(open) => !open && setVariablesFor(undefined)}
         title={`Preview ${variablesFor?.providerRef ?? ""} variables`}
         description="Configure values used only by this preview before deploying."
-        width="lg"
+        size="lg"
       >
         {variablesFor && (
           <VariablesPanel
@@ -873,7 +872,7 @@ function PreviewSheet({
       onOpenChange={(open) => !open && onClose()}
       title={<span className="font-mono">{preview?.environmentSlug ?? "Preview"}</span>}
       description="A pull request's own environment, its revision and its runs."
-      width="md"
+      size="md"
       actions={
         preview &&
         verbs.length > 0 && (
@@ -930,7 +929,7 @@ function PreviewSheet({
           {runs.error && !runs.data ? (
             <ErrorState error={runs.error} onRetry={runs.refresh} />
           ) : runs.loading && !runs.data ? (
-            <LoadingRows rows={3} />
+            <ChoiceListSkeleton rows={3} />
           ) : list.length === 0 ? (
             <FormNote>
               Nothing has run here yet — deploy the preview to build its revision.

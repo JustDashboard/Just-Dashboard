@@ -624,7 +624,7 @@ function ComposeTemplateSheet({
       onOpenChange={onOpenChange}
       title="Add from Compose file"
       description="A template made from a pasted Compose file, validated as a built-in template is."
-      width="lg"
+      size="lg"
       footer={
         <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={Boolean(busy)}>

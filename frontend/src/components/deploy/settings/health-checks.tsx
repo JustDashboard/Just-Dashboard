@@ -323,7 +323,7 @@ export function HealthChecks({
         onOpenChange={(next) => !next && setOpen(undefined)}
         title={editing ? editing.name || `Health check ${(open ?? 0) + 1}` : "Health check"}
         description="What this check probes, when it runs and how long it keeps trying."
-        width="sm"
+        size="sm"
         // The name already holds a sensible value; landing in it would select it.
         initialFocus="body"
         footer={

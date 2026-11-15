@@ -1,12 +1,10 @@
 "use client"
 
-import { useId, useRef, useState, type RefObject } from "react"
+import { useCallback, useId, useState } from "react"
 import { useMemoryState } from "@/lib/view-state"
-import Link from "next/link"
 import {
   Check,
   ClockRewind,
-  CloudUpload,
   Copy,
   Envelope,
   Eye,
@@ -38,15 +36,14 @@ import type {
 } from "@/lib/types"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
+import { Row, RowList, RowsSkeleton } from "@/components/row-list"
 import { EmptyNote, ErrorState } from "@/components/state"
-import { LoadingPanel } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldCheck,
@@ -81,9 +78,9 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { ProjectMark } from "@/components/project-mark"
-import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
+import { noProjectNode, projectNode } from "@/components/deploy/section-picture"
 import { ChannelGlyph, channelMark, mailProduct } from "@/components/deploy/vocabulary"
 import { useBreakpoint } from "@/lib/breakpoints"
 
@@ -809,94 +806,91 @@ export function NotificationsPage() {
 
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Notifications"
-      />
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Notifications" />
 
-      {channels.error ? (
-        <ErrorState error={channels.error} onRetry={channels.refresh} />
-      ) : channels.loading && !channels.data ? (
-        <LoadingPanel plain rows={3} />
-      ) : (
-        <>
-          {/* On the page's own ground rather than in a frame, with no dot grid
-              behind it: a wiring picture reads as one thing without either. */}
-          <div className="relative animate-rise py-2 lg:py-6">
-            <Fanout
-              channels={list}
-              fleet={fleet.data?.deployments ?? []}
-              onAdd={admin ? add : undefined}
-            />
-          </div>
+      {/* On the page's own ground rather than in a frame, with no dot grid
+          behind it: a wiring picture reads as one thing without either. It
+          stands while the channels are read, in the shape it will have. */}
+      <div className="mx-auto w-full max-w-5xl lg:py-2">
+        <Fanout
+          channels={list}
+          fleet={fleet.data?.deployments ?? []}
+          loading={!channels.data || (fleet.loading && !fleet.data)}
+          onAdd={admin ? add : undefined}
+        />
+      </div>
 
-          {/* Side by side once a card has the width to stay one line beside
-              the messages; stacked below that. */}
-          <div
-            className={cn(
-              "grid min-w-0 items-start gap-8 2xl:gap-x-10",
-              list.length > 0 && "2xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]",
+      {/* Side by side once a card has the width to stay one line beside
+          the messages; stacked below that. */}
+      <div
+        className={cn(
+          "grid min-w-0 items-start gap-8 2xl:gap-x-10",
+          list.length > 0 && "2xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]",
+        )}
+      >
+        <Panel plain>
+          <PanelHeader
+            title="Channels"
+            count={
+              list.length > 0 ? (
+                <>
+                  {plural(list.length, "channel")}
+                  {paused > 0 && ` · ${paused} paused`}
+                </>
+              ) : undefined
+            }
+            actions={
+              admin && (
+                <Button size="sm" onClick={() => add("discord")}>
+                  <Plus className="size-3.5" />
+                  Add channel
+                </Button>
+              )
+            }
+          />
+          <PanelBody>
+            {channels.error && !channels.data ? (
+              <ErrorState error={channels.error} onRetry={channels.refresh} />
+            ) : !channels.data ? (
+              <ChoiceListSkeleton rows={3} />
+            ) : list.length === 0 ? (
+              // The picture above already offers kinds to add; the list
+              // only has to say it is empty.
+              <EmptyNote>No notification channels</EmptyNote>
+            ) : (
+              <ChoiceList aria-label="Notification channels" className="animate-rise">
+                {ordered.map((channel) => {
+                  const verbs = verbsFor(channel, "card")
+                  return (
+                    <ChannelCard
+                      key={channel.id}
+                      channel={channel}
+                      verbs={verbs}
+                      {...working(channel, verbs)}
+                      wide={wide}
+                      onOpen={() => setHistoryId(channel.id)}
+                    />
+                  )
+                })}
+              </ChoiceList>
             )}
-          >
-            <Panel plain>
-              <PanelHeader
-                title="Channels"
-                actions={
-                  <span className="flex flex-wrap items-center gap-3">
-                    {list.length > 0 && (
-                      <span className="numeric text-hint text-muted-foreground">
-                        {plural(list.length, "channel")}
-                        {paused > 0 && ` · ${paused} paused`}
-                      </span>
-                    )}
-                    {admin && (
-                      <Button size="sm" onClick={() => add("discord")}>
-                        <Plus className="size-3.5" />
-                        Add channel
-                      </Button>
-                    )}
-                  </span>
-                }
-              />
-              <PanelBody>
-                {list.length === 0 ? (
-                  // The picture above already offers kinds to add; the list
-                  // only has to say it is empty.
-                  <EmptyNote>No notification channels</EmptyNote>
-                ) : (
-                  <ChoiceList aria-label="Notification channels" className="animate-rise">
-                    {ordered.map((channel) => {
-                      const verbs = verbsFor(channel, "card")
-                      return (
-                        <ChannelCard
-                          key={channel.id}
-                          channel={channel}
-                          verbs={verbs}
-                          {...working(channel, verbs)}
-                          wide={wide}
-                          onOpen={() => setHistoryId(channel.id)}
-                        />
-                      )
-                    })}
-                  </ChoiceList>
-                )}
-              </PanelBody>
-            </Panel>
-            {list.length > 0 && <RecentMessages channels={list} logs={logs} />}
-          </div>
-        </>
-      )}
+          </PanelBody>
+        </Panel>
+        {list.length > 0 && <RecentMessages channels={list} logs={logs} />}
+      </div>
 
       <SidePanel
         open={Boolean(draft) || Boolean(issued)}
         onOpenChange={(open) => !open && closeForm()}
-        title={issued ? `${issued.name} is ready` : draft?.id ? "Edit channel" : "Add channel"}
+        title={
+          issued
+            ? `${issued.name} is ready`
+            : draft?.id
+              ? `Edit ${editing?.name ?? "channel"}`
+              : "Add channel"
+        }
         description="Choose where deployment events are delivered."
-        width="md"
+        size="md"
         footer={
           issued ? (
             <Button onClick={closeForm}>Done</Button>
@@ -1105,7 +1099,7 @@ function RecentMessages({
         {logs.error ? (
           <ErrorState error={logs.error} onRetry={logs.refresh} />
         ) : !messages ? (
-          <LoadingPanel plain rows={3} />
+          <RowsSkeleton rows={3} />
         ) : shown.length === 0 ? (
           <EmptyNote>No messages sent yet</EmptyNote>
         ) : (
@@ -1158,14 +1152,13 @@ function ChannelTile({
 }
 
 /** What a line in the picture says about its channel (§2: the line is the state). */
-function lineOf(channel: NotificationChannel | undefined) {
-  if (!channel) return { still: true, dashed: true } as const
+function lineOf(channel: NotificationChannel): WireLine {
   const last = channel.lastDelivery
-  if (!channel.enabled || !last) return { still: true } as const
-  if (last.status === "delivered") return { still: false } as const
-  if (last.status === "failed" && !last.nextAttemptAt)
-    return { still: true, tone: "danger" } as const
-  return { still: true } as const
+  if (!channel.enabled || !last) return { state: "up" }
+  if (last.status === "delivered")
+    return { state: "up", moving: true, duration: 2.2, delay: (channel.id % 5) * 0.3 }
+  if (last.status === "failed" && !last.nextAttemptAt) return { state: "danger" }
+  return { state: "up" }
 }
 
 /** How the channel's last message went, in words, for a line of the picture. */
@@ -1178,13 +1171,13 @@ function outcomeWords(channel: NotificationChannel) {
   return `failed ${relativeTime(last.createdAt)}`
 }
 
+const channelNodeId = (id: number) => `channel:${id}`
+
 /**
- * Where an outcome goes: the projects on one side, this server in the middle
- * — it is what hears every run end and sends the message — and a mark for
- * each channel it reaches on the other, each the service it posts to. It is
- * the GitHub App's picture on Credentials read the other way: the accounts
- * there and the projects here are the same column of real things with their
- * own faces, and the server is the same mark in both.
+ * Where an outcome goes, drawn by `WireFlow` as its siblings' pictures are:
+ * the projects on one side, this server in the middle — it is what hears
+ * every run end and sends the message — and a mark for each channel it
+ * reaches on the other, each the service it posts to.
  *
  * The line to a channel pulses while its last message arrived, stands still
  * and red once one was given up on, still while it is paused, retrying or has
@@ -1193,303 +1186,113 @@ function outcomeWords(channel: NotificationChannel) {
  * is the same picture with nothing wired yet. The lines from the projects are
  * still: every one of them reports, and a project is not a delivery. Only
  * the first few kinds not set up get a ring (PICTURE_TARGETS); the rest are
- * in Add channel's picker.
+ * in Add channel's picker. Every project reports to every channel, so
+ * pointing at one lights every channel that is on, and the other way round.
  *
- * Wide, the three balance around the lines across the page. On a phone the
- * list below already names every channel, so the picture shrinks to what it
- * adds: the projects over this server over a row of channels, the lines
- * running down through it.
+ * On a phone the list below already names every channel, so the picture is
+ * `marks`: the projects over this server over a row of channels.
  */
 function Fanout({
   channels,
   fleet,
+  loading,
   onAdd,
 }: {
   channels: NotificationChannel[]
   fleet: DeploymentSummary[]
+  loading: boolean
   onAdd?: (kind: NotificationChannelKind) => void
 }) {
-  const wide = useBreakpoint("lg")
-  const container = useRef<HTMLDivElement>(null)
-  const hub = useRef<HTMLDivElement>(null)
+  const related = useCallback(
+    (focus: string, id: string) => {
+      const on = (node: string) =>
+        channels.some((channel) => channel.enabled && channelNodeId(channel.id) === node)
+      const project = (node: string) => node.startsWith("project:")
+      return (project(focus) && on(id)) || (on(focus) && project(id))
+    },
+    [channels],
+  )
   const missing = KINDS.filter(
     (item) => !channels.some((channel) => channel.kind === item.kind),
   ).slice(0, Math.max(0, PICTURE_TARGETS - channels.length))
-  const targets: { key: string; kind: NotificationChannelKind; channel?: NotificationChannel }[] = [
-    ...channels.map((channel) => ({ key: `channel-${channel.id}`, channel, kind: channel.kind })),
-    ...missing.map((item) => ({ key: `add-${item.kind}`, kind: item.kind })),
+  const sources: WireFlowNode[] =
+    fleet.length === 0
+      ? [noProjectNode("each reports here once it deploys")]
+      : fleet.map((deployment) => {
+          const run = deployment.activeRun ?? deployment.lastRun
+          return projectNode({
+            id: deployment.id,
+            name: deployment.name,
+            deployment,
+            hint: run ? `last run ${relativeTime(run.endedAt ?? run.requestedAt)}` : "never deployed",
+          })
+        })
+  const targets: WireFlowNode[] = [
+    ...channels.map((channel): WireFlowNode => {
+      const title = kindTitle(channel.kind)
+      const hint = channel.enabled
+        ? `${eventLabel(channel.events).toLowerCase()} · ${outcomeWords(channel)}`
+        : "paused"
+      return {
+        id: channelNodeId(channel.id),
+        mark: (size) => (
+          <WireMark tone="logo" size={size}>
+            <ChannelGlyph channel={channel} />
+          </WireMark>
+        ),
+        eyebrow: title,
+        title: channel.name,
+        name: `${title}: ${channel.name} · ${hint}`,
+        hint,
+        line: lineOf(channel),
+      }
+    }),
+    ...missing.map((item): WireFlowNode => ({
+      id: `add:${item.kind}`,
+      placeholder: true,
+      mark: (size) => (
+        <WirePlaceholder size={size} product={channelProduct(item.kind)} fallback={Envelope} />
+      ),
+      eyebrow: "Not added",
+      title: <span className="text-muted-foreground">{item.title}</span>,
+      name: item.title,
+      hint: item.hint,
+      onPress: onAdd ? () => onAdd(item.kind) : undefined,
+      label: `Add ${item.title}`,
+      line: { state: "idle" },
+    })),
   ]
   // Every channel: the grey mark and its still line say which are paused, and
   // the list's header already counts them.
   const hint =
     channels.length === 0 ? "reaching nobody yet" : `reaching ${plural(channels.length, "channel")}`
-  const shown = fleet.slice(0, 3)
-  const rest = fleet.length - shown.length
-  const group = { role: "group", "aria-label": "Where deployment events go" } as const
-  const sources = { role: "group", "aria-label": "Projects that report here" } as const
-  const projects = (
-    <>
-      {shown.map((deployment) => (
-        <FanoutProject
-          key={deployment.id}
-          compact={!wide}
-          containerRef={container}
-          hubRef={hub}
-          deployment={deployment}
-        />
-      ))}
-      {rest > 0 && (
-        <FanoutRest compact={!wide} containerRef={container} hubRef={hub} count={rest} />
-      )}
-      {fleet.length === 0 && <FanoutRest compact={!wide} containerRef={container} hubRef={hub} />}
-    </>
-  )
 
   return (
-    <div ref={container} className="relative mx-auto max-w-5xl">
-      {wide ? (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(3rem,0.4fr)_auto_minmax(4.5rem,0.5fr)_minmax(0,1.3fr)] items-center">
-          <div {...sources} className="flex flex-col items-end gap-5">
-            {projects}
-          </div>
-          <div aria-hidden />
-          <WireNode
-            nodeRef={hub}
-            align="center"
-            mark={<WireHost />}
-            eyebrow="This server"
-            title="Every deployment"
-            hint={hint}
-          />
-          <div aria-hidden />
-          {/* Not a list: the cards below are the channels' list, and these
-              are a picture of the same channels. */}
-          <div {...group} className="flex flex-col gap-4">
-            {targets.map((target) => (
-              <FanoutTarget
-                key={target.key}
-                containerRef={container}
-                sourceRef={hub}
-                channel={target.channel}
-                kind={target.kind}
-                onAdd={onAdd}
-              />
-            ))}
-          </div>
-        </div>
-      ) : (
-        // The words over the marks, so the lines run downwards over nothing
-        // but the page's own ground.
-        <div className="flex flex-col items-center text-center">
-          <p className="eyebrow">This server</p>
-          <p className="text-body leading-snug font-medium">Every deployment</p>
-          <p className="text-hint leading-snug text-muted-foreground">{hint}</p>
-          <div {...sources} className="mt-5 flex flex-wrap justify-center gap-4">
-            {projects}
-          </div>
-          <div ref={hub} className="relative z-raised mt-10 flex">
-            <WireHost />
-          </div>
-          <div {...group} className="mt-10 flex flex-wrap justify-center gap-4">
-            {targets.map((target) => (
-              <FanoutTarget
-                key={target.key}
-                compact
-                containerRef={container}
-                sourceRef={hub}
-                channel={target.channel}
-                kind={target.kind}
-                onAdd={onAdd}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * One project, drawn as itself — the favicon or product its card on the fleet
- * carries — with its line into this server, as an account is drawn beside the
- * GitHub App.
- */
-function FanoutProject({
-  deployment,
-  containerRef,
-  hubRef,
-  compact,
-}: {
-  deployment: DeploymentSummary
-  containerRef: RefObject<HTMLDivElement | null>
-  hubRef: RefObject<HTMLDivElement | null>
-  compact: boolean
-}) {
-  const mark = useRef<HTMLDivElement>(null)
-  const run = deployment.activeRun ?? deployment.lastRun
-  const beam = <AnimatedBeam containerRef={containerRef} fromRef={mark} toRef={hubRef} still />
-  if (compact)
-    return (
-      <div className="min-w-0">
-        {beam}
-        <div ref={mark} className="relative z-raised flex">
-          <ProjectMark deployment={deployment} size="sm" />
-        </div>
-        <span className="sr-only">{deployment.name}</span>
-      </div>
-    )
-  return (
-    <div className="min-w-0">
-      {beam}
-      <WireNode
-        nodeRef={mark}
-        align="end"
-        mark={<ProjectMark deployment={deployment} size="md" />}
-        title={
-          <Link href={`/deploy/${deployment.id}`} className="rounded-sm focus-ring hover:underline">
-            {deployment.name}
-          </Link>
-        }
-        hint={`${deployment.environmentName} · ${
-          run ? `last run ${relativeTime(run.endedAt ?? run.requestedAt)}` : "never deployed"
-        }`}
-      />
-    </div>
-  )
-}
-
-/**
- * The projects the column has no room for, as a count on a tile of the
- * projects' own shape; or, before there is any project, the dashed ring where
- * the first will stand.
- */
-function FanoutRest({
-  count,
-  containerRef,
-  hubRef,
-  compact,
-}: {
-  count?: number
-  containerRef: RefObject<HTMLDivElement | null>
-  hubRef: RefObject<HTMLDivElement | null>
-  compact: boolean
-}) {
-  const mark = useRef<HTMLDivElement>(null)
-  const drawn = count ? (
-    <span
-      className={cn(
-        "numeric flex shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-hint text-muted-foreground",
-        compact ? "size-8" : "size-10",
-      )}
-    >
-      +{count}
-    </span>
-  ) : (
-    <WirePlaceholder size={compact ? "sm" : "md"}>
-      <CloudUpload />
-    </WirePlaceholder>
-  )
-  const beam = (
-    <AnimatedBeam containerRef={containerRef} fromRef={mark} toRef={hubRef} still dashed={!count} />
-  )
-  if (compact)
-    return (
-      <div className="min-w-0">
-        {beam}
-        <div ref={mark} className="relative z-raised flex">
-          {drawn}
-        </div>
-      </div>
-    )
-  return (
-    <div className="min-w-0">
-      {beam}
-      <WireNode
-        nodeRef={mark}
-        align="end"
-        mark={drawn}
-        title={
-          <span className="font-normal text-muted-foreground">
-            {count ? plural(count, "more project") : "No projects yet"}
-          </span>
-        }
-        hint={count ? undefined : "each reports here once it deploys"}
-      />
-    </div>
-  )
-}
-
-/**
- * One channel, or the ring where a kind of channel would go, and its line from
- * the source. The kind is the title and the name rides in the hint as one
- * string: the cards below are where a channel is found by name.
- */
-function FanoutTarget({
-  containerRef,
-  sourceRef,
-  channel,
-  kind,
-  onAdd,
-  compact,
-}: {
-  containerRef: RefObject<HTMLDivElement | null>
-  sourceRef: RefObject<HTMLDivElement | null>
-  channel?: NotificationChannel
-  kind: NotificationChannelKind
-  onAdd?: (kind: NotificationChannelKind) => void
-  compact?: boolean
-}) {
-  const mark = useRef<HTMLDivElement>(null)
-  const meta = KINDS.find((item) => item.kind === kind)
-  const title = meta?.title ?? kind
-  const line = lineOf(channel)
-  const size = compact ? "sm" : "md"
-  const hint =
-    channel &&
-    (channel.enabled
-      ? `${channel.name} · ${eventLabel(channel.events).toLowerCase()} · ${outcomeWords(channel)}`
-      : `${channel.name} · paused`)
-  const drawn = channel ? (
-    <WireMark tone="logo" size={size}>
-      <ChannelGlyph channel={channel} />
-    </WireMark>
-  ) : (
-    <WireLink label={`Add ${title}`} onClick={onAdd ? () => onAdd(kind) : undefined}>
-      <WirePlaceholder size={size} product={channelProduct(kind)} fallback={Envelope} />
-    </WireLink>
-  )
-  const beam = (
-    <AnimatedBeam
-      containerRef={containerRef}
-      fromRef={sourceRef}
-      toRef={mark}
-      still={line.still}
-      dashed={"dashed" in line}
-      tone={"tone" in line ? line.tone : "default"}
-      duration={2.2}
-      delay={channel ? (channel.id % 5) * 0.3 : 0}
+    <WireFlow
+      className="animate-rise"
+      phone="marks"
+      loading={loading}
+      related={related}
+      start={{
+        title: "Projects that report here",
+        nodes: sources,
+        max: 3,
+        more: { href: "/deploy", words: (hidden) => plural(hidden, "more project") },
+      }}
+      hub={{
+        mark: (size) => <WireHost size={size} />,
+        eyebrow: "This server",
+        title: "Every deployment",
+        hint,
+      }}
+      end={{
+        title: "Where deployment events go",
+        nodes: targets,
+        max: PICTURE_TARGETS,
+        more: { words: (hidden) => plural(hidden, "more channel") },
+        loadingRows: 3,
+      }}
     />
-  )
-  if (compact)
-    return (
-      <div className="min-w-0">
-        {beam}
-        <div ref={mark} className="relative z-raised flex">
-          {drawn}
-        </div>
-        {channel && <span className="sr-only">{`${title}: ${hint}`}</span>}
-      </div>
-    )
-  return (
-    <div className="min-w-0">
-      {beam}
-      <WireNode
-        nodeRef={mark}
-        mark={drawn}
-        title={channel ? title : <span className="text-muted-foreground">{title}</span>}
-        hint={channel ? hint : meta?.hint}
-      />
-    </div>
   )
 }
 
@@ -1695,9 +1498,9 @@ function ChannelSheet({
     <SidePanel
       open={Boolean(channel)}
       onOpenChange={(open) => !open && onClose()}
-      title={channel ? `Deliveries · ${channel.name}` : "Deliveries"}
+      title={channel ? `${channel.name} · history` : "History"}
       description="Recent delivery attempts for this channel."
-      width="md"
+      size="md"
       actions={
         channel &&
         verbs.length > 0 && (
@@ -1730,7 +1533,7 @@ function ChannelSheet({
           {deliveries.error ? (
             <ErrorState error={deliveries.error} onRetry={deliveries.refresh} />
           ) : deliveries.loading && !deliveries.data ? (
-            <LoadingPanel plain rows={3} />
+            <RowsSkeleton rows={3} />
           ) : log.length === 0 ? (
             <EmptyNote>No deliveries have been attempted yet.</EmptyNote>
           ) : (

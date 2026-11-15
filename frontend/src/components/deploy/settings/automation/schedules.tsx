@@ -27,7 +27,7 @@ import type {
   DeploymentScheduleTest,
 } from "@/lib/types"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldRow,
@@ -41,7 +41,6 @@ import { OUTCOME_FILL, OutcomeStrip, type OutcomeTone } from "@/components/outco
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, ErrorState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -393,7 +392,7 @@ export function Schedules({
     >
       <div ref={column} className="min-w-0">
         {schedules.loading && !schedules.data ? (
-          <LoadingRows rows={2} />
+          <ChoiceListSkeleton rows={2} />
         ) : schedules.error && !schedules.data ? (
           <ErrorState error={schedules.error} onRetry={schedules.refresh} />
         ) : list.length === 0 ? (
@@ -945,9 +944,9 @@ function ScheduleRunsSheet({
     <SidePanel
       open={schedule !== undefined}
       onOpenChange={(next) => !next && onClose()}
-      title={`${schedule?.name ?? "Schedule"} runs`}
+      title={`${schedule?.name ?? "Schedule"} · history`}
       description="The runs this schedule has produced, and when it fires next."
-      width="md"
+      size="md"
       actions={
         schedule &&
         verbs && (
@@ -1001,7 +1000,7 @@ function ScheduleRunsSheet({
           {runs.error && !runs.data ? (
             <ErrorState error={runs.error} onRetry={runs.refresh} />
           ) : runs.loading && !runs.data ? (
-            <LoadingRows rows={4} />
+            <ChoiceListSkeleton rows={4} />
           ) : firings.length === 0 ? (
             <EmptyNote className="px-0 text-left">
               {nextAt
@@ -1295,7 +1294,7 @@ export function ScheduleSheet({
       onOpenChange={(open) => !open && !saving && sheet.close()}
       title={editing ? `Edit ${editing.name}` : "Add schedule"}
       description="Run an action on a clock, in a named timezone."
-      width="md"
+      size="md"
       footer={
         <>
           <FormNote className="mr-auto basis-full sm:basis-auto">

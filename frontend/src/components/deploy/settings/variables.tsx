@@ -1069,7 +1069,7 @@ function VariablesBody({
             ? "Change this variable's value, its type or who can read it."
             : "Name a value and choose who can read it."
         }
-        width="md"
+        size="md"
         footer={
           <>
             <FormNote className="mr-auto max-sm:hidden">Applies on your next deployment</FormNote>
@@ -1650,7 +1650,7 @@ function ImportSheet({
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
       title="Import a .env"
       description="Paste or choose a dotenv file; every name in it is listed with what importing it does."
-      width="lg"
+      size="lg"
       footer={
         <>
           {verdicts.length > 0 && (

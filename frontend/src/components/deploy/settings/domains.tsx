@@ -1461,7 +1461,7 @@ function AddDomainPanel({
           ? "Route a name on Cloudflare through the tunnel."
           : "Point a record at this server and check it before adding it."
       }
-      width="md"
+      size="md"
       footer={
         <>
           {unsaved > 0 && (
