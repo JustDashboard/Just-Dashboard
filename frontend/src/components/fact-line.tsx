@@ -72,7 +72,13 @@ export function Fact({
   lead?: boolean
 }) {
   return (
-    <span data-slot="fact" className={cn("relative max-w-full min-w-0 pl-4", className)} {...props}>
+    <span
+      data-slot="fact"
+      // Mono is the whole fact's, not an inline span's: a span in another
+      // face inside the line box grew the line a pixel past its 16.
+      className={cn("relative max-w-full min-w-0 pl-4", mono && "font-mono", className)}
+      {...props}
+    >
       {!lead && (
         <span aria-hidden className="absolute inset-y-0 left-0 w-4 text-center text-faint">
           {" · "}
@@ -81,10 +87,7 @@ export function Fact({
       <span
         title={title}
         className={
-          cn(
-            product && "inline-flex max-w-full min-w-0 items-center gap-1.5",
-            mono && "font-mono",
-          ) || undefined
+          product ? "inline-flex max-w-full min-w-0 items-center gap-1.5 align-top" : undefined
         }
       >
         {product && <ProductGlyph id={product} />}
