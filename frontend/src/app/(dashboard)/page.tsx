@@ -200,6 +200,8 @@ export default function OverviewPage() {
           logo={<Skeleton className="size-10 rounded-lg" />}
           title={<Bone className="w-56" />}
           state={<Bone className="w-14 text-xs" />}
+          // The verbs' place, so on a phone the line holds the row they land on.
+          menu={false}
           // Two lines of facts on a phone, where the machine's own wrap.
           facts={
             <>

@@ -176,9 +176,12 @@ test("a drifting candidate's replay names the requests it answered differently",
   await expect(
     verdict.getByText("48 of 50 replayed requests matched the record", { exact: true }),
   ).toBeVisible()
-  await expect(verdict.getByText("2 drifted (4%), 2% allowed", { exact: true })).toHaveClass(
-    /text-destructive/,
-  )
+  // The tone is set on the fact, which holds the words and the dot before them.
+  await expect(
+    verdict
+      .locator("[data-slot=fact]")
+      .filter({ has: page.getByText("2 drifted (4%), 2% allowed", { exact: true }) }),
+  ).toHaveClass(/text-destructive/)
   await expect(
     verdict.getByText("19 in 20 inside 38 ms, 42 ms recorded", { exact: true }),
   ).toBeVisible()

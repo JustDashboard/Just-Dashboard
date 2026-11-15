@@ -223,6 +223,8 @@ function Loading({ name, members }: { name: string; members?: number }) {
         fallback={Lifebuoy}
         title={name}
         state={<Status tone="unknown" label="Reading" />}
+        // The verbs' place, so on a phone the line holds the row they land on.
+        menu={false}
         facts={<TextShimmer>Reading the group…</TextShimmer>}
       />
       <EgressPicture links={[]} expected={members} />

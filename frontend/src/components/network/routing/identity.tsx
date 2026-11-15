@@ -97,9 +97,9 @@ export function RoutingIdentity({
           </>
         ) : (
           // The facts' own line, held while there is nothing to put on it.
-          <span aria-hidden className="max-sm:min-h-9">
-            &nbsp;
-          </span>
+          // One line at 390 too: drawn through FactLine, the four facts fit
+          // one line there, where with FactDots they wrapped to two.
+          <span aria-hidden>&nbsp;</span>
         )
       }
       command={
