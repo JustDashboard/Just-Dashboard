@@ -8,6 +8,7 @@ import { SaveBarProvider } from "@/components/settings/save-bar"
 import { SettingForm, SettingSection } from "@/components/settings/setting-card"
 import { FormSections } from "@/components/form"
 import { Trash } from "@/components/icons"
+import { Detail, DetailList } from "@/components/detail-list"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ErrorState, Notice } from "@/components/state"
@@ -278,20 +279,17 @@ export function RedisAccount({ name }: { name: string }) {
 /** One part of a rule on its line: what it is, then each rule as the server writes it. */
 function RulePart({ label, rules, none }: { label: string; rules: string[]; none: string }) {
   return (
-    <div className="flex min-h-11 min-w-0 items-center gap-4 py-2">
-      <dt className="w-24 shrink-0 text-body font-medium">{label}</dt>
-      <dd className="flex min-w-0 flex-1 flex-wrap gap-x-3 gap-y-1">
-        {rules.length === 0 ? (
-          <span className="text-body text-muted-foreground">{none}</span>
-        ) : (
-          rules.map((rule, index) => (
-            <code key={`${rule}:${index}`} className="font-mono text-xs">
-              {rule}
-            </code>
-          ))
-        )}
-      </dd>
-    </div>
+    <Detail label={label} className="flex flex-wrap gap-x-3 gap-y-1">
+      {rules.length === 0 ? (
+        <span className="text-muted-foreground">{none}</span>
+      ) : (
+        rules.map((rule, index) => (
+          <code key={`${rule}:${index}`} className="font-mono text-xs">
+            {rule}
+          </code>
+        ))
+      )}
+    </Detail>
   )
 }
 
@@ -307,11 +305,11 @@ function RuleReading({ user }: { user: RedisACLUser }) {
         >
           {user.rule || "no rule"}
         </Well>
-        <dl className="divide-y divide-hairline">
+        <DetailList ruled size="body">
           <RulePart label="Commands" rules={user.commands ?? []} none="none" />
           <RulePart label="Keys" rules={user.keys ?? []} none="none" />
           <RulePart label="Channels" rules={user.channels ?? []} none="none" />
-        </dl>
+        </DetailList>
       </PanelBody>
     </Panel>
   )
