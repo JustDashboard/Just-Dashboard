@@ -1,3 +1,5 @@
+import { generatePassword as makePassword } from "@/lib/password"
+
 /**
  * The server's rules for the names Add a database sends, read as the reader
  * types. The server is still the one that decides; these only mean the form
@@ -77,11 +79,7 @@ export function suggestedName(
 }
 
 /**
- * A password for an account the dashboard makes: thirty characters from the
- * set every engine takes unquoted, drawn with the browser's own generator.
+ * @deprecated use `generatePassword` from `@/lib/password`. A password is not a
+ * database rule: system users and the proxy make them too.
  */
-export function generatePassword(length = 30): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-  const bytes = crypto.getRandomValues(new Uint8Array(length))
-  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")
-}
+export const generatePassword: (length?: number) => string = makePassword

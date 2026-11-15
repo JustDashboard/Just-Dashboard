@@ -5,6 +5,7 @@ import { type VariantProps } from "class-variance-authority"
 import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useField } from "@/components/form"
 import { toggleVariants } from "@/components/ui/toggle"
 
 const ToggleGroupContext = React.createContext<
@@ -17,17 +18,34 @@ const ToggleGroupContext = React.createContext<
   spacing: 0,
 })
 
+/**
+ * Inside a `Field` the group is named by the field's label — a group is not a
+ * control a `for` can point at — and described by its hint and error, unless
+ * the caller named it.
+ */
 function ToggleGroup({
   className,
   variant,
   size,
   spacing = 0,
   children,
-  ...props
+  ...rest
 }: React.ComponentProps<typeof ToggleGroupPrimitive.Root> &
   VariantProps<typeof toggleVariants> & {
     spacing?: number
   }) {
+  const field = useField()
+  const named = Boolean(rest["aria-label"] || rest["aria-labelledby"])
+  const describedBy =
+    [rest["aria-describedby"], field?.describedBy].filter(Boolean).join(" ") || undefined
+  const props = field
+    ? {
+        ...rest,
+        "aria-labelledby": named ? rest["aria-labelledby"] : field.labelId,
+        "aria-describedby": describedBy,
+        "aria-invalid": rest["aria-invalid"] ?? (field.invalid || undefined),
+      }
+    : rest
   return (
     <ToggleGroupPrimitive.Root
       data-slot="toggle-group"

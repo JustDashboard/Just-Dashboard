@@ -4,6 +4,7 @@ import * as React from "react"
 import { Switch as SwitchPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useFieldControl } from "@/components/form"
 import { hitAreaClasses } from "@/components/ui/button"
 
 /**
@@ -14,14 +15,18 @@ import { hitAreaClasses } from "@/components/ui/button"
  *
  * No shadow, and the track's edge is the control edge, so an unchecked switch
  * reads as a control on the card rather than a dent in it.
+ *
+ * Inside a `Field` it is the field's control, as an `Input` is: named by the
+ * label, described by the hint and the error, and invalid with the error.
  */
 function Switch({
   className,
   size = "default",
-  ...props
+  ...rest
 }: React.ComponentProps<typeof SwitchPrimitive.Root> & {
   size?: "sm" | "default"
 }) {
+  const props = fieldMember(rest, useFieldControl(rest))
   return (
     <SwitchPrimitive.Root
       data-slot="switch"
@@ -41,6 +46,21 @@ function Switch({
       />
     </SwitchPrimitive.Root>
   )
+}
+
+/**
+ * A switch with a name of its own (`aria-label`, `aria-labelledby`) is
+ * beside the field's label rather than named by it — "On" against the
+ * question the label asks: it keeps the field's hint and error but not the
+ * field's id, so the label is not pointed at a control that names itself.
+ */
+function fieldMember<P extends { id?: string; "aria-label"?: string; "aria-labelledby"?: string }>(
+  own: P,
+  wired: P,
+): P {
+  return own.id === undefined && (own["aria-label"] || own["aria-labelledby"])
+    ? { ...wired, id: undefined }
+    : wired
 }
 
 export { Switch }

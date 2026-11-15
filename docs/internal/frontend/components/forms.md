@@ -1,15 +1,160 @@
 # Forms and settings
 
-Fields, options, settings sections, the save bar and the pending strip (D8).
+Fields, options, settings sections, the save bar, the pending strip and the danger zone (D8).
 
-**Members:** `Field`, `FieldRow`, `FieldCheck`, `FieldChecks`, `useFieldControl`, `FormSection`, `FormSections`, `OptionList`,
-`OptionRow`, `FormFacts`, `FormNote`, `Statement`, `SettingsColumn`, `SwitchRows`, `SwitchRow`,
-`EditedTag`, `NoticeLine`, `SettingSection`, `SaveBar`, `PendingStrip`, `Segments`, `Disclosure`,
-`ui/input-group`.
+**Members:** `Field`, `FieldRow`, `FieldCheck`, `FieldChecks`, `useFieldControl`, `useField`,
+`FormSection`, `FormSections`, `OptionList`, `OptionRow`, `FormFacts`, `FormNote`, `Statement`,
+`Disclosure` (`components/form.tsx`); `SecretField` (`components/secret-field.tsx`); `ListField`
+(`components/list-field.tsx`); `OneTimeCodeInput`, `RecoveryCodes`
+(`components/account/one-time-code.tsx`); `SettingsColumn`, `SwitchRows`, `SwitchRow`, `EditedTag`,
+`NoticeLines`, `NoticeLine` (`components/settings/settings-column.tsx`); `SettingsPage`
+(`components/settings/settings-page.tsx`); `SettingForm`, `SettingSection`, `settingStatus`
+(`components/settings/setting-card.tsx`); `DangerRows`, `DangerRow`
+(`components/settings/danger-row.tsx`); `SaveBarProvider`, `useSaveBarEntry`
+(`components/settings/save-bar.tsx`); `PendingStrip` (`components/settings/pending-strip.tsx`);
+`generatePassword`, `passwordChecks` (`lib/password.ts`); `Segments`; `ui/input-group`.
 
-**Status: moved text.** WP-16 rewrites this page in wave 1 as purpose, anatomy, use when and when
-not (and what instead), props, states, the phone, accessibility, an example call site, what enforces
-it, and related families. Until then it holds the rules that were in `design-system.md`, below.
+**Status: current** for the parts below. The rules and their history follow from §7 on.
+
+## Purpose
+
+A form is a label, a control and one line under it, as many times as the task needs; a page that
+*is* a form is one centred column of sections under one floating Save. These parts are the only way
+the product draws either, so a field reads the same in a dialog, a sheet, a flow and a settings page,
+and a screen reader hears its hint and its error wherever it is.
+
+## Anatomy
+
+- **`Field`**: the label (`text-body`, medium), an optional ⓘ (`info`) beside it, an optional
+  `trailing` control at the label row's far end, the control, then one line: the hint, or the error
+  (`role="alert"`, a warning glyph) while there is one. The field makes the ids and hands them to its
+  control through a context (`useFieldControl`); `Input`, `Textarea`, `SelectTrigger`,
+  `InputGroupInput`, `Switch` and `Checkbox` read it, and `ToggleGroup` takes the label's id as its
+  name (`useField()?.labelId`), since a group is not a control a `for` can point at.
+- **`SettingsColumn`**: `mx-auto max-w-3xl`, the pending strip first, then the sections in a
+  `FormSections` (a hairline between each), and 80px at the foot for the save bar.
+- **`SettingSection`**: a `FormSection aside`: an h2, under it what the section currently is as data
+  (`state`), at its far end one `settingStatus` and the section's small outline buttons.
+- **`DangerRows` and `DangerRow`**: the danger zone's one frame in `border-rule-danger`, a hairline
+  between acts; each act is an optional mark (what it is done to, drawn as itself), an h3 title, one
+  sentence, its facts, and its one button beside them.
+
+## Use when, and when not
+
+| You need | Use | Not |
+| --- | --- | --- |
+| A labelled control | `Field` around the control | `Label` + `Input` in a `space-y-1.5` div |
+| Two or three short fields on one line | `FieldRow` | a hand grid |
+| A rule the value must meet, lit as it is met | `FieldChecks` of `FieldCheck`s, inside the `Field` | a hand `aria-live` paragraph |
+| A password the dashboard makes or the reader types | `SecretField` (show, generate, copy) | an `InputGroup` built again |
+| A password made in code | `generatePassword()` from `lib/password.ts` | a second generator |
+| Values added one at a time | `ListField`, with `parse` for a value that can be refused | a field and a tag list built again |
+| An authenticator's six digits | `OneTimeCodeInput`, `size="flow"` on a sign-in step, `"reading"` elsewhere | an `Input` with its own `inputMode` and tracking |
+| Recovery codes shown once | `RecoveryCodes` (`framed` in a settings column) | a `Well` and two buttons |
+| A page that is a form | `SettingsColumn` (a deployment's: `SettingsPage`) | the column's classes typed again |
+| A switch in a settings column | `SwitchRow` in `SwitchRows` | `OptionRow` |
+| A switch on a task surface (dialog, sheet, flow) | `OptionRow` in an `OptionList` | `SwitchRow` |
+| An act that cannot be undone | `DangerRow` in `DangerRows`, under a `SettingSection tone="danger"` | a red card per act |
+| A closed set of two to five words | `Segments` | a `Select` |
+
+**`SwitchRow` or `OptionRow`.** Both are a switch with its name, and they are kept apart on purpose.
+A settings column is read top to bottom on every visit, so a switch there is one line: a short
+label, the reason behind the ⓘ (`info`), nothing under it, and a row with a reason is as tall as one
+without. That is `SwitchRow`. A task surface — a dialog, a sheet, a step of a flow — is read once,
+while deciding, so its switch carries its sentence under the title. That is `OptionRow`. One rule
+for every settings page: a short label, the explanation behind the ⓘ, and a visible line under a
+field only where a mistake is costly or the value has a unit or a format. An explanation never goes
+in the label after a dash ("Backup before deploy — the release waits for this job") — the dash
+clause is the ⓘ's.
+
+## Props
+
+- `SecretField({ id, label, hint?, value, onChange, error?, shown? = true, generate? = true,
+  copy? = true, length? })`. `shown` is how the value starts: a made password is shown, because the
+  reader has to read or copy it; a typed one passes `shown={false}`. `length` is how long Generate
+  makes one (`generatePassword`'s 30 otherwise).
+- `generatePassword(length = 30)`: letters and digits from `PASSWORD_ALPHABET`, which every engine,
+  shell and `htpasswd` line takes unquoted and which leaves out I, l, 1, O and 0.
+- `ListField({ id, label, placeholder, values, onChange, hint?, info?, error?, disabled?, parse?,
+  mono? = true })`. `parse(typed, values)` returns `{ entry }`, `{ error }` (shown as the field's
+  error until the reader types again) or null (nothing added); without it an entry is trimmed and
+  one already listed is skipped. `disabled` draws the values without their controls.
+- `OneTimeCodeInput({ id?, value, onChange, size? = "reading", autoFocus?, required? })`: always
+  `inputMode="numeric"`, `autoComplete="one-time-code"`, `maxLength={6}`; anything but a digit is
+  dropped, so "123 456" pasted from a message arrives as the code.
+- `RecoveryCodes({ codes, onDone, framed?, busy? })`.
+- `SettingsColumn({ strip?, sectioned? = true, className?, children })`. `sectioned={false}` when
+  the children already hold the strip and the sections, because one wrapper has to hold both (a
+  database's `SettingsPending`, which the pages report to).
+- `SettingsPage({ state, pageKinds?, children })`: a deployment's configuration read, then
+  `SettingsColumn` with the pending strip and the last failure's remedy as its `strip`.
+- `DangerRow({ mark?, title, sentence?, facts?, action?, children? })`. Without `action` the title
+  goes quiet and the sentence says why the act cannot be taken, or what comes first. `children`
+  outlives the row's own block, so the confirmation an act opens goes there.
+
+## States
+
+- **A field:** empty, typed, invalid (the error replaces the hint, the edge turns red through
+  `aria-invalid`), disabled. Checks lit one by one while typing.
+- **A settings column:** loading (the page's skeleton, final shape), clean (no bar), dirty (the bar
+  rises with the count and what applies when), saving, refused (the form keeps its edits and says
+  why under the field), saved.
+- **A danger act:** open (its button), held (no button, quiet title, the sentence says why),
+  not drawn (the role cannot take it). Stop turning into Start, or a held act getting its button,
+  arrives rather than being repainted: the row's block is keyed on its title and state.
+
+## The phone
+
+Fields are 44px under a finger and 16px text, so iOS does not zoom (`Input`'s guard). `FieldRow`
+stacks below `sm`. `SecretField`'s Generate and Copy keep their glyphs and lose their words. A
+danger act's button goes full width under its sentence. The pending strip folds its items under its
+headline. The code field keeps its height on a touch screen (`pointer-coarse:`).
+
+## Accessibility
+
+Every control in a `Field` is named by its label and described by its hint, its error and its
+checks; the error is an alert once and the field stays described by it. `Checkbox` never takes the
+field's id, because boxes come in runs each named by its own words; a `Switch` with its own
+`aria-label` keeps the hint and error but not the id. `FieldChecks` is a polite live region, never
+an alert. A danger act's title is an h3 under the zone's h2. The sign-in page's fields are all
+`Field`s, so its "These do not match yet." is announced.
+
+## Example
+
+```tsx
+<SettingSection id="danger" tone="danger" title="Danger zone">
+  <DangerRows>
+    <DangerRow
+      mark={<ProductLogo id="docker" size="sm" />}
+      title="Remove its container"
+      sentence="Removes the container that runs this server, with the volumes it wrote to."
+      facts={<>Container <span className="font-mono text-foreground">{name}</span></>}
+      action={<Button variant="destructive" size="sm" onClick={remove}><WarningFill />Remove…</Button>}
+    />
+  </DangerRows>
+</SettingSection>
+```
+
+## What enforces it
+
+`components/form.test.js` (a field's wiring), `components/ui/field-controls.test.js` (Switch,
+Checkbox and ToggleGroup in a field), `components/account/one-time-code.test.js`,
+`components/settings/danger-row.test.js` and `lib/password.test.js`. The browser specs `sign-in`,
+`auth-recovery`, `account-passkeys`, `database-operate` and `deploy-settings-b` fill these fields by
+their labels. WP-39 adds lint rules against the retired names.
+
+**Retired names, still exported until WP-39:** `SecretField` from `database/ops/access-parts`,
+`generatePassword` from `database/connect/rules`, `SettingsPage` from `settings/setting-card`. The
+proxy's own `ListField` and generator, the found-server dialog's password field, the tailnet field
+on Domains and the code fields on Passkeys and the hub sign-in move onto the shared parts in their
+areas' wave-2 passes.
+
+## Related
+
+[`overlays-confirm.md`](overlays-confirm.md) (a sheet's anatomy, confirmations),
+[`tabs-chips-segments.md`](tabs-chips-segments.md) (`Segments`, chips),
+[`../patterns/settings-save-and-pending.md`](../patterns/settings-save-and-pending.md),
+[`../recipes/settings-page.md`](../recipes/settings-page.md).
 
 ## 7. Which surface: what goes inside a task surface
 
@@ -70,10 +215,11 @@ line).
 **Spacing does what the rail was for, and type keeps the ranks apart.** The space is asymmetric on
 purpose: 32px above and below every section, so 64px and a hairline between one section and the
 next, against 16px from a head to its own fields, which stand 20px apart — a head is always nearer
-its own fields than the ones above it. The title is `text-base` semibold, a `Section`'s 16 and a
-rung above a dialog section's 15, because it names a part of the page (§8). The state under it is
-`text-xs` muted, 12, between the title and the 11px hints in the fields, because it is data rather
-than a caption (§5). `actions` sit at the far end of the head's row, and so does a settings
+its own fields than the ones above it. The title is the section head, `PanelHeader` plain at
+15/600, an h2 where a dialog's is an h3, because it names a part of the page (§8); it draws no rule
+of its own, because `FormSections` draws the one between sections. The state under it (the
+deprecated `hint`) is `text-xs` muted, 12, between the title and the 11px hints in the fields,
+because it is data rather than a caption (§5). `actions` sit at the far end of the head's row, and so does a settings
 section's `settingStatus`, so "Unsaved changes", arriving with the first keystroke, takes no line of
 its own and pushes no field down.
 
@@ -90,8 +236,9 @@ Save waits on the confirmation, and a cancelled or refused change leaves the dra
 **The deployment settings are that shape, and they were the last pages in the product that were
 all containers.** Each of the nine was a stack of framed cards — a title strip, the form, a footer
 holding Save — on the argument that things filled in one at a time read best as bordered boxes,
-which is the wrong shape for a page that *is* a form. `components/settings/setting-card.tsx` draws them now.
-`SettingsPage` reads the configuration, then draws what is saved but not live yet (a strip with no
+which is the wrong shape for a page that *is* a form. `components/settings/setting-card.tsx` and
+`settings-page.tsx` draw them now. `SettingsPage` reads the configuration, then, in the same
+`SettingsColumn` the account and Configuration pages use, draws what is saved but not live yet (a strip with no
 button: the project context row already carries the one "Deploy changes", and a second brand face a
 hundred and fifty pixels under it was two commands on one surface; `PendingStrip` in
 `components/settings/pending-strip.tsx` draws it from a headline and a list of items — a mark, a name, a word for

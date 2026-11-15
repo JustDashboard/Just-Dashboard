@@ -2,16 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import {
-  ArrowRight,
-  Check,
-  Copy,
-  Eye,
-  EyeOff,
-  Fingerprint,
-  Key,
-  ShieldCheck,
-} from "@/components/icons"
+import { ArrowRight, Check, Copy, Eye, EyeOff, Fingerprint, ShieldCheck } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
 import { passwordChecks } from "@/lib/password"
@@ -22,18 +13,16 @@ import {
   usePasskeyPlace,
 } from "@/lib/passkeys"
 import { returnAfterSignIn } from "@/lib/sign-in-return"
-import { cn } from "@/lib/utils"
 import type { AuthStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Notice } from "@/components/state"
 import { Logo } from "@/components/logo"
 import { useCopy } from "@/hooks/use-copy"
-import { Well } from "@/components/panel"
-import { FieldCheck } from "@/components/form"
+import { Field, FieldCheck, FieldChecks } from "@/components/form"
 import { FlowPanel, FlowSteps } from "@/components/flow"
+import { OneTimeCodeInput, RecoveryCodes } from "@/components/account/one-time-code"
 import { TotpSecret } from "@/components/account/totp-secret"
 import { ProductOrbit } from "@/components/onboarding/product-orbit"
 
@@ -328,8 +317,7 @@ export default function LoginPage() {
                 <>
                   {step === "credentials" && (
                     <form onSubmit={submitCredentials} className="space-y-4">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="username">Username</Label>
+                      <Field label="Username" htmlFor="username">
                         <Input
                           id="username"
                           autoFocus
@@ -341,19 +329,16 @@ export default function LoginPage() {
                           onChange={(e) => setUsername(e.target.value)}
                           required
                         />
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between gap-3">
-                          <Label htmlFor="password">Password</Label>
-                          <button
-                            type="button"
-                            aria-expanded={forgot}
-                            onClick={() => setForgot((v) => !v)}
-                            className="rounded-sm text-hint text-muted-foreground underline-offset-4 focus-ring transition-colors hover:text-foreground hover:underline"
-                          >
+                      </Field>
+                      <Field
+                        label="Password"
+                        htmlFor="password"
+                        trailing={
+                          <TextButton expanded={forgot} onClick={() => setForgot((v) => !v)}>
                             Forgot it?
-                          </button>
-                        </div>
+                          </TextButton>
+                        }
+                      >
                         <div className="relative">
                           <Input
                             id="password"
@@ -377,7 +362,7 @@ export default function LoginPage() {
                             )}
                           </button>
                         </div>
-                      </div>
+                      </Field>
                       {forgot && <ForgotPassword username={username} />}
                       <Button type="submit" size="lg" className="w-full" pending={busy}>
                         Continue
@@ -423,27 +408,38 @@ export default function LoginPage() {
 
                   {step === "totp" && (
                     <form onSubmit={submitTotp} className="space-y-4">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="code">
-                          {recoveryMode ? "Recovery code" : "Verification code"}
-                        </Label>
-                        <Input
-                          id="code"
-                          autoFocus
-                          key={recoveryMode ? "recovery" : "totp"}
-                          inputMode={recoveryMode ? "text" : "numeric"}
-                          autoComplete="one-time-code"
-                          placeholder={recoveryMode ? "xxxx-xxxx" : "000000"}
-                          maxLength={recoveryMode ? 32 : 6}
-                          className={cn(
-                            "h-14 text-center font-mono sm:h-14",
-                            recoveryMode ? "text-base" : "text-2xl tracking-[0.45em] sm:text-2xl",
-                          )}
-                          value={code}
-                          onChange={(e) => setCode(e.target.value)}
-                          required
-                        />
-                      </div>
+                      <Field
+                        label={recoveryMode ? "Recovery code" : "Verification code"}
+                        htmlFor="code"
+                      >
+                        {recoveryMode ? (
+                          // A recovery code is letters and a dash, not the six digits.
+                          <Input
+                            id="code"
+                            key="recovery"
+                            autoFocus
+                            autoComplete="one-time-code"
+                            autoCapitalize="none"
+                            spellCheck={false}
+                            placeholder="xxxx-xxxx"
+                            maxLength={32}
+                            className="h-14 text-center font-mono text-base sm:h-14 sm:text-base pointer-coarse:h-14"
+                            value={code}
+                            onChange={(e) => setCode(e.target.value)}
+                            required
+                          />
+                        ) : (
+                          <OneTimeCodeInput
+                            id="code"
+                            key="totp"
+                            size="flow"
+                            autoFocus
+                            required
+                            value={code}
+                            onChange={setCode}
+                          />
+                        )}
+                      </Field>
                       <Button
                         type="submit"
                         size="lg"
@@ -488,20 +484,16 @@ export default function LoginPage() {
                     ) : (
                       <form onSubmit={submitEnrollment} className="space-y-4">
                         <TotpSecret secret={enrollment.secret} otpauthUrl={enrollment.otpauthUrl} />
-                        <div className="space-y-1.5">
-                          <Label htmlFor="enroll-code">Code from your app</Label>
-                          <Input
+                        <Field label="Code from your app" htmlFor="enroll-code">
+                          <OneTimeCodeInput
                             id="enroll-code"
+                            size="flow"
                             autoFocus
-                            inputMode="numeric"
-                            maxLength={6}
-                            placeholder="000000"
-                            className="h-14 text-center font-mono text-2xl tracking-[0.45em] sm:h-14 sm:text-2xl"
-                            value={code}
-                            onChange={(e) => setCode(e.target.value)}
                             required
+                            value={code}
+                            onChange={setCode}
                           />
-                        </div>
+                        </Field>
                         <Button
                           type="submit"
                           size="lg"
@@ -637,8 +629,7 @@ function ChangePassword({
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       {askCurrent && (
-        <div className="space-y-1.5">
-          <Label htmlFor="current-password">Current password</Label>
+        <Field label="Current password" htmlFor="current-password">
           <Input
             id="current-password"
             type="password"
@@ -647,10 +638,9 @@ function ChangePassword({
             onChange={(e) => onCurrent(e.target.value)}
             required
           />
-        </div>
+        </Field>
       )}
-      <div className="space-y-1.5">
-        <Label htmlFor="new-password">New password</Label>
+      <Field label="New password" htmlFor="new-password">
         <Input
           id="new-password"
           type="password"
@@ -660,24 +650,27 @@ function ChangePassword({
           onChange={(e) => onNext(e.target.value)}
           required
         />
-        <p className="flex flex-wrap gap-x-4 gap-y-1" aria-live="polite">
+        <FieldChecks>
           <FieldCheck met={checks.long}>12 characters or more</FieldCheck>
           <FieldCheck met={checks.mixed}>three of upper, lower, digits, symbols</FieldCheck>
-        </p>
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="repeat-password">Repeat new password</Label>
+        </FieldChecks>
+      </Field>
+      {/* The mismatch is the field's error, so it is announced and the field
+          is described by it, rather than a red line a reader cannot hear. */}
+      <Field
+        label="Repeat new password"
+        htmlFor="repeat-password"
+        error={mismatch ? "These do not match yet." : undefined}
+      >
         <Input
           id="repeat-password"
           type="password"
           autoComplete="new-password"
-          aria-invalid={mismatch || undefined}
           value={repeat}
           onChange={(e) => onRepeat(e.target.value)}
           required
         />
-        {mismatch && <p className="text-hint text-destructive">These do not match yet.</p>}
-      </div>
+      </Field>
       <Button
         type="submit"
         size="lg"
@@ -692,54 +685,24 @@ function ChangePassword({
   )
 }
 
-function TextButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+function TextButton({
+  onClick,
+  expanded,
+  children,
+}: {
+  onClick: () => void
+  /** For a button that shows or hides a part of the step under it. */
+  expanded?: boolean
+  children: React.ReactNode
+}) {
   return (
     <button
       type="button"
+      aria-expanded={expanded}
       onClick={onClick}
       className="rounded-sm text-hint text-muted-foreground underline-offset-4 focus-ring transition-colors hover:text-foreground hover:underline"
     >
       {children}
     </button>
-  )
-}
-
-function RecoveryCodes({
-  codes,
-  onDone,
-  busy,
-}: {
-  codes: string[]
-  onDone: () => void
-  busy: boolean
-}) {
-  const { copy, copied } = useCopy()
-
-  return (
-    <div className="space-y-4">
-      <Well plain className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-xs">
-        {codes.map((c) => (
-          <span key={c} className="tracking-wider">
-            {c}
-          </span>
-        ))}
-      </Well>
-
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Button
-          type="button"
-          variant="outline"
-          size="lg"
-          className="sm:flex-1"
-          onClick={() => void copy(codes.join("\n"))}
-        >
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          {copied ? "Copied" : "Copy all"}
-        </Button>
-        <Button size="lg" className="sm:flex-1" onClick={onDone} pending={busy}>
-          <Key className="size-4" />I have saved them
-        </Button>
-      </div>
-    </div>
   )
 }

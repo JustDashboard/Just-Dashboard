@@ -3,6 +3,7 @@
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { FormSections } from "@/components/form"
 import { SaveBarProvider } from "@/components/settings/save-bar"
+import { SettingsColumn } from "@/components/settings/settings-column"
 import { SectionFrame } from "@/components/database/kit"
 import { BlockedState } from "@/components/database/kit/blocked-state"
 import { SettingsPending } from "@/components/database/ops/settings-pending"
@@ -74,12 +75,13 @@ export function SettingsFrame({
   return (
     <SectionFrame section="settings" part={page === "general" ? undefined : listed.title}>
       <SaveBarProvider>
-        {/* The room at the foot is the save bar's, so it never lies over the last field. */}
-        <div className="mx-auto w-full max-w-3xl min-w-0 space-y-8 pb-20">
+        {/* The strip and the sections are both the pending wrapper's: the
+            pages report to the strip through it. */}
+        <SettingsColumn sectioned={false}>
           <SettingsPending page={page} confirm={confirm}>
             <FormSections>{children(confirm)}</FormSections>
           </SettingsPending>
-        </div>
+        </SettingsColumn>
       </SaveBarProvider>
       {dialog}
     </SectionFrame>
