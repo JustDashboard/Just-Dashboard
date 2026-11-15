@@ -87,7 +87,8 @@ import { useColumnWidth } from "@/hooks/use-column-width"
 import { RevealedValue, ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
 import { SharedReferencePicker, SharedVariables } from "@/components/deploy/shared-variables"
 import { StoreReferenceLabel, StoreReferencePicker } from "@/components/deploy/secret-store-picker"
-import { SettingSection, SettingsPage } from "@/components/settings/setting-card"
+import { SettingSection } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import {
   ConfigurationState,
   useConfiguration,

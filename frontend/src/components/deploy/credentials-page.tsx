@@ -618,7 +618,9 @@ export function CredentialsPage() {
                 {/* A host is optional for every kind but a registry login.
                     Left out on a phone, where it pushed the command under
                     the title. */}
-                {hosts.size > 0 && <span className="max-sm:hidden"> · {plural(hosts.size, "host")}</span>}
+                {hosts.size > 0 && (
+                  <span className="max-sm:hidden"> · {plural(hosts.size, "host")}</span>
+                )}
               </>
             ) : undefined
           }

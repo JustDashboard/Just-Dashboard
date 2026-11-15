@@ -29,20 +29,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
-import {
-  GameIdentity,
-  GameIdentitySkeleton,
-  useGameOverview,
-} from "@/components/deploy/game/identity"
+import { useGameOverview } from "@/components/deploy/game/identity"
 import { groupFacts, groupProperties } from "@/components/deploy/game/settings-model"
 import { Explain } from "@/components/explain"
 import { Segments } from "@/components/segments"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { useConfiguration } from "@/components/deploy/settings/use-configuration"
 
 /**
@@ -67,17 +59,12 @@ export function GameSettings({ projectId }: { projectId: number }) {
   // The strip at the head is the deployment's: a game server has saved
   // changes that are not live like any other project.
   const state = useConfiguration(projectId, project.environmentId)
+  // No identity line over the column: Players opens on it, and every other
+  // settings page keeps to the one centred column (PGD-18).
   return (
-    <div className="space-y-6">
-      {overview.data ? (
-        <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
-      ) : (
-        !overview.error && <GameIdentitySkeleton />
-      )}
-      <SettingsPage state={state}>
-        {() => <PropertiesForm projectId={projectId} files={overview.data?.files} />}
-      </SettingsPage>
-    </div>
+    <SettingsPage state={state}>
+      {() => <PropertiesForm projectId={projectId} files={overview.data?.files} />}
+    </SettingsPage>
   )
 }
 

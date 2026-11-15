@@ -61,12 +61,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { SettingPicture } from "@/components/settings/setting-picture"
 import { PreviewBranchesForm } from "@/components/deploy/settings/preview-branches"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"

@@ -76,12 +76,8 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
 import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE, hostOf } from "@/components/deploy/vocabulary"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import {
   draftChanges,
   useConfiguration,
@@ -865,10 +861,10 @@ function DomainRow({
   const [asking, setAsking] = useState(false)
   const signInIncomplete = Boolean(
     protection &&
-      (!protection.username ||
-        protectionUserProblem(protection.username) ||
-        (!protection.hash && !password) ||
-        (password && typedProblem)),
+    (!protection.username ||
+      protectionUserProblem(protection.username) ||
+      (!protection.hash && !password) ||
+      (password && typedProblem)),
   )
 
   return (
@@ -1020,8 +1016,8 @@ function DomainRow({
                 {sharedWith.length > 0 && (
                   <FormNote tone="warning">
                     {sharedWith.join(", ")} {sharedWith.length === 1 ? "has" : "have"} this user
-                    name with another password, and the route keeps one password per user. Give
-                    each its own user name, or the same password.
+                    name with another password, and the route keeps one password per user. Give each
+                    its own user name, or the same password.
                   </FormNote>
                 )}
               </PopoverContent>
@@ -1057,7 +1053,10 @@ function DomainRow({
           disabled={!canAdmin}
           className="shrink-0"
         >
-          <Explain face="wrap" tip={httpsTip({ https: domain.https, tunnel, gated: httpsHeld && !tunnel })}>
+          <Explain
+            face="wrap"
+            tip={httpsTip({ https: domain.https, tunnel, gated: httpsHeld && !tunnel })}
+          >
             <Segment
               value="https"
               aria-label={`HTTPS on ${host}`}

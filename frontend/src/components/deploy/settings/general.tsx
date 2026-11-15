@@ -49,12 +49,8 @@ import {
 } from "@/components/deploy/vocabulary"
 import { WireLabel, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import { applyDetectionChanges } from "@/components/deploy/settings/detection-changes"

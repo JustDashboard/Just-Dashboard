@@ -1224,7 +1224,9 @@ function Fanout({
             id: deployment.id,
             name: deployment.name,
             deployment,
-            hint: run ? `last run ${relativeTime(run.endedAt ?? run.requestedAt)}` : "never deployed",
+            hint: run
+              ? `last run ${relativeTime(run.endedAt ?? run.requestedAt)}`
+              : "never deployed",
           })
         })
   const targets: WireFlowNode[] = [

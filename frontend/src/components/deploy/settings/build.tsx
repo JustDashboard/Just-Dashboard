@@ -74,12 +74,8 @@ import {
   railpackProviderLabel,
 } from "@/components/deploy/vocabulary"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { ReleaseTasks, type ReleaseTask } from "@/components/deploy/settings/release-tasks"
 import { RehearsalForm } from "@/components/deploy/settings/rehearsal"
 import { VulnerabilityScanForm } from "@/components/deploy/settings/vulnerability-scan"
@@ -312,7 +308,9 @@ const BUILDERS: Builder[] = [
   },
   {
     key: "site",
-    label: RECIPE_SHORT.site,
+    // Shorter than the recipe's name, which a fifth of the settings column
+    // cut to "Site genera…" at 1440 (PGD-29); the detail names the tools.
+    label: "Static site",
     product: "nginx-static",
     detail: "Hugo · Jekyll",
     method: "recipe",
