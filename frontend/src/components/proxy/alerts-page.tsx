@@ -1,10 +1,7 @@
 "use client"
 
-import { useId, useRef, useState, type RefObject } from "react"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useState } from "react"
 import {
-  ArrowRight,
   Bell,
   Clock,
   CrossCircle,
@@ -20,7 +17,6 @@ import {
   ShieldOff,
   Slash,
   Trash,
-  type Icon,
 } from "@/components/icons"
 import { del, get, post, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -38,16 +34,11 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { ProductGlyph, ProductLogo, hasProductLogo } from "@/components/product-logo"
-import { ChannelGlyph } from "@/components/deploy/vocabulary"
+import { Field, FieldRow, FormNote } from "@/components/form"
+import { ProductLogo } from "@/components/product-logo"
 import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
-import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { SidePanel, SidePanelFooter } from "@/components/side-panel"
-import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { HostIdentity } from "@/components/identity-header"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -55,11 +46,24 @@ import {
   AllClear,
   ChannelTests,
   HistoryRow,
-  PictureChannel,
+  NothingTold,
   SubjectCard,
-  isFiring,
-  pictureTargets,
 } from "@/components/alerts/alert-parts"
+import {
+  AlertsPicture,
+  KindCards,
+  KindTile,
+  PAIRED_HEAD,
+  RuleForm,
+  RuleSheet,
+  isFiring,
+} from "@/components/alerts/kit"
+import {
+  reaches,
+  type AlertArea,
+  type AlertKindSpec,
+  type AlertKinds,
+} from "@/components/alerts/kinds"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -73,7 +77,6 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { engineProduct } from "@/components/proxy/marks"
-import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The proxy's alerts: rules over the readings the overview shows, told to the
@@ -93,19 +96,12 @@ import { useBreakpoint } from "@/lib/breakpoints"
  * edited in a sheet, so the page behind it stays as it was.
  */
 
-type KindWords = {
-  label: string
-  /** A few words, on a card. */
-  hint: string
-  /** The sentence behind them, as the card's tooltip. */
-  detail: string
-  icon: Icon
-  describe: (params: ProxyAlertParams) => string
-}
+/** A kind as the kit draws it, and how its parameters read as a sentence. */
+type ProxyKind = AlertKindSpec & { describe: (params: ProxyAlertParams) => string }
 
 const EXPIRY_DAYS = [21, 7, 3, 1]
 
-const KINDS: Record<ProxyAlertKind, KindWords> = {
+const KINDS: Record<ProxyAlertKind, ProxyKind> = {
   cert_expiring: {
     label: "Certificate expiring",
     hint: "21, 7, 3 and 1 days left",
@@ -199,16 +195,7 @@ const DEFAULT_PARAMS: Record<ProxyAlertKind, ProxyAlertParams> = {
  * reader thinks in — a certificate, the engine, a site — rather than the ten
  * kinds of rule there are.
  */
-type Area = {
-  key: string
-  title: string
-  /** The product the area is drawn as, where it has one. */
-  product?: (engine: string | undefined) => string | undefined
-  fallback: Icon
-  kinds: ProxyAlertKind[]
-}
-
-const AREAS: Area[] = [
+const AREAS: AlertArea<ProxyAlertKind>[] = [
   {
     key: "certificates",
     title: "Certificates",
@@ -233,73 +220,8 @@ const AREAS: Area[] = [
   },
 ]
 
-function areaOf(kind: ProxyAlertKind) {
-  return AREAS.find((area) => area.kinds.includes(kind)) ?? AREAS[0]
-}
-
-/** The product a kind of rule is about: Let's Encrypt for a certificate, the engine for itself. */
-function kindProduct(kind: ProxyAlertKind, engine: string | undefined) {
-  return areaOf(kind).product?.(engine)
-}
-
-/**
- * A rule's tile: what it watches, drawn as that product where it is one, with
- * the kind's own glyph in the corner — Let's Encrypt with a clock is a
- * certificate running low, with a cross one that ran out.
- */
-function KindTile({
-  kind,
-  engine,
-  tone,
-  size = "md",
-  className,
-}: {
-  kind: ProxyAlertKind
-  engine?: string
-  tone?: "danger" | "warning"
-  size?: "sm" | "md"
-  className?: string
-}) {
-  const product = kindProduct(kind, engine)
-  const Glyph = KINDS[kind].icon
-  if (!hasProductLogo(product))
-    return (
-      <ProductLogo
-        size={size}
-        fallback={Glyph}
-        className={cn(
-          tone === "danger" && "border-rule-danger [&_svg]:text-destructive",
-          tone === "warning" && "border-rule-warning [&_svg]:text-warning",
-          className,
-        )}
-      />
-    )
-  return (
-    <span className={cn("relative flex shrink-0", className)}>
-      <ProductLogo
-        id={product}
-        size={size}
-        className={cn(
-          tone === "danger" && "border-rule-danger",
-          tone === "warning" && "border-rule-warning",
-        )}
-      />
-      <span
-        aria-hidden
-        className={cn(
-          "absolute -right-1 -bottom-1 flex size-4.5 items-center justify-center rounded-md border bg-background",
-          tone === "danger"
-            ? "border-rule-danger text-destructive"
-            : tone === "warning"
-              ? "border-rule-warning text-warning"
-              : "border-hairline text-muted-foreground",
-        )}
-      >
-        <Glyph className="size-3" />
-      </span>
-    </span>
-  )
-}
+/** The proxy's kinds, as the alerts kit reads them. */
+const PROXY_KINDS: AlertKinds<ProxyAlertKind> = { kinds: KINDS, order: KIND_ORDER, areas: AREAS }
 
 export function AlertsPage() {
   const { status } = useProxy()
@@ -401,7 +323,7 @@ export function AlertsPage() {
   }
 
   const subjectFor = (rule: ProxyAlertRule) => ({
-    mark: <KindTile kind={rule.kind} engine={engine} />,
+    mark: <KindTile kinds={PROXY_KINDS} kind={rule.kind} engine={engine} />,
     name: KINDS[rule.kind].label,
     facts: <span>{KINDS[rule.kind].describe(rule.params)}</span>,
   })
@@ -527,11 +449,13 @@ export function AlertsPage() {
           {/* On the page's own ground, as Notifications' picture is. */}
           <div className="relative animate-rise py-2 lg:py-6">
             <AlertsPicture
+              kinds={PROXY_KINDS}
               rules={rules}
               subjects={subjects}
               channels={channelList}
-              every={every}
               engine={engine}
+              title={`checks every ${every} min`}
+              reach="tells each change once"
               onAdd={admin ? (kind) => edit({ kind }) : undefined}
             />
           </div>
@@ -541,6 +465,7 @@ export function AlertsPage() {
               <Panel plain aria-label="Firing">
                 <PanelHeader
                   title="Firing"
+                  className={PAIRED_HEAD}
                   actions={
                     <span className="flex flex-wrap items-center gap-3">
                       {data?.lastPass && (
@@ -549,7 +474,7 @@ export function AlertsPage() {
                         </span>
                       )}
                       {admin && (
-                        <Button size="sm" variant="outline" onClick={check} pending={checking}>
+                        <Button size="xs" variant="outline" onClick={check} pending={checking}>
                           <RefreshClockwise className="size-3.5" />
                           Check now
                         </Button>
@@ -568,7 +493,12 @@ export function AlertsPage() {
                           subject={subject}
                           kindLabel={KINDS[subject.kind].label}
                           tile={(tone) => (
-                            <KindTile kind={subject.kind} engine={engine} tone={tone} />
+                            <KindTile
+                              kinds={PROXY_KINDS}
+                              kind={subject.kind}
+                              engine={engine}
+                              tone={tone}
+                            />
                           )}
                           admin={admin}
                           busy={busy === `mute:${subject.ruleId}:${subject.subject}`}
@@ -583,29 +513,20 @@ export function AlertsPage() {
               <Panel plain aria-label="Rules">
                 <PanelHeader
                   title="Rules"
-                  actions={
-                    <span className="numeric text-hint text-muted-foreground">
-                      {rules.length > 0
-                        ? `${plural(rules.length, "rule")}${paused > 0 ? ` · ${paused} paused` : ""}`
-                        : `${KIND_ORDER.length} to choose from`}
-                    </span>
+                  className={PAIRED_HEAD}
+                  count={
+                    rules.length > 0
+                      ? `${plural(rules.length, "rule")}${paused > 0 ? ` · ${paused} paused` : ""}`
+                      : `${KIND_ORDER.length} to choose from`
                   }
                 />
                 <PanelBody>
                   {rules.length === 0 ? (
-                    // What can be watched, each a press away from its rule. A
-                    // paragraph stood over it saying what a rule is; the
-                    // picture and the line above say it.
-                    <ChoiceGrid columns={2} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-                      {KIND_ORDER.map((kind) => (
-                        <KindCard
-                          key={kind}
-                          kind={kind}
-                          engine={engine}
-                          onClick={admin ? () => edit({ kind }) : undefined}
-                        />
-                      ))}
-                    </ChoiceGrid>
+                    <KindCards
+                      kinds={PROXY_KINDS}
+                      engine={engine}
+                      onAdd={admin ? (kind) => edit({ kind }) : undefined}
+                    />
                   ) : (
                     <ChoiceList aria-label="Alert rules" className="animate-rise">
                       {rules.map((rule) => {
@@ -615,6 +536,7 @@ export function AlertsPage() {
                             key={rule.id}
                             leading={
                               <KindTile
+                                kinds={PROXY_KINDS}
                                 kind={rule.kind}
                                 engine={engine}
                                 tone={fires > 0 ? "danger" : undefined}
@@ -662,11 +584,8 @@ export function AlertsPage() {
                 <Panel plain aria-label="Muted">
                   <PanelHeader
                     title="Muted"
-                    actions={
-                      <span className="numeric text-hint text-muted-foreground">
-                        {muted.length} nobody is told about
-                      </span>
-                    }
+                    className={PAIRED_HEAD}
+                    count={`${muted.length} nobody is told about`}
                   />
                   <PanelBody>
                     <ul aria-label="Muted" className="space-y-2">
@@ -676,7 +595,12 @@ export function AlertsPage() {
                           subject={subject}
                           kindLabel={KINDS[subject.kind].label}
                           tile={(tone) => (
-                            <KindTile kind={subject.kind} engine={engine} tone={tone} />
+                            <KindTile
+                              kinds={PROXY_KINDS}
+                              kind={subject.kind}
+                              engine={engine}
+                              tone={tone}
+                            />
                           )}
                           admin={admin}
                           busy={busy === `mute:${subject.ruleId}:${subject.subject}`}
@@ -693,17 +617,15 @@ export function AlertsPage() {
               <Panel plain aria-label="Recently told">
                 <PanelHeader
                   title="Recently told"
-                  actions={
-                    (data?.history ?? []).length > 0 && (
-                      <span className="numeric text-hint text-muted-foreground">
-                        newest {Math.min((data?.history ?? []).length, 100)}
-                      </span>
-                    )
+                  className={PAIRED_HEAD}
+                  count={
+                    (data?.history ?? []).length > 0 &&
+                    `newest ${Math.min((data?.history ?? []).length, 100)}`
                   }
                 />
                 <PanelBody>
                   {(data?.history ?? []).length === 0 ? (
-                    <EmptyNote className="px-0 text-left">Nothing has been told yet.</EmptyNote>
+                    <NothingTold />
                   ) : (
                     <ul aria-label="Alert history" className="animate-rise">
                       {(data?.history ?? []).slice(0, 12).map((event) => (
@@ -714,7 +636,12 @@ export function AlertsPage() {
                           kindLabel={KINDS[event.kind]?.label ?? event.kind}
                           tile={
                             KINDS[event.kind] ? (
-                              <KindTile kind={event.kind} engine={engine} size="sm" />
+                              <KindTile
+                                kinds={PROXY_KINDS}
+                                kind={event.kind}
+                                engine={engine}
+                                size="sm"
+                              />
                             ) : (
                               <ProductLogo size="sm" fallback={Bell} />
                             )
@@ -730,14 +657,8 @@ export function AlertsPage() {
               <Panel plain aria-label="Channels">
                 <PanelHeader
                   title="Channels"
-                  actions={
-                    <Link
-                      href="/deploy/notifications"
-                      className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                    >
-                      Notifications <ArrowRight className="size-3" />
-                    </Link>
-                  }
+                  className={PAIRED_HEAD}
+                  link={{ href: "/deploy/notifications", label: "Notifications" }}
                 />
                 <PanelBody>
                   <ChannelTests
@@ -755,15 +676,9 @@ export function AlertsPage() {
         </>
       )}
 
-      <SidePanel
-        open={Boolean(editing)}
-        onOpenChange={(open) => !open && closeForm()}
-        title={editing?.rule ? "Edit alert" : "Add alert"}
-        description="What to watch, and who is told when it starts and when it stops."
-        width="lg"
-      >
+      <RuleSheet open={Boolean(editing)} editing={Boolean(editing?.rule)} onClose={closeForm}>
         {editing && (
-          <RuleForm
+          <ProxyRuleForm
             key={session}
             rule={editing.rule}
             kind={editing.kind}
@@ -776,266 +691,14 @@ export function AlertsPage() {
             onCancel={closeForm}
           />
         )}
-      </SidePanel>
+      </RuleSheet>
       {dialog}
     </Page>
   )
 }
 
-function KindCard({
-  kind,
-  engine,
-  onClick,
-}: {
-  kind: ProxyAlertKind
-  engine?: string
-  onClick?: () => void
-}) {
-  return (
-    <ChoiceCard
-      onClick={onClick}
-      disabled={!onClick}
-      className="min-h-0 flex-row items-center gap-3 p-3"
-    >
-      <KindTile kind={kind} engine={engine} size="sm" />
-      <KindWords kind={kind} />
-    </ChoiceCard>
-  )
-}
-
-/** A kind of rule on a card: its name over a few words, the sentence behind them a hover away. */
-function KindWords({ kind }: { kind: ProxyAlertKind }) {
-  return (
-    <span className="min-w-0 space-y-0.5" title={KINDS[kind].detail}>
-      <ChoiceCardTitle className="block truncate">{KINDS[kind].label}</ChoiceCardTitle>
-      <ChoiceCardHint className="block truncate">{KINDS[kind].hint}</ChoiceCardHint>
-    </span>
-  )
-}
-
-/** Whether an enabled rule tells this channel: one with no channels named tells every enabled one. */
-function reaches(rules: ProxyAlertRule[], channel: NotificationChannel) {
-  return (
-    channel.enabled &&
-    rules.some(
-      (rule) => rule.enabled && (rule.channels.length === 0 || rule.channels.includes(channel.id)),
-    )
-  )
-}
-
-/**
- * What the rules watch, wired through this server to who is told — the
- * Notifications picture's shape, read left to right. A watched area is drawn
- * as its product; its wire is red while something there fires, amber while
- * one holds, moving where a rule watches it and dashed where none does, and
- * pressing an unwatched one opens a rule for it. A channel's wire moves while
- * an enabled rule reaches it; a paused one is still and grey.
- */
-function AlertsPicture({
-  rules,
-  subjects,
-  channels,
-  every,
-  engine,
-  onAdd,
-}: {
-  rules: ProxyAlertRule[]
-  subjects: ProxyAlertSubject[]
-  channels: NotificationChannel[]
-  /** How often the rules are checked, in minutes. */
-  every: number
-  engine?: string
-  onAdd?: (kind: ProxyAlertKind) => void
-}) {
-  const wide = useBreakpoint("lg")
-  const router = useRouter()
-  const container = useRef<HTMLDivElement>(null)
-  const hub = useRef<HTMLDivElement>(null)
-  const enabled = rules.filter((rule) => rule.enabled)
-  const targets = pictureTargets(channels)
-  // The line over the picture says how many rules are on and who is told;
-  // the server in the middle says what it does with them, which a paragraph
-  // under Rules used to.
-  const title = `checks every ${every} min`
-  const reach = "tells each change once"
-
-  const areas = AREAS.map((area) => (
-    <PictureArea
-      key={area.key}
-      area={area}
-      engine={engine}
-      rules={enabled.filter((rule) => area.kinds.includes(rule.kind))}
-      subjects={subjects.filter((s) => area.kinds.includes(s.kind))}
-      containerRef={container}
-      hubRef={hub}
-      compact={!wide}
-      onAdd={onAdd}
-    />
-  ))
-  const channelNodes = targets.map((target) => (
-    <PictureChannel
-      key={target.key}
-      channel={target.channel}
-      kind={target.kind}
-      live={target.channel ? reaches(rules, target.channel) : false}
-      containerRef={container}
-      hubRef={hub}
-      compact={!wide}
-      onAdd={() => router.push("/deploy/notifications")}
-    />
-  ))
-
-  return (
-    <div ref={container} className="relative mx-auto max-w-5xl">
-      {wide ? (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(3rem,0.4fr)_auto_minmax(4.5rem,0.5fr)_minmax(0,1.1fr)] items-center">
-          <div
-            role="group"
-            aria-label="What the rules watch"
-            className="flex flex-col items-end gap-4"
-          >
-            {areas}
-          </div>
-          <div aria-hidden />
-          <WireNode
-            nodeRef={hub}
-            align="center"
-            mark={<WireHost />}
-            eyebrow="This server"
-            title={title}
-            hint={reach}
-          />
-          <div aria-hidden />
-          <div role="group" aria-label="Who is told" className="flex flex-col gap-4">
-            {channelNodes}
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center text-center">
-          <p className="eyebrow">This server</p>
-          <p className="text-body leading-snug font-medium">{title}</p>
-          <p className="text-hint leading-snug text-muted-foreground">{reach}</p>
-          <div
-            role="group"
-            aria-label="What the rules watch"
-            className="mt-5 flex flex-wrap justify-center gap-4"
-          >
-            {areas}
-          </div>
-          <div ref={hub} className="relative z-raised mt-10 flex">
-            <WireHost size="md" />
-          </div>
-          <div
-            role="group"
-            aria-label="Who is told"
-            className="mt-10 flex flex-wrap justify-center gap-4"
-          >
-            {channelNodes}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function PictureArea({
-  area,
-  engine,
-  rules,
-  subjects,
-  containerRef,
-  hubRef,
-  compact,
-  onAdd,
-}: {
-  area: Area
-  engine?: string
-  rules: ProxyAlertRule[]
-  subjects: ProxyAlertSubject[]
-  containerRef: RefObject<HTMLDivElement | null>
-  hubRef: RefObject<HTMLDivElement | null>
-  compact: boolean
-  onAdd?: (kind: ProxyAlertKind) => void
-}) {
-  const mark = useRef<HTMLDivElement>(null)
-  const product = area.product?.(engine)
-  const Glyph = area.fallback
-  const firing = subjects.filter(isFiring).length
-  const holding = subjects.filter((s) => s.state === "pending" && !s.muted).length
-  const watched = rules.length > 0
-  const tone = firing > 0 ? "danger" : holding > 0 ? "warning" : undefined
-  const size = compact ? "sm" : "md"
-  const glyph = hasProductLogo(product) ? <ProductGlyph id={product} /> : <Glyph aria-hidden />
-  const drawn = watched ? (
-    <WireMark tone={tone ?? "logo"} size={size}>
-      {glyph}
-    </WireMark>
-  ) : (
-    <WireLink
-      label={`Watch ${area.title.toLowerCase()}`}
-      onClick={onAdd ? () => onAdd(area.kinds[0]) : undefined}
-    >
-      <WirePlaceholder size={size} product={product} fallback={Glyph} />
-    </WireLink>
-  )
-  const words = !watched
-    ? "not watched"
-    : firing > 0
-      ? `${firing} firing`
-      : holding > 0
-        ? `${holding} holding`
-        : `${plural(rules.length, "rule")}, all quiet`
-  const beam = (
-    <AnimatedBeam
-      containerRef={containerRef}
-      fromRef={mark}
-      toRef={hubRef}
-      still={!watched || tone !== undefined}
-      dashed={!watched}
-      tone={tone ?? "default"}
-      duration={2.4}
-      delay={(AREAS.indexOf(area) % 5) * 0.35}
-    />
-  )
-  if (compact)
-    return (
-      <div className="min-w-0">
-        {beam}
-        <div ref={mark} className="relative z-raised flex">
-          {drawn}
-        </div>
-        <span className="sr-only">{`${area.title}: ${words}`}</span>
-      </div>
-    )
-  return (
-    <div className="min-w-0">
-      {beam}
-      <WireNode
-        nodeRef={mark}
-        align="end"
-        mark={drawn}
-        title={watched ? area.title : <span className="text-muted-foreground">{area.title}</span>}
-        hint={
-          <span
-            className={cn(
-              tone === "danger" && "font-medium text-destructive",
-              tone === "warning" && "font-medium text-warning",
-            )}
-          >
-            {words}
-          </span>
-        }
-      />
-    </div>
-  )
-}
-
-/**
- * One rule as a form: what to watch, its line where the kind has one, and
- * who to tell. It brings its own footer, so the command stays beside the rule
- * it saves.
- */
-function RuleForm({
+/** One proxy rule as a form: the kit's shape, with each kind's own fields. */
+function ProxyRuleForm({
   rule,
   kind: preset,
   engine,
@@ -1061,7 +724,6 @@ function RuleForm({
   const [selected, setSelected] = useState<number[]>(rule?.channels ?? [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
-  const formId = useId()
 
   const choose = (next: ProxyAlertKind) => {
     setKind(next)
@@ -1110,32 +772,20 @@ function RuleForm({
   }
 
   return (
-    <form
-      id={formId}
-      className="flex flex-col gap-6"
-      onSubmit={(event) => {
-        event.preventDefault()
-        void save()
-      }}
+    <RuleForm
+      editing={Boolean(rule)}
+      onCancel={onCancel}
+      kinds={PROXY_KINDS}
+      kind={kind}
+      onKind={choose}
+      engine={engine}
+      channels={channels}
+      selected={selected}
+      onSelected={setSelected}
+      sentence={`${KINDS[kind].label}: ${KINDS[kind].describe(params())}.`}
+      saving={saving}
+      onSave={() => void save()}
     >
-      <Field label="Watch for">
-        <div role="group" aria-label="Alert kind">
-          <ChoiceGrid columns={2} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-            {KIND_ORDER.map((option) => (
-              <ChoiceCard
-                key={option}
-                selected={kind === option}
-                onClick={() => choose(option)}
-                className="min-h-0 flex-row items-center gap-3 p-3"
-              >
-                <KindTile kind={option} engine={engine} size="sm" />
-                <KindWords kind={option} />
-              </ChoiceCard>
-            ))}
-          </ChoiceGrid>
-        </div>
-      </Field>
-
       {kind === "cert_expiring" && (
         <Field label="Tell at" info="Days left; each is told once." error={error}>
           <ToggleGroup
@@ -1253,60 +903,6 @@ function RuleForm({
       {kind !== "cert_expiring" && kind !== "upstream_down" && kind !== "site_errors" && error && (
         <FormNote tone="danger">{error}</FormNote>
       )}
-
-      <Field label="Tell">
-        {channels.length === 0 ? (
-          <FormNote>
-            No notification channels yet — the rule reaches every channel you add later.{" "}
-            <Link
-              href="/deploy/notifications"
-              className="text-foreground underline-offset-2 hover:underline"
-            >
-              Add a channel
-            </Link>
-          </FormNote>
-        ) : (
-          <div className="space-y-1.5">
-            <OptionList>
-              {channels.map((channel) => (
-                <OptionRow
-                  key={channel.id}
-                  title={
-                    <span className="inline-flex items-center gap-2">
-                      <ChannelGlyph channel={channel} />
-                      {channel.name}
-                    </span>
-                  }
-                  hint={`${channel.target || channel.url}${channel.enabled ? "" : " · paused"}`}
-                  checked={selected.includes(channel.id)}
-                  onCheckedChange={(on) =>
-                    setSelected((prev) =>
-                      on ? [...prev, channel.id] : prev.filter((id) => id !== channel.id),
-                    )
-                  }
-                />
-              ))}
-            </OptionList>
-            <FormNote>
-              {selected.length === 0
-                ? "None chosen: every enabled channel is told."
-                : `${selected.length} chosen.`}
-            </FormNote>
-          </div>
-        )}
-      </Field>
-
-      <SidePanelFooter>
-        <p className="mr-auto min-w-0 basis-full text-hint text-muted-foreground sm:basis-auto">
-          {KINDS[kind].label}: {KINDS[kind].describe(params())}.
-        </p>
-        <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
-          Cancel
-        </Button>
-        <Button type="submit" form={formId} pending={saving}>
-          {rule ? "Save alert" : "Add alert"}
-        </Button>
-      </SidePanelFooter>
-    </form>
+    </RuleForm>
   )
 }

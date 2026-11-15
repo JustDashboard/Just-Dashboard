@@ -6,12 +6,11 @@ import { Bell, CheckCircle, Envelope, PaperAirplane } from "@/components/icons"
 import { plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { NotificationChannel, NotificationChannelKind } from "@/lib/types"
-import { FormNote } from "@/components/form"
-import { ProductLogo, channelProduct } from "@/components/product-logo"
+import { ProductLogo, ProductLogos, channelProduct } from "@/components/product-logo"
 import { ChannelGlyph, channelMark } from "@/components/deploy/vocabulary"
 import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { ErrorState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 
@@ -223,6 +222,18 @@ export function HistoryRow({
   )
 }
 
+/** Nothing told yet: said with a mark, the same on every alerts page. */
+export function NothingTold() {
+  return (
+    <EmptyState
+      icon={Bell}
+      title="Nothing told yet"
+      description="What a rule tells a channel is kept here, newest first."
+      className="py-8"
+    />
+  )
+}
+
 /**
  * The notification channels, each with a test an administrator can send, or
  * the way to add one when there are none.
@@ -244,16 +255,21 @@ export function ChannelTests({
 }) {
   if (error) return <ErrorState error={error} onRetry={onRetry} />
   if (channels.length === 0)
+    // The services a channel can be, drawn as themselves, and the way to add
+    // one: channels are the deployments' Notifications', made there. It was
+    // a grey sentence on the proxy's page and this on the host's.
     return (
-      <FormNote>
-        No notification channels yet, so a rule tells nobody.{" "}
-        <Link
-          href="/deploy/notifications"
-          className="text-foreground underline-offset-2 hover:underline"
-        >
-          Add a channel
-        </Link>
-      </FormNote>
+      <EmptyState
+        mark={<ProductLogos ids={["slack", "discord", "telegram"]} size="md" />}
+        title="No channels yet"
+        description="A rule tells nobody until there is a channel to tell."
+        action={
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/deploy/notifications">Add a channel</Link>
+          </Button>
+        }
+        className="py-8"
+      />
     )
   return (
     <ul aria-label="Notification channels" className="space-y-2">
