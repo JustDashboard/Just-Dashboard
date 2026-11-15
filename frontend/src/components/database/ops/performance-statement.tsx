@@ -69,7 +69,7 @@ import type {
   DbStatements,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { counted } from "@/components/database/kit/figures"
+import { counted, agree } from "@/components/database/kit/figures"
 
 /** How many statements the page reads to find its own among, and lists beside it. The server's cap. */
 const LISTED = 200
@@ -171,7 +171,7 @@ function Statement({ address }: { address: string | null }) {
       : "Reading the statements…"
     : !data.supported
       ? "This server is not counting its statements"
-      : `${rows.length === keyed.length ? keyed.length : `${rows.length} of ${keyed.length}`} ${keyed.length === 1 ? "statement" : "statements"} · by ${(order ?? "total time").toLowerCase()}`
+      : `${rows.length === keyed.length ? keyed.length : `${rows.length} of ${keyed.length}`} ${agree(keyed.length, "statement", "statements")} · by ${(order ?? "total time").toLowerCase()}`
 
   const fromHistory = tab === "history"
   const back = fromHistory

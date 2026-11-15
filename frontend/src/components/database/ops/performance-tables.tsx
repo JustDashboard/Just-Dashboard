@@ -36,13 +36,14 @@ import {
   type Maintenance,
 } from "@/components/database/ops/performance-maintenance"
 import {
+  FIT_COLUMN,
   NoFigure,
   NotAvailable,
   Notes,
   ObjectName,
+  RETURNS_FOCUS,
   ScopeChips,
   SortHead,
-  RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import {
   columnWidth,
@@ -281,14 +282,14 @@ export function TablesView() {
                   </p>
                 )}
               </div>
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {data.tables.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     This database holds no {objects} yet. Create one on the Schema page, or import a
                     file on the Data page.
                   </EmptyNote>
                 ) : rows.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     No {engine.nouns.object} matches {filter.trim() || scope}.
                   </EmptyNote>
                 ) : columns ? (
@@ -433,7 +434,7 @@ export function TablesView() {
                       <li
                         key={objectParam(table.schema, table.table)}
                         data-list-row="table"
-                        className="space-y-1 px-4 py-2.5"
+                        className="space-y-1 py-2.5"
                       >
                         <div className="flex min-w-0 items-center gap-2">
                           <span className="flex min-w-0 flex-1 items-center gap-2">

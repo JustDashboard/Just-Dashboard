@@ -646,7 +646,6 @@ function AllowedAddresses({
             id="reach-allow-add"
             value={adding}
             placeholder="203.0.113.7 or 198.51.100.0/24"
-            aria-invalid={Boolean(problem) || undefined}
             onChange={(event) => setAdding(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter") return

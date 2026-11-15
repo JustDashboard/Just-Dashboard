@@ -31,6 +31,7 @@ import {
 } from "@/components/database/ops/performance-storage"
 import type { DbMaintenanceResult } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { agree } from "@/components/database/kit/figures"
 
 type Run = {
   verb: MaintenanceVerb
@@ -388,7 +389,7 @@ function MaintenanceRun({
         {result && (
           <>
             <Statement
-              label={result.statements.length === 1 ? "Statement" : "Statements"}
+              label={agree(result.statements.length, "Statement", "Statements")}
               sql={result.statements.join("\n")}
               placeholder="The engine was sent no statement."
             />

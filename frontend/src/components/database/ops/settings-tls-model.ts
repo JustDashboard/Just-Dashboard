@@ -1,5 +1,6 @@
 import type { DbTLS } from "@/lib/types"
 import { plural } from "@/lib/format"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * What the TLS section says and asks, worked out from what the server reported.
@@ -71,7 +72,7 @@ export function changeEffects(
   const linked =
     tls.linked > 0
       ? [
-          `${tls.linked} deployment ${tls.linked === 1 ? "environment reaches" : "environments reach"} this database by its internal name. Once TLS is required, each has to connect with TLS.`,
+          `${plural(tls.linked, "deployment environment")} ${agree(tls.linked, "reaches", "reach")} this database by its internal name. Once TLS is required, each has to connect with TLS.`,
         ]
       : []
   switch (change) {

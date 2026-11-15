@@ -31,12 +31,13 @@ import {
   useMaintenance,
 } from "@/components/database/ops/performance-maintenance"
 import {
+  FIT_COLUMN,
   NoFigure,
   NotAvailable,
   Notes,
   ObjectName,
-  ScopeChips,
   RETURNS_FOCUS,
+  ScopeChips,
 } from "@/components/database/ops/performance-parts"
 import {
   countFlags,
@@ -258,15 +259,15 @@ export function IndexesView() {
                   </span>
                 </p>
               )}
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {data.indexes.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     {data.notes?.length
                       ? "The engine lists no index here."
                       : `No ${engine.nouns.object} of this database has an index.`}
                   </EmptyNote>
                 ) : rows.length === 0 ? (
-                  <EmptyNote className="px-4">No index matches.</EmptyNote>
+                  <EmptyNote>No index matches.</EmptyNote>
                 ) : width < TABLE_FROM ? (
                   <ul className="divide-y divide-hairline border-y border-hairline">
                     {rows.map((index) => {
@@ -275,7 +276,7 @@ export function IndexesView() {
                         <li
                           key={`${index.schema}.${index.table}.${index.name}`}
                           data-list-row="index"
-                          className="space-y-1.5 px-4 py-2.5 text-xs"
+                          className="space-y-1.5 py-2.5 text-xs"
                         >
                           <div className="flex min-w-0 items-center gap-2">
                             <span className="min-w-0 flex-1 truncate font-mono" title={index.name}>
@@ -292,7 +293,7 @@ export function IndexesView() {
                           <span className="flex h-5 min-w-0 items-center gap-x-3 overflow-hidden whitespace-nowrap">
                             {counted && index.scans >= 0 && (
                               <span className="numeric text-hint text-muted-foreground">
-                                {compact(index.scans)} {index.scans === 1 ? "scan" : "scans"}
+                                {compact(index.scans)} {agree(index.scans, "scan", "scans")}
                               </span>
                             )}
                             <IndexTags index={index} />

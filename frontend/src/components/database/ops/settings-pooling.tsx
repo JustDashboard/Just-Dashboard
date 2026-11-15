@@ -42,6 +42,7 @@ import {
 } from "@/components/database/ops/settings-pooling-model"
 import { usePendingReport } from "@/components/database/ops/settings-pending"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { plural } from "@/lib/format"
 
 /**
  * The pooler in front of a PostgreSQL server: PgBouncer, run by the dashboard
@@ -748,7 +749,7 @@ function PoolsSection({ stats }: { stats: DbPoolerStats }) {
       title="Pools"
       state={
         <span className="numeric">
-          {stats.pools.length === 1 ? "1 pool" : `${stats.pools.length} pools`}, each a database and
+          {plural(stats.pools.length, "pool")}, each a database and
           an account
         </span>
       }

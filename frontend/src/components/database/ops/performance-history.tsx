@@ -50,11 +50,12 @@ import {
   type HistoryRow,
 } from "@/components/database/ops/performance-recorded"
 import {
+  FIT_COLUMN,
   NoFigure,
   NotAvailable,
+  RETURNS_FOCUS,
   SortHead,
   StatementLine,
-  RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { Fig, FigureLine, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
 import type {
@@ -66,6 +67,7 @@ import type {
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { Read, Stale } from "@/components/database/kit/read"
+import { agree } from "@/components/database/kit/figures"
 
 /** How many statements the list asks for. The server's cap is 200. */
 const TOP = 50
@@ -215,13 +217,13 @@ export function StatementHistoryView() {
                   <p>The history below ends at the last reading that worked.</p>
                 </Notice>
               )}
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {answer.statements.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     No {engine.nouns.statement} ran in {windowWords(answer.hours)}.
                   </EmptyNote>
                 ) : rows.length === 0 ? (
-                  <EmptyNote className="px-4">No statement matches {filter.trim()}.</EmptyNote>
+                  <EmptyNote>No statement matches {filter.trim()}.</EmptyNote>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -451,7 +453,7 @@ function RecordedFigures({
         <Fig>{shareWords(entry.share)}</Fig> of the window&apos;s statement time
       </span>
       <span>
-        <Fig>{entry.calls.toLocaleString()}</Fig> {entry.calls === 1 ? "call" : "calls"}
+        <Fig>{entry.calls.toLocaleString()}</Fig> {agree(entry.calls, "call", "calls")}
       </span>
       <span>
         <Fig>{millis(entry.totalMs)}</Fig> in all
@@ -468,7 +470,7 @@ function RecordedFigures({
         )
       })}
       <span>
-        <Fig>{entry.rows.toLocaleString()}</Fig> {entry.rows === 1 ? "row" : "rows"}
+        <Fig>{entry.rows.toLocaleString()}</Fig> {agree(entry.rows, "row", "rows")}
         {each !== undefined && `, ${ratio(each)} a call`}
       </span>
       {entry.rowsRead !== undefined && (

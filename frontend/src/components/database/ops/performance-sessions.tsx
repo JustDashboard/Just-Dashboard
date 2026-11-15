@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { Cross, StopCircle } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes, duration } from "@/lib/format"
+import { bytes, duration, plural } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll, type PollState } from "@/hooks/use-poll"
@@ -47,13 +47,14 @@ import {
 import { sessionHref } from "@/components/database/ops/performance-address"
 import { endSession, readChQueries } from "@/components/database/ops/performance-api"
 import {
+  FIT_COLUMN,
   Named,
   NoFigure,
   NotAvailable,
+  RETURNS_FOCUS,
   SessionState,
   StatementLine,
   useAsk,
-  RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { sessionsFilterKey, sessionsIdleKey } from "@/components/database/ops/performance-lists"
 import { ClientTile, StateFigure, Who } from "@/components/database/ops/performance-session-parts"
@@ -215,14 +216,14 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
                 )}
               </div>
 
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {data.sessions.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     The server listed no session to this account. It lists the sessions an account
                     may see, and showing every account&apos;s takes a grant.
                   </EmptyNote>
                 ) : listed.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     {filter.trim()
                       ? `No session matches ${filter.trim()}.`
                       : state
@@ -241,8 +242,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
                   onOpenChange={setIdleOpen}
                   summary={
                     <>
-                      {idle.length.toLocaleString()} idle{" "}
-                      {idle.length === 1 ? "session" : "sessions"}
+                      {plural(idle.length, "idle session")}
                     </>
                   }
                   facts={
@@ -250,7 +250,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
                   }
                 >
                   {idleOpen && (
-                    <div className="-mx-4">
+                    <div className={FIT_COLUMN}>
                       <SessionRows sessions={idle} {...rowProps} continued />
                     </div>
                   )}
@@ -390,7 +390,7 @@ function SessionRows({
         {sessions.map((session) => (
           // Three lines in every state: what a session waits on stands
           // beside its state, and one with no statement keeps the line.
-          <li key={session.pid} data-list-row="session" className="space-y-1.5 px-4 py-2.5">
+          <li key={session.pid} data-list-row="session" className="space-y-1.5 py-2.5">
             <div className="flex h-6 min-w-0 items-center justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                 <SessionState status={statusOf(session)} late={Boolean(concernOf(session))} />
@@ -577,16 +577,16 @@ function RunningQueries() {
         {(data) => {
           const others = data.queries.filter((query) => !query.self)
           return (
-            <PanelBody flush className="animate-rise group-data-[plain]/panel:-mx-4">
+            <PanelBody flush className={cn("animate-rise", FIT_COLUMN)}>
               {others.length === 0 ? (
-                <EmptyNote className="px-4">
+                <EmptyNote>
                   Nothing is running but this page&apos;s own read of the list.
                 </EmptyNote>
               ) : width < TABLE_FROM ? (
                 // Drawn down where a table has no room: nothing is dropped.
                 <ul className="divide-y divide-hairline border-y border-hairline">
                   {others.map((query) => (
-                    <li key={query.id} className="space-y-1.5 px-4 py-2.5 text-xs">
+                    <li key={query.id} className="space-y-1.5 py-2.5 text-xs">
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <span className="flex min-w-0 items-center gap-2">
                           <Named name={query.user} className="font-medium" />

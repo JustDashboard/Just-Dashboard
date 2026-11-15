@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { readReplication } from "@/components/database/ops/performance-api"
-import { Named, NoFigure, NotAvailable, Notes } from "@/components/database/ops/performance-parts"
+import { FIT_COLUMN, Named, NoFigure, NotAvailable, Notes } from "@/components/database/ops/performance-parts"
 import type {
   DbReplicaSource,
   DbReplicationSlot,
@@ -25,6 +25,7 @@ import type {
 import { ReplicationPicture } from "@/components/database/ops/replication-picture"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { Read, Stale } from "@/components/database/kit/read"
+import { cn } from "@/lib/utils"
 
 /** How far behind something is. `-1` is the server's "unknown", which is not zero. */
 function Lag({ seconds, size }: { seconds?: number; size?: number }) {
@@ -273,7 +274,7 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
       <p className="eyebrow">{title}</p>
       {/* A container: the tables inside give up a column by this block's
           width, not the window's. */}
-      <div className="@container -mx-4">{children}</div>
+      <div className={cn("@container", FIT_COLUMN)}>{children}</div>
     </section>
   )
 }

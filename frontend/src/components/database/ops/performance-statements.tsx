@@ -41,12 +41,13 @@ import {
   statementSorts,
 } from "@/components/database/ops/performance-figures"
 import {
+  FIT_COLUMN,
   NoFigure,
   NotAvailable,
+  RETURNS_FOCUS,
   StatementLine,
   useAsk,
   useReturnFocus,
-  RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { statementsFilterKey } from "@/components/database/ops/performance-lists"
 import { Fig, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
@@ -258,13 +259,13 @@ export function StatementsView() {
                   </Button>
                 )}
               </div>
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {answer.statements.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     No {engine.nouns.statement} has been counted yet. The list fills as they run.
                   </EmptyNote>
                 ) : rows.length === 0 ? (
-                  <EmptyNote className="px-4">No statement matches {filter.trim()}.</EmptyNote>
+                  <EmptyNote>No statement matches {filter.trim()}.</EmptyNote>
                 ) : (
                   <Table>
                     <TableHeader>

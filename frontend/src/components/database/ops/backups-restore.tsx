@@ -101,7 +101,7 @@ export function RestoreDump({
   const hold = numbered && reach.several ? "hold" : "holds"
   const beyond =
     numbered && reach.others.length > 0
-      ? `${reach.others.length === 1 ? "db" : "databases"} ${reach.others.join(", ")}`
+      ? `${agree(reach.others.length, "db", "databases")} ${reach.others.join(", ")}`
       : ""
   // What a reader has to know before a dump goes anywhere but this connection's own number.
   const reachWords = !beyond

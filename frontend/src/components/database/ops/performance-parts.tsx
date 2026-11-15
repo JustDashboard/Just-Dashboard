@@ -322,6 +322,17 @@ function keep(element: HTMLElement, around: HTMLElement) {
  */
 export const RETURNS_FOCUS = { tabIndex: -1, "data-return-focus": "" } as const
 
+/**
+ * A reading table on a plain section, set on what holds it: its hairlines and
+ * row washes end where the section's title hairline does, and its outer
+ * cells start and end on the title's edges. The tables were bled out 16px on
+ * each side so their cells' own padding lined the text up with the title,
+ * which ran every row's hairline past the title's on both sides (PGB-11).
+ * Important, so it also wins over the unlayered outer-column rule in
+ * globals.css where the table is a flush body's own child.
+ */
+export const FIT_COLUMN = "[&_tr>*:first-child]:pl-0! [&_tr>*:last-child]:pr-0!"
+
 export type ReturnFocus = ReturnType<typeof useReturnFocus>
 
 /**

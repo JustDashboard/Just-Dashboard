@@ -77,6 +77,7 @@ import { notify } from "@/lib/toast"
 import type { BackupJob, Job } from "@/lib/types"
 import { Stale } from "@/components/database/kit/read"
 import { Detail, DetailList } from "@/components/detail-list"
+import { FIT_COLUMN } from "@/components/database/ops/performance-parts"
 
 /** The width of the panel from which a base backup is a row of a table rather than a block of lines. */
 const TABLE_FROM = 600
@@ -647,7 +648,7 @@ function ArchiveReading({
           The first base backup has not finished; until it has, no moment can be recovered to.
         </FormNote>
       ) : width >= TABLE_FROM || width === 0 ? (
-        <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+        <PanelBody flush className={FIT_COLUMN}>
           <Table className="table-fixed" aria-label="Base backups">
             <colgroup>
               <col className="w-36" />
@@ -685,10 +686,10 @@ function ArchiveReading({
       ) : (
         <ul
           aria-label="Base backups"
-          className="-mx-4 divide-y divide-hairline border-y border-hairline"
+          className="divide-y divide-hairline border-y border-hairline"
         >
           {backups.map((one) => (
-            <li key={one.name} className="px-4 py-2 text-xs">
+            <li key={one.name} className="py-2 text-xs">
               <p className="truncate font-mono">{one.name}</p>
               <p className="numeric flex flex-wrap gap-x-2.5 text-hint text-muted-foreground">
                 <span title={timestamp(one.finishedAt)}>{relativeTime(one.finishedAt)}</span>

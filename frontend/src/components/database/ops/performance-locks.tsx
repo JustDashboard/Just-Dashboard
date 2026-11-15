@@ -33,12 +33,13 @@ import {
 } from "@/components/database/ops/performance-activity"
 import { readLocks } from "@/components/database/ops/performance-api"
 import {
+  FIT_COLUMN,
   Named,
   NoFigure,
   NotAvailable,
   Notes,
-  StatementLine,
   RETURNS_FOCUS,
+  StatementLine,
 } from "@/components/database/ops/performance-parts"
 import { useStops, type Stops } from "@/components/database/ops/performance-stops"
 import type {
@@ -367,13 +368,13 @@ function LockTable({
     </span>
   )
   return (
-    <div className="-mx-4 space-y-2">
+    <div className={cn("space-y-2", FIT_COLUMN)}>
       {width < 560 ? (
         <ul className="max-h-[28rem] divide-y divide-hairline overflow-y-auto border-y border-hairline">
           {locks.map((lock, index) => (
             <li
               key={`${lock.pid}:${lock.object}:${lock.mode}:${index}`}
-              className="space-y-1 px-4 py-2 text-xs"
+              className="space-y-1 py-2 text-xs"
             >
               <div className="flex min-w-0 items-center justify-between gap-3">
                 <span className="flex min-w-0 items-center gap-2">
@@ -437,7 +438,7 @@ function LockTable({
         </Table>
       )}
       {truncated && (
-        <FormNote className="px-4">
+        <FormNote>
           The server listed more locks than these; the first 500 are shown.
         </FormNote>
       )}

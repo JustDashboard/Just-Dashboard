@@ -30,7 +30,7 @@ import {
   readSqliteFile,
 } from "@/components/database/ops/performance-api"
 import { MaintenanceList, useMaintenance } from "@/components/database/ops/performance-maintenance"
-import { NoFigure, StatementLine } from "@/components/database/ops/performance-parts"
+import { FIT_COLUMN, NoFigure, StatementLine } from "@/components/database/ops/performance-parts"
 import {
   Fig,
   ShareCell,
@@ -108,9 +108,9 @@ export function PartsView() {
                   ))}
                 </ChipStrip>
               )}
-              <PanelBody flush className="@container group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={cn("@container", FIT_COLUMN)}>
                 {shown.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     No table of <span className="font-mono">{data.database}</span> has a part yet:
                     parts are written by inserts.
                   </EmptyNote>
@@ -175,7 +175,7 @@ export function PartsView() {
                   summary={<>Every part · {listed.length.toLocaleString()}</>}
                 >
                   {open && (
-                    <div className="@container -mx-4">
+                    <div className={cn("@container", FIT_COLUMN)}>
                       <Table containerClassName="max-h-[28rem]">
                         <TableHeader>
                           <TableRow className="hover:bg-transparent">
@@ -247,9 +247,9 @@ export function MergesView() {
         <PanelHeader title="Merges running" actions={<Stale poll={merges} />} />
         <Read patience poll={merges} what="the merges" skeleton={<LoadingPanel plain rows={3} />}>
           {(data) => (
-            <PanelBody flush className="@container animate-rise group-data-[plain]/panel:-mx-4">
+            <PanelBody flush className={cn("@container animate-rise", FIT_COLUMN)}>
               {data.merges.length === 0 ? (
-                <EmptyNote className="px-4">
+                <EmptyNote>
                   No merge is running. The server merges parts in the background as inserts arrive.
                 </EmptyNote>
               ) : (
@@ -320,9 +320,9 @@ export function MergesView() {
           skeleton={<LoadingPanel plain rows={3} />}
         >
           {(data) => (
-            <PanelBody flush className="@container animate-rise group-data-[plain]/panel:-mx-4">
+            <PanelBody flush className={cn("@container animate-rise", FIT_COLUMN)}>
               {data.mutations.length === 0 ? (
-                <EmptyNote className="px-4">
+                <EmptyNote>
                   No mutation has been asked of this database. An ALTER TABLE … UPDATE or DELETE
                   appears here while it rewrites parts.
                 </EmptyNote>

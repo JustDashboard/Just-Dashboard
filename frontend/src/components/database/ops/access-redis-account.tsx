@@ -60,7 +60,7 @@ const SHOW_WORDS: Record<AclShow, string> = {
 function passwordWords(user: RedisACLUser): string {
   if (user.noPassword) return "accepts any password"
   if (user.passwords === 0) return "no password set, so nothing signs in as it"
-  return user.passwords === 1 ? "1 password set" : `${user.passwords} passwords set`
+  return `${plural(user.passwords, "password")} set`
 }
 
 /**
