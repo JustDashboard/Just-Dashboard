@@ -104,8 +104,12 @@ test.describe("on a phone", () => {
       "aria-current",
       "page",
     )
-    // The strip a desk picks the view on is not drawn twice.
-    await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeHidden()
+    // The strip a desk picks the view on is not drawn twice: the one Insights
+    // button shown is the bar's own stop.
+    await expect(
+      page.getByRole("button", { name: "Insights", exact: true }).filter({ visible: true }),
+    ).toHaveCount(1)
+    await expect(bar.getByRole("button", { name: "Insights", exact: true })).toBeVisible()
     await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
     // The readings are behind the pane's first line, not stacked over it.
     await expect(page.getByRole("group", { name: "The last hour" })).toHaveCount(0)
