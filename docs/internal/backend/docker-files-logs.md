@@ -660,7 +660,7 @@ crop handles and aspect-ratio constraints; native canvas operations stay local t
 bakes live adjustments into PNG/JPEG/WebP, preserving `.jpeg` when applicable. The ordinary upload
 route gets `overwrite=true` only for the source path, preserving owner and mode; a copy refuses an
 occupied name. Both editors guard closing a dirty sheet. The full workspace guards file changes,
-links, unload and cancelable browser-history traversal (see `frontend/shell-design.md`).
+links, unload and cancelable browser-history traversal (see `frontend/shell.md`).
 
 Large listings keep every filename and metadata cell mounted: native find, sorting, filtering, range
 selection and select-all still address the complete directory. One shared intersection observer defers
@@ -674,7 +674,7 @@ reads or response bytes.
 
 The host Logs frontend records sources, modes, run handoffs and settled searches in browser history.
 Back/Forward restores the question and its in-memory record/following state; match controls and local
-read refresh operate in the current pane. [Workspace interactions](../frontend/workspace-interactions.md)
+read refresh operate in the current pane. [Workspace interactions](../frontend/patterns/keyboard-and-place.md)
 defines identity, storage and keyboard rules; discovery, search and stream routes retain their guards.
 
 `logsx` + `handlers_logs.go` were three products wearing one page: the grep box and level chips applied

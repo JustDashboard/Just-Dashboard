@@ -1,4 +1,6 @@
-# Workspace interactions
+# Keyboard and place
+
+This page was `patterns/keyboard-and-place.md` until 0.9.0.
 
 `components/workspace/` supplies page-owned keyboard commands and place memory to Processes,
 Services, Git, Logs, the Docker overview and containers, Docker images, Docker stacks, Docker volumes, Docker networks, Packages, Backups, deployment setup, Audit and the Security
@@ -114,7 +116,7 @@ is the pane under the project's header, which the shell holds to the window belo
 alerts are not a stop but a page behind the pane's first line, with `PaneBack` and the bar out of its way
 (`deploy-logs-page.spec.ts`). The terminal keeps a hidden emulator's socket and grid and fits it again
 when shown, and a session keeps its connection and its size while another pane is up
-(`features-terminal.md`). The server map is not on it: below `lg` it is the canvas alone. Nor are the
+(`features/`). The server map is not on it: below `lg` it is the canvas alone. Nor are the
 detail pages (a container, a process, a stack and the rest): each is one pane that scrolls as a whole.
 
 Files keeps its pane against the folder it was picked in, so arriving at a folder by any route (a place,

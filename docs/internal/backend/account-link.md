@@ -5,7 +5,7 @@ A person can link this dashboard to their account on the project's site (`JD_ACC
 it, and, at a scope the person chose on this machine, can ask it to do a few things. It is optional, off until
 an administrator does it, and can be switched off outright with `JD_ACCOUNT_LINK=false`. Everything lives in
 `backend/internal/accountlink`; the Settings page is `frontend/src/app/(dashboard)/dashboard/link`
-([feature map](../frontend/feature-map.md)).
+([feature map](../frontend/features/README.md)).
 
 **The wire contract is not in this repository.** The protocol is
 [`docs/server-link-protocol.md`](https://github.com/JustDashboard/frontend/blob/main/docs/server-link-protocol.md)
