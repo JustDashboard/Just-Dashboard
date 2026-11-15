@@ -8,11 +8,12 @@ import type { Tone } from "@/components/tone"
  * because the container is what this component stopped drawing.
  */
 const TONE: Record<Tone, string> = {
-  // A step below the muted text it sits beside. Small caps at 10px have the
+  // A step below the muted text it sits beside, in the faint ink rather than
+  // muted faded by opacity (text is never faded). Small caps at 10px have the
   // same cap height as 13px lower-case has x-height, so at equal contrast an
   // untinted tag reads as loud as the title it is annotating. The tinted three
   // stay at full strength — a tag that has taken a tone is saying something.
-  default: "text-muted-foreground/80",
+  default: "text-faint",
   success: "text-success",
   warning: "text-warning",
   danger: "text-destructive",
@@ -52,17 +53,29 @@ const TONE: Record<Tone, string> = {
  *   A sentence. Small caps stop being legible somewhere around three words. If
  *   the thing to say is "answers 200 without redirecting", it is prose and
  *   belongs in the row's secondary line or in a `Notice`.
+ *
+ * The caps face is the `.caps` class in `globals.css`, the same one a caps
+ * label outside a tag takes, so the two cannot drift apart.
  */
 export function Tag({
   tone = "default",
+  hue,
   mono,
   icon: Icon,
   asChild,
   className,
+  style,
   children,
   ...props
 }: React.ComponentProps<"span"> & {
   tone?: Tone
+  /**
+   * A colour that is not a signal, as a CSS colour variable: a change's
+   * (`var(--git-modified)`), a label's own (`var(--tag-blue)`). It is the
+   * word's colour, as a tone's is, and wins over `tone`, which stays for the
+   * four signal tones.
+   */
+  hue?: string
   /** For values that are literal strings from the host — a cipher, a port map. */
   mono?: boolean
   icon?: React.ComponentType<{ className?: string }>
@@ -78,10 +91,11 @@ export function Tag({
       data-slot="tag"
       className={cn(
         "inline-flex w-fit shrink-0 items-center gap-1 text-micro leading-[1.5] font-medium whitespace-nowrap",
-        mono ? "rounded-sm bg-surface-sunken px-1 py-px font-mono" : "tracking-[0.06em] uppercase",
+        mono ? "rounded-sm bg-surface-sunken px-1 py-px font-mono" : "caps",
         TONE[tone],
         className,
       )}
+      style={hue ? { color: hue, ...style } : style}
       {...props}
     >
       {asChild ? (

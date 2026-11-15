@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { Box } from "@/components/icons"
+import { StatusDot, type CornerSize } from "@/components/status-dot"
+import type { DotTone } from "@/components/tone"
 import { hostOf, productOfHost, wordsProduct } from "@/lib/clients"
 import type { NotificationChannelKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -250,6 +252,7 @@ const LOGOS: Record<string, string> = {
   mailgun: "mailgun.svg",
   mailpit: "mailpit.svg",
   mariadb: "mariadb.svg",
+  markdown: "markdown.svg",
   matomo: "matomo.svg",
   mattermost: "mattermost.svg",
   meilisearch: "meilisearch.svg",
@@ -1332,4 +1335,67 @@ export function ProductLogos({
       {more > 0 && <span className="numeric ml-1 text-micro text-muted-foreground">+{more}</span>}
     </span>
   )
+}
+
+/**
+ * The tile sizes a mark with its state in the corner comes in, one ladder for
+ * every such mark: `sm` a rail's or a sheet's line (28px), `md` a list row's
+ * (36px), `lg` an identity header's (40px). Each takes the corner dot of its own size.
+ */
+const STATE_MARK = {
+  sm: "size-7 rounded-md [&_svg]:size-3.5 [&_img]:size-4",
+  md: "size-9 rounded-lg [&_svg]:size-4 [&_img]:size-5",
+  // The identity line's own tile (`IdentityHeader`'s, beside a state), so the
+  // header keeps its height from the loading form to the read one.
+  lg: "size-10 rounded-lg [&_svg]:size-5 [&_img]:size-6",
+} as const
+
+/**
+ * A thing's tile with its state in the corner, as a process's is: the glyph
+ * (or the product's logo) says what kind of thing it is, the dot whether it is
+ * still working, so a list of them reads green, grey and red before a name is
+ * read.
+ */
+export function StateMark({
+  product,
+  glyph,
+  tone,
+  size = "md",
+  label,
+  className,
+}: {
+  /** The product the thing is, where one made it: its logo stands in the glyph's place. */
+  product?: string
+  glyph: React.ComponentType<{ className?: string }>
+  tone: DotTone
+  size?: CornerSize
+  /** The state in words, where the row beside the mark does not say it. */
+  label?: string
+  className?: string
+}) {
+  return (
+    <span className={cn("relative flex shrink-0", className)}>
+      <ProductLogo id={product} fallback={glyph} className={STATE_MARK[size]} />
+      <StateCorner tone={tone} size={size} label={label} />
+    </span>
+  )
+}
+
+/**
+ * The state dot alone, on the corner of a tile that is not a `ProductLogo` —
+ * a project's mark, an avatar, a hand-drawn tile. Its parent is the
+ * positioned mark.
+ */
+export function StateCorner({
+  tone,
+  size = "sm",
+  label,
+  className,
+}: {
+  tone: DotTone
+  size?: CornerSize
+  label?: string
+  className?: string
+}) {
+  return <StatusDot tone={tone} corner={size} label={label} className={className} />
 }

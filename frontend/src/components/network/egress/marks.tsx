@@ -2,26 +2,25 @@
 
 import type { EgressGroup, EgressMemberView } from "@/lib/network/egress"
 import type { NetworkLink } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { Lifebuoy, LockClosed, Router } from "@/components/icons"
-import { ProductGlyph, ProductLogo } from "@/components/product-logo"
-import { StatusDot, type DotTone } from "@/components/status-dot"
-import type { Tone } from "@/components/tone"
+import { ProductGlyph, StateMark } from "@/components/product-logo"
+import { TEXT_TONE, TONE_DOT, type DotTone, type Tone } from "@/components/tone"
 import { linkProduct } from "@/components/network/marks"
 import { egressCarrying } from "@/components/network/egress/reading"
 
-export const DOT: Record<Tone, DotTone> = {
-  default: "stopped",
-  success: "running",
-  warning: "warning",
-  danger: "danger",
-}
+/** @deprecated use `TONE_DOT` from `components/tone`. */
+export const DOT: Record<Tone, DotTone> = TONE_DOT
 
+/**
+ * A carrying state's word colour: the status dot's own, so a group that is
+ * carrying is plain text, as every running thing is, and only the ones to act
+ * on take a hue.
+ */
 export const TONE_TEXT: Record<Tone, string> = {
-  default: "text-muted-foreground",
-  success: "text-success",
-  warning: "text-warning",
-  danger: "text-destructive",
+  default: TEXT_TONE[TONE_DOT.default],
+  success: TEXT_TONE[TONE_DOT.success],
+  warning: TEXT_TONE[TONE_DOT.warning],
+  danger: TEXT_TONE[TONE_DOT.danger],
 }
 
 /**
@@ -38,24 +37,13 @@ export function EgressMark({
   size?: "sm" | "md" | "lg"
   className?: string
 }) {
-  const carrying = egressCarrying(group)
   return (
-    <span className={cn("relative flex shrink-0", className)}>
-      <ProductLogo
-        fallback={Lifebuoy}
-        className={cn(
-          size === "lg" && "size-10 rounded-lg [&_svg]:size-5",
-          size === "md" && "size-8 rounded-lg [&_svg]:size-4",
-          size === "sm" && "size-7 rounded-md [&_svg]:size-3.5",
-        )}
-      />
-      <span
-        aria-hidden
-        className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-      >
-        <StatusDot tone={DOT[carrying.tone]} className="size-1.5" />
-      </span>
-    </span>
+    <StateMark
+      glyph={Lifebuoy}
+      tone={TONE_DOT[egressCarrying(group).tone]}
+      size={size}
+      className={className}
+    />
   )
 }
 
