@@ -279,7 +279,7 @@ export function MergesView() {
                         <TableCell className="px-2 py-2">
                           {/* Shorter in a phone's column: fitted to it, the
                               table has no bleed left to borrow. */}
-                          <span className="flex w-36 items-center gap-2 @max-[24rem]:w-28">
+                          <span className="flex w-36 items-center gap-2 @max-sm:w-28">
                             <Meter
                               value={merge.progress * 100}
                               size="thin"
