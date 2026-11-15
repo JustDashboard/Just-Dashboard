@@ -128,7 +128,12 @@ export function PanelHeader({
         )}
       </div>
       {children}
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-1.5">{actions}</div>}
+      {/* Never wider than the header: a phone's 16px field grew the history's
+          filter past the header, and a row that cannot shrink scrolled the
+          page sideways instead of wrapping its own controls. */}
+      {actions && (
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1.5">{actions}</div>
+      )}
     </header>
   )
 }
