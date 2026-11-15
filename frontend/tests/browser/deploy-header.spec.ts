@@ -50,9 +50,14 @@ test("the project header is one compact row that keeps its readings apart across
     await expect(identity.getByText("Ready", { exact: true })).toBeVisible()
     await expect(identity.getByText("No priority issues found", { exact: true })).toHaveCount(0)
     await expect(identity.locator('a[href="#attention"]')).toHaveCount(0)
-    await expect(
-      identity.getByRole("link", { name: "Automatic deployment settings" }),
-    ).toHaveAttribute("href", "/deploy/7/settings/general#automatic-deployment")
+    // Auto-deploy on is the expected answer: a phone's one line of facts leaves it to the desktop.
+    const automatic = identity.getByRole("link", { name: "Automatic deployment settings" })
+    if (width === 390) await expect(automatic).toHaveCount(0)
+    else
+      await expect(automatic).toHaveAttribute(
+        "href",
+        "/deploy/7/settings/general#automatic-deployment",
+      )
     // The rail leads back and the address leads to the site: neither is repeated here.
     await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
     await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveCount(0)
@@ -92,4 +97,79 @@ test("the project header is one compact row that keeps its readings apart across
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
   }
+})
+
+test("on a phone the project header is one row over one line of facts, and holds still while it loads", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await mockProject(page, { operations: healthyOperations })
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/deploy/7", async (route) => {
+    await held
+    return route.fallback()
+  })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto("/deploy/7")
+  const header = page.locator("[data-slot=project-header]").first()
+  await expect(header).toHaveAttribute("aria-busy", "true")
+  const loading = (await header.boundingBox())!
+  release()
+
+  const identity = page.getByRole("region", { name: "About api-production" })
+  await expect(identity.getByText("acme/api", { exact: true })).toBeVisible()
+  await expect(identity).not.toHaveAttribute("aria-busy", "true")
+  const loaded = (await identity.boundingBox())!
+  // Nothing under the line moves when the project lands.
+  expect(Math.abs(loaded.y - loading.y)).toBeLessThanOrEqual(0.5)
+  expect(Math.abs(loaded.height - loading.height)).toBeLessThanOrEqual(0.5)
+  // One row and one line of facts: wave 0's line, with the command beside the
+  // name and the state and facts on rows of their own, was 129px tall here,
+  // and the verbs' own row made it 44px taller still.
+  expect(loaded.height).toBeLessThanOrEqual(80)
+
+  const parts = await identity.evaluate((line) => {
+    const box = (element: Element | null) => {
+      const rect = element!.getBoundingClientRect()
+      return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }
+    }
+    const title = line.querySelector("p")!
+    const buttons = Array.from(line.querySelectorAll("[data-size]")).filter(
+      (button) => button.getClientRects().length > 0,
+    )
+    return {
+      tile: box(line.firstElementChild),
+      title: box(title),
+      // The name is read whole: nothing in it is cut.
+      cut: [title, ...Array.from(title.querySelectorAll("*"))].some(
+        (element) => element.scrollWidth > element.clientWidth + 0.5,
+      ),
+      verbs: buttons.map((button) => ({
+        ...box(button),
+        name: button.getAttribute("aria-label") ?? button.textContent?.trim(),
+      })),
+      facts: box(line.lastElementChild),
+    }
+  })
+  const centre = (part: { top: number; bottom: number }) => (part.top + part.bottom) / 2
+  // The tile, the name and every verb share one row, the verbs at its far end.
+  expect(parts.verbs.length).toBeGreaterThanOrEqual(2)
+  for (const part of [parts.title, ...parts.verbs])
+    expect(Math.abs(centre(part) - centre(parts.tile))).toBeLessThanOrEqual(1)
+  for (const verb of parts.verbs) {
+    expect(verb.left).toBeGreaterThanOrEqual(parts.title.right)
+    // An icon button, as wide as it is tall, that keeps its words as its name.
+    expect(Math.abs(verb.right - verb.left - (verb.bottom - verb.top))).toBeLessThanOrEqual(0.5)
+    expect(verb.name).toBeTruthy()
+  }
+  expect(parts.cut).toBe(false)
+  // The tile is a step smaller on a phone.
+  expect(parts.tile.bottom - parts.tile.top).toBeLessThanOrEqual(32.5)
+  // One line of facts, under the row.
+  expect(parts.facts.top).toBeGreaterThanOrEqual(parts.tile.bottom)
+  expect(parts.facts.bottom - parts.facts.top).toBeLessThanOrEqual(16.5)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
 })
