@@ -112,15 +112,19 @@ export function PurposeCard({
       </span>
       <span className={cn("grid min-w-0 flex-1", hero ? "gap-1.5" : "gap-1")}>
         <span
+          // The leading after the size, which would otherwise take its own.
           className={cn(
-            "truncate leading-tight font-semibold",
+            "truncate font-semibold",
             hero ? "text-base sm:text-lg" : "text-title",
+            "leading-tight",
           )}
         >
           {purpose.title}
         </span>
         {more && (
-          <span id={words} className={cn("grid min-w-0", hero ? "gap-1.5" : "gap-1")}>
+          // In a row the lines under the name are set solid, so the mark
+          // takes exactly the line the sections give up.
+          <span id={words} className={cn("grid min-w-0", hero && "gap-1.5")}>
             {reading}
             {experimental && <ExperimentalMark />}
             {detail && (
