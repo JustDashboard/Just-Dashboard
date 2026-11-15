@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Box, ShieldOff } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { plural, relativeTime, timestamp } from "@/lib/format"
+import { plural, relativeTime, shortDigest, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import type {
@@ -39,7 +39,6 @@ import {
   scanLead,
   scanVerdict,
   severityTone,
-  shortDigest,
   vulnerable,
   type FindingGroup,
 } from "@/components/deploy/vulnerabilities-model"

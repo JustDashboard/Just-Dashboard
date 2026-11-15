@@ -37,7 +37,7 @@ import { Section } from "@/components/section"
 import { useTabTitle } from "@/components/shell/tab-title"
 import { ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
-import { StatusDot } from "@/components/status-dot"
+import { StatusDot, StatusWords } from "@/components/status-dot"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
@@ -594,12 +594,12 @@ export function RunPage() {
           first thing drawn. */}
       <PageContext title={`Deployment #${run.runNumber}`} />
 
-      <p className="sr-only" aria-live="polite" aria-atomic="true">
-        Deployment state: {runLabel(run.state, run.operation)}
+      <StatusWords subject="Deployment state">
+        {runLabel(run.state, run.operation)}
         {current
           ? `. Current step: ${stepName(current.key, stepOperation(run))}, ${current.state}`
           : ""}
-      </p>
+      </StatusWords>
 
       <RunHeader
         run={run}

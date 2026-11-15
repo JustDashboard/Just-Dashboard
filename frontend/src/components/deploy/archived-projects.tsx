@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { ArchivedDeployment } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { FormFact } from "@/components/form"
 import { DimActions } from "@/components/icon-action"
 import { Page, PageContext } from "@/components/page"
@@ -22,7 +22,6 @@ import { ProductGlyph } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu } from "@/components/verbs"
 import { WorkloadMark, projectProduct, sourceProduct } from "@/components/deploy/vocabulary"
 import { purgeRequest } from "@/components/deploy/project-verbs"
@@ -240,15 +239,7 @@ const BACK = (
 
 /** Three rows in the archive's shape, before its first answer. */
 function ArchivedRows() {
-  return (
-    <ChoiceList aria-hidden>
-      {[0, 1, 2].map((index) => (
-        <li key={index}>
-          <Skeleton className="h-14 rounded-xl" />
-        </li>
-      ))}
-    </ChoiceList>
-  )
+  return <ChoiceListSkeleton rows={3} lines={2} />
 }
 
 /**

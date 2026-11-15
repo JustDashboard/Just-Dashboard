@@ -72,12 +72,6 @@ export function isImageDigest(image: string | undefined) {
   return /^sha256:[0-9a-f]{12,}$/.test(image ?? "")
 }
 
-/** An image id as Docker's own CLI prints it: twelve hex digits, no algorithm. */
-export function shortDigest(id: string | undefined) {
-  if (!id) return undefined
-  return id.replace(/^sha256:/, "").slice(0, 12)
-}
-
 /**
  * Where well-known programs keep their data, so a volume mounted there is
  * drawn as that program when no container can be asked what it is. Only

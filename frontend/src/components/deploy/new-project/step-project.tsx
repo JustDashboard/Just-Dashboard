@@ -586,15 +586,17 @@ export function StepProject({
       </FormSection>
 
       {ambiguous && (
-        <FormSection
-          title="Choose the detected candidate"
-          hint={
-            flow.detection?.selectionReason ??
-            (flow.detection?.selectedId
-              ? "Ranked, with the application first. Pick another if the checked one is not it."
-              : "Multiple equally strong roots or build methods were found.")
-          }
-        >
+        <FormSection title="Choose the detected candidate">
+          {/* Why the list is here is what the reader needs before picking,
+              so it is a notice over the rows, not a line under the title. */}
+          <Notice
+            title={
+              flow.detection?.selectionReason ??
+              (flow.detection?.selectedId
+                ? "Ranked, with the application first. Pick another if the checked one is not it."
+                : "Multiple equally strong roots or build methods were found.")
+            }
+          />
           <OptionList role="group" aria-label="Detected candidates">
             {candidates.map((item) => {
               // What stops a candidate building is the reason to pick another

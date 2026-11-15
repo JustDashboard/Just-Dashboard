@@ -6,7 +6,6 @@ import {
   publishedPorts,
   releaseEvents,
   runtimeContainer,
-  shortDigest,
   wantsFailureReading,
 } from "./runtime-model"
 
@@ -77,16 +76,6 @@ describe("isImageDigest", () => {
     expect(isImageDigest("postgres:16-alpine")).toBe(false)
     expect(isImageDigest(`ghcr.io/acme/api@sha256:${"ab12".repeat(16)}`)).toBe(false)
     expect(isImageDigest(undefined)).toBe(false)
-  })
-})
-
-describe("shortDigest", () => {
-  test("drops the algorithm and keeps twelve digits", () => {
-    expect(shortDigest(`sha256:${"ab12".repeat(16)}`)).toBe("ab12ab12ab12")
-  })
-  test("says nothing for an image the engine could not name", () => {
-    expect(shortDigest("")).toBeUndefined()
-    expect(shortDigest(undefined)).toBeUndefined()
   })
 })
 
