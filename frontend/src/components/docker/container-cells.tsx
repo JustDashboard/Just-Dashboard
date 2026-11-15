@@ -235,9 +235,7 @@ function Reading({
   if (compact)
     return (
       <span className="flex min-w-0 cursor-help items-baseline gap-1.5 text-left whitespace-nowrap">
-        <span className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase">
-          {label}
-        </span>
+        <span className="caps shrink-0">{label}</span>
         <span
           className={cn(
             "numeric min-w-0 truncate font-mono text-hint",
@@ -269,9 +267,7 @@ function Reading({
         {value}
       </span>
       <span className="mt-1 flex min-w-0 items-center gap-1.5">
-        <span className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase">
-          {label}
-        </span>
+        <span className="caps shrink-0">{label}</span>
         {meter !== undefined ? (
           <>
             <Meter

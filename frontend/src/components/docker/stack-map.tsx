@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { WireLane } from "@/components/wire/wire-lane"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { pulseDuration } from "@/components/network/marks"
 import { looksLikeDatabase } from "@/components/docker/shared"
@@ -172,7 +173,7 @@ export function StackMap({
         })}
 
         <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(2.5rem,5vw,5rem)_minmax(0,1.1fr)_clamp(2.5rem,5vw,5rem)_minmax(0,1fr)] lg:items-center">
-          <Lane title="Ways in" count={ways.length} className="lg:text-right">
+          <WireLane title="Ways in" count={ways.length} align="end">
             {ways.length === 0 ? (
               <li>
                 <WireNode
@@ -224,11 +225,11 @@ export function StackMap({
                 )
               })
             )}
-          </Lane>
+          </WireLane>
 
           <div aria-hidden className="hidden lg:block" />
 
-          <Lane title="Services" count={readings.length}>
+          <WireLane title="Services" count={readings.length}>
             {readings.map((reading) => {
               const id = `s:${reading.key}`
               const product = productOf(reading.key)
@@ -269,12 +270,11 @@ export function StackMap({
                               </WireMark>
                               {/* The service's state in the tile's corner, as the
                                   runtime map's containers carry theirs. */}
-                              <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-                                <StatusDot
-                                  tone={bucketTone(reading.bucket)}
-                                  live={up && reading.container !== undefined}
-                                />
-                              </span>
+                              <StatusDot
+                                tone={bucketTone(reading.bucket)}
+                                live={up && reading.container !== undefined}
+                                corner="md"
+                              />
                             </>
                           )}
                         </span>
@@ -331,11 +331,11 @@ export function StackMap({
                 </li>
               )
             })}
-          </Lane>
+          </WireLane>
 
           <div aria-hidden className="hidden lg:block" />
 
-          <Lane title="Networks" count={networks.length}>
+          <WireLane title="Networks" count={networks.length}>
             {!networksRead ? (
               <li>
                 <WireNode
@@ -396,35 +396,9 @@ export function StackMap({
                 )
               })
             )}
-          </Lane>
+          </WireLane>
         </div>
       </div>
-    </div>
-  )
-}
-
-function Lane({
-  title,
-  count,
-  className,
-  children,
-}: {
-  title: string
-  count?: number
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center">
-      <p className={cn("eyebrow mb-4", className)}>
-        {title}
-        {count !== undefined && count > 0 && (
-          <span className="numeric ml-1.5 font-medium tracking-normal text-faint">{count}</span>
-        )}
-      </p>
-      <ol className="flex flex-col gap-5" aria-label={title}>
-        {children}
-      </ol>
     </div>
   )
 }

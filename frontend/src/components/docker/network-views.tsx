@@ -387,7 +387,7 @@ function MemberRow({
             .filter(Boolean)
             .join(" · ")}
         >
-          <span className="shrink-0 font-mono text-foreground/80">
+          <span className="shrink-0 font-mono text-foreground">
             {address ?? (running ? "no address" : "holds no address")}
           </span>
           {second && <span className="shrink-0 font-mono @max-lg:hidden">{second}</span>}
@@ -476,7 +476,7 @@ function MemberRow({
             "\u00a0"
           ) : (
             <>
-              answers to <span className="font-mono text-foreground/80">{names.join(", ")}</span>
+              answers to <span className="font-mono text-foreground">{names.join(", ")}</span>
             </>
           )}
         </p>

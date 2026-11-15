@@ -385,7 +385,10 @@ export function Networks() {
           <>
             {/* Framed, because it is a table: the grid owns a scroll region and
             the edge is what says so (§2). Everything above it stays plain. */}
-            <Panel>
+            <Panel
+              // Framed: a table: the frame is the edge of its scroll (§2).
+              framed
+            >
               <PanelHeader title="Networks" count={networks.length}>
                 <ChipStrip aria-label="Made by" className={cn("mr-auto", CHIPS_WRAP)}>
                   {OWNER_KINDS.map(({ kind, label, title }) => {
@@ -494,7 +497,12 @@ export function Networks() {
               </PanelFooter>
             </Panel>
 
-            <Panel ref={containersPanel} className="scroll-mt-4">
+            <Panel
+              // Framed: a table: the frame is the edge of its scroll (§2).
+              framed
+              ref={containersPanel}
+              className="scroll-mt-4"
+            >
               <PanelHeader title="Containers" count={containers.length}>
                 <ChipStrip aria-label="Which containers" className={cn("mr-auto", CHIPS_WRAP)}>
                   {LENSES.map(({ value, label, title, tone }) => {

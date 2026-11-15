@@ -389,7 +389,10 @@ export default function ContainersPage() {
 
         {/* Framed, because it is a table: the grid owns a scroll region and
             the edge is what says so (§2). Everything above it stays plain. */}
-        <Panel>
+        <Panel
+          // Framed: a table: the frame is the edge of its scroll (§2).
+          framed
+        >
           <PanelHeader
             title={
               <span className="inline-flex items-center gap-1.5">

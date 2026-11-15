@@ -156,7 +156,11 @@ export function StackHistory({
       <div
         className={cn("grid min-w-0 gap-6", wide && "grid-cols-[22rem_minmax(0,1fr)] items-start")}
       >
-        <Panel aria-label="Deployments">
+        <Panel
+          // Framed: a rail of records with its own scroll, beside the one it opens.
+          framed
+          aria-label="Deployments"
+        >
           <PanelHeader title="Deployments" count={records.length} />
           <PanelBody className="p-1.5">
             <Rail

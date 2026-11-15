@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { cpuModes } from "@/components/metrics/cpu-modes"
 import { Download, Pause, Play } from "@/components/icons"
 import { bytes, duration, percent, rate } from "@/lib/format"
 import type { MetricEvent, Snapshot } from "@/lib/types"
@@ -346,9 +347,10 @@ export default function MetricsPage() {
         {/* What this machine is made of. The Overview's line says what it
           runs; this one says what it runs on, drawn as the processor itself,
           because every figure below is a share of something named here. The
-          window's controls sit at its end because they change every chart
-          under it; the shortcuts are the key beside them, where they had been
-          a line of their own above the page. */}
+          window is not here: it is the first reading's, on the Resources
+          line, as Runtime's is (PGH-27), and on a phone this line no longer
+          wraps to three rows. The shortcuts are the key at its end, where they
+          had been a line of their own above the page. */}
         <HostIdentity
           mark={cpuProduct(host.cpuModel, host.kernelArch)}
           title={host.cpuModel || "Unknown processor"}
@@ -389,22 +391,11 @@ export default function MetricsPage() {
           aside={
             <div className="flex max-w-full flex-wrap items-center gap-2">
               <HostAlertsLink />
-              {live && (
-                <IconAction
-                  label={paused ? "Resume live feed" : "Pause live feed"}
-                  onClick={() =>
-                    setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
-                  }
-                >
-                  {paused ? <Play /> : <Pause />}
-                </IconAction>
-              )}
               {/* Export the exact window and resolution on screen, peaks included. */}
               <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
                 <Download />
                 Export CSV
               </Button>
-              <RangePicker controls={controls} />
               <WorkspaceHelp compact />
             </div>
           }
@@ -423,9 +414,22 @@ export default function MetricsPage() {
         <Section
           title="Resources"
           actions={
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <span className="numeric text-hint text-muted-foreground">{span.head}</span>
               <StreamState connection={connection} />
+              <span className="flex items-center gap-1">
+                {live && (
+                  <IconAction
+                    label={paused ? "Resume live feed" : "Pause live feed"}
+                    onClick={() =>
+                      setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
+                    }
+                  >
+                    {paused ? <Play /> : <Pause />}
+                  </IconAction>
+                )}
+                <RangePicker controls={controls} />
+              </span>
             </div>
           }
         >
@@ -855,11 +859,7 @@ function Readings({
         tone={utilisationTone(snapshot.cpu.totalPercent)}
         trend={cpuTrend}
         meter={cpuTrend ? undefined : snapshot.cpu.totalPercent}
-        hint={
-          modes
-            ? `${modes.user.toFixed(0)}% user · ${modes.system.toFixed(0)}% sys · ${modes.iowait.toFixed(0)}% wait`
-            : `${cores} cores`
-        }
+        hint={modes ? cpuModes(modes) : `${cores} cores`}
         trailing={
           <span className="inline-flex items-center gap-2">
             <CoreBars cores={snapshot.cpu.perCore} color={HUE.cpu} />

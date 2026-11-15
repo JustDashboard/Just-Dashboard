@@ -306,7 +306,11 @@ export function ImagesPage() {
         ) : images.error && !images.data ? (
           <ErrorState error={images.error} onRetry={images.refresh} />
         ) : (
-          <Panel className="animate-rise">
+          <Panel
+            // Framed: a table: the frame is the edge of its scroll (§2).
+            framed
+            className="animate-rise"
+          >
             {/* The list section's one anatomy (PGH-06): the title, its count
                 and the state chips on the title line; search, the registry's
                 narrowing and the order on the toolbar under it. */}

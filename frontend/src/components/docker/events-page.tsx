@@ -396,7 +396,11 @@ export function EventsPage() {
 
             {/* Framed, because it is a table: the grid owns a scroll region and
                 the edge is what says so (§2). */}
-            <Panel aria-label="Containers">
+            <Panel
+              // Framed: a table: the frame is the edge of its scroll (§2).
+              framed
+              aria-label="Containers"
+            >
               <PanelHeader
                 title="Containers"
                 count={rows.length}

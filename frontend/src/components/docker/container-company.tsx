@@ -74,7 +74,12 @@ export function ContainerCompany({
     `/docker/containers/${encodeURIComponent(id)}?tab=${encodeURIComponent(tab)}`
 
   return (
-    <Panel className="animate-rise" aria-label="Containers beside it">
+    <Panel
+      // Framed: a table: the frame is the edge of its scroll (§2).
+      framed
+      className="animate-rise"
+      aria-label="Containers beside it"
+    >
       <PanelHeader
         eyebrow={company.kind === "stack" ? "Compose project" : "On its network"}
         title={

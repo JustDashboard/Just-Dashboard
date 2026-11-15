@@ -92,7 +92,10 @@ export function PortsTable({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <Panel>
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+      >
         <PanelHeader
           title={<Definition name="port">Ports</Definition>}
           actions={<span className="numeric text-hint text-muted-foreground">{rows.length}</span>}
@@ -202,7 +205,10 @@ export function NetworksTable({
   if (detail.networkDetails.length === 0) return null
   const short = detail.id.slice(0, 12)
   return (
-    <Panel>
+    <Panel
+      // Framed: a table: the frame is the edge of its scroll (§2).
+      framed
+    >
       <PanelHeader
         title={<Definition name="network">Networks</Definition>}
         actions={
@@ -342,7 +348,11 @@ export function EnvironmentTable({ env }: { env: string[] }) {
   }
 
   return (
-    <Panel className="max-h-full min-h-0 animate-rise">
+    <Panel
+      // Framed: a table: the frame is the edge of its scroll (§2).
+      framed
+      className="max-h-full min-h-0 animate-rise"
+    >
       <PanelHeader
         title="Environment"
         actions={

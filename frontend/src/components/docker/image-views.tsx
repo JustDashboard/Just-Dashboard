@@ -234,7 +234,12 @@ export function ImageHistory({ detail, wide }: { detail: ImageDetail; wide: bool
     )
   }
   return (
-    <Panel className="animate-rise" data-slot="image-history">
+    <Panel
+      // Framed: a table: the frame is the edge of its scroll (§2).
+      framed
+      className="animate-rise"
+      data-slot="image-history"
+    >
       <PanelHeader title="History" count={plural(steps.length, "step")} className="min-h-11" />
       <Table className="table-fixed">
         <TableHeader>

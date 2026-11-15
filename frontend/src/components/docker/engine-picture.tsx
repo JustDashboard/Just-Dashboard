@@ -172,12 +172,7 @@ function node(item: EngineNode): WireFlowNode {
           <Glyph item={item} className={off ? "opacity-60 grayscale" : undefined} />
         </WireMark>
         {(item.kind === "stack" || item.kind === "container") && (
-          <span
-            aria-hidden
-            className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background"
-          >
-            <StatusDot tone={DOT[item.state]} live={item.state === "up"} />
-          </span>
+          <StatusDot tone={DOT[item.state]} live={item.state === "up"} corner="md" />
         )}
       </span>
     ),

@@ -214,7 +214,11 @@ export function StackPreview({
         </ul>
       </section>
 
-      <Panel aria-label="Services">
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+        aria-label="Services"
+      >
         <PanelHeader title="Services" count={services.length} />
         <PanelBody flush>
           {wide ? (

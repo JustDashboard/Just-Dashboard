@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
+import { cores } from "@/components/procs/shared"
 import { Pencil } from "@/components/icons"
 import { get, patch, ApiError } from "@/lib/api"
 import { bytes, percent } from "@/lib/format"
@@ -275,9 +276,9 @@ function Processor({
         actions={
           <span className="numeric text-hint text-muted-foreground">
             <span className="font-medium text-foreground">
-              {cpu === undefined ? "—" : `${(cpu / 100).toFixed(2)}`}
+              {cpu === undefined ? "—" : cores(cpu)}
             </span>{" "}
-            cores in use · 100% is one core
+            in use · 100% is one core
           </span>
         }
       />
@@ -457,9 +458,7 @@ function Limits({
               />
             )}
             <p className="text-hint text-muted-foreground">
-              {cpu !== undefined
-                ? `${(cpu / 100).toFixed(2)} cores in use now`
-                : "Read while it runs"}
+              {cpu !== undefined ? `${cores(cpu)} in use now` : "Read while it runs"}
             </p>
             {open && (
               <Field label="New quota in cores" htmlFor="limit-cpus" className="pt-2">
@@ -535,7 +534,11 @@ function Interfaces({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <Panel className="animate-rise">
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+        className="animate-rise"
+      >
         <PanelHeader
           title="Interfaces"
           actions={

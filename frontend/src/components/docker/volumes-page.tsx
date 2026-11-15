@@ -368,7 +368,11 @@ export function VolumesPage() {
         ) : list.error && !list.data ? (
           <ErrorState error={list.error} onRetry={list.refresh} />
         ) : (
-          <Panel className="animate-rise">
+          <Panel
+            // Framed: a table: the frame is the edge of its scroll (§2).
+            framed
+            className="animate-rise"
+          >
             {/* The list section's one anatomy (PGH-06): the title, its count
                 and the state chips on the title line; search and what the
                 band narrowed on the toolbar under it. */}

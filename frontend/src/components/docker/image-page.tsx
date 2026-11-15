@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, Copy, Layers } from "@/components/icons"
+import { ChevronDown, ChevronUp, Copy, Layers } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
@@ -37,23 +36,13 @@ import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useBreakpoint } from "@/lib/breakpoints"
-
-const BACK = (
-  <Link
-    href="/docker/images"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Images
-  </Link>
-)
 
 /**
  * One image, as a place of its own.
@@ -182,7 +171,7 @@ export function ImagePage() {
           />
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
             <PageContext
-              eyebrow={BACK}
+              back={{ href: "/docker/images", label: "Images" }}
               title={known ? (primaryTag(known) ?? `Image ${shortId(known.id)}`) : "Image"}
               actions={
                 <span className="flex items-center">
@@ -435,35 +424,31 @@ function ImageMain({
         <ErrorState error={error} onRetry={onRetry} />
       ) : (
         <div className="flex min-w-0 flex-col xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
-          <ImagePicture
-            detail={detail}
-            state={state}
-            update={update}
-            pulling={pulling}
-            onContainers={() => setTab("containers")}
-          />
           <Tabs value={tab} onValueChange={setTab} className="gap-0">
-            <TabsPrimitive.List
-              aria-label={`Views of ${name}`}
-              className="z-sticky flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline bg-background xl:sticky xl:top-0 [&::-webkit-scrollbar]:hidden"
-            >
-              {VIEWS.map((view) => (
-                <TabsPrimitive.Trigger
-                  key={view.key}
-                  value={view.key}
-                  className={tabClasses(tab === view.key, "h-10")}
-                >
-                  {view.label}
-                  {(counts[view.key] ?? 0) > 0 && <ChipCount>{counts[view.key]}</ChipCount>}
-                </TabsPrimitive.Trigger>
-              ))}
-            </TabsPrimitive.List>
+            <ViewTabList
+              label={`Views of ${name}`}
+              views={VIEWS.map((view) => ({ ...view, count: counts[view.key] }))}
+              value={tab}
+              className="z-sticky bg-background xl:sticky xl:top-0"
+            />
             {VIEWS.map((view) => (
               <TabsContent key={view.key} value={view.key} className="pt-6 pb-4">
                 {tab !== view.key ? null : !detail ? (
                   <LoadingRows rows={5} />
                 ) : view.key === "layers" ? (
-                  <ImageLayers detail={detail} />
+                  // The picture opens the image's first view, as a detail
+                  // page's Overview holds its picture, and the strip stands
+                  // straight under the line on every view (PGH-17).
+                  <div className="flex min-w-0 flex-col gap-6">
+                    <ImagePicture
+                      detail={detail}
+                      state={state}
+                      update={update}
+                      pulling={pulling}
+                      onContainers={() => setTab("containers")}
+                    />
+                    <ImageLayers detail={detail} />
+                  </div>
                 ) : view.key === "containers" ? (
                   <ImageContainers
                     detail={detail}
