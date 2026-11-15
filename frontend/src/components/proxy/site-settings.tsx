@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useEffectEvent } from "react"
-import { createPortal } from "react-dom"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { plural } from "@/lib/format"
@@ -9,9 +8,8 @@ import { Modal } from "@/components/modal"
 import { Status, StatusDot } from "@/components/status-dot"
 import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
-import { TextShimmer } from "@/components/ui/text-shimmer"
+import { FloatingBar, SaveKey } from "@/components/floating-bar"
 import { PendingStrip } from "@/components/settings/pending-strip"
-import { saveShortcut, useSaveBarHost } from "@/components/settings/save-bar"
 import {
   SETTINGS_VIEWS,
   SETTINGS_VIEW_LABEL,
@@ -181,9 +179,9 @@ export type SaveCommand = {
  * a file the form would rewrite — and `note` what the save does, which was
  * the sheet's footer line. The primary command takes Ctrl or Cmd+S.
  *
- * Its own bar, not `SaveBarProvider`'s: that one is many forms and one Save,
- * and this is one draft with two saves whose difference matters. It floats
- * where that one does (`useSaveBarHost`).
+ * Its own commands, not `SaveBarProvider`'s: that one is many forms and one
+ * Save, and this is one draft with two saves whose difference matters. The
+ * surface is the same one (`FloatingBar`), a step wider for the third button.
  */
 export function SiteSaveBar({
   headline,
@@ -204,28 +202,14 @@ export function SiteSaveBar({
   disabled: boolean
   saving: boolean
 }) {
-  const host = useSaveBarHost()
-  if (!host) return null
-  return createPortal(
-    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-3 md:bottom-6">
-      <div
-        role="region"
-        aria-label="Save changes"
-        aria-live="polite"
-        className="pointer-events-auto flex w-full max-w-2xl animate-rise flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border-strong bg-popover py-2.5 pr-2.5 pl-4 text-popover-foreground shadow-lg"
-      >
-        <div key={saving ? "saving" : "dirty"} className="min-w-0 flex-[1_1_14rem] animate-rise">
-          <p className="flex min-w-0 items-center gap-2 text-body leading-snug font-medium">
-            <StatusDot tone="warning" />
-            {saving ? (
-              <TextShimmer>Saving…</TextShimmer>
-            ) : (
-              <span className="numeric">{headline}</span>
-            )}
-          </p>
-          <p className="mt-0.5 line-clamp-2 pl-4 text-xs text-muted-foreground">{note}</p>
-        </div>
-        <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+  return (
+    <FloatingBar
+      width="lg"
+      state={saving ? "saving" : "dirty"}
+      headline={saving ? "Saving…" : headline}
+      note={note}
+      actions={
+        <>
           {onDiscard && (
             <Button
               type="button"
@@ -261,20 +245,11 @@ export function SiteSaveBar({
             className="max-sm:h-10"
           >
             {primary.label}
-            <kbd
-              aria-hidden
-              className={cn(
-                "ml-0.5 font-sans text-hint font-normal opacity-60 max-sm:hidden",
-                primary.pending && "hidden",
-              )}
-            >
-              {saveShortcut()}
-            </kbd>
+            <SaveKey hidden={primary.pending} />
           </Button>
-        </div>
-      </div>
-    </div>,
-    host,
+        </>
+      }
+    />
   )
 }
 
