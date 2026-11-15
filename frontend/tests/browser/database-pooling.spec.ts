@@ -366,7 +366,7 @@ test("statistics that cannot be read say so and can be asked for again", async (
   await visit(page, PAGE)
   const pooler = section(page, "pooler")
   await expect(pooler).toContainText("Could not read the pooler's statistics")
-  await expect(pooler).toContainText("the console refused the connection")
+  await expect(pooler).toContainText("The console refused the connection.")
   await expect(pooler.getByRole("button", { name: "Try again" })).toBeVisible()
   // The rest of the page is still there, and its form still works.
   await expect(section(page, "addresses")).toBeVisible()

@@ -1,13 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight, Warning } from "@/components/icons"
-import { errorMessage } from "@/lib/api"
+import { ArrowRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Notice } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { Button } from "@/components/ui/button"
+import { Stale } from "@/components/stale"
+import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { PollState } from "@/hooks/use-poll"
 
@@ -44,7 +42,7 @@ export function Block({
         actions={
           (stale || actions) && (
             <>
-              {stale && <NotUpdating error={stale} />}
+              <Stale error={stale} />
               {actions}
             </>
           )
@@ -67,22 +65,22 @@ export function BlockLink({ href, children }: { href: string; children: React.Re
   )
 }
 
-/** A reading that is the one before: the poll after it failed. */
+/**
+ * A reading that is the one before: the poll after it failed.
+ *
+ * @deprecated use `Stale` from `@/components/stale` (its mark is this).
+ */
 export function NotUpdating({ error }: { error: Error }) {
-  return (
-    // A flex box: a bare span keeps a 16px line box and sets the status a
-    // pixel under the centre line of the header it sits in.
-    <span className="flex" title={errorMessage(error)}>
-      <Status verdict="warning" label="Not updating" />
-    </span>
-  )
+  return <Stale error={error} />
 }
 
 /**
- * A read that failed with nothing to show in its place. It says what could
- * not be read and why, in the server's words, and always offers the retry:
- * the reader is looking at a hole in the page and the only other way to fill
- * it is to reload everything around it.
+ * A read that failed with nothing to show in its place: "Could not read
+ * <what>", the server's words, and always the retry.
+ *
+ * @deprecated use `ErrorState` with `what`, which this is. It was an amber
+ * notice of its own, and dropped what `ErrorState` says for an item that is
+ * gone, a server that asked for a pause and a module the host does not have.
  */
 export function CouldNotRead({
   what,
@@ -96,16 +94,7 @@ export function CouldNotRead({
   onRetry: () => void
   className?: string
 }) {
-  return (
-    <div role="status" className={className}>
-      <Notice tone="warning" icon={Warning} title={`Could not read ${what}`}>
-        <p className="wrap-anywhere">{errorMessage(error)}</p>
-        <Button size="xs" variant="outline" className="mt-2" onClick={onRetry}>
-          Try again
-        </Button>
-      </Notice>
-    </div>
-  )
+  return <ErrorState what={what} error={error} onRetry={onRetry} className={className} />
 }
 
 /**
@@ -125,7 +114,7 @@ export function Read<T>({
   children: (data: T) => React.ReactNode
 }) {
   if (poll.data !== undefined) return <div className="animate-rise">{children(poll.data)}</div>
-  if (poll.error) return <CouldNotRead what={what} error={poll.error} onRetry={poll.refresh} />
+  if (poll.error) return <ErrorState what={what} error={poll.error} onRetry={poll.refresh} />
   return <>{skeleton}</>
 }
 

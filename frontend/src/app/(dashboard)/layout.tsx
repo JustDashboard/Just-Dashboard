@@ -13,6 +13,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { CommandPaletteProvider, useCommandPalette } from "@/components/shell/command-palette"
 import { MagnifyingGlass } from "@/components/icons"
 import { Button } from "@/components/ui/button"
+import { Sweep } from "@/components/loading"
 import { NavScopeProvider } from "@/components/shell/nav-scope"
 import { SavedFolderColours } from "@/components/files/folder-colour"
 import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
@@ -200,16 +201,13 @@ function ShellSplash({ waiting }: { waiting?: string }) {
     <div className="auth-backdrop flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
       <div className="flex flex-col items-center gap-2.5">
         <LogoStacked className="h-18" />
-        <div className="h-0.5 w-24 overflow-hidden rounded-full bg-muted">
-          <div className="h-full w-1/3 animate-[loading_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
-        </div>
+        <Sweep rounded label="Starting the dashboard" className="h-0.5 w-24" />
       </div>
       {waiting && (
         <p role="status" className="max-w-xs px-4 text-center text-sm text-muted-foreground">
           {waiting}
         </p>
       )}
-      <style>{`@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
     </div>
   )
 }

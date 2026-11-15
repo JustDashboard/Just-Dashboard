@@ -367,7 +367,10 @@ test("a network the inspect cannot read is drawn from the list, and with neither
 
   await page.route("**/api/v1/docker/networks/", (route) => route.fulfill(unreachable))
   await page.reload()
-  await expect(page.locator("[data-slot=error-state]")).toBeVisible()
+  // A daemon that does not answer is the Docker screen, not a red box.
+  await expect(
+    page.locator('[data-slot="missing-thing"][data-reason="docker-silent"]'),
+  ).toContainText("Docker is not answering")
   await expect(identity(page)).toHaveCount(0)
 })
 

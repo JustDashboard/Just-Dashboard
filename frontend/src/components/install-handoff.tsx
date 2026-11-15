@@ -1,0 +1,250 @@
+"use client"
+
+import { useEffect, useState, useSyncExternalStore } from "react"
+import { ApiError, get, post } from "@/lib/api"
+import { notify } from "@/lib/toast"
+import type { Job } from "@/lib/types"
+import { phaseReading, type PackageHandoff } from "@/lib/network/traffic"
+import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
+import { ErrorState, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { JobConsole, useJobConsole } from "@/components/job-console"
+import { MissingThing } from "@/components/missing-thing"
+import { ProductLogos, hasProductLogo } from "@/components/product-logo"
+import { Button } from "@/components/ui/button"
+
+/**
+ * The packages installed from a hand-off in this page session. A section that
+ * rendered the hand-off is replaced by its installed reading as soon as its
+ * own poll sees the package, so what followed the install is kept here and
+ * shown by `InstallFollowUp` in the section that took its place.
+ */
+const recent = new Set<string>()
+const listeners = new Set<() => void>()
+
+function announce() {
+  for (const listener of listeners) listener()
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+function markInstalled(pkg: string) {
+  recent.add(pkg)
+  announce()
+}
+
+function dismissInstalled(pkg: string) {
+  recent.delete(pkg)
+  announce()
+}
+
+function useRecentInstall(pkg: string) {
+  return useSyncExternalStore(
+    subscribe,
+    () => recent.has(pkg),
+    () => false,
+  )
+}
+
+/**
+ * What a section shows where the tool it reads is not installed: what the
+ * tool would do here, drawn as the product it is, and the package to install
+ * — through the Packages page's own install route, whose job streams into a
+ * console under the button so the reader watches it go in rather than
+ * waiting on a spinner. When the job succeeds the section reads again, and
+ * what followed the install — configured, active, verified — is read as
+ * phases rather than assumed: a package on disk is not a working service.
+ *
+ * The button is an administrator's: installing a package runs its
+ * maintainer's scripts as root (the install route's own capability), so
+ * anybody else is told the package's name and nothing to press.
+ *
+ * It is drawn as `MissingThing`, the product's one screen for a thing that is
+ * not there: the tool's tile beside the words at `size="block"` inside a
+ * section, the whole page at `size="page"`, the install as its step and the
+ * job's console after it. It was an `EmptyState`, the dashed box of an empty
+ * list, which said "nothing here yet" about a tool that was missing.
+ */
+export function InstallHandoff({
+  pkg,
+  products,
+  icon,
+  title,
+  children,
+  description,
+  onInstalled,
+  phases = true,
+  size = "block",
+}: {
+  pkg: string
+  /** The tool drawn as itself, where the logo collection has it. */
+  products: string[]
+  /** The glyph for a tool no logo names; used when `products` draws nothing. */
+  icon?: React.ComponentType<{ className?: string }>
+  title: string
+  /** What the tool does here, once it is in: one or two sentences. */
+  children?: React.ReactNode
+  /** @deprecated pass the sentences as `children`. */
+  description?: React.ReactNode
+  size?: "page" | "block"
+  onInstalled: () => void
+  /**
+   * Off for a package the server keeps no after-install reading of (git,
+   * Tailscale): the section's own read, which `onInstalled` asks for again,
+   * is what says it is there.
+   */
+  phases?: boolean
+}) {
+  const { can } = useAuth()
+  const [installed, setInstalled] = useState(false)
+  const console_ = useJobConsole({
+    onSuccess: () => {
+      setInstalled(true)
+      markInstalled(pkg)
+      onInstalled()
+    },
+  })
+  const [starting, setStarting] = useState(false)
+  const install = async () => {
+    setStarting(true)
+    try {
+      console_.attach(await post<Job>("/packages/install", { packages: [pkg] }))
+    } catch (err) {
+      notify.error(`Could not start installing ${pkg}`, err)
+    } finally {
+      setStarting(false)
+    }
+  }
+  const drawn = products.filter(hasProductLogo)
+  return (
+    <MissingThing
+      reason="not-installed"
+      size={size}
+      thing={drawn[0]}
+      icon={icon}
+      // More than one product (Tailscale and its Headscale server) is the
+      // stack, at the tile's size.
+      mark={drawn.length > 1 ? <ProductLogos ids={drawn} size="md" /> : undefined}
+      title={title}
+      step={
+        can("system.admin") ? (
+          <Button
+            size={size === "page" ? "lg" : "sm"}
+            onClick={() => void install()}
+            pending={starting || console_.running}
+            disabled={starting || console_.running}
+          >
+            Install {pkg}
+          </Button>
+        ) : (
+          <span className="text-hint text-muted-foreground">
+            An administrator can install <span className="font-mono">{pkg}</span>.
+          </span>
+        )
+      }
+      after={
+        (console_.job || (installed && phases)) && (
+          <div className="flex min-w-0 flex-col gap-3">
+            <JobConsole
+              job={console_.job}
+              lines={console_.lines}
+              onDismiss={console_.dismiss}
+              onCancel={console_.cancel}
+            />
+            {installed && phases && <HandoffPhases pkg={pkg} />}
+          </div>
+        )
+      }
+    >
+      {children ?? description}
+    </MissingThing>
+  )
+}
+
+/**
+ * The phases after an install, in the section that replaced the hand-off,
+ * until every phase that applies is done or the reader puts it away.
+ */
+export function InstallFollowUp({ pkg }: { pkg: string }) {
+  const shown = useRecentInstall(pkg)
+  if (!shown) return null
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <HandoffPhases pkg={pkg} />
+      <span>
+        <Button size="xs" variant="ghost" onClick={() => dismissInstalled(pkg)}>
+          Dismiss
+        </Button>
+      </span>
+    </div>
+  )
+}
+
+/** One package's phases, read again every few seconds while it is not working. */
+export function HandoffPhases({ pkg }: { pkg: string }) {
+  const handoff = usePoll<PackageHandoff>(
+    (signal) => get(`/network/handoffs/${encodeURIComponent(pkg)}`, undefined, signal),
+    5000,
+    [pkg],
+  )
+  const h = handoff.data
+  if (!h) {
+    return handoff.error ? <ErrorState error={handoff.error} onRetry={handoff.refresh} /> : null
+  }
+  const pending = h.phases.find((p) => p.status !== "done" && p.status !== "not_applicable")
+  return (
+    <Notice
+      tone={h.working ? "success" : "warning"}
+      title={
+        h.working
+          ? `${pkg} is installed, running and verified`
+          : `${pkg} is installed; it is not a working service yet`
+      }
+    >
+      <ul className="mt-1 flex flex-col gap-1" aria-label={`After installing ${pkg}`}>
+        {h.phases.map((p) => {
+          const reading = phaseReading(p)
+          return (
+            <li key={p.key} className="flex flex-wrap items-baseline gap-x-2">
+              <Status tone={reading.tone} label={`${reading.label}: ${reading.word}`} />
+              <span>{p.detail}</span>
+            </li>
+          )
+        })}
+      </ul>
+      {pending && <p className="mt-1">Next: {pending.detail}.</p>}
+    </Notice>
+  )
+}
+
+/**
+ * Whether this server's package manager has a package by that name. `asking`
+ * until it answers, then `known` or `unknown`; `unread` where it cannot be
+ * asked — no package manager, an account that may not read packages, a read
+ * that failed — which is not the same as "no such package".
+ *
+ * Tailscale is in Arch's, Fedora's and Alpine's repositories, and in Debian's
+ * and Ubuntu's only after its own is added: a button that ends in "Unable to
+ * locate package" is worse than the sentence it replaced.
+ */
+export type PackageKnown = "asking" | "known" | "unknown" | "unread"
+
+export function usePackageKnown(pkg: string): PackageKnown {
+  const [answer, setAnswer] = useState<{ pkg: string; known: PackageKnown } | undefined>(undefined)
+  useEffect(() => {
+    const controller = new AbortController()
+    get(`/packages/${encodeURIComponent(pkg)}`, undefined, controller.signal)
+      .then(() => setAnswer({ pkg, known: "known" }))
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        const missing = err instanceof ApiError && err.status === 404
+        setAnswer({ pkg, known: missing ? "unknown" : "unread" })
+      })
+    return () => controller.abort()
+  }, [pkg])
+  return answer?.pkg === pkg ? answer.known : "asking"
+}
