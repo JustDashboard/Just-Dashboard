@@ -92,7 +92,7 @@ export function RemoteDesktopOverview() {
           {/* A phone has room for the name or the version, and the picture's
               hub says the version under it. */}
           {data && (
-            <span className="font-mono text-body font-normal text-muted-foreground max-sm:hidden">
+            <span className="font-mono text-body leading-none font-normal text-muted-foreground max-sm:hidden">
               {" "}
               guacd {data.engine.version}
             </span>

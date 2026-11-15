@@ -334,7 +334,7 @@ export function StacksTab() {
               title={
                 <span className="inline-flex items-center gap-1.5">
                   Stacks
-                  <span className="numeric ml-0.5 text-body font-normal text-muted-foreground">
+                  <span className="numeric ml-0.5 text-body leading-none font-normal text-muted-foreground">
                     {filtered ? `${visible.length} of ${stacks.length}` : stacks.length}
                   </span>
                   <ExplainIcon name="stack" />
