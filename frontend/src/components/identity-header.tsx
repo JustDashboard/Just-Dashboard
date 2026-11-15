@@ -238,7 +238,9 @@ export const HostIdentity = IdentityHeader
 /** Facts written as facts go through a `FactLine`; anything else is drawn as it was given. */
 function factRun(facts: React.ReactNode) {
   if (!hasFacts(facts)) return facts
-  return <FactLine className="w-full">{facts}</FactLine>
+  // The rows a wrap makes are the line's own 4px apart, the gap its bones
+  // wait at, so a line whose facts wrap is as tall loaded as loading.
+  return <FactLine className="w-full [&>span]:gap-y-1">{facts}</FactLine>
 }
 
 /** The facts' place while they are read: one bone in the line's own height. */
