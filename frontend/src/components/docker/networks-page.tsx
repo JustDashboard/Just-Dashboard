@@ -413,7 +413,7 @@ export function Networks() {
                 title={
                   <>
                     Networks
-                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                       {networks.length}
                     </span>
                   </>
@@ -531,7 +531,7 @@ export function Networks() {
                 title={
                   <>
                     Containers
-                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                       {containers.length}
                     </span>
                   </>

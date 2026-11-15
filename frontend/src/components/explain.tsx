@@ -6,6 +6,7 @@ import { Popover as PopoverPrimitive } from "radix-ui"
 import { Information, Question } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { usePortalContainer } from "@/lib/portal-container"
+import { keepMovedFocus } from "@/components/ui/popover"
 
 /**
  * A short explanation one step from the thing it explains: the paragraph
@@ -253,6 +254,9 @@ export function Explain(props: ExplainProps) {
           data-opened={opened ?? undefined}
           role={asTip ? "tooltip" : "dialog"}
           aria-label={asTip ? undefined : label}
+          // Radix keeps it mounted while it fades; closed, it is only paint,
+          // and out of the accessibility tree at once.
+          aria-hidden={opened === null ? true : undefined}
           side={side}
           align={align}
           sideOffset={entry ? 4 : 2}
@@ -265,6 +269,7 @@ export function Explain(props: ExplainProps) {
           }}
           onCloseAutoFocus={(event) => {
             if (how.current !== "press" || face === "wrap") event.preventDefault()
+            else keepMovedFocus(event)
           }}
           onInteractOutside={(event) => {
             // A press on the mark is the mark's toggle, not a press outside.

@@ -151,7 +151,7 @@ export function RoutesTable({
         title={
           <>
             Routes
-            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
               {target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
             </span>
           </>
@@ -437,7 +437,7 @@ export function RulesTable({
         title={
           <>
             Policy rules
-            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
               {rules.length}
             </span>
           </>
