@@ -1913,9 +1913,10 @@ test.describe("a deployment's traffic", () => {
       await page.setViewportSize({ width, height: 900 })
       await page.goto("/deploy/7/logs")
       // A phone picks the view on the bar at the pane's foot, a desk on the
-      // strip at its head.
+      // strip at its head; both are buttons, so the phone's is the bar's.
+      const bar = page.locator("[data-slot=pane-bar]")
       const view = (name: string) =>
-        page.getByRole(width === 390 ? "tab" : "button", { name, exact: true })
+        (width === 390 ? bar : page).getByRole("button", { name, exact: true })
       await expect(view("Requests")).toBeVisible()
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
