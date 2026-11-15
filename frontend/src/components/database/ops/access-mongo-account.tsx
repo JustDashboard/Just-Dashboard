@@ -121,6 +121,8 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
           .join(" · ") || (one.roles.length > 0 ? plural(one.roles.length, "role") : "no role"),
     })),
     loading: users.loading && !down,
+    error: users.data ? undefined : users.error,
+    onRetry: users.refresh,
     caption: down
       ? "The server is not running"
       : users.data

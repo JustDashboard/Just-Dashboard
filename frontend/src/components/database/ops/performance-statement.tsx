@@ -37,7 +37,6 @@ import { readStatementHistoryOf, readStatements } from "@/components/database/op
 import {
   DetailFrame,
   DetailGate,
-  DetailHead,
   DetailRail,
   DetailTabs,
   stepOf,
@@ -177,14 +176,12 @@ function Statement({ address }: { address: string | null }) {
   const back = fromHistory
     ? { href: href("performance", { view: "history" }), label: "Statement history" }
     : { href: href("performance", { view: "statements", sort: carried.sort }), label: "Statements" }
-  const head = (
-    <DetailHead
-      title={`${conn.name} · Statement`}
-      back={back}
-      noun="statement"
-      step={stepOf(rows, address)}
-    />
-  )
+  const head = {
+    title: `${conn.name} · Statement`,
+    back,
+    noun: "statement",
+    step: stepOf(rows, address),
+  }
   const rail = (
     <DetailRail
       label="Statements"
@@ -196,6 +193,8 @@ function Statement({ address }: { address: string | null }) {
       current={address}
       pinned={pinned}
       loading={!data && !statements.error}
+      error={statements.data ? undefined : statements.error}
+      onRetry={statements.refresh}
       empty={
         // The caption has already said why there is nothing under it.
         (statements.error && !data) || (data && !data.supported)
@@ -212,10 +211,11 @@ function Statement({ address }: { address: string | null }) {
     (!recorder || engineId === "" || detail.data !== undefined || detail.error !== undefined)
   if (text === undefined) {
     return (
-      <DetailFrame rail={rail}>
-        {head}
-        {address !== null && !settled ? (
-          <>
+      <DetailFrame
+        rail={rail}
+        head={head}
+        identity={
+          address !== null && !settled ? (
             <HostIdentity
               className="border-b-0 pb-0"
               logo={<StatementTile />}
@@ -223,6 +223,11 @@ function Statement({ address }: { address: string | null }) {
               menu={<span className="size-8" />}
               facts={<span>&nbsp;</span>}
             />
+          ) : undefined
+        }
+      >
+        {address !== null && !settled ? (
+          <>
             {/* The page's own shape while it is read: the strip is where it will be. */}
             <DetailTabs label="Views of this statement" views={views} tab={tab} onTab={setTab}>
               <LoadingRows />
@@ -251,9 +256,10 @@ function Statement({ address }: { address: string | null }) {
   const missing = listed && listed.hitRatio >= 0 && listed.hitRatio < 0.9 ? listed : undefined
 
   return (
-    <DetailFrame rail={rail}>
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        {head}
+    <DetailFrame
+      rail={rail}
+      head={head}
+      identity={
         <HostIdentity
           label="About this statement"
           className="animate-rise border-b-0 pb-0"
@@ -306,7 +312,7 @@ function Statement({ address }: { address: string | null }) {
               <Button size="sm" onClick={() => toQuery(text)}>
                 <CodeBracket />
                 {/* On a phone the command shares the title's row: the word
-                    that says where is enough, and the statement keeps the room. */}
+                  that says where is enough, and the statement keeps the room. */}
                 <span>
                   <span className="max-sm:sr-only">Open in </span>Query
                 </span>
@@ -315,8 +321,8 @@ function Statement({ address }: { address: string | null }) {
           }
           menu={<VerbMenu verbs={verbs} label="More for this statement" />}
         />
-      </div>
-
+      }
+    >
       <DetailTabs label="Views of this statement" views={views} tab={tab} onTab={setTab}>
         {tab === "figures" ? (
           listed ? (

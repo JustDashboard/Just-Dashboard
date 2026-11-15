@@ -78,6 +78,7 @@ import {
 import type { DbTableStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { Read, Stale } from "@/components/database/kit/read"
+import { capitalize } from "@/components/database/kit/figures"
 
 /**
  * What each table weighs and how it is being kept: its rows and its size by
@@ -116,8 +117,8 @@ export function TablesView() {
   })
   const by: TableSort = isTableSort(order.by) ? order.by : "size"
   const objects = engine.nouns.objects
-  const title = objects[0].toUpperCase() + objects.slice(1)
-  const noun = engine.nouns.object[0].toUpperCase() + engine.nouns.object.slice(1)
+  const title = capitalize(objects)
+  const noun = capitalize(engine.nouns.object)
 
   const all = stats.data?.tables
   const schemas = useMemo(() => schemasOf(all ?? []), [all])

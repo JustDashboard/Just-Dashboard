@@ -12,6 +12,7 @@ import type {
   RedisACLRequest,
   RedisACLUser,
 } from "@/components/database/ops/access-types"
+import { capitalize } from "@/components/database/kit/figures"
 
 /**
  * What the Access page works out from what the server lists: which account is
@@ -165,7 +166,7 @@ export function grantSummary(
   }
   if (parts.length === 0) return "No grant of its own"
   const line = parts.join(" · ")
-  return line[0].toUpperCase() + line.slice(1)
+  return capitalize(line)
 }
 
 /** An account's name as the create route takes it. */

@@ -39,7 +39,6 @@ import { readActivity } from "@/components/database/ops/performance-api"
 import {
   DetailFrame,
   DetailGate,
-  DetailHead,
   DetailRail,
   DetailTabs,
   stepOf,
@@ -162,14 +161,12 @@ function Session({ pid }: { pid: string | null }) {
       }`
 
   const back = { href: href("performance", { view: "sessions", state }), label: "Sessions" }
-  const head = (
-    <DetailHead
-      title={`${conn.name} · Session ${pid ?? ""}`}
-      back={back}
-      noun="session"
-      step={stepOf(rows, pid)}
-    />
-  )
+  const head = {
+    title: `${conn.name} · Session ${pid ?? ""}`,
+    back,
+    noun: "session",
+    step: stepOf(rows, pid),
+  }
   const rail = (
     <DetailRail
       label="Sessions"
@@ -181,6 +178,8 @@ function Session({ pid }: { pid: string | null }) {
       current={pid}
       pinned={pinned}
       loading={!activity.data && !activity.error}
+      error={activity.data ? undefined : activity.error}
+      onRetry={activity.refresh}
       empty={
         activity.error && !activity.data
           ? ""
@@ -193,17 +192,26 @@ function Session({ pid }: { pid: string | null }) {
 
   if (!shown) {
     return (
-      <DetailFrame rail={rail}>
-        {head}
-        {pid !== null && !activity.data && !activity.error ? (
-          <>
+      <DetailFrame
+        rail={rail}
+        head={head}
+        identity={
+          pid !== null && !activity.data && !activity.error ? (
+            // The loaded line's form: on a phone its verbs' row, so
+            // nothing under it moves when it is read.
             <HostIdentity
+              loading
               className="border-b-0 pb-0"
               logo={<DbClientMark size="md" />}
               title={<SessionTitle pid={pid} />}
               state={<TextShimmer className="text-xs">Reading the sessions…</TextShimmer>}
-              facts={<span>&nbsp;</span>}
+              menu={false}
             />
+          ) : undefined
+        }
+      >
+        {pid !== null && !activity.data && !activity.error ? (
+          <>
             {/* The page's own shape while it is read: the strip is where it will be. */}
             <DetailTabs label={`Views of session ${pid}`} views={views} tab={tab} onTab={setTab}>
               <LoadingRows />
@@ -283,10 +291,10 @@ function Session({ pid }: { pid: string | null }) {
   ]
 
   return (
-    <DetailFrame rail={rail}>
-      {stopping.dialog}
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        {head}
+    <DetailFrame
+      rail={rail}
+      head={head}
+      identity={
         <HostIdentity
           label={`About session ${session.pid}`}
           className="animate-rise border-b-0 pb-0"
@@ -358,7 +366,9 @@ function Session({ pid }: { pid: string | null }) {
           }
           menu={menu.length > 0 && <VerbMenu verbs={menu} label={`More for session ${pid}`} />}
         />
-      </div>
+      }
+    >
+      {stopping.dialog}
 
       <DetailTabs label={`Views of session ${session.pid}`} views={views} tab={tab} onTab={setTab}>
         {tab === "activity" ? (

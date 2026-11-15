@@ -17,6 +17,7 @@ import { duration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
 import { Stale } from "@/components/stale"
+import { capitalize } from "@/components/database/kit/figures"
 
 /**
  * The Overview: who is on the server right now, then what it has done over
@@ -143,7 +144,7 @@ function sentence(words: string[]): string {
     words.length <= 1
       ? (words[0] ?? "")
       : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`
-  return text.charAt(0).toUpperCase() + text.slice(1)
+  return capitalize(text)
 }
 
 /**

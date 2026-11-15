@@ -29,6 +29,7 @@ import { ChipCount } from "@/components/chips"
 import { usePoll } from "@/hooks/use-poll"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { capitalize } from "@/components/database/kit/figures"
 
 type View =
   | "overview"
@@ -108,9 +109,7 @@ function Answering() {
       ...(engine.can("statementHistory")
         ? [{ id: "history" as const, label: "Statement history" }]
         : []),
-      ...(engine.can("tableStats")
-        ? [{ id: "tables" as const, label: objects[0].toUpperCase() + objects.slice(1) }]
-        : []),
+      ...(engine.can("tableStats") ? [{ id: "tables" as const, label: capitalize(objects) }] : []),
       ...(engine.can("indexStats") ? [{ id: "indexes" as const, label: "Indexes" }] : []),
       ...(engine.can("clickhouseViews")
         ? [

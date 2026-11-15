@@ -26,7 +26,6 @@ import { STORAGE_LIMIT, readTableStats } from "@/components/database/ops/perform
 import {
   DetailFrame,
   DetailGate,
-  DetailHead,
   DetailRail,
   DetailTabs,
   stepOf,
@@ -64,6 +63,7 @@ import {
 import { Fig } from "@/components/database/ops/performance-words"
 import type { DbTableStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { capitalize } from "@/components/database/kit/figures"
 
 type Tab = "figures" | "maintenance"
 
@@ -173,16 +173,14 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
 
   const back = {
     href: href("performance", { view: "tables", scope: scope || null }),
-    label: objects[0].toUpperCase() + objects.slice(1),
+    label: capitalize(objects),
   }
-  const head = (
-    <DetailHead
-      title={`${conn.name} · ${current ?? engine.nouns.object}`}
-      back={back}
-      noun={engine.nouns.object}
-      step={stepOf(rows, current)}
-    />
-  )
+  const head = {
+    title: `${conn.name} · ${current ?? engine.nouns.object}`,
+    back,
+    noun: engine.nouns.object,
+    step: stepOf(rows, current),
+  }
   const rail = (
     <DetailRail
       label={back.label}
@@ -193,23 +191,35 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
       rows={rows}
       current={current}
       loading={!stats.data && !stats.error}
+      error={stats.data ? undefined : stats.error}
+      onRetry={stats.refresh}
       empty={stats.error && !stats.data ? "" : `No ${engine.nouns.object} matches.`}
     />
   )
 
   if (!table) {
     return (
-      <DetailFrame rail={rail}>
-        {head}
-        {named && !stats.data && !stats.error ? (
-          <>
+      <DetailFrame
+        rail={rail}
+        head={head}
+        identity={
+          named && !stats.data && !stats.error ? (
+            // The loaded line's form: its command's place and, on a phone,
+            // its verbs' row, so nothing under it moves when it is read.
             <HostIdentity
+              loading
               className="border-b-0 pb-0"
               logo={<TableTile />}
               title={<ObjectName schema={named.schema || undefined} name={named.name} />}
               state={<TextShimmer className="text-xs">Reading its figures…</TextShimmer>}
-              facts={<span>&nbsp;</span>}
+              command
+              menu={false}
             />
+          ) : undefined
+        }
+      >
+        {named && !stats.data && !stats.error ? (
+          <>
             {/* The page's own shape while it is read: the strip is where it will be. */}
             <DetailTabs
               label={`Views of ${qualified(named.schema, named.name)}`}
@@ -270,10 +280,10 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
   ]
 
   return (
-    <DetailFrame rail={rail}>
-      {maintenance.dialogs}
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        {head}
+    <DetailFrame
+      rail={rail}
+      head={head}
+      identity={
         <HostIdentity
           label={`About ${qualified(table.schema, table.table)}`}
           className="animate-rise border-b-0 pb-0"
@@ -336,7 +346,9 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
             )
           }
         />
-      </div>
+      }
+    >
+      {maintenance.dialogs}
 
       <DetailTabs
         label={`Views of ${qualified(table.schema, table.table)}`}

@@ -120,6 +120,8 @@ export function RedisAccount({ name }: { name: string }) {
       tone: one.enabled && one.noPassword ? ("warning" as const) : undefined,
     })),
     loading: acl.loading && !down,
+    error: acl.data ? undefined : acl.error,
+    onRetry: acl.refresh,
     caption: down
       ? "The server is not running"
       : acl.data

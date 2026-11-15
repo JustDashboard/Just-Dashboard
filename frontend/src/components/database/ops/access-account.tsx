@@ -195,6 +195,8 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       sessions: role.connections,
     })),
     loading: roles.loading && !down,
+    error: roles.data ? undefined : roles.error,
+    onRetry: roles.refresh,
     search: {
       value: filter.search,
       onChange: filter.setSearch,

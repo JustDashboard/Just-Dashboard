@@ -3585,16 +3585,22 @@ for (const width of [1280, 390]) {
     await visit(page, "/databases/1/performance/tables/public.sessions_log")
     await expect(page.getByText("Reading its figures…")).toBeVisible()
     const tableLine = await topOf(page, line)
+    // The loading line holds the verbs' place (their own row on a phone), so
+    // the views under it stay where they are when the line is read.
+    const tableStrip = await topOf(page, strip)
     tables.release(null)
     await expect(about(page, "About public.sessions_log")).toContainText("a vacuum is due")
     expect(await topOf(page, line)).toBe(tableLine)
+    expect(await topOf(page, strip)).toBe(tableStrip)
 
     await visit(page, "/databases/1/performance/sessions/52")
     await expect(page.locator(line).getByText("Reading the sessions…")).toBeVisible()
     const sessionLine = await topOf(page, line)
+    const sessionStrip = await topOf(page, strip)
     activity.release(null)
     await expect(about(page, "About session 52")).toContainText("Active")
     expect(await topOf(page, line)).toBe(sessionLine)
+    expect(await topOf(page, strip)).toBe(sessionStrip)
   })
 }
 

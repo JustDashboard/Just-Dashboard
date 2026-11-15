@@ -49,6 +49,7 @@ import {
 import { isDown } from "@/components/database/ops/performance-parts"
 import { usePendingReport } from "@/components/database/ops/settings-pending"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { capitalize } from "@/components/database/kit/figures"
 
 /** A loaded module of a key–value server, from `GET /redis/server`. */
 type ServerModules = { modules: { name: string; version: number }[] }
@@ -92,7 +93,7 @@ function ExtensionRow({
   state?: { text: string; tone?: "warning" }
   action?: React.ReactNode
 }) {
-  const said = about ? about.charAt(0).toUpperCase() + about.slice(1) : undefined
+  const said = about ? capitalize(about) : undefined
   return (
     <li data-extension={name} className="flex h-14 min-w-0 items-center gap-3.5">
       {mark}
