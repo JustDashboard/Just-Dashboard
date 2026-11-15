@@ -11,12 +11,12 @@ Bun only. Keep `bun.lock`; never add `package-lock.json` or `yarn.lock`.
 | Path | What it is |
 | --- | --- |
 | `src/app/` | Routes. `(dashboard)/` is the signed-in shell, one directory per sidebar section; `login/`, `welcome/` and `hub/enter/` sit outside it |
-| `src/components/` | One directory per section (`components/<area>/`), `ui/` for the low-level controls, and the shared primitives at the top level. `nav.ts` is the sidebar's source |
-| `src/lib/` | The API client (`api.ts`), the API's types (`types.ts`) and pure logic, each with its `*.test.js` beside it |
+| `src/components/` | One directory per section (`components/<area>/`), `ui/` for the low-level controls, `shell/` for the sidebar, the command palette and the tab title (`shell/nav.ts` is the sidebar's source), `settings/` and `wire/` for the settings kit and the wiring marks, and the other shared components at the top level, each in a file named after it |
+| `src/lib/` | The API client (`api.ts`), the API's types (`types.ts`) and pure logic, each with its `*.test.js` beside it. What belongs to one domain is in its folder (`network/`, `log/`, `metrics/`, `terminal/`, `board/`, `tls/`, `proxy/`) |
 | `src/hooks/` | Polling, sockets, authentication and other shared state |
 | `src/proxy.ts` | The request proxy: the CSP nonce and policy, and the trailing-slash rule |
 | `tests/browser/` | Playwright specs (`<area>-*.spec.ts`) and the mocked APIs they run against (`*-fixture.ts`, `fixtures/`) |
-| `scripts/` | Build helpers (`sync-monaco.mjs`, `sync-excalidraw.mjs`), the standalone server `bun run start` uses, and the recording scripts |
+| `scripts/` | Build helpers (`sync-monaco.mjs`, `sync-excalidraw.mjs`), the standalone server `bun run start` uses, the recording scripts, and `move-files.ts`, which moves files and exports to where `moves.json` says and rewrites every import, test path and doc mention of them (`bun scripts/move-files.ts --dry-run` lists what it would change) |
 | `eslint-rules/` | The design system's lint rules, turned on in `eslint.config.mjs` |
 | `public/` | Static files: the product logos, and the Monaco and Excalidraw files the sync scripts copy in |
 | `Dockerfile` | The frontend image |
@@ -30,6 +30,7 @@ repository root.
 bun install && bun dev               # :3000, proxies /api to 127.0.0.1:8080
 bun run lint && bun run build
 bun test src                         # the unit tests over src/lib and src/components
+bun test scripts                     # the move script's own tests
 bun run start --hostname 127.0.0.1 --port 43117   # the built server the browser specs open
 bunx playwright test tests/browser/docker-ui.spec.ts
 ```
