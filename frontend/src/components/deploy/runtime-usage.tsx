@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { Download, Pause, Play } from "@/components/icons"
 import { ApiError } from "@/lib/api"
-import { bytes, percent, rate } from "@/lib/format"
+import { bytes, minuteAt, percent, rate } from "@/lib/format"
 import { bucketLive, containerRateLabel, peakOf } from "@/lib/container-usage"
 import { rowsToCsv } from "@/lib/metrics/export"
 import { windowLabel, type ContainerRow } from "@/lib/metrics/range"
@@ -27,6 +27,9 @@ import type { Series } from "@/components/metrics/metric-chart"
 import { HUE, LiveBytes, LiveFigure, SeriesKey } from "@/components/live-figure"
 import { useContainerScales, useContainerUsage } from "@/components/docker/container-usage"
 import { saveText } from "@/lib/download"
+import { useBreakpoint } from "@/lib/breakpoints"
+import { VerbMenu } from "@/components/verbs"
+import { newestReadings } from "@/components/deploy/runtime-model"
 
 // The Metrics page's colours and words for the same measurements (§10), so a
 // container's network is the line the host's network is. Its processes stand
@@ -109,6 +112,8 @@ export function RuntimeUsage({
     running ? { rows: buckets, memoryLimit: stats?.memLimited ? stats.memLimit : 0 } : undefined,
   )
   const { limit, streaming, history, controls } = usage
+  // On a phone the head is the picker and the range; Export CSV is in its ⋯.
+  const roomy = useBreakpoint("sm")
 
   // Pausing holds the rows the charts were drawn from while the socket keeps
   // filling the window behind them, as on Metrics; a recorded range has nothing
@@ -182,11 +187,15 @@ export function RuntimeUsage({
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
             {picker && <div className="min-w-0 max-sm:w-full">{picker}</div>}
             <span className="numeric text-hint text-muted-foreground">{span.head}</span>
-            <Status
-              tone={!running ? "stopped" : feed.live ? "running" : "notice"}
-              live={running && feed.live}
-              label={label}
-            />
+            {/* The range's own Live stop says the feed is live; the status
+                is only drawn when it says something the range does not. */}
+            {!(streaming && running && feed.live) && (
+              <Status
+                tone={!running ? "stopped" : feed.live ? "running" : "notice"}
+                live={running && feed.live}
+                label={label}
+              />
+            )}
             <div className="flex max-w-full flex-wrap items-center gap-2">
               {streaming && (
                 <IconAction
@@ -196,11 +205,32 @@ export function RuntimeUsage({
                   {frozen ? <Play /> : <Pause />}
                 </IconAction>
               )}
-              <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
-                <Download />
-                Export CSV
-              </Button>
+              {roomy ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rows.length === 0}
+                  onClick={exportCsv}
+                >
+                  <Download />
+                  Export CSV
+                </Button>
+              ) : null}
               <RangePicker controls={controls} ranges={usage.ranges} />
+              {!roomy && (
+                <VerbMenu
+                  label="More resource actions"
+                  verbs={[
+                    {
+                      key: "export",
+                      label: "Export CSV",
+                      icon: Download,
+                      disabled: rows.length === 0,
+                      run: exportCsv,
+                    },
+                  ]}
+                />
+              )}
             </div>
           </div>
         }
@@ -394,12 +424,18 @@ function Readings({
   const stats = off ? undefined : (frame.stats ?? initial)
   const now = off ? undefined : frame.now
   const trends = useMemo(() => trendsOf(rows), [rows])
+  // Before the socket's first frame (or with no socket), the newest recorded
+  // row stands in, marked with its minute, so a tile never says "—" over a
+  // line and a chart that have the figure.
+  const newest = useMemo(() => newestReadings(rows), [rows])
+  const asOf = newest.ts !== undefined ? `as of ${minuteAt(new Date(newest.ts))}` : undefined
 
   const trend = (values: number[], name: string, color: string, max?: number) =>
     values.length < 2 ? undefined : (
       <TileTrend values={values} max={max} color={color} label={`${name} over ${over}`} />
     )
-  const cpu = stats?.cpuReady ? stats.cpuPercent : undefined
+  const liveCpu = stats?.cpuReady ? stats.cpuPercent : undefined
+  const cpu = liveCpu ?? newest.cpu
   const quotaShare = cpu !== undefined && stats?.cpuLimit ? cpu / stats.cpuLimit : undefined
   const cpuTrend = trend(
     trends.cpu,
@@ -412,10 +448,14 @@ function Readings({
   // A process count sits still for hours, and a line scaled to its own maximum
   // would not be drawn at all: headroom over the top keeps it a line at its level.
   const pidsTrend = trend(trends.pids, "Processes", HUE.load, Math.max(...trends.pids, 1) * 1.25)
-  const rx = now?.netRx ?? null
-  const tx = now?.netTx ?? null
-  const read = now?.blockRead ?? null
-  const write = now?.blockWrite ?? null
+  const live = now?.netRx != null || now?.netTx != null
+  const rx = now?.netRx ?? (live ? null : (newest.netRx ?? null))
+  const tx = now?.netTx ?? (live ? null : (newest.netTx ?? null))
+  const liveDisk = now?.blockRead != null || now?.blockWrite != null
+  const read = now?.blockRead ?? (liveDisk ? null : (newest.blockRead ?? null))
+  const write = now?.blockWrite ?? (liveDisk ? null : (newest.blockWrite ?? null))
+  const mem = stats ? stats.memUsage : newest.mem
+  const pids = stats ? stats.pids : newest.pids
 
   return (
     <StatGrid columns={5}>
@@ -432,11 +472,13 @@ function Readings({
         trend={cpuTrend}
         meter={cpuTrend ? undefined : quotaShare}
         hint={
-          !stats
-            ? undefined
-            : stats.cpuLimit
+          liveCpu === undefined
+            ? cpu !== undefined
+              ? asOf
+              : undefined
+            : stats?.cpuLimit
               ? `of a ${stats.cpuLimit}-core quota`
-              : stats.hostCpus
+              : stats?.hostCpus
                 ? `of one core · ${stats.hostCpus} here`
                 : "of one core"
         }
@@ -449,20 +491,22 @@ function Readings({
           </>
         }
         meterLabel="Memory"
-        value={stats ? <LiveBytes value={stats.memUsage} /> : "—"}
+        value={mem !== undefined ? <LiveBytes value={mem} /> : "—"}
         tone={stats?.memLimited ? utilisationTone(stats.memPercent) : "default"}
         trend={memTrend}
         meter={memTrend || !stats?.memLimited ? undefined : stats.memPercent}
         hint={
           !stats
-            ? undefined
+            ? mem !== undefined
+              ? asOf
+              : undefined
             : stats.memLimited
               ? `of ${bytes(stats.memLimit)}`
               : stats.memHostPercent !== undefined
                 ? `no limit · ${percent(stats.memHostPercent)} of the host`
                 : "no limit"
         }
-        trailing={stats ? "used" : undefined}
+        trailing={mem !== undefined ? "used" : undefined}
       />
       <StatTile
         label={
@@ -472,11 +516,19 @@ function Readings({
           </>
         }
         meterLabel="Processes"
-        value={stats ? <LiveFigure value={stats.pids} /> : "—"}
+        value={pids !== undefined ? <LiveFigure value={pids} /> : "—"}
         tone={pidsLimit > 0 && stats ? utilisationTone((stats.pids / pidsLimit) * 100) : "default"}
         trend={pidsTrend}
         meter={pidsTrend || pidsLimit <= 0 || !stats ? undefined : (stats.pids / pidsLimit) * 100}
-        hint={!stats ? undefined : pidsLimit > 0 ? `of ${pidsLimit.toLocaleString()}` : "no limit"}
+        hint={
+          !stats
+            ? pids !== undefined
+              ? asOf
+              : undefined
+            : pidsLimit > 0
+              ? `of ${pidsLimit.toLocaleString()}`
+              : "no limit"
+        }
       />
       <StatTile
         label={
@@ -487,7 +539,13 @@ function Readings({
         }
         value={rx !== null ? <LiveBytes value={rx} suffix="/s" /> : "—"}
         trend={trend(trends.net, "Network", HUE.net)}
-        hint={tx !== null ? `${rate(tx)} out` : undefined}
+        hint={
+          tx !== null
+            ? `${rate(tx)} out${live ? "" : ` · ${asOf}`}`
+            : rx !== null && !live
+              ? asOf
+              : undefined
+        }
         trailing={rx !== null ? "in" : undefined}
       />
       <StatTile
@@ -507,7 +565,7 @@ function Readings({
         trend={trend(trends.disk, "Disk I/O", HUE.disk)}
         hint={
           read !== null || write !== null
-            ? `${rate(read)} read · ${rate(write)} written`
+            ? `${rate(read)} read · ${rate(write)} written${liveDisk ? "" : ` · ${asOf}`}`
             : undefined
         }
       />

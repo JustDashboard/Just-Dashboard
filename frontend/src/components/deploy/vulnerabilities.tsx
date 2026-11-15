@@ -150,7 +150,7 @@ export function Vulnerabilities({
             {offerRebuild && (
               <Button
                 size="sm"
-                variant={rebuildMode === "command" ? undefined : "outline"}
+                variant="outline"
                 title={
                   rebuildMode === "command"
                     ? undefined

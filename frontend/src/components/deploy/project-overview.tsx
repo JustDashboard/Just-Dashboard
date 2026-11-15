@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Sparkles } from "@/components/icons"
+import { RotateCounterClockwise, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
 import {
   previewServices,
@@ -22,6 +22,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
+import { VerbMenu, type VerbSpec } from "@/components/verbs"
 import { ChoiceList } from "@/components/choice-row"
 import { buildMethodProduct, imageProduct } from "@/components/product-logo"
 import { PullRequestRow } from "@/components/git/pull-request-row"
@@ -199,6 +200,29 @@ export function ProjectOverview() {
         }}
       />,
     ])
+  const productionVerbs: VerbSpec[] = [
+    ...(rollbackEligible && can("destructive")
+      ? [
+          {
+            key: "rollback",
+            label: "Roll back",
+            icon: RotateCounterClockwise,
+            run: () => setRollbackOpen(true),
+          },
+        ]
+      : []),
+    ...(canDiagnose
+      ? [
+          {
+            key: "diagnose",
+            label: "Diagnose",
+            icon: Sparkles,
+            href: `/deploy/${project.projectId}/assistant?ask=diagnose`,
+            internal: true,
+          },
+        ]
+      : []),
+  ]
   blocks.push([
     "production",
     <Panel key="production" plain>
@@ -213,18 +237,10 @@ export function ProjectOverview() {
                 </Link>
               </Button>
             )}
-            {rollbackEligible && can("destructive") && (
-              <Button variant="outline" size="sm" onClick={() => setRollbackOpen(true)}>
-                Roll back
-              </Button>
-            )}
-            {canDiagnose && (
-              <Button asChild variant="outline" size="sm">
-                <Link href={`/deploy/${project.projectId}/assistant?ask=diagnose`}>
-                  <Sparkles />
-                  Diagnose
-                </Link>
-              </Button>
+            {/* One verb on the title line; the rest in its ⋯, so on a phone
+                the head stays the title and one button. */}
+            {productionVerbs.length > 0 && (
+              <VerbMenu verbs={productionVerbs} label={`${deployment.environmentName} actions`} />
             )}
           </>
         }
@@ -357,14 +373,7 @@ export function ProjectOverview() {
       <Panel plain>
         <PanelHeader
           title="Recent deployments"
-          actions={
-            <Link
-              href={`/deploy/${project.projectId}/deployments`}
-              className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-            >
-              View all <ArrowRight className="size-3" />
-            </Link>
-          }
+          link={{ href: `/deploy/${project.projectId}/deployments`, label: "View all" }}
         />
         <PanelBody>
           {recent.length ? (
@@ -395,15 +404,13 @@ export function ProjectOverview() {
         <Panel plain>
           <PanelHeader
             title="Pull requests"
-            actions={
-              info.checkoutPath && (
-                <Link
-                  href={`/git?${new URLSearchParams({ repo: info.checkoutPath })}`}
-                  className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                >
-                  Git page <ArrowRight className="size-3" />
-                </Link>
-              )
+            link={
+              info.checkoutPath
+                ? {
+                    href: `/git?${new URLSearchParams({ repo: info.checkoutPath })}`,
+                    label: "Git page",
+                  }
+                : undefined
             }
           />
           <PanelBody>

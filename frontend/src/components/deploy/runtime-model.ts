@@ -194,3 +194,50 @@ export function publicServices(
   if (applications.length > 0) return applications
   return live.slice(0, 1)
 }
+
+/** The newest value a recorded history holds for each reading, and when it was taken. */
+export type NewestReadings = {
+  cpu?: number
+  mem?: number
+  pids?: number
+  netRx?: number
+  netTx?: number
+  blockRead?: number
+  blockWrite?: number
+  /** The moment (epoch ms) of the newest row that held any of them. */
+  ts?: number
+}
+
+/**
+ * What a reading falls back to before the live socket's first frame: the
+ * newest recorded value of each figure, walking back from the window's end,
+ * so a tile does not say "—" over a chart that has the figure. Each field is
+ * the newest row that has it; `ts` is the newest row that had anything.
+ */
+export function newestReadings(
+  rows: readonly {
+    ts: number
+    cpu: number | null
+    mem: number | null
+    pids: number | null
+    netRx: number | null
+    netTx: number | null
+    blockRead: number | null
+    blockWrite: number | null
+  }[],
+): NewestReadings {
+  const out: NewestReadings = {}
+  const keys = ["cpu", "mem", "pids", "netRx", "netTx", "blockRead", "blockWrite"] as const
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index]
+    for (const key of keys) {
+      const value = row[key]
+      if (out[key] === undefined && value !== null && value !== undefined) {
+        out[key] = value
+        out.ts ??= row.ts
+      }
+    }
+    if (keys.every((key) => out[key] !== undefined)) break
+  }
+  return out
+}
