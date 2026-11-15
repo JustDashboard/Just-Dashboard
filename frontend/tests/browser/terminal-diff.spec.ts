@@ -312,7 +312,11 @@ test("on a phone Files and Git are stops on the bar, with the changed files coun
   await expect(git).toHaveAttribute("aria-description", "4")
   await expect(page.getByRole("link", { name: "Open in Git" })).toBeVisible()
   // The bar says which half is up; the column's own strip would say it twice.
-  await expect(page.getByRole("button", { name: "Files", exact: true })).toBeHidden()
+  // The bar's stop is a button too, so the one Files button shown is the bar's.
+  await expect(
+    page.getByRole("button", { name: "Files", exact: true }).filter({ visible: true }),
+  ).toHaveCount(1)
+  await expect(bar.getByRole("button", { name: "Files", exact: true })).toBeVisible()
 
   await bar.getByRole("button", { name: "Files" }).click()
   await expect(bar.getByRole("button", { name: "Files" })).toHaveAttribute("aria-current", "page")

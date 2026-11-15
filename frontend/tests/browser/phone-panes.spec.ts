@@ -200,7 +200,11 @@ test.describe("on a phone", () => {
     expect((await box(run)).y).toBeLessThan(PHONE.height / 2)
     await expect(catalogue).toBeHidden()
     // The bar's stop is the one way to the catalogue: the head's button is a desk's.
-    await expect(panel.getByRole("button", { name: "Every tool" })).toBeHidden()
+    // The bar's own stop is a button too now, so the one shown is the bar's.
+    await expect(
+      panel.getByRole("button", { name: "Every tool" }).filter({ visible: true }),
+    ).toHaveCount(1)
+    await expect(bar.getByRole("button", { name: "Every tool" })).toBeVisible()
     const frame = await box(panel)
     expect(Math.round(frame.x)).toBe(0)
     expect(Math.round(frame.width)).toBe(PHONE.width)
