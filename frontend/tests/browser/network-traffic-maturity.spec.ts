@@ -365,15 +365,13 @@ test("a peer opens its own page with its tuples, closes and the layers it crosse
 }) => {
   await open(page, [])
   await visit(page, "/network/connections")
-  await expect(page.getByLabel("What this read cannot see")).toContainText(
-    "Read 10s after the last",
-  )
-  await expect(page.getByLabel("What this read cannot see")).toContainText(
-    "5 connections closed since the last read",
-  )
-  await expect(page.getByLabel("What this read cannot see")).toContainText(
-    "7 unconnected UDP sockets",
-  )
+  // What the read cannot see is behind the tip at the list's foot, not a paragraph under it.
+  await page.getByRole("button", { name: "What this read cannot see" }).click()
+  const unseen = page.getByRole("dialog", { name: "What this read cannot see" })
+  await expect(unseen).toContainText("Read 10s after the last")
+  await expect(unseen).toContainText("5 connections closed since the last read")
+  await expect(unseen).toContainText("7 unconnected UDP sockets")
+  await page.keyboard.press("Escape")
   await page.getByRole("link", { name: "Open 198.51.100.23" }).click()
   await expect(page).toHaveURL(/\/network\/connections\/198\.51\.100\.23$/)
   const reached = page.getByLabel("Where it connects")

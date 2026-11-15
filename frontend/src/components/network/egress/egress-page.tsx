@@ -186,7 +186,10 @@ function LoadingIdentity({ name }: { name: string }) {
 function Loading({ members }: { members?: number }) {
   return (
     <div className="flex min-w-0 flex-col">
-      <div className="h-10 border-b border-hairline" />
+      {/* A tab's height over the strip's hairline, as the strip is built. */}
+      <div className="border-b border-hairline">
+        <div className="h-10" />
+      </div>
       <div className={cn(VIEW_PANE, "flex min-w-0 flex-col gap-6")}>
         <EgressPicture links={[]} expected={members} />
         <LoadingRows rows={3} />

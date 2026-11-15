@@ -6,7 +6,7 @@ import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { AddressLine } from "@/components/network/address"
+import { AddressLine } from "@/components/address"
 import { LinkMark, OWNER_LABEL, kindLabel } from "@/components/network/marks"
 import { describeDevice, deviceHref, deviceState, groupDevices } from "./device-facts"
 

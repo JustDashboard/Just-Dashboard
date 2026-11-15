@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { ReadingWords } from "./device-detail"
 
