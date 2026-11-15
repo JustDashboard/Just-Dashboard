@@ -86,11 +86,11 @@ export function OverviewView({
       <Block
         title="Activity"
         bodyClassName="space-y-4"
+        // What was two sentences under the charts: how much is recorded and
+        // how long it is kept, on the line that picks the window.
+        aside={<HistoryFact samples={samples} retentionHours={retentionHours} />}
         actions={
           <>
-            {/* What was two sentences under the charts: how much is recorded
-                and how long it is kept, on the line that picks the window. */}
-            <HistoryFact samples={samples} retentionHours={retentionHours} />
             {error && samples.length > 0 && <Stale error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>

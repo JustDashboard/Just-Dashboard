@@ -20,6 +20,7 @@ export function Block({
   count,
   link,
   actions,
+  aside,
   stale,
   className,
   bodyClassName,
@@ -35,6 +36,8 @@ export function Block({
   /** The way on to the page that holds all of what the block shows the top of. */
   link?: { href: string; label: string }
   actions?: React.ReactNode
+  /** Drawn on the head's line between the title and the actions (`PanelHeader`'s children). */
+  aside?: React.ReactNode
   /** The last poll failed over what is drawn: it is the reading before, not now. */
   stale?: Error
   className?: string
@@ -55,7 +58,9 @@ export function Block({
             </>
           )
         }
-      />
+      >
+        {aside}
+      </PanelHeader>
       <PanelBody className={bodyClassName}>{children}</PanelBody>
     </Panel>
   )

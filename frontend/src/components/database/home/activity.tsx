@@ -71,12 +71,13 @@ export const Activity = memo(function Activity({
         title="Activity"
         actions={
           <>
-            <HistoryFact samples={samples} retentionHours={retentionHours} />
             {error && samples.length > 0 && <Stale error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }
-      />
+      >
+        <HistoryFact samples={samples} retentionHours={retentionHours} />
+      </PanelHeader>
       <PanelBody>
         <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2 [&>*]:min-w-0">
           {offered.map((view, index) => (
@@ -114,9 +115,11 @@ export function HistoryFact({
   return (
     <span
       data-slot="history-fact"
-      // A row of its own on a phone: the words grow when the record lands, and
-      // sharing the range's row they wrapped it onto a line more.
-      className="min-w-0 truncate text-hint text-muted-foreground max-sm:w-full"
+      // Beside the actions from `sm`, the actions' own 6px from them. On a
+      // phone a row of its own under the title's: the words grow when the
+      // record lands, and in the actions' run they pushed the range under
+      // the title, so everything below the head moved down a line.
+      className="min-w-0 truncate text-hint text-muted-foreground max-sm:order-last max-sm:w-full sm:-mr-2.5 sm:ml-auto"
       title={`Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed.`}
     >
       {held > 0 && (

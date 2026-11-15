@@ -94,12 +94,13 @@ export const ActivityLines = memo(function ActivityLines({
         actions={
           <>
             {error && samples.length > 0 && <Stale error={error} />}
-            <HistoryFact samples={samples} retentionHours={retentionHours} />
             {performance && <SectionLink href={performance}>Performance</SectionLink>}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }
-      />
+      >
+        <HistoryFact samples={samples} retentionHours={retentionHours} />
+      </PanelHeader>
       <PanelBody>
         <ReadingLines>
           {readings.map(({ view, reading }) => {
