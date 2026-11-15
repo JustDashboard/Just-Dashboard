@@ -9,7 +9,7 @@
  *
  * The rest — whether a surface is a Panel or a Pane, whether a fact is a Tag or
  * a Status — stays a judgement, and stays in
- * `docs/internal/frontend/design-system.md`.
+ * `docs/internal/frontend/standard.md` and the pages `design-system.md` indexes.
  *
  * A local plugin rather than `no-restricted-syntax` selectors: esquery's
  * attribute-regex grammar has no way to escape a `/`, which every one of these
@@ -200,21 +200,19 @@ const latencyWords = {
  * Any import that ends in `bar-list` is the one, whichever folder it is
  * written from, so a relative `./bar-list` is refused as an alias is.
  */
-const BAR_LIST_HOMES =
-  /src[\\/]components[\\/]database[\\/]query[\\/](?:bar-list|chart-view)\.tsx$/
+const BAR_LIST_HOMES = /src[\\/]components[\\/]database[\\/]query[\\/](?:bar-list|chart-view)\.tsx$/
 const BAR_LIST_IMPORT = /(?:^|\/)bar-list(?:\.tsx?)?$/
 
 /**
  * The 0.6.1 design-system audit asked for one checkbox and one spinner, and
  * each came back in a newer file: a native `<input type="checkbox">` beside
  * the Radix one in the same workspace, and `LoaderCircle` spun by hand where
- * `Spinner` (components/state.tsx) is the spinner. Both are refused outside
+ * `Spinner` (components/loading.tsx) is the spinner. Both are refused outside
  * the primitives that draw them. The spinner's home is `components/loading.tsx`,
  * which the 0.9.0 file moves split out of `state.tsx`; both stay homes, since
  * `state.tsx` still draws the states a spinner sits in.
  */
-const PRIMITIVE_HOMES =
-  /src[\\/]components[\\/](?:ui[\\/]|state\.tsx$|loading\.tsx$|icons\.tsx$)/
+const PRIMITIVE_HOMES = /src[\\/]components[\\/](?:ui[\\/]|state\.tsx$|loading\.tsx$|icons\.tsx$)/
 
 const primitives = {
   meta: {

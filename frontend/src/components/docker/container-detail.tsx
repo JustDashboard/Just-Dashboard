@@ -63,7 +63,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
  *
  * The tabs stayed *in* the page. They switch between views of one thing, which
  * is what the underlined tab is for; the route-level strip was retired in
- * 0.6.7 and this is not the reason to bring it back (`shell-design.md`). What
+ * 0.6.7 and this is not the reason to bring it back (`shell.md`). What
  * the panel took as a `focusTab` prop is `?tab=` now — the same job, and it
  * survives a reload and a shared link.
  *

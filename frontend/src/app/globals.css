@@ -774,7 +774,7 @@
 /*
  * A page arrives from the top. What is written under a block that still waits
  * for its first answer is not drawn until that answer lands (`Hold` in
- * components/state.tsx leaves the marker), so a block that lands taller than
+ * components/loading.tsx leaves the marker), so a block that lands taller than
  * its skeleton, or one that was not there at all, has nothing under it to
  * push: things appear, and nothing already on the page moves. The first line
  * is for what follows the marker where it stands; the second is for the blocks

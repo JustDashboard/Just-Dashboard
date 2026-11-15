@@ -7,7 +7,7 @@
     "build": "node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next build",
     "start": "node scripts/serve-standalone.mjs",
     "lint": "eslint",
-    "test": "bun test src",
+    "test": "bun test src scripts",
     "test:browser": "playwright test",
     "test:browser:install": "playwright install chromium"
   },

@@ -106,7 +106,7 @@ export function PageContext({
             className,
           )}
         >
-          {back && <div className="text-body text-muted-foreground">{back}</div>}
+          {back && <div className="flex items-center text-body text-muted-foreground">{back}</div>}
           {actions && (
             <div className={cn("flex max-w-full flex-wrap items-center gap-2", back && "ml-auto")}>
               {actions}

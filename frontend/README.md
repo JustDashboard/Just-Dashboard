@@ -43,9 +43,11 @@ source change, or the specs test the old build. The whole browser suite is never
 - [`../AGENTS.md`](../AGENTS.md): the workflow, the required checks and the code style.
 - [`../docs/internal/reference/finding-things.md`](../docs/internal/reference/finding-things.md):
   the route, components, handler and spec that belong to a given page.
+- [`../docs/internal/frontend/standard.md`](../docs/internal/frontend/standard.md): the operator's
+  decisions for the frontend, and what holds each one.
 - [`../docs/internal/frontend/design-system.md`](../docs/internal/frontend/design-system.md): the
   design system's rules, and the passes a page redesign runs.
-- [`../docs/internal/frontend/shell-design.md`](../docs/internal/frontend/shell-design.md),
-  [`feature-map.md`](../docs/internal/frontend/feature-map.md) and
-  [`data-theming.md`](../docs/internal/frontend/data-theming.md): the shell, each route area, and
-  the API and socket clients.
+- [`../docs/internal/frontend/shell.md`](../docs/internal/frontend/shell.md),
+  [`features/README.md`](../docs/internal/frontend/features/README.md) and
+  [`patterns/data-flow.md`](../docs/internal/frontend/patterns/data-flow.md): the shell, each route
+  area, and the API and socket clients.
