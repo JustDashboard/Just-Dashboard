@@ -4,6 +4,7 @@ import * as React from "react"
 import { Slider as SliderPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { hitAreaClasses } from "@/components/ui/button"
 
 function Slider({
   className,
@@ -51,7 +52,12 @@ function Slider({
           data-slot="slider-thumb"
           key={index}
           aria-label={ariaLabel}
-          className="block size-4 shrink-0 rounded-full border border-primary bg-white ring-ring/50 focus-ring transition-[color,box-shadow] hover:ring-4 disabled:pointer-events-none disabled:opacity-50"
+          // The 16px thumb keeps the press box every small control has: 24px
+          // under a mouse, 44px under a finger.
+          className={cn(
+            "block size-4 shrink-0 rounded-full border border-primary bg-primary ring-ring/50 focus-ring transition-[color,box-shadow] hover:ring-4 disabled:pointer-events-none disabled:opacity-50",
+            hitAreaClasses,
+          )}
         />
       ))}
     </SliderPrimitive.Root>

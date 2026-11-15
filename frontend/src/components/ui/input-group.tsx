@@ -45,7 +45,8 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
         // the button below and whatever a caller puts in an addon — draw
         // theirs inset: the group says "focus is in this field", the inset
         // ring says which control has it.
-        "group/input-group flex h-11 w-full min-w-0 items-stretch overflow-hidden rounded-md border border-input bg-transparent shadow-xs focus-ring-within transition-colors sm:h-9 dark:bg-input/30",
+        // No shadow, and the control edge, for the reasons `Input` gives.
+        "group/input-group flex h-11 w-full min-w-0 items-stretch overflow-hidden rounded-md border border-[color:var(--control-edge,var(--input))] bg-input/30 focus-ring-within transition-colors sm:h-9 pointer-coarse:h-11",
         "has-[[data-slot=input-group-control][aria-invalid=true]]:border-destructive",
         className,
       )}
@@ -108,15 +109,15 @@ function InputGroupAddon({
 
 /**
  * The field. Borderless, groundless and ringless — the group draws all three —
- * and it keeps `Input`'s 16px-on-narrow size, because the iOS zoom that rule
- * exists for does not care which element owns the border.
+ * and it keeps `Input`'s 16px size under a finger and below `sm`, because the
+ * iOS zoom that rule exists for does not care which element owns the border.
  */
 function InputGroupInput({ className, ...props }: React.ComponentProps<"input">) {
   return (
     <Input
       data-slot="input-group-control"
       className={cn(
-        "h-full min-w-0 flex-1 rounded-none border-0 bg-transparent shadow-none outline-none sm:h-full dark:bg-transparent",
+        "h-full min-w-0 flex-1 rounded-none border-0 bg-transparent outline-none sm:h-full pointer-coarse:h-full",
         className,
       )}
       {...props}
