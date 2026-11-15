@@ -1,0 +1,24 @@
+import { ChevronRight } from "@/components/icons"
+import { cn } from "@/lib/utils"
+
+const HINT = "text-xs text-muted-foreground/60"
+const GLYPH = "size-3 shrink-0 text-muted-foreground/50"
+
+export function Demo({ open }: { open: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground/70">quiet</span>
+      <span className={cn("truncate", open && "text-muted-foreground/40")}>faint</span>
+      <input className="placeholder:text-muted-foreground/60" />
+      <span className="hover:text-muted-foreground/45">hover</span>
+      <ChevronRight className="size-3 text-muted-foreground/60" />
+      <svg className="text-muted-foreground/40" />
+      <span className="[&_svg]:text-muted-foreground/60">glyphs</span>
+      <span className="text-foreground/85">near</span>
+      <span className="text-foreground/75">less</span>
+      <span className="text-muted-foreground/80">tag</span>
+      <a className="active:text-primary/80">link</a>
+      <span className={`${HINT} ${GLYPH}`}>both</span>
+    </div>
+  )
+}

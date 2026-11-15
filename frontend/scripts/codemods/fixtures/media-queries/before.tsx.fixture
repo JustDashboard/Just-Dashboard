@@ -1,0 +1,20 @@
+"use client"
+
+import { useIsMobile, useMediaQuery } from "@/hooks/use-mobile"
+
+const WIDE = "(min-width: 1600px)"
+
+export function Demo() {
+  const lg = useMediaQuery("(min-width: 1024px)")
+  const phone = useMediaQuery("(max-width: 639px)")
+  const odd = useMediaQuery("(min-width: 1100px)")
+  const wide = useMediaQuery(WIDE)
+  const mobile = useIsMobile()
+  const list = window.matchMedia("(min-width: 1280px)")
+  return (
+    <div
+      className="max-[1023px]:hidden min-[1280px]:grid min-[1400px]:flex"
+      data-x={String(lg && phone && odd && wide && mobile && list)}
+    />
+  )
+}
