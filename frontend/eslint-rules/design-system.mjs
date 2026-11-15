@@ -52,7 +52,7 @@ const BANNED = [
     id: "type-scale",
     re: /\btext-\[[0-9.]+(px|rem)\]/,
     message:
-      "Off the type scale. Use text-micro (10px), text-hint (11px), text-xs (12px), text-body (13px), text-sm (14px) or text-title (15px). Thirteen sizes is what typing them by hand produced.",
+      "Off the type scale. Use text-micro (10px), text-hint (11px), text-xs (12px), text-body (13px), text-sm (14px) or text-title (15px), each with its own line height. Thirteen sizes is what typing them by hand produced.",
   },
   {
     id: "tone-tint",
@@ -68,8 +68,9 @@ const BANNED = [
   },
   {
     id: "radius-scale",
-    re: /\brounded-(?:xs|2xl|3xl|4xl)\b/,
-    message: "Off the radius ladder. Use rounded-sm, rounded-md, rounded-lg or rounded-xl.",
+    re: /\brounded-(?:2xl|3xl|4xl)\b/,
+    message:
+      "Off the radius ladder. Use rounded-xs (swatch), rounded-sm (mark), rounded-md (control), rounded-lg (well, floating surface), rounded-xl (block) or rounded-tile-md/lg (logo tile).",
   },
   {
     id: "focus-ring",
@@ -190,21 +191,30 @@ const latencyWords = {
  * fixed strip for a whole (`SplitBar`). Insights left it first, the Databases
  * pages next, and the deploy, proxy, security, network and Files lists last.
  * It stays for the one place where the bars are the picture the reader asked
- * for, the Query page's Chart tab. (The small size bars inside table cells,
- * the other shape the operator kept, are their own few lines and never were a
- * `BarList`.) A new ranked list is a `RankList`.
+ * for, the Query page's Chart tab, and it lives beside that tab
+ * (`components/database/query/bar-list.tsx`) since the 0.9.0 file moves. (The
+ * small size bars inside table cells, the other shape the operator kept, are
+ * their own few lines and never were a `BarList`.) A new ranked list is a
+ * `RankList`.
+ *
+ * Any import that ends in `bar-list` is the one, whichever folder it is
+ * written from, so a relative `./bar-list` is refused as an alias is.
  */
 const BAR_LIST_HOMES =
-  /src[\\/]components[\\/](?:bar-list\.tsx|database[\\/]query[\\/]chart-view\.tsx)$/
+  /src[\\/]components[\\/]database[\\/]query[\\/](?:bar-list|chart-view)\.tsx$/
+const BAR_LIST_IMPORT = /(?:^|\/)bar-list(?:\.tsx?)?$/
 
 /**
  * The 0.6.1 design-system audit asked for one checkbox and one spinner, and
  * each came back in a newer file: a native `<input type="checkbox">` beside
  * the Radix one in the same workspace, and `LoaderCircle` spun by hand where
  * `Spinner` (components/state.tsx) is the spinner. Both are refused outside
- * the primitives that draw them.
+ * the primitives that draw them. The spinner's home is `components/loading.tsx`,
+ * which the 0.9.0 file moves split out of `state.tsx`; both stay homes, since
+ * `state.tsx` still draws the states a spinner sits in.
  */
-const PRIMITIVE_HOMES = /src[\\/]components[\\/](?:ui[\\/]|state\.tsx$|icons\.tsx$)/
+const PRIMITIVE_HOMES =
+  /src[\\/]components[\\/](?:ui[\\/]|state\.tsx$|loading\.tsx$|icons\.tsx$)/
 
 const primitives = {
   meta: {
@@ -222,7 +232,7 @@ const primitives = {
           context.report({
             node,
             message:
-              "[spinner] Use Spinner from components/state.tsx. A hand-spun LoaderCircle is the spinner drawn a second way.",
+              "[spinner] Use Spinner from components/loading.tsx. A hand-spun LoaderCircle is the spinner drawn a second way.",
           })
           return
         }
@@ -239,7 +249,8 @@ const primitives = {
         }
       },
       ImportDeclaration(node) {
-        if (node.source.value !== "@/components/bar-list") return
+        if (typeof node.source.value !== "string" || !BAR_LIST_IMPORT.test(node.source.value))
+          return
         if (BAR_LIST_HOMES.test(filename)) return
         context.report({
           node,
