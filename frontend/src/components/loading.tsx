@@ -32,7 +32,11 @@ function Said({ label }: { label: string }) {
 }
 
 /**
- * Rows of skeleton. `hold` keeps what is written under them, and the blocks of
+ * Rows of skeleton: the fallback for a list whose shape is not known yet. A
+ * list of `Row`s waits as `RowsSkeleton` (`row-list.tsx`), a `ChoiceList` as
+ * `ChoiceListSkeleton` (`choice-row.tsx`).
+ *
+ * `hold` keeps what is written under them, and the blocks of
  * the page under the one they are in, off the page while they stand (`Hold`):
  * for a block with blocks under it whose answer is not the skeleton's height.
  *
