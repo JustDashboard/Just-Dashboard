@@ -28,7 +28,8 @@ describe("lineReading", () => {
       words: "12 open of 100",
       rest: "2 active · 0 waiting on a lock",
       values: [8, 10, 12],
-      max: undefined,
+      // The line is drawn against the same ceiling its words name.
+      max: 100,
     })
   })
 

@@ -402,6 +402,7 @@ export function Backups() {
                 <Button
                   ref={command}
                   size="sm"
+                  variant="outline"
                   disabled={!idle || !answering || !data}
                   onClick={() => setAsking({ kind: "take" })}
                 >

@@ -1,7 +1,7 @@
 "use client"
 
 import { useConfirm } from "@/components/confirm-dialog"
-import { generatePassword } from "@/components/database/connect/rules"
+import { generatePassword } from "@/lib/password"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { useAccessFilterFrom } from "@/components/database/ops/access-filter"
@@ -125,7 +125,7 @@ export function RedisAccess() {
               <Stale poll={acl} />
               {readOnly && <ProtectedTag />}
               {mayEdit && data?.supported && (
-                <Button size="sm" onClick={() => setCreating(true)}>
+                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
                   <UserPlus />
                   New user
                 </Button>

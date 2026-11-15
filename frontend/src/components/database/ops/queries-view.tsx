@@ -230,7 +230,8 @@ export function DatabaseQueries({
       <div className="flex min-h-9 shrink-0 items-stretch border-b border-hairline">
         <ChipStrip
           aria-label="Which statements"
-          className="scroll-affordance min-w-0 flex-1 px-2 py-1 max-sm:mx-0 max-sm:my-0 max-sm:px-2 max-sm:py-1 sm:flex-nowrap sm:overflow-x-auto"
+          bleed={false}
+          className="scroll-affordance min-w-0 flex-1 px-2 py-1 sm:flex-nowrap sm:overflow-x-auto"
         >
           <FilterChip selected={shown === "latest"} onClick={() => setReading("latest")}>
             Latest

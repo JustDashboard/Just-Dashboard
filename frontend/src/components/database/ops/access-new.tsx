@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { generatePassword } from "@/components/database/connect/rules"
+import { generatePassword } from "@/lib/password"
 import {
   ATTRIBUTES,
   accountDsn,

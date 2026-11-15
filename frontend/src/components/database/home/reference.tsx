@@ -627,7 +627,7 @@ export function BackupsLine({
       actions={
         <>
           {data && !job && answering && can("service.control") && (
-            <Button size="xs" variant="outline" pending={starting} onClick={start}>
+            <Button size="sm" variant="outline" pending={starting} onClick={start}>
               <Archive />
               Back up now
             </Button>
@@ -747,7 +747,7 @@ export function ServerDatabases() {
       stale={staleOf(list)}
       actions={
         adds && (
-          <Button ref={create} size="xs" variant="ghost" onClick={() => setCreating(true)}>
+          <Button ref={create} size="sm" variant="outline" onClick={() => setCreating(true)}>
             <Plus />
             New database
           </Button>

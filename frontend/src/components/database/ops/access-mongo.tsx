@@ -1,7 +1,7 @@
 "use client"
 
 import { useConfirm } from "@/components/confirm-dialog"
-import { generatePassword } from "@/components/database/connect/rules"
+import { generatePassword } from "@/lib/password"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import {
@@ -146,7 +146,7 @@ export function MongoAccess() {
             <Stale poll={users} />
             {readOnly && <ProtectedTag />}
             {mayEdit && view === "users" && (
-              <Button size="sm" onClick={() => setCreating(true)}>
+              <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
                 <UserPlus />
                 New user
               </Button>

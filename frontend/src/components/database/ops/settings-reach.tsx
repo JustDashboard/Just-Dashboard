@@ -381,7 +381,6 @@ export function ReachabilitySection() {
         <>
           <Field label="Reachable from" info={what}>
             <Segments
-              fill
               label="Where it is reachable from"
               value={draft.choice}
               disabled={busy}

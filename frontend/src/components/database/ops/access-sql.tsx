@@ -207,7 +207,7 @@ export function SqlAccess() {
                 containerClassName="w-40 sm:w-52"
               />
               {mayEdit && data?.supported && (
-                <Button size="sm" onClick={() => setCreating(true)}>
+                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
                   <UserPlus />
                   New account
                 </Button>

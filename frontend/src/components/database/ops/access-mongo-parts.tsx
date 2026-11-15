@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState } from "react"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { generatePassword } from "@/components/database/connect/rules"
+import { generatePassword } from "@/lib/password"
 import { read } from "@/components/database/home/read"
 import { accountDsn, roleWord, sameRole } from "@/components/database/ops/access-model"
 import {
