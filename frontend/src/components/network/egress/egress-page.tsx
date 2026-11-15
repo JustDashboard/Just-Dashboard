@@ -44,13 +44,13 @@ import {
   EGRESS_TABS,
   egressCarrying,
   egressHref,
-  egressNameOf,
   egressSibling,
   egressSimulationFact,
   findEgressGroup,
   type EgressTab,
 } from "@/components/network/egress/reading"
 import { useEgressLinks, useEgressView } from "@/components/network/egress/use-egress"
+import { decodeSegment } from "@/lib/route-params"
 
 const BACK = (
   <Link
@@ -84,7 +84,7 @@ export function EgressGroupPage() {
   const params = useParams<{ name: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = egressNameOf(params.name)
+  const name = decodeSegment(params.name)
   const requested = search.get("tab") ?? "members"
   const [chosen, setChosen] = useState(requested)
   const tab: EgressTab = (EGRESS_TABS as readonly string[]).includes(chosen)

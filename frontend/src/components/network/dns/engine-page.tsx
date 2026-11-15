@@ -53,7 +53,6 @@ import {
   ENGINE_TABS,
   ENGINE_TAB_NAME,
   engineHref,
-  engineIdOf,
   engineSibling,
   engineTabOf,
   type EngineTab,
@@ -65,6 +64,7 @@ import { DNSEngineReadings, DNSServiceChangeForm } from "./service-inventory"
 import { DNSReviewStatus } from "./service-review"
 import { ENGINE_PRODUCT, RetainedReview, useDNSAttempts } from "./services"
 import { dnsHref } from "./views"
+import { decodeSegment } from "@/lib/route-params"
 
 const SERVICES = dnsHref("services")
 
@@ -107,7 +107,7 @@ type Step = { disabled: boolean; run: () => void }
 export function DNSEnginePage() {
   const params = useParams<{ id: string }>()
   const { can, status } = useAuth()
-  const id = engineIdOf(params.id)
+  const id = decodeSegment(params.id)
   if (!can("system.admin") || !status?.user)
     return (
       <Page>

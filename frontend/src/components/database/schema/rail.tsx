@@ -30,7 +30,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { compactCount, grouped } from "@/components/database/data/view"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
@@ -42,6 +41,7 @@ import {
 } from "@/components/database/schema/address"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
 import type { DbCatalog, DbCatalogSchema, SchemaObject } from "@/components/database/schema/types"
+import { compactCount, grouped } from "@/lib/format"
 
 /** How many rows of a branch are drawn before the reader asks for more. */
 const GROUP_STEP = 300

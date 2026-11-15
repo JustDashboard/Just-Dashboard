@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { CloudUpload } from "@/components/icons"
 import { postForm } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DbImportFormat } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -58,7 +58,6 @@ import type {
   DbTableDetail,
 } from "@/components/database/data/types"
 import { uploadForm } from "@/components/database/data/upload"
-import { grouped } from "@/components/database/data/view"
 
 /** How much of a file a dry run is sent: the server reads its first thousand rows and no more. */
 const SAMPLE_BYTES = 1 << 20

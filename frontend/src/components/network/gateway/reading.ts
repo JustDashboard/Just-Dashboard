@@ -10,6 +10,7 @@ import type {
 } from "@/lib/types"
 import type { Tone } from "@/components/tone"
 import { portProduct } from "@/components/product-logo"
+import { compactCount } from "@/lib/format"
 
 /**
  * What a forward or a NAT entry says about itself, as the words and the
@@ -170,8 +171,9 @@ export function ownerOf(owner: string) {
 }
 
 /** A counter as a short figure: 1.2k, 4.8M. Under a thousand it is the number. */
+/** @deprecated use compactCount from lib/format */
 export function compact(n: number) {
-  return Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n)
+  return compactCount(n)
 }
 
 /**

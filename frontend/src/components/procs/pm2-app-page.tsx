@@ -59,6 +59,7 @@ import {
   savedDrift,
   type PM2App,
 } from "@/components/procs/pm2-shared"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["overview", "instances", "logs", "environment", "control"] as const
 type Tab = (typeof TABS)[number]
@@ -108,7 +109,7 @@ export function PM2AppPage() {
   const params = useParams<{ app: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decodeName(params.app)
+  const name = decodeSegment(params.app)
   const account = search.get("account") || undefined
   const worker = search.get("worker")
   const requested = search.get("tab")
@@ -231,16 +232,6 @@ export function PM2AppPage() {
       </Page>
     </Workspace>
   )
-}
-
-/** The route's segment as an application's name. */
-function decodeName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
 }
 
 /**

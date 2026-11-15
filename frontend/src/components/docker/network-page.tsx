@@ -72,6 +72,7 @@ import {
   shelfOf,
   type MemberReading,
 } from "@/components/docker/networks"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["overview", "members", "configuration"] as const
 type Tab = (typeof TABS)[number]
@@ -112,7 +113,7 @@ const BACK = (
  */
 export function NetworkPage() {
   const params = useParams<{ name: string }>()
-  const key = decode(params.name)
+  const key = decodeSegment(params.name)
   const search = useSearchParams()
   const router = useRouter()
   const requested = search.get("tab")
@@ -240,14 +241,6 @@ export function NetworkPage() {
       </Page>
     </Workspace>
   )
-}
-
-function decode(value: string) {
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return value
-  }
 }
 
 type Step = { disabled: boolean; run: () => void }

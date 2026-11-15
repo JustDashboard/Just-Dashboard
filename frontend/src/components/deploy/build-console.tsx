@@ -29,12 +29,12 @@ import {
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { clock, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
-import { downloadText } from "@/lib/metrics/export"
 import { transcriptLine, type TranscriptLine } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
 import type { DeploymentRunState, DeploymentStep, DeploymentSummary } from "@/lib/types"
 import { StepTile } from "@/components/deploy/run-evidence"
 import { WireMark } from "@/components/wire/wire"
+import { saveText } from "@/lib/download"
 
 /**
  * One `step.log` event as the stream delivers it: a chunk, not a line, from
@@ -379,7 +379,7 @@ export function BuildConsole({
             label="Download build logs"
             disabled={!rows.length}
             onClick={() =>
-              downloadText(`deployment-${runNumber}.log`, `${plain(rows)}\n`, "text/plain")
+              saveText(`deployment-${runNumber}.log`, `${plain(rows)}\n`, "text/plain")
             }
           >
             <Download />

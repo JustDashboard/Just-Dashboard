@@ -3,12 +3,12 @@ import {
   dependency,
   filterPackages,
   packageHref,
-  packageName,
   packageScope,
   samePackage,
   softwareGroups,
   softwareKey,
 } from "./inventory"
+import { decodeSegment } from "@/lib/route-params"
 
 test("software shares sum the whole inventory and include a product's libraries", () => {
   const packages = [
@@ -70,11 +70,11 @@ test("a package's address holds any name a manager accepts", () => {
   expect(packageHref("g++-13", "depends")).toBe("/packages/g%2B%2B-13?tab=depends")
   expect(packageHref("libc6:amd64")).toBe("/packages/libc6%3Aamd64")
   for (const name of ["g++-13", "libstdc++6", "libc6:amd64", "python3.12", "foo@bar_baz"]) {
-    expect(packageName(packageHref(name).split("/").pop())).toBe(name)
+    expect(decodeSegment(packageHref(name).split("/").pop())).toBe(name)
     expect(new URL(packageHref(name, "log"), "http://x").pathname.split("/")).toHaveLength(3)
   }
-  expect(packageName("100%")).toBe("100%")
-  expect(packageName(undefined)).toBe("")
+  expect(decodeSegment("100%")).toBe("100%")
+  expect(decodeSegment(undefined)).toBe("")
 })
 
 test("a dependency is the package to open and what is asked of it", () => {

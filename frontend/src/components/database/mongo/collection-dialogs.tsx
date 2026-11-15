@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { errorMessage } from "@/lib/api"
-import { bytes, duration } from "@/lib/format"
+import { bytes, duration, grouped } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -27,7 +27,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { grouped } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
 import {
   createCollection,

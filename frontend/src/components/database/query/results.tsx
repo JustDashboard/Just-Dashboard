@@ -3,7 +3,6 @@
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
 import { useId, useRef, useState } from "react"
-import { useNow } from "@/hooks/use-now"
 import { ChevronDown, Download, Sparkles, StopCircle, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DbExportFormat } from "@/lib/types"
@@ -42,6 +41,8 @@ import {
   type RunStep,
   type TabRun,
 } from "@/components/database/query/run-model"
+import { grouped } from "@/lib/format"
+import { useElapsed } from "@/hooks/use-elapsed"
 
 export type ResultsViewId = "results" | "messages" | "plan" | "chart"
 
@@ -55,8 +56,6 @@ const VIEWS: { id: ResultsViewId; label: string }[] = [
 /** The row limits a run can ask for; the last is the most the server hands over. */
 export const ROW_LIMITS = [100, 500, 1000, 5000] as const
 export const MAX_ROWS = ROW_LIMITS[ROW_LIMITS.length - 1]
-
-const grouped = (n: number) => n.toLocaleString("en-US")
 
 /**
  * What a tab's statements came back with: their rows, what each one did, the
@@ -466,11 +465,6 @@ function Waiting({ run, onCancel }: { run: Run; onCancel: () => void }) {
       </div>
     </div>
   )
-}
-
-/** Milliseconds since `since`, ticking while mounted. */
-export function useElapsed(since: number): number {
-  return Math.max(0, useNow(250) - since)
 }
 
 /**

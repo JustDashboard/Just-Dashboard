@@ -14,6 +14,7 @@ import type { FleetTarget } from "@/lib/proxy/types-tls-fleet"
 import type { AddressKind, TLSOrigin, TLSScan } from "@/lib/proxy/types-tls"
 import { failureSteps, STARTTLS_NAMES } from "./report"
 import { targetLabel } from "@/lib/scan-target"
+import { timeLeftWords } from "@/lib/certificates"
 
 /** A node's verdict, which is its colour. `neutral` is a step that was not judged. */
 export type ChainTone = "success" | "warning" | "danger" | "neutral"
@@ -85,9 +86,8 @@ export function timeLeft(
   now: number,
 ) {
   if (cert.expired) return "expired"
-  if (cert.daysLeft >= 2) return `${cert.daysLeft} days left`
-  const hours = Math.floor((Date.parse(cert.notAfter ?? "") - now) / 3_600_000)
-  return hours >= 1 ? `${hours} ${hours === 1 ? "hour" : "hours"} left` : "under an hour left"
+  // Lower case, as the node's other hints are ("not for this name").
+  return `${timeLeftWords(cert, { form: "long", now })} left`
 }
 
 /** The visitor: this server, and what it asked for. */

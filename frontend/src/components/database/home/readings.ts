@@ -1,3 +1,4 @@
+import { compactCount } from "@/lib/format"
 /** One part of a figure that is a sum. */
 export type Part = {
   key: string
@@ -9,13 +10,13 @@ export type Part = {
   color: string
 }
 
-const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
-
-/** A count in the width of a tile: every digit up to ten thousand, "16.1M" past it. */
+/**
+ * A count in the width of a tile: every digit up to ten thousand, "16.1M" past it.
+ *
+ * @deprecated use `compactCount(value, { exactBelow: 10_000 })` from lib/format.
+ */
 export function compact(value: number): string {
-  return Math.abs(value) < 10_000
-    ? Math.round(value).toLocaleString("en-US")
-    : COMPACT.format(value)
+  return compactCount(value, { exactBelow: 10_000 })
 }
 
 /** A rate a second: one decimal while it is small enough to need it. */
@@ -25,15 +26,5 @@ export function perSecond(value: number): string {
   return compact(value)
 }
 
-/**
- * How long ago an instant was, against the page's newest reading rather than
- * the wall clock, in the one unit a tile's figure has room for: an age is
- * read at a glance, and "3h 10s ago" is two figures where one was asked for.
- */
-export function ago(at: number, now: number): string {
-  const seconds = (now - at) / 1000
-  if (seconds < 45) return "just now"
-  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))}m ago`
-  if (seconds < 48 * 3600) return `${Math.floor(seconds / 3600)}h ago`
-  return `${Math.floor(seconds / 86_400)}d ago`
-}
+/** @deprecated use `ago` from lib/format, the one "how long ago" for an age held as a number. */
+export { ago } from "@/lib/format"

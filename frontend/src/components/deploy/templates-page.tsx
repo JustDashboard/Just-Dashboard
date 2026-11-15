@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import { CloudUpload, Download, Plus, Rocket, Trash } from "@/components/icons"
 import { ApiError, del, get, getText, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
-import { downloadText } from "@/lib/metrics/export"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -46,6 +45,7 @@ import {
   templateRuns,
   templateUse,
 } from "@/components/deploy/templates"
+import { saveText } from "@/lib/download"
 
 /**
  * Templates: the catalogue's own half, the templates added on this dashboard,
@@ -82,7 +82,7 @@ export function TemplatesPage() {
   const exportTemplate = async (template: UserTemplate) => {
     try {
       const text = await getText(`/deploy/templates/${encodeURIComponent(template.id)}/export`)
-      downloadText(templateFilename(template.id), text, "application/json")
+      saveText(templateFilename(template.id), text, "application/json")
     } catch (err) {
       notify.error(`Could not export ${template.name}`, err)
     }

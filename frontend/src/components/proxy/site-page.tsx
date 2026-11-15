@@ -66,6 +66,7 @@ import {
   type SiteTab,
 } from "@/components/proxy/site-tabs"
 import { poolsOfSite } from "@/components/proxy/upstream-pools"
+import { decodeSegment } from "@/lib/route-params"
 
 /** The site's file read back: the form's fields, and where it logs. */
 type SiteRead = { spec: SiteSpec; managed: boolean; warnings: string[] }
@@ -95,16 +96,6 @@ const BACK = (
     <ArrowLeft className="size-3" /> Sites
   </Link>
 )
-
-/** The route's segment as a site name; decoding a decoded name twice is harmless. */
-function decodeName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
-}
 
 /**
  * The chips the rail can answer from the listing and the certificates. Not
@@ -146,7 +137,7 @@ export function SitePage() {
   const params = useParams<{ name: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decodeName(params.name)
+  const name = decodeSegment(params.name)
   const { can } = useAuth()
   const admin = can("system.admin")
   const asked = siteTab(search.get("tab"))

@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/search-input"
@@ -47,7 +47,6 @@ import type {
   DbTableDetail,
   Filter,
 } from "@/components/database/data/types"
-import { grouped } from "@/components/database/data/view"
 
 /** How many tables that point here are counted for one row. */
 const REFERENCES = 12

@@ -89,6 +89,7 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { decodeSegment } from "@/lib/route-params"
 
 /**
  * A stack, as the application it is rather than as five container rows.
@@ -138,7 +139,7 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
  */
 export function StackPage() {
   const { name } = useParams<{ name: string }>()
-  const stack = decodeURIComponent(name)
+  const stack = decodeSegment(name)
   const router = useRouter()
   const requested = useSearchParams().get("tab")
   const [remembered] = useViewState("docker.stack.tab", "services")

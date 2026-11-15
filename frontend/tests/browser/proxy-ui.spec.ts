@@ -349,7 +349,7 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
   // And the expired one is first, saying so.
   await expect(installed.first()).toContainText("old.example.com")
-  await expect(row.getByText("expired", { exact: true })).toBeVisible()
+  await expect(row.getByText("Expired", { exact: true })).toBeVisible()
 })
 
 test("a stream is drawn as the service its port is", async ({ page }) => {

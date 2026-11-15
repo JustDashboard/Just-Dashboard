@@ -16,7 +16,8 @@ import {
 import type { ChangeCounts, ChangeProblem } from "@/components/database/grid"
 import { changeSummary } from "@/components/database/data/rows"
 import type { BrowsePage } from "@/components/database/data/types"
-import { PAGE_SIZES, grouped, pageFacts, readableDuration } from "@/components/database/data/view"
+import { PAGE_SIZES, pageFacts, readableDuration } from "@/components/database/data/view"
+import { grouped } from "@/lib/format"
 
 /**
  * The foot of the grid while nothing is staged: how long the page took, which

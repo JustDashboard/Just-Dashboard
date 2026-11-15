@@ -58,6 +58,7 @@ import { StateTile, interfaceMark, toolGlyph } from "./diagnostic-marks"
 import { ItemRail } from "./item-rail"
 import { NetworkReadWarning } from "./read-warning"
 import { runHref } from "./saved-runs"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["overview", "facts"] as const
 type Tab = (typeof TABS)[number]
@@ -82,7 +83,7 @@ export function CapturePage() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const params = useParams<{ id: string }>()
-  const id = params.id ? decodeURIComponent(params.id) : ""
+  const id = decodeSegment(params.id)
   const search = useSearchParams()
   const router = useRouter()
   const requested = search.get("tab")

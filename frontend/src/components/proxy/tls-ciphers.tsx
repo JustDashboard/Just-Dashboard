@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { CrossCircle } from "@/components/icons"
 import { get } from "@/lib/api"
-import { duration, relativeTime } from "@/lib/format"
+import { duration } from "@/lib/format"
 import type { TLSScan } from "@/lib/proxy/types-tls"
 import type { DeepScan, VersionSuites } from "@/lib/proxy/types-tls-deep"
 import {
@@ -43,6 +43,7 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { useNow } from "@/hooks/use-now"
 import { Button } from "@/components/ui/button"
 import { siteSettingsHref } from "@/components/proxy/site-tabs"
+import { Ago } from "@/components/ago"
 
 /**
  * The TLS report's deep scan: what the quick report leaves out because it
@@ -231,7 +232,7 @@ function DeepReport({
           <PanelHeader title="Deep scan" actions={<TurnOff onClick={onTurnOff} />} />
           <PanelBody className="space-y-3">
             <p className="text-hint text-muted-foreground">
-              <CheckedWhen at={deep.checkedAt} /> · {deep.connections} connections to{" "}
+              <Ago at={deep.checkedAt} verb="Checked" /> · {deep.connections} connections to{" "}
               <span className="font-mono break-all">{deep.address}</span>
               {elsewhere && ", which is not this server"}
             </p>
@@ -246,12 +247,6 @@ function DeepReport({
       </div>
     </div>
   )
-}
-
-/** "Checked 3 minutes ago", kept true while the page stays open. */
-function CheckedWhen({ at }: { at: string }) {
-  useNow(30_000)
-  return <>Checked {relativeTime(at)}</>
 }
 
 const RATING_LABEL: Record<Rating, string> = {

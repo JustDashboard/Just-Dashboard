@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation"
 import { Download, Eye, Globe, LockClosed, LockOpen, Play } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
-import { csvCell, downloadText } from "@/lib/metrics/export"
+import { csvCell } from "@/lib/metrics/export"
 import { tlsReportHref, targetLabel } from "@/lib/scan-target"
 import { fleetFacts, fleetLife, fleetRank, gradeVerdict, type ChainTone } from "@/lib/tls/chain"
 import { notify } from "@/lib/toast"
@@ -35,6 +35,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import { TLSTools } from "@/components/proxy/request-tester"
 import { TLSReportPage } from "@/components/proxy/tls-report"
+import { saveText } from "@/lib/download"
 
 /**
  * The TLS page's views, kept in the address: ?view=fleet for every site and
@@ -209,7 +210,7 @@ function TLSFleetPage() {
         .map(csvCell)
         .join(","),
     )
-    downloadText("tls-fleet.csv", [header.join(","), ...lines].join("\n") + "\n")
+    saveText("tls-fleet.csv", [header.join(","), ...lines].join("\n") + "\n", "text/csv")
   }
 
   const toggle = (t: FleetTarget) =>

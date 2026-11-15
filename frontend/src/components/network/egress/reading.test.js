@@ -6,7 +6,6 @@ import {
   egressHref,
   egressMemberLine,
   egressMemberState,
-  egressNameOf,
   egressPolicyShort,
   egressRowLine,
   egressSibling,
@@ -14,6 +13,7 @@ import {
   egressTrafficLine,
   findEgressGroup,
 } from "./reading"
+import { decodeSegment } from "@/lib/route-params"
 
 const member = (fields) => ({
   id: 1,
@@ -54,8 +54,8 @@ test("a group's address holds its name, encoded, and the view past the first", (
   expect(egressHref("providers")).toBe("/network/egress/providers")
   expect(egressHref("vpn clients", "decisions")).toBe("/network/egress/vpn%20clients?tab=decisions")
   expect(egressHref("providers", "members")).toBe("/network/egress/providers")
-  expect(egressNameOf("vpn%20clients")).toBe("vpn clients")
-  expect(egressNameOf("100%")).toBe("100%")
+  expect(decodeSegment("vpn%20clients")).toBe("vpn clients")
+  expect(decodeSegment("100%")).toBe("100%")
 })
 
 test("a name opens its group whatever its case, as the server refuses both", () => {

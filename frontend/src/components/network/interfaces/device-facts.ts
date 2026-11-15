@@ -17,16 +17,6 @@ export function deviceHref(name: string, tab?: string) {
   return tab && tab !== "traffic" ? `${path}?tab=${encodeURIComponent(tab)}` : path
 }
 
-/** The `[name]` segment as the kernel spells the device. */
-export function deviceName(segment: string | undefined) {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
-}
-
 type Stateful = Pick<NetworkLink, "adminUp" | "carrier" | "state">
 
 /**

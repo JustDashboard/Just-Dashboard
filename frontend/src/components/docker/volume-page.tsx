@@ -68,6 +68,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { decodeSegment } from "@/lib/route-params"
 
 const BACK = (
   <Link
@@ -110,7 +111,7 @@ export function VolumePage() {
   const params = useParams<{ name: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decodeName(params.name)
+  const name = decodeSegment(params.name)
   const requested = search.get("tab")
   const [remembered, remember] = useViewState<string>("docker.volume.tab", VOLUME_TABS[0])
   const [chosen, setChosen] = useState<string>(requested ?? remembered)
@@ -235,16 +236,6 @@ export function VolumePage() {
       </Page>
     </Workspace>
   )
-}
-
-/** The route's segment as a volume's name; a name cannot hold `%`, so decoding twice is harmless. */
-function decodeName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
 }
 
 /**

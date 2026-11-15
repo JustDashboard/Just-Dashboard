@@ -128,16 +128,6 @@ export function packageHref(name: string, tab?: string) {
   return tab && tab !== "overview" ? `${path}?tab=${encodeURIComponent(tab)}` : path
 }
 
-/** The route's segment as a package name; a name cannot hold `%`, so decoding twice is harmless. */
-export function packageName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
-}
-
 /**
  * A dependency as the manager prints it, `libc6 (>= 2.34)` or
  * `debconf (>= 0.5) | debconf-2.0`, as the package to open and what is asked

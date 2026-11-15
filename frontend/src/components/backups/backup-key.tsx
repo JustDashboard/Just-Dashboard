@@ -4,7 +4,6 @@ import { useState } from "react"
 import { Key } from "@/components/icons"
 import { get, post, postFile } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
-import { downloadText } from "@/lib/metrics/export"
 import { notify } from "@/lib/toast"
 import type { BackupArchiveKey } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -21,6 +20,7 @@ import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { keyReach } from "@/components/backups/encryption"
+import { saveText } from "@/lib/download"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
 
@@ -87,7 +87,7 @@ export function BackupKeyPanel({
       ),
       action: async () => {
         const file = await postFile("/backups/key/export", {})
-        downloadText(file.filename, await file.blob.text(), "text/plain")
+        saveText(file.filename, await file.blob.text(), "text/plain")
         notify.success("Backup key exported", {
           description: `Saved as ${file.filename}. The file says how to open an archive with it.`,
         })

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { RefreshClockwise } from "@/components/icons"
-import { relativeTime, timestamp } from "@/lib/format"
+import { grouped, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { usePoll, type PollState } from "@/hooks/use-poll"
@@ -59,8 +59,6 @@ const LEVEL_HINT: Record<MongoProfilerLevel, string> = {
 /** How often the list is read while the profiler is recording, and while it is off. */
 const RECORDING_MS = 4000
 const IDLE_MS = 20_000
-
-const grouped = (n: number) => n.toLocaleString("en-US")
 
 function took(millis: number): string {
   if (millis >= 60_000) return `${(millis / 60_000).toFixed(1)} min`

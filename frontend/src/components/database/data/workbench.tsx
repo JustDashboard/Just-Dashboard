@@ -100,10 +100,10 @@ import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZES,
   gridSort,
-  grouped,
   type TableView,
   type ViewState,
 } from "@/components/database/data/view"
+import { grouped } from "@/lib/format"
 
 const VIEWS: { key: TableView; label: string }[] = [
   { key: "data", label: "Data" },

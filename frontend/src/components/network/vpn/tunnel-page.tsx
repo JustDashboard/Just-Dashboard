@@ -34,6 +34,7 @@ import { TunnelPicture } from "./tunnel-picture"
 import { TunnelRail } from "./tunnel-rail"
 import { railTunnels, tunnelHref, type TunnelTab } from "./tunnel-reading"
 import { TunnelEndpoint, TunnelHistory, TunnelTraffic } from "./tunnel-views"
+import { decodeSegment } from "@/lib/route-params"
 
 const BACK = (
   <Link
@@ -71,7 +72,7 @@ export function TunnelPage() {
   const router = useRouter()
   const { can } = useAuth()
   const admin = can("system.admin")
-  const name = decodeName(params.tunnel)
+  const name = decodeSegment(params.tunnel)
   const [tab, setChosen] = useState(search.get("tab") ?? "")
   const setTab = useCallback((next: string, first: string) => {
     setChosen(next)
@@ -232,16 +233,6 @@ export function TunnelPage() {
       </Page>
     </Workspace>
   )
-}
-
-/** The route's segment as a tunnel name. */
-function decodeName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
 }
 
 type View = { key: TunnelTab; label: string; count?: number }
