@@ -101,7 +101,7 @@ test("it opens on its identity line and its picture, not on tiles", async ({ pag
     "15,654 networks in 3 lists · 3.1 MB dropped since load",
   )
   await expect(section(page, "limits")).toContainText(
-    /2 in force · 147\.5 KB refused since load · 12\.5K packets since/,
+    /2 in force · 147\.5 KB refused since load · 12\.5k packets since/,
   )
 })
 
