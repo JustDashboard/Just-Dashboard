@@ -273,203 +273,207 @@ function Engine({ account, id }: { account: number; id: string }) {
   const changes = history.data ?? []
 
   return (
-    <DetailPage
-      name="DNS engine"
-      what="engine"
-      stateKey="network.dns.engine"
-      refresh={refresh}
-      steps={{ previous, next }}
-      rail={
-        <EngineRail
-          engines={list}
-          current={id}
-          tab={tab}
-          loading={!engines.data && !engines.error}
-          error={!engines.data ? engines.error : undefined}
-          onRetry={engines.refresh}
-        />
-      }
-      back={BACK}
-      title={connection?.name ?? "DNS engine"}
-      actions={
-        <IconAction label="Refresh native reading" onClick={refresh}>
-          <RefreshClockwise />
-        </IconAction>
-      }
-      identity={
-        <>
-          {!gone && (
-            <Identity
-              view={view.data}
-              failed={Boolean(!view.data && view.error)}
-              command={
-                // On Changes the form is the page: the command that leads to it steps aside.
-                connection?.management &&
-                tab !== "changes" && (
-                  <Button size="sm" onClick={() => show("changes")}>
-                    Review a change
-                  </Button>
-                )
+    // The engine's whole page, rail and line included, as its specs find it;
+    // a box of no layout of its own.
+    <div data-slot="dns-engine" className="contents">
+      <DetailPage
+        name="DNS engine"
+        what="engine"
+        stateKey="network.dns.engine"
+        refresh={refresh}
+        steps={{ previous, next }}
+        rail={
+          <EngineRail
+            engines={list}
+            current={id}
+            tab={tab}
+            loading={!engines.data && !engines.error}
+            error={!engines.data ? engines.error : undefined}
+            onRetry={engines.refresh}
+          />
+        }
+        back={BACK}
+        title={connection?.name ?? "DNS engine"}
+        actions={
+          <IconAction label="Refresh native reading" onClick={refresh}>
+            <RefreshClockwise />
+          </IconAction>
+        }
+        identity={
+          <>
+            {!gone && (
+              <Identity
+                view={view.data}
+                failed={Boolean(!view.data && view.error)}
+                command={
+                  // On Changes the form is the page: the command that leads to it steps aside.
+                  connection?.management &&
+                  tab !== "changes" && (
+                    <Button size="sm" onClick={() => show("changes")}>
+                      Review a change
+                    </Button>
+                  )
+                }
+                menu={verbs.length > 0 && <VerbMenu verbs={verbs} label="Engine actions" />}
+              />
+            )}
+            {error && (
+              <Notice tone="warning" title="Connection needs review" live="alert">
+                {error}
+              </Notice>
+            )}
+            {view.data && (!fresh || view.data.state !== "available" || view.data.error) && (
+              <Notice
+                tone="warning"
+                live="status"
+                title={!fresh ? "Last native reading retained" : "Native service needs review"}
+              >
+                {view.data.error && <p>{view.data.error}</p>}
+                <p>
+                  {!fresh
+                    ? "The refresh failed. The prior inventory remains visible; native changes are blocked."
+                    : `Native state: ${view.data.state}. A returned response does not establish verified native success.`}
+                </p>
+              </Notice>
+            )}
+          </>
+        }
+      >
+        <div className="flex min-w-0 flex-col gap-8">
+          {gone ? (
+            <EmptyState
+              icon={Globe}
+              title="No DNS engine is connected under that address"
+              description="It may have been disconnected."
+              action={
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={SERVICES}>DNS services</Link>
+                </Button>
               }
-              menu={verbs.length > 0 && <VerbMenu verbs={verbs} label="Engine actions" />}
+            />
+          ) : !view.data ? (
+            view.error ? (
+              // A first read that failed is safe to ask again.
+              <ErrorState error={view.error} onRetry={view.refresh} retryable />
+            ) : (
+              // The strip's place and the first view's, so the read lands under the line.
+              <div className="flex min-w-0 flex-col">
+                {/* A tab's height over the strip's hairline, as the strip is built. */}
+                <div data-slot="engine-strip" className="border-b border-hairline">
+                  <div className="h-10" />
+                </div>
+                <div className="pt-6">
+                  <LoadingRows rows={4} />
+                </div>
+              </div>
+            )
+          ) : (
+            <Views
+              view={view.data}
+              stale={!fresh}
+              tab={tab}
+              opened={opened}
+              show={show}
+              counts={{
+                queries: view.data.snapshot?.queries.length,
+                changes: history.data?.length,
+              }}
+            >
+              {{
+                changes: (
+                  <>
+                    {/* Kept in the document under a review, so a draft is there to come back to. */}
+                    <div hidden={Boolean(change)} className="flex min-w-0 flex-col gap-8">
+                      <DNSServiceChangeForm view={view.data} stale={!fresh} onReview={review} />
+                      <Panel plain aria-label="Retained native changes">
+                        <PanelHeader
+                          title="Retained changes"
+                          actions={
+                            history.data && (
+                              <span className="numeric text-hint text-muted-foreground">
+                                {changes.length}
+                              </span>
+                            )
+                          }
+                        />
+                        <PanelBody>
+                          {history.error && (
+                            <ErrorState error={history.error} onRetry={history.refresh} />
+                          )}
+                          {!history.data ? (
+                            !history.error && <LoadingRows rows={2} />
+                          ) : changes.length === 0 ? (
+                            <EmptyNote>
+                              No native change has been reviewed for this connection.
+                            </EmptyNote>
+                          ) : (
+                            <ChoiceList>
+                              {changes.map((one) => (
+                                <ChoiceRow
+                                  key={one.id}
+                                  title={dnsChangeName(one.request)}
+                                  verb={`Read DNS change ${one.id}`}
+                                  description={new Date(one.createdAt).toLocaleString()}
+                                  trailing={<DNSReviewStatus state={one.state} />}
+                                  onSelect={() => review(one)}
+                                />
+                              ))}
+                            </ChoiceList>
+                          )}
+                        </PanelBody>
+                      </Panel>
+                    </div>
+                    {change && (
+                      <div ref={reviewed} className="flex min-w-0 scroll-mt-6 flex-col gap-5">
+                        <button
+                          type="button"
+                          onClick={() => show("changes")}
+                          className="inline-flex items-center gap-1 self-start rounded-sm text-hint text-muted-foreground focus-ring hover:text-foreground hover:underline"
+                        >
+                          <ArrowLeft className="size-3" /> Changes
+                        </button>
+                        <RetainedReview
+                          key={`change:${change}`}
+                          screen={{
+                            kind: "change",
+                            id: change,
+                            initial: staged?.id === change ? staged : undefined,
+                          }}
+                          attempts={attempts}
+                          onListsRefresh={refresh}
+                        />
+                      </div>
+                    )}
+                  </>
+                ),
+              }}
+            </Views>
+          )}
+        </div>
+        <SidePanel
+          open={editing && Boolean(connection)}
+          onOpenChange={(open) => !open && setEditing(false)}
+          title={connection ? `Update ${connection.name}` : "Update connection"}
+          description="The connection's address, trust and credential."
+          width="xl"
+          initialFocus="body"
+        >
+          {editing && connection && (
+            <DNSServiceConnectionForm
+              key={connection.id}
+              connection={connection}
+              onCancel={() => setEditing(false)}
+              onConnected={() => {
+                setEditing(false)
+                refresh()
+                refreshEngines()
+              }}
             />
           )}
-          {error && (
-            <Notice tone="warning" title="Connection needs review" live="alert">
-              {error}
-            </Notice>
-          )}
-          {view.data && (!fresh || view.data.state !== "available" || view.data.error) && (
-            <Notice
-              tone="warning"
-              live="status"
-              title={!fresh ? "Last native reading retained" : "Native service needs review"}
-            >
-              {view.data.error && <p>{view.data.error}</p>}
-              <p>
-                {!fresh
-                  ? "The refresh failed. The prior inventory remains visible; native changes are blocked."
-                  : `Native state: ${view.data.state}. A returned response does not establish verified native success.`}
-              </p>
-            </Notice>
-          )}
-        </>
-      }
-    >
-      <div data-slot="dns-engine" className="flex min-w-0 flex-col gap-8">
-        {gone ? (
-          <EmptyState
-            icon={Globe}
-            title="No DNS engine is connected under that address"
-            description="It may have been disconnected."
-            action={
-              <Button size="sm" variant="outline" asChild>
-                <Link href={SERVICES}>DNS services</Link>
-              </Button>
-            }
-          />
-        ) : !view.data ? (
-          view.error ? (
-            // A first read that failed is safe to ask again.
-            <ErrorState error={view.error} onRetry={view.refresh} retryable />
-          ) : (
-            // The strip's place and the first view's, so the read lands under the line.
-            <div className="flex min-w-0 flex-col">
-              {/* A tab's height over the strip's hairline, as the strip is built. */}
-              <div data-slot="engine-strip" className="border-b border-hairline">
-                <div className="h-10" />
-              </div>
-              <div className="pt-6">
-                <LoadingRows rows={4} />
-              </div>
-            </div>
-          )
-        ) : (
-          <Views
-            view={view.data}
-            stale={!fresh}
-            tab={tab}
-            opened={opened}
-            show={show}
-            counts={{
-              queries: view.data.snapshot?.queries.length,
-              changes: history.data?.length,
-            }}
-          >
-            {{
-              changes: (
-                <>
-                  {/* Kept in the document under a review, so a draft is there to come back to. */}
-                  <div hidden={Boolean(change)} className="flex min-w-0 flex-col gap-8">
-                    <DNSServiceChangeForm view={view.data} stale={!fresh} onReview={review} />
-                    <Panel plain aria-label="Retained native changes">
-                      <PanelHeader
-                        title="Retained changes"
-                        actions={
-                          history.data && (
-                            <span className="numeric text-hint text-muted-foreground">
-                              {changes.length}
-                            </span>
-                          )
-                        }
-                      />
-                      <PanelBody>
-                        {history.error && (
-                          <ErrorState error={history.error} onRetry={history.refresh} />
-                        )}
-                        {!history.data ? (
-                          !history.error && <LoadingRows rows={2} />
-                        ) : changes.length === 0 ? (
-                          <EmptyNote>
-                            No native change has been reviewed for this connection.
-                          </EmptyNote>
-                        ) : (
-                          <ChoiceList>
-                            {changes.map((one) => (
-                              <ChoiceRow
-                                key={one.id}
-                                title={dnsChangeName(one.request)}
-                                verb={`Read DNS change ${one.id}`}
-                                description={new Date(one.createdAt).toLocaleString()}
-                                trailing={<DNSReviewStatus state={one.state} />}
-                                onSelect={() => review(one)}
-                              />
-                            ))}
-                          </ChoiceList>
-                        )}
-                      </PanelBody>
-                    </Panel>
-                  </div>
-                  {change && (
-                    <div ref={reviewed} className="flex min-w-0 scroll-mt-6 flex-col gap-5">
-                      <button
-                        type="button"
-                        onClick={() => show("changes")}
-                        className="inline-flex items-center gap-1 self-start rounded-sm text-hint text-muted-foreground focus-ring hover:text-foreground hover:underline"
-                      >
-                        <ArrowLeft className="size-3" /> Changes
-                      </button>
-                      <RetainedReview
-                        key={`change:${change}`}
-                        screen={{
-                          kind: "change",
-                          id: change,
-                          initial: staged?.id === change ? staged : undefined,
-                        }}
-                        attempts={attempts}
-                        onListsRefresh={refresh}
-                      />
-                    </div>
-                  )}
-                </>
-              ),
-            }}
-          </Views>
-        )}
-      </div>
-      <SidePanel
-        open={editing && Boolean(connection)}
-        onOpenChange={(open) => !open && setEditing(false)}
-        title={connection ? `Update ${connection.name}` : "Update connection"}
-        description="The connection's address, trust and credential."
-        width="xl"
-        initialFocus="body"
-      >
-        {editing && connection && (
-          <DNSServiceConnectionForm
-            key={connection.id}
-            connection={connection}
-            onCancel={() => setEditing(false)}
-            onConnected={() => {
-              setEditing(false)
-              refresh()
-              refreshEngines()
-            }}
-          />
-        )}
-      </SidePanel>
-      {dialog}
-    </DetailPage>
+        </SidePanel>
+        {dialog}
+      </DetailPage>
+    </div>
   )
 }
 

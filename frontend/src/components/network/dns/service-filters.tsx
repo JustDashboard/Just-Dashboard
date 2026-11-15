@@ -1,5 +1,6 @@
 "use client"
 
+import { PanelHeader } from "@/components/panel"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import {
@@ -32,17 +33,18 @@ function FilterSection({ title, value }: { title: string; value: DNSFilterSectio
   const configured = value.evidence.state === "configured"
   return (
     <section className="min-w-0 space-y-4" aria-label={title}>
-      <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline pb-3">
-        <h4 className="text-title font-semibold">{title}</h4>
-        {configured && (
-          <span
-            className="numeric text-2xl font-semibold"
-            aria-label={`${value.entries.length} ${title.toLowerCase()} entries`}
-          >
-            {value.entries.length}
-          </span>
-        )}
-      </div>
+      <PanelHeader
+        plain
+        level={3}
+        title={title}
+        count={
+          configured && (
+            <span aria-label={`${value.entries.length} ${title.toLowerCase()} entries`}>
+              {value.entries.length}
+            </span>
+          )
+        }
+      />
       <Reading label="Configured inventory" value={value.evidence} />
       <Reading label="Entry identity" value={value.identity} />
       {value.entries.length > 0 ? (
@@ -123,12 +125,15 @@ export function DNSServiceFilters({
   const inventory = filter.data?.inventory
   return (
     <section className="min-w-0 space-y-6" aria-label="Native DNS filter inventory">
-      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-3 border-b border-hairline pb-3">
-        <h3 className="text-base font-semibold">Native filter inventory</h3>
-        <Button variant="outline" onClick={filter.refresh} disabled={ownerStale}>
-          Read native filters
-        </Button>
-      </div>
+      <PanelHeader
+        plain
+        title="Filter inventory"
+        actions={
+          <Button size="sm" variant="outline" onClick={filter.refresh} disabled={ownerStale}>
+            Read native filters
+          </Button>
+        }
+      />
       {filter.error && (
         <ErrorState error={filter.error} onRetry={ownerStale ? undefined : filter.refresh} />
       )}

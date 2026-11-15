@@ -35,9 +35,7 @@ function configuredGroups(control: DNSServicePageControl) {
 /** The engine's page, opened from the Services list, on the view where a change is written. */
 async function openInventory(page: Page) {
   await page.getByRole("link", { name: "Inspect Fixture DNS", exact: true }).click()
-  await expect(
-    shown(page).getByRole("heading", { name: "Configured listeners", exact: true }),
-  ).toBeVisible()
+  await expect(shown(page).getByRole("heading", { name: "Listeners", exact: true })).toBeVisible()
   await page.getByRole("tab", { name: /^Changes/ }).click()
 }
 
