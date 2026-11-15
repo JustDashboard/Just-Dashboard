@@ -1,116 +1,52 @@
 import { cn } from "@/lib/utils"
+import {
+  DOT_TONE,
+  ICON_TONE,
+  TEXT_TONE,
+  VERDICT_TONE,
+  toneFor,
+  type DotTone,
+  type Verdict,
+} from "@/components/tone"
+
+// The vocabulary lives in `components/tone.ts`; these names stay importable
+// from here because four hundred files reach them through this one.
+export { DOT_COLOR, toneFor, type DotTone, type Verdict } from "@/components/tone"
 
 /**
- * What a status dot can be. A *state*, not a tone: `running` and `stopped` are
- * facts about a thing, and `warning`/`danger`/`notice` are readings of it. The
- * severe level takes the shared word from `components/tone.ts` so a component
- * handing a level to another component does not have to translate it.
+ * The ring a dot on a mark sits in, and the dot inside it, per size of mark:
+ * `sm` for a 28–32px tile (the 41 hand copies of this were all this one),
+ * `md` for a row's 36px tile, `lg` for an identity header's 48px one. The ring
+ * is the ground the mark sits on, so the dot reads as cut out of the tile's
+ * corner rather than stuck on it.
  */
-export type DotTone = "running" | "stopped" | "warning" | "danger" | "notice" | "unknown"
+const CORNER = {
+  sm: { ring: "size-2.5", dot: "size-1.5" },
+  md: { ring: "size-3", dot: "size-2" },
+  lg: { ring: "size-4", dot: "size-2" },
+} as const
 
-/** The dot's fill. */
-const DOT_TONE: Record<DotTone, string> = {
-  running: "bg-success",
-  stopped: "bg-muted-foreground",
-  warning: "bg-warning",
-  danger: "bg-destructive",
-  notice: "bg-muted-foreground",
-  unknown: "bg-muted-foreground",
-}
-
-/** The same fills as a colour, for something other than a dot drawn in the tone. */
-export const DOT_COLOR: Record<DotTone, string> = {
-  running: "var(--success)",
-  stopped: "var(--muted-foreground)",
-  warning: "var(--warning)",
-  danger: "var(--destructive)",
-  notice: "var(--muted-foreground)",
-  unknown: "var(--muted-foreground)",
-}
+export type CornerSize = keyof typeof CORNER
 
 /**
- * The label's colour. Only the two that need acting on take a hue — a column
- * of green "running" text is as hard to scan as a column with no signal at
- * all.
+ * The state as a dot: six pixels of colour and nothing else.
+ *
+ * `corner` places it on a mark's bottom-right, in a ring of the ground, the
+ * way a unit's or a container's tile carries its state: the mark is the
+ * positioned parent (`relative`). `label` says the state in words for a
+ * screen reader where the row does not already say it — the dirty dot on a
+ * view link, a map's system dot — and is left out where the word is beside
+ * it, which would say it twice.
  */
-const TEXT_TONE: Record<DotTone, string> = {
-  running: "text-foreground",
-  stopped: "text-muted-foreground",
-  warning: "text-warning",
-  danger: "text-destructive",
-  notice: "text-muted-foreground",
-  unknown: "text-muted-foreground",
-}
-
-/**
- * The icon's colour, where a caller passes one instead of the dot. It tracks
- * `TEXT_TONE` except for `running`: the label there is deliberately neutral
- * (a column of green "running" is noise), but a lone check or arrow icon
- * carries the whole signal and should read as good.
- */
-const ICON_TONE: Record<DotTone, string> = {
-  ...TEXT_TONE,
-  running: "text-success",
-}
-
-/** Maps the many state vocabularies (docker, systemd, pm2) onto one signal. */
-export function toneFor(state: string | undefined): DotTone {
-  switch (state?.toLowerCase()) {
-    case "running":
-    case "active":
-    case "online":
-    case "enabled":
-    case "success":
-    case "open":
-    case "connected":
-      return "running"
-    case "paused":
-    case "restarting":
-    case "activating":
-    case "deactivating":
-    case "launching":
-    case "stopping":
-    case "connecting":
-    case "reconnecting":
-      return "warning"
-    case "failed":
-    case "errored":
-    case "dead":
-    case "unreachable":
-      return "warning"
-    case "exited":
-    case "stopped":
-    case "inactive":
-    case "created":
-    case "closed":
-    case "disconnected":
-      return "stopped"
-    default:
-      return "unknown"
-  }
-}
-
-/**
- * A verdict, not a running state: `Posture.status` and the other assessments
- * rank a hardened or healthy "ok" up through notice, warning and critical.
- * `VERDICT_TONE` lets one indicator answer them without `toneFor`'s
- * state-string guessing, which has no `"critical"` case to guess right.
- */
-export type Verdict = "ok" | "notice" | "warning" | "critical"
-
-const VERDICT_TONE: Record<Verdict, DotTone> = {
-  ok: "running",
-  notice: "notice",
-  warning: "warning",
-  critical: "danger",
-}
-
 export function StatusDot({
   state,
   tone,
   live,
+  corner,
+  label,
   className,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"span">, "children"> & {
   state?: string
   tone?: DotTone
   /**
@@ -127,16 +63,50 @@ export function StatusDot({
    * saying it is would be the interface lying about how fresh its numbers are.
    */
   live?: boolean
-  className?: string
+  /** On a mark's bottom-right corner; `true` is the small mark's size. */
+  corner?: boolean | CornerSize
+  /** The state in words, for a screen reader, where the row does not say it. */
+  label?: string
 }) {
   const fill = DOT_TONE[tone ?? toneFor(state)]
-  if (!live) {
-    return <span className={cn("size-1.5 shrink-0 rounded-full", fill, className)} />
-  }
+  const size = corner ? CORNER[corner === true ? "sm" : corner] : undefined
+  const words = label ? <span className="sr-only">{label}</span> : null
+  // The dot alone is one element: most callers place it in a flex line that
+  // spaces its children, and a wrapper would be one more of them. It carries
+  // the slot itself unless something wraps it.
+  const bare = !size && !words && Object.keys(props).length === 0
+  const slot = bare ? "status-dot" : undefined
+  const sized = cn(size?.dot, !size && className)
+  const dot = !live ? (
+    <span
+      data-slot={slot}
+      aria-hidden
+      className={cn("size-1.5 shrink-0 rounded-full", fill, sized)}
+    />
+  ) : (
+    <span data-slot={slot} aria-hidden className={cn("relative flex size-1.5 shrink-0", sized)}>
+      <span className={cn("absolute inset-0 animate-breathe rounded-full", fill)} />
+      <span className={cn("relative size-full rounded-full", fill)} />
+    </span>
+  )
+  if (bare) return dot
   return (
-    <span className={cn("relative flex size-1.5 shrink-0", className)}>
-      <span className={cn("absolute inset-0 animate-breathe rounded-full", fill)} aria-hidden />
-      <span className={cn("relative size-1.5 rounded-full", fill)} />
+    <span
+      data-slot="status-dot"
+      aria-hidden={words ? undefined : true}
+      className={
+        size
+          ? cn(
+              "absolute -right-0.5 -bottom-0.5 flex items-center justify-center rounded-full bg-background",
+              size.ring,
+              className,
+            )
+          : "inline-flex shrink-0"
+      }
+      {...props}
+    >
+      {dot}
+      {words}
     </span>
   )
 }
@@ -158,9 +128,11 @@ export function Status({
   tone: given,
   label,
   live,
+  announce,
   icon: Icon,
   className,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"span">, "children"> & {
   state?: string
   verdict?: Verdict
   /**
@@ -171,23 +143,73 @@ export function Status({
   label?: React.ReactNode
   /** Passed to the dot — see `StatusDot`. Ignored when an icon is given. */
   live?: boolean
+  /**
+   * Say the word aloud when it changes: the state of the one thing a page is
+   * about — a container's, a run's, a tunnel's — in a polite live region, so
+   * a screen reader hears "stopped" when it stops, once, without being sent
+   * to look. A string names what the state is of ("Container state"), and is
+   * spoken before the word.
+   *
+   * Only for a page's own subject. A list of twenty rows each announcing its
+   * own change is noise, and a row's state is found by reading the row.
+   */
+  announce?: boolean | string
   icon?: React.ComponentType<{ className?: string }>
   className?: string
 }) {
   const tone = given ?? (verdict ? VERDICT_TONE[verdict] : toneFor(state))
+  const word = label ?? state ?? "unknown"
   return (
     <span
+      data-slot="status"
       className={cn(
         "inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap",
         className,
       )}
+      {...props}
     >
       {Icon ? (
         <Icon className={cn("size-3.5 shrink-0", ICON_TONE[tone])} />
       ) : (
         <StatusDot tone={tone} live={live} />
       )}
-      <span className={TEXT_TONE[tone]}>{label ?? state ?? "unknown"}</span>
+      {/* With `announce` the word a screen reader reads is the live one, so
+          the drawn word is hidden from it rather than read twice. */}
+      <span className={TEXT_TONE[tone]} aria-hidden={announce ? true : undefined}>
+        {word}
+      </span>
+      {announce && (
+        <StatusWords subject={typeof announce === "string" ? announce : undefined}>
+          {word}
+        </StatusWords>
+      )}
+    </span>
+  )
+}
+
+/**
+ * A state in words, in a polite, atomic live region that is not drawn: what
+ * `Status announce` speaks, for a caller whose state is not a `Status` — a
+ * run's header, a job's console. It is in the page from the first render, so
+ * the state it opens with is not announced and each change after is, once.
+ */
+export function StatusWords({
+  subject,
+  children,
+}: {
+  /** What the state is of, spoken first: "Deployment state". */
+  subject?: string
+  children: React.ReactNode
+}) {
+  return (
+    <span className="sr-only" aria-live="polite" aria-atomic="true">
+      {subject ? (
+        <>
+          {subject}: {children}
+        </>
+      ) : (
+        children
+      )}
     </span>
   )
 }

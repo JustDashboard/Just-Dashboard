@@ -26,7 +26,8 @@ import type { PollState } from "@/hooks/use-poll"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import { Bone } from "@/components/bone"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { LogoGlyph } from "@/components/logo"
+import { DashboardMark } from "@/components/logo"
+import { VERDICT_TONE } from "@/components/tone"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import {
   ProductGlyphs,
@@ -199,12 +200,6 @@ export function ProxyRow({ read }: { read: PollState<Certificate[]> }) {
   )
 }
 
-const VERDICT_TONE = {
-  ok: "running",
-  notice: "notice",
-  warning: "warning",
-  critical: "danger",
-} as const
 const VERDICT_WORD = {
   ok: "Private",
   notice: "Private",
@@ -330,14 +325,7 @@ export function SettingsRow() {
   const { report, loading } = useSelfUpdate()
   return (
     <ServiceRow
-      logo={
-        <span
-          aria-hidden
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-brand"
-        >
-          <LogoGlyph small className="h-4 w-auto" />
-        </span>
-      }
+      logo={<DashboardMark />}
       fallback={Servers}
       title="Settings"
       href="/dashboard"
