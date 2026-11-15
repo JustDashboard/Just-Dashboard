@@ -104,7 +104,7 @@ and an inset of 12px only from `lg`; `bleed` drops that inset (a remote screen).
 | `command`, `menu` | from `IdentityVerbs` |
 | `aside` | the far end of a line with no state: a health verdict |
 | `bar` | the compact framed bar (Proxy overview) |
-| `foot` | the command on a row of its own, at the line's foot, wherever the line is narrower than 42rem and not only on a phone: for a line beside a rail |
+| `foot` | the command on a row of its own, at the line's foot, wherever the line is narrower than 42rem from `sm` up: for a line beside a rail. On a phone the verbs keep the name's row |
 | `label` | the landmark name ("About api"); set, the line is a region |
 | `slot` | the `data-slot`, default `host-identity`, for specs that know a header by another name |
 | `loading` | bones in the final boxes (below) |
@@ -131,17 +131,24 @@ shape while it loads and nothing under the line moves when the words land (D11).
 - The back line keeps the back link. The walk and the help are desk tools: put them in a span with
   `max-sm:hidden`, as the container page does. The thing's verbs are on the identity line, so
   nothing on the back line wraps.
-- The identity line gives the name its own row: the tile and the title share the first row, the
-  state takes the next, the command and its `⋯` a row of their own under it, and the facts run the
-  full width at the foot. Before this, "View deployment" beside the address cut it to eleven
-  characters on all 16 deploy project pages (MOB-13). The command's row comes before the facts, so
-  facts that wrap to more lines once they are read never move it. The state's row keeps a line's
-  height, and the command's row keeps a control's height whenever the line has a place for verbs,
-  even an empty one (`menu={false}`). So a loading line that says where its verbs will be is as
-  tall as the line that replaces it, with its command where it will be. A loading form whose
-  loaded line has verbs passes `command` (drawn as a bone) or `menu={false}`; one that passes
-  neither grows by a row when the verbs land.
-- Facts wrap between facts, never inside one, and no dot is left at a line's end (`FactLine`).
+- The identity line is one row and one line of facts. The row holds the tile a step smaller (32px),
+  the name, and the verbs at the far end as icon buttons: the command drawn as its icon alone, its
+  words kept as its accessible name and said in a tooltip, then `⋯`. Each verb is a 32px square
+  with a 44px press box (`hit-area`), 12px apart so no two boxes overlap, and the row does not grow
+  for them. The name stays whole when it fits; it is the last thing to give way, and truncates only
+  when it is too long for the row on its own (MOB-13: "View deployment" beside the address cut it to
+  eleven characters on every deploy project page).
+- The state stands after the name when both fit, and otherwise leads the facts line. The line
+  measures that before it paints, so it never shows the state in one place and then the other.
+- The facts are one line that never wraps. A fact that does not fit is left off whole, at a fact's
+  edge, never cut inside a word. A fact that only states the expected answer ("Auto-deploy on" when
+  it is on) is not on a phone's line at all: it takes `max-sm:hidden` at its call site, so the line
+  keeps the facts that differ.
+- The row has a control's height and the facts a line's whatever is in them, so a loading line is
+  as tall as the line it becomes, with nothing reserved. `menu={false}`, `command` passed as `true`
+  while `loading`, and `foot` still work; on a phone none of them adds a row.
+- Off a phone, facts wrap between facts, never inside one, and no dot is left at a line's end
+  (`FactLine`).
 
 ## Accessibility
 
@@ -149,12 +156,16 @@ shape while it loads and nothing under the line moves when the words land (D11).
 - `label` makes the identity line a named region ("About api"); specs and screen readers find it by
   that name.
 - The dots between facts are `aria-hidden`; the facts are read as words.
-- The command keeps its word on a phone; `⋯`'s name says whose actions it holds.
+- On a phone the command is drawn as its icon, and its words stay in the button as its accessible
+  name and come up in a tooltip on hover and focus; `⋯`'s name says whose actions it holds.
 
 ## What enforces it
 
-- `src/components/identity-header.test.js`: the loading form, the phone's command row, the identity rung,
+- `src/components/identity-header.test.js`: the loading form, the phone's one row, the identity rung,
   `IdentityVerbs`.
+- `tests/browser/identity-header-phone.spec.ts`: on a phone the header is one row over one line of
+  facts, no taller than before the verbs had a row, still while it loads, with the name whole where
+  it fits.
 - `tests/browser/deploy-header.spec.ts`, `deploy-run.spec.ts`, `network-vpn-page.spec.ts`,
   `network-device-page.spec.ts`, `account-ui.spec.ts`: the headers as pages draw them.
 - WP-39 adds the lint rules that ban `HostIdentity`, `HostFact`, `FactDot` and string eyebrows.
