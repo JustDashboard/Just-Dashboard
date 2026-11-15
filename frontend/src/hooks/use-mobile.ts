@@ -1,33 +1,25 @@
-import * as React from "react"
-
-const MOBILE_BREAKPOINT = 768
-const QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`
+import { useBelow } from "@/lib/breakpoints"
 
 /**
- * Tracks a media query.
- *
- * useSyncExternalStore is what React provides for reading a browser API that
- * changes outside of React — it avoids the extra render an effect-plus-state
- * version costs, and gives the server render an explicit answer instead of
- * undefined.
+ * `useMediaQuery` lives with the breakpoints now (`lib/breakpoints.ts`); it is
+ * re-exported here for the call sites that import it from this module.
  */
-export function useMediaQuery(query: string) {
-  const subscribe = React.useCallback(
-    (onChange: () => void) => {
-      const mql = window.matchMedia(query)
-      mql.addEventListener("change", onChange)
-      return () => mql.removeEventListener("change", onChange)
-    },
-    [query],
-  )
-  return React.useSyncExternalStore(
-    subscribe,
-    () => window.matchMedia(query).matches,
-    () => false,
-  )
+export { useMediaQuery } from "@/lib/breakpoints"
+
+/**
+ * A phone: narrower than `sm`, the same width every `max-sm:` class means.
+ * This is the one definition of a phone in script.
+ */
+export function useIsPhone() {
+  return useBelow("sm")
 }
 
-/** Tracks the mobile breakpoint. */
+/**
+ * The sidebar's drawer width: narrower than `md`, where the shell's rail is a
+ * sheet rather than a column (`components/ui/sidebar.tsx` and its `md:`
+ * classes). Not a phone — a 700px window is not a phone and still gets the
+ * drawer. A layout that means "phone" asks `useIsPhone`.
+ */
 export function useIsMobile() {
-  return useMediaQuery(QUERY)
+  return useBelow("md")
 }

@@ -56,7 +56,6 @@
      the faded spellings of the muted ink resolve to it too (see below). */
   --faint: oklch(0.62 0.0129 286.0665);
   --destructive: oklch(0.6368 0.2078 25.3313);
-  --destructive-foreground: oklch(1 0 0);
 
   /* ---- The brand blue, at rest and lit ------------------------------------
    *
@@ -93,7 +92,6 @@
      one value that carries no hue and cannot be mistaken for a status. */
   --brand-foreground: oklch(0 0 0); /* #000000 */
   --signal: oklch(0.78 0.13 238.9);
-  --signal-foreground: oklch(0.16 0.04 238.9);
 
   /* The command face's three steps, named once rather than re-mixed at every
      call site the way a `/90`, `/80` opacity pair leaves them. At rest it is
@@ -106,10 +104,17 @@
   --success: oklch(0.72 0.163 162);
   --success-foreground: oklch(0.18 0.05 162);
   --warning: oklch(0.79 0.152 78);
-  --warning-foreground: oklch(0.22 0.05 78);
 
   --border: oklch(0.275 0 0);
   --input: oklch(0.275 0 0);
+  /* The edge that says "this is a field": an input, a select, a checkbox, a
+     switch's track. WCAG 1.4.11 asks 3:1 of the boundary that identifies a
+     control, and `--input` is a hairline at 1.3:1 — decoration, which is right
+     for a card and wrong for the one thing on the page you type into. This is
+     the lowest neutral that holds 3:1 on every ground a field sits on: 3.8:1 on
+     the page, 3.7 on a card, 3.6 on a popover and 3.2 on the control face a
+     checkbox is filled with. Controls only; borders and hairlines keep theirs. */
+  --control-edge: oklch(0.54 0 0);
   /* Focus is the vivid blue. It is the one mark that has to be found
      instantly, and at this chroma nothing else on the ground competes with
      it — the pale brand sits on faces and marks, never around a control. */
@@ -124,52 +129,84 @@
      carries no meaning of its own to break. */
   --chart-3: oklch(0.68 0.2 345);
   --chart-4: oklch(0.6056 0.2189 292.7172);
-  --chart-5: oklch(0.6959 0.1491 162.4796);
+  /* Slot five is the received half of every in/out pair, and the terminal's
+     ANSI cyan. It sat at 162°, the success hue, so a fifth series and every
+     RX figure read as "healthy". Cyan at 200° is a hue no status owns, at the
+     chart ramp's lightness and just inside the most chroma sRGB holds there
+     (0.118): 7.5:1 on the
+     page and 7.2 on a card. */
+  --chart-5: oklch(0.6959 0.115 200);
 
   --sidebar: var(--background);
   --sidebar-foreground: oklch(0.9461 0 0);
-  /* The "you are here" mark is the brand blue, not the ink. Ink is what you
-     press; blue is where you are. */
-  --sidebar-primary: var(--brand);
-  --sidebar-primary-foreground: var(--brand-foreground);
-  --sidebar-accent: oklch(0.22 0 0);
+  /* The current nav entry is the product's selection ground, not a shade of
+     its own. */
+  --sidebar-accent: var(--accent);
   --sidebar-accent-foreground: oklch(1 0 0);
   --sidebar-border: oklch(0.245 0 0);
-  --sidebar-ring: var(--signal);
 
   /* Git status. The convention every git client uses — green means added — so
-     the hues are fixed and only the lightness is tuned to this ground. */
-  --git-added: oklch(0.68 0.16 152);
-  --git-modified: oklch(0.72 0.14 78);
-  --git-deleted: oklch(0.65 0.19 25);
-  --git-untracked: oklch(0.7 0.11 195);
-  --git-renamed: oklch(0.67 0.15 265);
+     the hues are fixed. They are the tag ramp's own colours under the git
+     names (each moved by under 0.03 of lightness to land there), so the
+     product draws one green, one red and one amber for a label rather than
+     four near-copies; a conflict keeps a red of its own, deeper than deleted. */
+  --git-added: var(--tag-green);
+  --git-modified: var(--tag-amber);
+  --git-deleted: var(--tag-red);
+  --git-untracked: var(--tag-cyan);
+  --git-renamed: var(--tag-blue);
   --git-conflict: oklch(0.66 0.21 8);
 
   /* A pull request's state, in the forge's own convention: open is green,
-     merged violet, closed red, a draft grey. The hues are GitHub's — the
-     colours the same request carries on the site it lives on, the argument
-     the language marks make below — at one lightness tuned to this ground.
-     Kept apart from the status hues so an open request never reads as a
-     healthy service, and merged has a hue none of them owns. */
-  --pull-open: oklch(0.7 0.181 145.6);
-  --pull-merged: oklch(0.68 0.193 298.1);
-  --pull-closed: oklch(0.66 0.205 27);
+     merged violet, closed red, a draft grey — the colours the same request
+     carries on the site it lives on, drawn from the tag ramp like git's. A
+     draft keeps its own grey, which no tag is. */
+  --pull-open: var(--tag-green);
+  --pull-merged: var(--tag-violet);
+  --pull-closed: var(--tag-red);
   --pull-draft: oklch(0.66 0.018 250.9);
 
   /* Shadows are for things that genuinely float above the page — a popover, a
      dropdown, a dialog. They are no longer spent on cards and buttons, which
-     now separate by ground step and border alone. */
-  --shadow-color: #000000;
+     now separate by ground step and border alone. Four steps for four roles:
+     `sm` the flow register's one focused surface, `md` a menu, popover or
+     chart tooltip, `lg` a save bar, dock or sheet, `xl` a dialog. `xs` is
+     what the shadcn fields still carry until they lose it. */
   --tracking-normal: -0.02em;
-  --shadow-2xs: 0 1px 2px 0 oklch(0 0 0 / 0.4);
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.4);
   --shadow-sm: 0 2px 6px -2px oklch(0 0 0 / 0.5);
-  --shadow: 0 2px 6px -2px oklch(0 0 0 / 0.5);
   --shadow-md: 0 6px 16px -6px oklch(0 0 0 / 0.6);
   --shadow-lg: 0 12px 28px -10px oklch(0 0 0 / 0.68);
   --shadow-xl: 0 20px 44px -16px oklch(0 0 0 / 0.72);
-  --shadow-2xl: 0 28px 60px -20px oklch(0 0 0 / 0.8);
+
+  /* ---- Motion -------------------------------------------------------------
+   *
+   * Two curves and four lengths, so a transition is a pair of names rather
+   * than a number picked per component (200 ×15, 150 ×10, 500, 300, 700 and
+   * 1000 were all in use). `arrive` is the product's own curve: fast out of
+   * the gate and settling, for anything landing (rise, drill, a beam's pass,
+   * a bar filling). `standard` is the even in-and-out of a loop that never
+   * lands (breathe, sweep) and of a colour change. Read by the utilities
+   * `ease-arrive`, `duration-fast` and `transition-fill`, and by JavaScript
+   * that has to time itself against a CSS transition. */
+  --ease-arrive: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.6, 1);
+  --duration-fast: 150ms; /* a hover colour, a row's verbs, a chevron turning */
+  --duration-base: 200ms; /* an overlay arriving, a drill, a block rising */
+  --duration-slow: 300ms; /* a sheet sliding, a cross-fade */
+  --duration-fill: 500ms; /* a meter or bar filling to its new reading */
+
+  /* ---- Control sizes ------------------------------------------------------
+   *
+   * One box height per density, so a call site picks a density and the touch
+   * screen gets the taller box from here rather than from `h-11 sm:h-9` at
+   * every control. Fine pointer values; the coarse ones are under the media
+   * query after this block. `dense` and `compact` stay short on touch and
+   * take `hit-area` for the rest of the 44px. */
+  --control-dense: 1.5rem; /* 24 — pane chrome, grid toolbars */
+  --control-compact: 2rem; /* 32 — the default in pages */
+  --control-regular: 2.25rem; /* 36 — forms and dialogs */
+  --control-large: 2.5rem; /* 40 — a flow's commands */
 
   /* ---- Derived surfaces --------------------------------------------------
    *
@@ -207,8 +244,14 @@
      outline button, a tab, a command-palette row, the active session in the
      terminal rail. Deliberately neutral — "this one is chosen" is never the
      brand hue and never the primary tint, or a filter starts reading as the
-     page's main action. */
-  --accent: color-mix(in oklab, var(--muted) 92%, var(--foreground) 8%);
+     page's main action.
+     It is one step of ground over the card, the same step the current nav
+     entry takes, and no more: what is written on a selected row still has to
+     read. It was 8% foreground over --muted (L 0.278), where the faint ink
+     fell to 4.0:1 and the red of a failure to 3.9, so a selected rail row or
+     ChoiceCard failed the floor its own words keep everywhere else. Here they
+     are 4.7:1 and 4.6, and the muted ink 6.8. */
+  --accent: oklch(0.22 0 0);
   --accent-foreground: var(--foreground);
 
   /* The lighter wash for surfaces where `--accent` is too heavy — a menu that
@@ -236,7 +279,6 @@
    * Mixed against `transparent` rather than against a surface, because these
    * sit on the card, on the header strip and in a sunken well alike. */
   --plot-brand: color-mix(in oklab, var(--brand) 20%, transparent);
-  --plot-signal: color-mix(in oklab, var(--signal) 16%, transparent);
   --plot-primary: color-mix(in oklab, var(--primary) 12%, transparent);
   --plot-success: color-mix(in oklab, var(--success) 12%, transparent);
   --plot-warning: color-mix(in oklab, var(--warning) 12%, transparent);
@@ -251,7 +293,6 @@
 
   /* A plot that is also a button steps up one tint under the pointer. */
   --plot-brand-hover: color-mix(in oklab, var(--brand) 30%, transparent);
-  --plot-primary-hover: color-mix(in oklab, var(--primary) 20%, transparent);
   --plot-success-hover: color-mix(in oklab, var(--success) 20%, transparent);
   --plot-danger-hover: color-mix(in oklab, var(--destructive) 20%, transparent);
 
@@ -309,7 +350,8 @@
    *
    * Fixed hues, and deliberately the one exception to the rule above. A tag is
    * a label the operator applied — "the red one is production" — and a label
-   * that moved with the palette would stop being the same label. */
+   * that moved with the palette would stop being the same label. The git and
+   * pull-request states above are drawn from this ramp too. */
   --tag-slate: oklch(0.68 0.035 260);
   --tag-red: oklch(0.66 0.19 25);
   --tag-amber: oklch(0.75 0.15 75);
@@ -411,6 +453,24 @@
   --doc-label: oklch(0.99 0 0);
 }
 
+/* A touch screen gets the taller control box (see "Control sizes" above) and
+ * the two smallest type steps one pixel up: 11 and 10px are the most-drawn
+ * sizes in the product, and are read at arm's length on a phone. A desk
+ * pointer keeps 11 and 10 exactly. The type steps live in a plain `@theme`
+ * (below) so the utilities read these variables rather than inlining a size. */
+@media (pointer: coarse) {
+  :root {
+    --control-dense: 2rem;
+    --control-compact: 2.5rem;
+    --control-regular: 2.75rem;
+    --control-large: 3rem;
+    --text-hint: 0.75rem;
+    --text-hint--line-height: 1rem;
+    --text-micro: 0.6875rem;
+    --text-micro--line-height: 0.9375rem;
+  }
+}
+
 [data-folder] {
   --folder-back: color-mix(in oklab, var(--folder) 80%, #000);
   --folder-mark: color-mix(in oklab, var(--folder) 64%, #000);
@@ -446,7 +506,6 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
   /* The brand blue and its two interaction steps, so `bg-brand`,
      `bg-brand-hover` and `border-signal` are real utilities. Brand is the
      command face at rest, signal is it lit — see the note above. */
@@ -455,13 +514,12 @@
   --color-brand-hover: var(--brand-hover);
   --color-brand-active: var(--brand-active);
   --color-signal: var(--signal);
-  --color-signal-foreground: var(--signal-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
-  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-control-edge: var(--control-edge);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -470,12 +528,31 @@
   --color-chart-5: var(--chart-5);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* The label families, registered for the reason plot and rule are below:
+     without it they were written `text-[var(--tag-pink)]`, `text-(--git-added)`
+     and `"var(--pull-open)"`, three spellings of one colour. */
+  --color-tag-slate: var(--tag-slate);
+  --color-tag-red: var(--tag-red);
+  --color-tag-amber: var(--tag-amber);
+  --color-tag-green: var(--tag-green);
+  --color-tag-cyan: var(--tag-cyan);
+  --color-tag-blue: var(--tag-blue);
+  --color-tag-violet: var(--tag-violet);
+  --color-tag-pink: var(--tag-pink);
+  --color-git-added: var(--git-added);
+  --color-git-modified: var(--git-modified);
+  --color-git-deleted: var(--git-deleted);
+  --color-git-untracked: var(--git-untracked);
+  --color-git-renamed: var(--git-renamed);
+  --color-git-conflict: var(--git-conflict);
+  --color-pull-open: var(--pull-open);
+  --color-pull-merged: var(--pull-merged);
+  --color-pull-closed: var(--pull-closed);
+  --color-pull-draft: var(--pull-draft);
 
   --color-control: var(--control);
   --color-control-hover: var(--control-hover);
@@ -503,7 +580,6 @@
      opacities in in the first place. */
   --color-plot-brand: var(--plot-brand);
   --color-plot-brand-hover: var(--plot-brand-hover);
-  --color-plot-signal: var(--plot-signal);
   --color-wash-brand: var(--wash-brand);
   --color-rule-brand: var(--rule-brand);
   --color-plot-primary: var(--plot-primary);
@@ -515,7 +591,6 @@
   --color-wash-success: var(--wash-success);
   --color-wash-warning: var(--wash-warning);
   --color-wash-danger: var(--wash-danger);
-  --color-plot-primary-hover: var(--plot-primary-hover);
   --color-plot-success-hover: var(--plot-success-hover);
   --color-plot-danger-hover: var(--plot-danger-hover);
   --color-mark: var(--mark);
@@ -525,43 +600,86 @@
   --color-rule-warning: var(--rule-warning);
   --color-rule-danger: var(--rule-danger);
 
-  /* The three sizes the product uses constantly and had been typing as
-     arbitrary values — `text-[13px]` 192 times, `text-[11px]` 408, `text-[10px]`
-     94 — which is how `text-[12px]` (30 uses, byte-identical to `text-xs`) and
-     one-off 9, 15, 17 and 22px slipped in beside them. Named here so the ladder
-     is `micro → hint → xs → body → sm → …` and an arbitrary value is visibly a
-     departure from it rather than the normal way to write a size. */
-  --text-micro: 0.625rem; /* 10px — eyebrows, tags, the smallest legible mark */
-  --text-hint: 0.6875rem; /* 11px — a row's secondary line */
-  --text-body: 0.8125rem; /* 13px — body and row text; the product's default */
-  --text-title: 0.9375rem; /* 15px — the title of a surface that opens */
-
+  /* One radius per role, outer to inner: `xs` 2 a swatch (a legend key, a
+     histogram cap), `sm` 4 a mark (a mono tag, a menu row, a checkbox), `md` 6
+     a control, `lg` 8 a well and every floating surface, `xl` 12 a block (a
+     panel, a pane, a card you pick). The two tile steps are for the rounded
+     square of a WireMark-style logo tile, which sits between them. */
+  --radius-xs: 2px;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-tile-md: 10px;
+  --radius-tile-lg: 14px;
 
-  /* The theme's shadow scale, so `shadow-xs`…`shadow-2xl` — already used
+  /* The theme's shadow scale, so `shadow-xs`…`shadow-xl` — already used
      throughout the generated shadcn primitives (inputs, dialogs, the
      sidebar) — pick up its softer, wider spread instead of Tailwind's
-     built-in default. Each name maps to itself: the value lives in `:root`/
-     `.dark` above and has to stay a `var()` reference here rather than a
-     literal, or it would stop changing with the mode. */
-  --shadow-2xs: var(--shadow-2xs);
+     built-in default. Each name maps to itself: the value lives in `:root`
+     above and has to stay a `var()` reference here rather than a literal. */
   --shadow-xs: var(--shadow-xs);
   --shadow-sm: var(--shadow-sm);
-  --shadow: var(--shadow);
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
   --shadow-xl: var(--shadow-xl);
-  --shadow-2xl: var(--shadow-2xl);
-  --color-shadow-color: var(--shadow-color);
   --tracking-normal: var(--tracking-normal);
   --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
   --tracking-tight: calc(var(--tracking-normal) - 0.025em);
   --tracking-wide: calc(var(--tracking-normal) + 0.025em);
   --tracking-wider: calc(var(--tracking-normal) + 0.05em);
   --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+  /* A one-time code's digits, spaced so each reads as its own box. */
+  --tracking-code: 0.4em;
+
+  /* Layers, by name rather than by number. Ten raw values had drifted into
+     two collisions: the full-screen map, ER diagram, terminal and remote
+     screen shared z-50 with the dialogs that open over them, so stacking fell
+     to portal order, and a tooltip sat on the same layer as the dialog it was
+     inside. Each step says what lives there. */
+  --z-index-raised: 10; /* a sticky cell, a chip over a chart, a pinned column */
+  --z-index-sticky: 20; /* the top bar, sticky headers, split and resize handles */
+  --z-index-pane: 30; /* a side column laid over the work below lg, a drop target */
+  --z-index-float: 40; /* the floating save bar and the docks: one bottom stack */
+  --z-index-immersive: 45; /* full-screen map, ER diagram, terminal, remote screen */
+  --z-index-overlay: 50; /* dialog, sheet, popover, menu, hover card, lightbox */
+  --z-index-tooltip: 55; /* above the dialog it may sit in */
+
+  --ease-arrive: var(--ease-arrive);
+  --ease-standard: var(--ease-standard);
+  --transition-duration-fast: var(--duration-fast);
+  --transition-duration-base: var(--duration-base);
+  --transition-duration-slow: var(--duration-slow);
+  --transition-duration-fill: var(--duration-fill);
+
+  /* Box heights by density, so `h-control-compact` and `size-control-dense`
+     take the touch step from the media query above without a variant. */
+  --height-control-dense: var(--control-dense);
+  --height-control-compact: var(--control-compact);
+  --height-control-regular: var(--control-regular);
+  --height-control-large: var(--control-large);
+  --size-control-dense: var(--control-dense);
+  --size-control-compact: var(--control-compact);
+  --size-control-regular: var(--control-regular);
+  --size-control-large: var(--control-large);
+
+  /* Layout values that recur, named so the grid that recurs is a word. A
+     template that appears once and a table's column percentages stay
+     arbitrary: they are layout, and naming them would be a name nobody
+     reuses. */
+  --grid-template-columns-main-end: minmax(0, 1fr) auto;
+  --grid-template-columns-start-main: auto minmax(0, 1fr);
+  --grid-template-columns-start-main-end: auto minmax(0, 1fr) auto;
+  --grid-template-rows-fill: minmax(0, 1fr);
+  --width-rail: 18rem; /* a page's list rail */
+  --width-inspector: 22rem; /* the column of facts beside a workbench */
+  /* A workbench well inside a reading page: tall enough to work in, never
+     taller than the screen. svh, so a phone's toolbars do not resize it. */
+  --height-workbench: min(75svh, 40rem);
+  /* A rail's scrolling list, under the page head and above the foot. */
+  --max-height-rail: calc(100svh - 13rem);
+  /* The width under which a row's trailing column drops beneath its name. */
+  --container-stack: 38rem;
 
   /* Motion, as a named vocabulary rather than a per-component decision.
    *
@@ -591,10 +709,44 @@
    *
    * All four are covered by the root `prefers-reduced-motion` rule, which
    * collapses their duration rather than cancelling them — see the note there. */
-  --animate-breathe: jd-breathe 2.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-rise: jd-rise 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  --animate-sweep: jd-sweep 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-drill: jd-drill 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-breathe: jd-breathe 2.6s var(--ease-standard) infinite;
+  --animate-rise: jd-rise var(--duration-base) var(--ease-arrive) both;
+  --animate-sweep: jd-sweep 1.4s var(--ease-standard) infinite;
+  --animate-drill: jd-drill var(--duration-base) var(--ease-arrive) both;
+}
+
+/* The type steps of this product, each with the line it sits on.
+ *
+ * The three sizes the product uses constantly had been typed as arbitrary
+ * values — `text-[13px]` 192 times, `text-[11px]` 408, `text-[10px]` 94 — which
+ * is how `text-[12px]` (30 uses, byte-identical to `text-xs`) and one-off 9,
+ * 15, 17 and 22px slipped in beside them. Named here so the ladder is
+ * `micro → hint → xs → body → sm → title …` and an arbitrary value is visibly a
+ * departure from it.
+ *
+ * Each carries its line height, as Tailwind's own steps do. Without one, an 11px
+ * hint took its line box from whatever held it: 16.5px under the page, 14.7
+ * inside a text-xs parent, 15.7 inside text-sm, so a row's words did not share
+ * one centre line. A plain `@theme` rather than `inline`, so the utilities read
+ * the variable and the touch step in the media query above retunes them.
+ *
+ * The breakpoints are Tailwind's own, written out because `lib/breakpoints.ts`
+ * mirrors them for script and its test reads them from here. */
+@theme {
+  --text-micro: 0.625rem; /* 10px — eyebrows, tags, the smallest legible mark */
+  --text-micro--line-height: 0.875rem; /* 14 */
+  --text-hint: 0.6875rem; /* 11px — a row's secondary line */
+  --text-hint--line-height: 1rem; /* 16 */
+  --text-body: 0.8125rem; /* 13px — body and row text; the product's default */
+  --text-body--line-height: 1.25rem; /* 20 */
+  --text-title: 0.9375rem; /* 15px — the title of a surface, and a section head */
+  --text-title--line-height: 1.375rem; /* 22 */
+
+  --breakpoint-sm: 40rem; /* 640 — a field row stops stacking */
+  --breakpoint-md: 48rem; /* 768 — the sidebar appears */
+  --breakpoint-lg: 64rem; /* 1024 — a workbench shows its side column */
+  --breakpoint-xl: 80rem; /* 1280 — a detail page shows its sibling rail */
+  --breakpoint-2xl: 96rem; /* 1536 — a second readings column */
 }
 
 @keyframes jd-breathe {
@@ -722,6 +874,38 @@
        pieces — "No tes", "Emp ty", "Howitis listed". Geometric precision lays
        glyphs out at their real widths there; macOS and Windows already do. */
     text-rendering: geometricPrecision;
+    /* With the viewport drawn edge to edge (`viewportFit: "cover"` in
+       app/layout.tsx), a phone held sideways puts its notch over the page;
+       the side insets keep the content beside it. Zero everywhere else. */
+    padding-inline: env(safe-area-inset-left, 0px) env(safe-area-inset-right, 0px);
+  }
+  /* The same fix, again for the four elements Chromium's own stylesheet
+     resets to `text-rendering: auto` — so every label inside a button, every
+     chip and every placeholder still broke ("Notmounted", "Show the16
+     events") while the text around them was whole. */
+  button,
+  input,
+  select,
+  textarea {
+    text-rendering: geometricPrecision;
+  }
+
+  /* A tap is answered by the control's own pressed and focus states; the
+     browser's grey flash over the whole box on top of them is a second,
+     unstyled answer. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* A scroll that reaches the end of a working region stops there, rather
+     than carrying on into the page behind it (or into the browser's
+     pull-to-refresh): a pane of a workbench, a sheet, and the shell's own
+     scroller, which is the outermost one the app has. */
+  [data-slot="pane"] :where(.overflow-auto, .overflow-y-auto, .overflow-scroll, .overflow-y-scroll),
+  [data-slot="sheet-content"],
+  [data-slot="sheet-content"] :where(.overflow-auto, .overflow-y-auto),
+  [data-workspace-shell-scroll] {
+    overscroll-behavior: contain;
   }
 
   /* Tailwind v4 dropped the browser's pointer cursor on buttons, which leaves
@@ -790,7 +974,12 @@
    *
    * Durations rather than `animation: none`: a keyframe animation that never
    * runs never reaches its final frame, so a dialog that fades in would stay at
-   * zero opacity. Collapsing the duration runs it instantly instead. */
+   * zero opacity. Collapsing the duration runs it instantly instead.
+   *
+   * `data-motion="paused"` on <html> is the same request made in the product
+   * rather than in the system settings (the shell's "Pause animations"), for
+   * whoever wants the beams, breathing dots, sweeps and shimmers still without
+   * asking every app on the machine to stop. */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -800,6 +989,15 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+  }
+  :root[data-motion="paused"],
+  :root[data-motion="paused"] *,
+  :root[data-motion="paused"] *::before,
+  :root[data-motion="paused"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -852,6 +1050,70 @@
   &:focus-visible {
     outline-color: var(--ring);
   }
+}
+
+/* A press target bigger than what is drawn: 24px at least under a mouse
+ * (WCAG 2.5.8) and 44px under a finger, for an inline text button, a checkbox
+ * or a verb in a row, without growing the row it sits in. The box is an
+ * invisible `::after` centred on the control, so the control needs room around
+ * it and must not already draw an `::after` of its own. */
+@utility hit-area {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc((100% - 24px) / 2));
+  }
+  @media (pointer: coarse) {
+    &::after {
+      inset: min(0px, calc((100% - 44px) / 2));
+    }
+  }
+}
+
+/* A meter or a bar filling to its new reading: the one length and curve every
+ * fill takes, instead of 500, 700 and 1000ms across twenty-one of them. */
+@utility transition-fill {
+  transition-property: width, height;
+  transition-duration: var(--duration-fill);
+  transition-timing-function: var(--ease-arrive);
+}
+
+/* A glyph set in a line of text, sitting on the text's own centre rather than
+ * on its baseline: what `align-[-2px]` and `align-[-1px]` were reaching for. */
+@utility glyph-inline {
+  display: inline;
+  vertical-align: -0.125em;
+}
+
+/* A word of code inside a sentence: the mono face a step smaller, because mono
+ * at the sentence's size reads as larger than the words around it. */
+@utility code-inline {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* The phone's own edges: the home indicator, and the notch when it is held
+ * sideways. Zero on a desk, and zero until app/layout.tsx asks for the page to
+ * be drawn edge to edge. A bottom bar or a sheet's footer takes `pb-safe`. */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@utility pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+@utility pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+@utility px-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+@utility mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Faded secondary text has a floor.
@@ -939,6 +1201,15 @@
    * the same four utilities. */
   .eyebrow {
     @apply text-micro font-semibold tracking-[0.14em] text-muted-foreground uppercase;
+  }
+
+  /* The quieter caps of a label on a thing rather than over a section: a
+   * Tag's caps face, a kind written in a grid's head. A step lighter in weight
+   * and tracking than the eyebrow, and in the faint ink, which is the step
+   * below muted that still keeps 4.5:1. Seven places had typed it by hand in
+   * three different inks. */
+  .caps {
+    @apply text-micro font-medium tracking-[0.06em] text-faint uppercase;
   }
 
   /* Any figure meant to be compared with the one above or below it. Tabular
