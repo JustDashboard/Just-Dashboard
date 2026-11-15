@@ -724,7 +724,7 @@ export function GrantsMatrix({
         // The page's one floating thing while grants are staged, drawn as the
         // settings' save bar is: it holds to the foot of the view, over the
         // rows, so the command is where the eye is after a press far down.
-        <div className="pointer-events-none sticky bottom-4 z-10 flex justify-center">
+        <div className="pointer-events-none sticky bottom-4 z-raised flex justify-center">
           <div
             role="status"
             data-slot="grants-pending"
@@ -738,7 +738,6 @@ export function GrantsMatrix({
               <Button
                 variant="ghost"
                 size="sm"
-                className="max-sm:h-10"
                 onClick={() => {
                   setWanted({})
                   setMembers([])
@@ -746,7 +745,7 @@ export function GrantsMatrix({
               >
                 Discard
               </Button>
-              <Button size="sm" className="max-sm:h-10" onClick={() => setReviewing(true)}>
+              <Button size="sm" onClick={() => setReviewing(true)}>
                 Review…
               </Button>
             </div>

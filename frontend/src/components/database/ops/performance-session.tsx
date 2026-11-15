@@ -382,7 +382,7 @@ function Session({ pid }: { pid: string | null }) {
 function SessionTitle({ pid }: { pid: string }) {
   return (
     <span className="inline-flex min-w-0 items-baseline gap-1.5">
-      Session <span className="truncate font-mono text-[0.9375em]">{pid}</span>
+      Session <span className="truncate code-inline">{pid}</span>
     </span>
   )
 }

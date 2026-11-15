@@ -346,7 +346,7 @@ export function SortHead({
 
 /** A dash where a row has no figure: the engine does not count it. */
 export function NoFigure() {
-  return <span className="text-muted-foreground/50">—</span>
+  return <span className="text-faint">—</span>
 }
 
 /**

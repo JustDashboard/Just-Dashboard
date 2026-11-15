@@ -127,7 +127,7 @@ export function PartsView() {
                         <TableHead className="px-2 text-right">Rows</TableHead>
                         <TableHead className="px-2 text-right">On disk</TableHead>
                         <ShareHead className="@max-[30rem]:hidden" />
-                        <TableHead className="px-2 text-right @max-[38rem]:hidden">
+                        <TableHead className="px-2 text-right @max-stack:hidden">
                           Compressed
                         </TableHead>
                         <TableHead className="@max-[46rem]:hidden">Last written</TableHead>
@@ -156,7 +156,7 @@ export function PartsView() {
                             whole={whole}
                             className="@max-[30rem]:hidden"
                           />
-                          <TableCell className="numeric px-2 py-2 text-right text-muted-foreground @max-[38rem]:hidden">
+                          <TableCell className="numeric px-2 py-2 text-right text-muted-foreground @max-stack:hidden">
                             {ratio(partition) ?? <NoFigure />}
                           </TableCell>
                           <TableCell
@@ -187,7 +187,7 @@ export function PartsView() {
                             <TableHead className="px-2">Of</TableHead>
                             <TableHead className="px-2 text-right">Rows</TableHead>
                             <TableHead className="px-2 text-right">On disk</TableHead>
-                            <TableHead className="px-2 text-right @max-[38rem]:hidden">
+                            <TableHead className="px-2 text-right @max-stack:hidden">
                               Merged
                             </TableHead>
                             <TableHead className="@max-[46rem]:hidden">Stored as</TableHead>
@@ -207,7 +207,7 @@ export function PartsView() {
                                 {bytes(part.bytes)}
                               </TableCell>
                               <TableCell
-                                className="numeric px-2 py-2 text-right text-muted-foreground @max-[38rem]:hidden"
+                                className="numeric px-2 py-2 text-right text-muted-foreground @max-stack:hidden"
                                 title="How many rounds of merging produced this part"
                               >
                                 {part.level === 0 ? "not yet" : `${part.level}×`}
@@ -264,7 +264,7 @@ export function MergesView() {
                       <TableHead className="px-2">Progress</TableHead>
                       <TableHead className="px-2 text-right">For</TableHead>
                       <TableHead className="px-2 text-right">Parts</TableHead>
-                      <TableHead className="px-2 text-right @max-[38rem]:hidden">Size</TableHead>
+                      <TableHead className="px-2 text-right @max-stack:hidden">Size</TableHead>
                       <TableHead className="text-right @max-[46rem]:hidden">Memory</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -299,7 +299,7 @@ export function MergesView() {
                         <TableCell className="numeric px-2 py-2 text-right">
                           {merge.parts.toLocaleString()}
                         </TableCell>
-                        <TableCell className="numeric px-2 py-2 text-right @max-[38rem]:hidden">
+                        <TableCell className="numeric px-2 py-2 text-right @max-stack:hidden">
                           {bytes(merge.bytes)}
                         </TableCell>
                         <TableCell className="numeric py-2 text-right text-muted-foreground @max-[46rem]:hidden">
@@ -332,7 +332,7 @@ export function MergesView() {
                       <TableHead>Table</TableHead>
                       <TableHead className="px-2">State</TableHead>
                       <TableHead className="px-2">Command</TableHead>
-                      <TableHead className="@max-[38rem]:hidden">Asked</TableHead>
+                      <TableHead className="@max-stack:hidden">Asked</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -365,7 +365,7 @@ export function MergesView() {
                           )}
                         </TableCell>
                         <TableCell
-                          className="py-2 text-muted-foreground @max-[38rem]:hidden"
+                          className="py-2 text-muted-foreground @max-stack:hidden"
                           title={timestamp(mutation.created)}
                         >
                           {mutation.created ? relativeTime(mutation.created) : <NoFigure />}

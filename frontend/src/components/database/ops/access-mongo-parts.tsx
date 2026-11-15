@@ -180,7 +180,7 @@ export function RolePicker({
           <Button
             type="button"
             variant="outline"
-            className="h-11 w-full sm:h-9"
+            className="w-full"
             disabled={!role}
             pending={pending}
             onClick={() => {

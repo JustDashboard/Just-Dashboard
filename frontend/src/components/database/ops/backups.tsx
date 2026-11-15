@@ -720,7 +720,7 @@ function DumpName({ file, bare }: { file: DbBackupFile; bare?: boolean }) {
         </PopoverTrigger>
         <PopoverContent align="start" className="w-80 space-y-2 p-3 text-xs">
           <p className="font-mono break-all">{file.file}</p>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-hint">
+          <dl className="grid grid-cols-start-main gap-x-3 gap-y-1 text-hint">
             <dt className="text-muted-foreground">Taken</dt>
             <dd>
               {timestamp(file.takenAt)}

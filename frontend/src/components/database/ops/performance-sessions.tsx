@@ -415,7 +415,7 @@ function SessionRows({
                 <Who session={session} />
               </span>
               {session.query ? (
-                <StatementLine text={session.query} className="text-hint text-foreground/80" />
+                <StatementLine text={session.query} className="text-hint text-muted-foreground" />
               ) : (
                 <span className="text-hint text-muted-foreground">no statement</span>
               )}
@@ -599,7 +599,7 @@ function RunningQueries() {
                           {stopper(query)}
                         </span>
                       </div>
-                      <StatementLine text={query.query} className="text-hint text-foreground/80" />
+                      <StatementLine text={query.query} className="text-hint text-muted-foreground" />
                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
                         {progress(query)}
                         <span className="numeric">

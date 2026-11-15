@@ -227,7 +227,7 @@ function LockRow({
             {user && <Named name={user} className="text-xs" />}
             {session?.application && (
               <>
-                <span aria-hidden className="text-muted-foreground/60">
+                <span aria-hidden className="text-faint">
                   ·
                 </span>
                 <span className="flex min-w-0 items-center gap-1.5">
@@ -276,7 +276,7 @@ function LockRow({
             </p>
           )}
           {node.query ? (
-            <StatementLine text={node.query} className="text-hint text-foreground/80" />
+            <StatementLine text={node.query} className="text-hint text-muted-foreground" />
           ) : phantom ? (
             <p className="text-hint text-muted-foreground">
               Not a session: a prepared transaction, or one the server no longer lists.

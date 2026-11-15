@@ -510,7 +510,7 @@ function Compression({ table }: { table: DbTableStat }) {
 
 /** When something was last done to a table, and whether the engine did it by itself. */
 function Kept({ run }: { run: ReturnType<typeof lastRun> }) {
-  if (!run) return <span className="text-muted-foreground/60">never</span>
+  if (!run) return <span className="text-faint">never</span>
   return (
     <span className="text-muted-foreground" title={timestamp(run.at)}>
       {relativeTime(run.at)}

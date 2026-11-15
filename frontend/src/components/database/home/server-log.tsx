@@ -223,7 +223,7 @@ function Lines({ lines, waiting }: { lines: Held[]; waiting: boolean }) {
                 )}
               >
                 <span
-                  className="w-16 shrink-0 text-muted-foreground/60 select-none"
+                  className="w-16 shrink-0 text-faint select-none"
                   title={line.timestamp ? timestamp(line.timestamp) : undefined}
                 >
                   {line.timestamp ? formatLogTime(line.timestamp, "clock") : ""}

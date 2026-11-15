@@ -28,7 +28,6 @@ import type {
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { laneStyle } from "@/components/logs/log-text"
 import { Address } from "@/components/deploy/request-marks"
@@ -60,6 +59,7 @@ import {
   type QueryOrder,
   type QueryRange,
 } from "@/components/database/ops/queries"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** How many rows one read asks for; the server's cap is 500. */
 const LIMIT = 200
@@ -545,7 +545,7 @@ function QueryRows({
   const keys = entryKeys(entries)
   const { highlight } = useLogView()
   const plain = !highlight
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   // A column only for what some row has: SLOWLOG knows no database and
   // Postgres's log no row count, and a column of dashes is width the
   // statement needed.
@@ -559,7 +559,7 @@ function QueryRows({
   return (
     <div className="animate-rise py-1 font-mono text-xs leading-relaxed">
       {wide && (
-        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-hairline bg-surface-sunken pr-4 pb-1 font-sans text-hint font-medium text-muted-foreground">
+        <div className="sticky top-0 z-raised flex items-center gap-3 border-b border-hairline bg-surface-sunken pr-4 pb-1 font-sans text-hint font-medium text-muted-foreground">
           <span aria-hidden className="w-0.5 shrink-0" />
           <span className="w-16 shrink-0">Time</span>
           <span className="w-16 shrink-0 text-right">Took</span>
@@ -610,7 +610,7 @@ function QueryRows({
                 <>
                   <span
                     title={timestamp(entry.at)}
-                    className="numeric w-16 shrink-0 text-muted-foreground/70 select-none"
+                    className="numeric w-16 shrink-0 text-faint select-none"
                   >
                     {clock(entry.at)}
                   </span>
@@ -629,12 +629,12 @@ function QueryRows({
                       {entry.client ? (
                         <Address ip={entry.client} plain={plain} />
                       ) : (
-                        <span className="text-muted-foreground/50">—</span>
+                        <span className="text-faint">—</span>
                       )}
                     </span>
                   )}
                   {has.rows && (
-                    <span className="numeric hidden w-14 shrink-0 text-right text-muted-foreground/70 xl:block">
+                    <span className="numeric hidden w-14 shrink-0 text-right text-faint xl:block">
                       {entry.rows !== undefined ? entry.rows.toLocaleString() : "—"}
                     </span>
                   )}
@@ -679,7 +679,7 @@ function QueryRows({
 
 /** A name in its lane's hue, the way the log console draws who spoke. */
 function Lane({ value, plain, className }: { value?: string; plain: boolean; className?: string }) {
-  if (!value) return <span className={cn("shrink-0 text-muted-foreground/50", className)}>—</span>
+  if (!value) return <span className={cn("shrink-0 text-faint", className)}>—</span>
   return (
     <span
       title={value}

@@ -649,7 +649,7 @@ function UpgradeStep({
       // The step marks are a size under the servers': set down by the difference, the line runs level.
       className="flex min-w-0 items-center gap-3.5 pl-1 lg:flex-col lg:gap-2 lg:pt-1 lg:pl-0"
     >
-      <div ref={nodeRef} className="relative z-10 flex shrink-0">
+      <div ref={nodeRef} className="relative z-raised flex shrink-0">
         <WireMark
           size="sm"
           tone={state === "done" ? "success" : state === "running" ? "brand" : "neutral"}
