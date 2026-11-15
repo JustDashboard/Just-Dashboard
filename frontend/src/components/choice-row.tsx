@@ -3,10 +3,103 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight } from "@/components/icons"
+import { Bone } from "@/components/bone"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
+import { Skeleton } from "@/components/ui/skeleton"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { cn } from "@/lib/utils"
+
+/**
+ * Anything inside a row that owns its own press — mirrors `TableRow`'s rule.
+ * Exported for a card that is a click target without being a `ChoiceRow` — a
+ * grid card built on `SpotlightBorder` directly — so the rule of which presses
+ * it skips is written once.
+ */
+export const CONTROL =
+  "a, button, input, select, textarea, label, [role='menuitem'], [role='switch']"
+
+/** What a press on a choice's surface does: nothing, open a new tab, or the choice's own act. */
+export type ChoicePress = "ignore" | "tab" | "go"
+
+/**
+ * The one rule for a press on a surface that is a convenience for the pointer
+ * — a `ChoiceRow`, a `ChoiceCard` that carries a sentence, an `OpenCard` —
+ * written once because the copies drifted: the row navigated on a press that
+ * ended a text selection and on Cmd-click, which the card already did not.
+ *
+ * A press is ignored when the choice is disabled, when it landed on a control
+ * of its own inside the surface (a menu, a switch, a copy button), when React
+ * carried it up from a portal that is not on the surface at all (a group label
+ * in an open menu), and when it ends a text selection — selecting a path to
+ * copy it is not asking to open it. A press with Cmd, Ctrl or Shift held opens
+ * a destination in a new tab, as a link does. Pure, so the rule has a test.
+ */
+export function choicePress(
+  event: {
+    target: EventTarget | null
+    currentTarget: EventTarget | null
+    metaKey: boolean
+    ctrlKey: boolean
+    shiftKey: boolean
+  },
+  { href, disabled, selection }: { href?: string; disabled?: boolean; selection?: string },
+): ChoicePress {
+  if (disabled) return "ignore"
+  const target = event.target as Element | null
+  const surface = event.currentTarget as Element | null
+  if (target && surface && target !== surface) {
+    if (!surface.contains(target) || target.closest(CONTROL)) return "ignore"
+  }
+  if (selection) return "ignore"
+  if (href && (event.metaKey || event.ctrlKey || event.shiftKey)) return "tab"
+  return "go"
+}
+
+/**
+ * The press of a choice's surface, and `go` for the control on its title — the
+ * keyboard's way in, which takes the same act without the pointer's filters.
+ *
+ * The surface does not become a second tab stop or a second button: the title
+ * is the control and carries the verb in its name (§12), so the surface takes
+ * only `onClick`, behind the `jsx-a11y` comment every caller already writes.
+ */
+export function useChoicePress({
+  href,
+  onSelect,
+  disabled,
+}: {
+  href?: string
+  onSelect?: () => void
+  disabled?: boolean
+}) {
+  const router = useRouter()
+  const go = () => {
+    if (disabled) return
+    if (href) router.push(href)
+    else onSelect?.()
+  }
+  const onClick = (event: React.MouseEvent<HTMLElement>) => {
+    const press = choicePress(event, {
+      href,
+      disabled,
+      selection: window.getSelection()?.toString(),
+    })
+    if (press === "tab" && href) window.open(href, "_blank")
+    else if (press === "go") go()
+  }
+  return { onClick, go }
+}
+
+/**
+ * A `ChoiceRow`'s box inside its edge: 56px at least, so with the 1px edge on
+ * each side every row of a list is 58px whether it has a second line or not.
+ * Shared with `ChoiceListSkeleton`, which is the reason it is a constant.
+ */
+export const CHOICE_ROW_BOX = "flex min-h-14 min-w-0 rounded-xl px-3 py-2.5"
+
+/** The resting edge and ground of a card that does not answer the pointer. */
+const CHOICE_ROW_EDGE = "relative isolate rounded-xl border bg-choice-surface"
 
 /**
  * One *instance* among many of the same kind: a repository, an image tag, a
@@ -95,11 +188,7 @@ export function ChoiceRow({
   children?: React.ReactNode
   className?: string
 }) {
-  const router = useRouter()
-  const go = () => {
-    if (href) router.push(href)
-    else onSelect?.()
-  }
+  const press = useChoicePress({ href, onSelect, disabled })
   const line = (
     <>
       {leading && <span className="flex shrink-0 items-center">{leading}</span>}
@@ -132,7 +221,7 @@ export function ChoiceRow({
             // is for the keyboard and must not run the action twice.
             onClick={(event) => {
               event.stopPropagation()
-              go()
+              press.go()
             }}
             className="block max-w-full min-w-0 truncate rounded-sm text-left text-body font-medium focus-ring"
           >
@@ -175,17 +264,9 @@ export function ChoiceRow({
       )}
       {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by */}
       <div
-        onClick={(event) => {
-          if (disabled) return
-          // A control of its own inside the row — a copy button in the
-          // second line, a switch beneath it — is not a press on the row.
-          if (
-            event.target !== event.currentTarget &&
-            (event.target as HTMLElement).closest(CONTROL)
-          )
-            return
-          go()
-        }}
+        // A control of its own inside the row — a copy button in the second
+        // line, a switch beneath it — is not a press on the row.
+        onClick={press.onClick}
         className={cn(
           // A fixed minimum, because a description is optional and a run of
           // cards where some are a line taller than others reads as a list
@@ -195,7 +276,8 @@ export function ChoiceRow({
           // content it has not got.
           // The unnamed group as well, so `DimActions` in the actions slot
           // brightens with the row the way it does in a table.
-          "group group/choice flex min-h-14 min-w-0 rounded-xl px-3 py-2.5 text-left",
+          "group group/choice text-left",
+          CHOICE_ROW_BOX,
           !disabled && "cursor-pointer",
           children ? "flex-col gap-2.5" : "items-center gap-3",
           className,
@@ -215,7 +297,7 @@ export function ChoiceRow({
   // The lit edge means "this is takeable" (§16), so a disabled row keeps its
   // card and its resting edge, and its edge does not answer the pointer.
   const card = disabled ? (
-    <div className="relative isolate rounded-xl border bg-choice-surface">{body}</div>
+    <div className={CHOICE_ROW_EDGE}>{body}</div>
   ) : (
     <SpotlightBorder>{body}</SpotlightBorder>
   )
@@ -227,15 +309,6 @@ export function ChoiceRow({
     </li>
   )
 }
-
-/**
- * Anything inside a row that owns its own press — mirrors `TableRow`'s rule.
- * Exported for a card that is a click target without being a `ChoiceRow` — a
- * grid card built on `SpotlightBorder` directly — so the rule of which presses
- * it skips is written once.
- */
-export const CONTROL =
-  "a, button, input, select, textarea, label, [role='menuitem'], [role='switch']"
 
 /**
  * What the next run of cards is, and how many of them.
@@ -281,4 +354,67 @@ export function GroupRule({
 /** A run of `ChoiceRow`s. Gapped rather than hairlined: each row owns an edge. */
 export function ChoiceList({ className, ...props }: React.ComponentProps<"ul">) {
   return <ul data-slot="choice-list" className={cn("min-w-0 space-y-2", className)} {...props} />
+}
+
+const GHOST_WIDTHS = ["w-32", "w-40", "w-28", "w-36"]
+
+/**
+ * Cards where a `ChoiceList` will be, each at its `ChoiceRow`'s own box, so the
+ * list holds still when it lands (D11).
+ *
+ * Every page had imitated one: `LoadingRows` forced into a card's shape with a
+ * class hack, grey slabs at 56, 58 and 62px, a mark and two lines in one place
+ * and none in the next. This is drawn from the same box constant the row is,
+ * with the mark slot at the size the row's leading mark takes (`sm` a
+ * `ProductLogo size="sm"` or a `KindTile`, `md` a 40px tile, which makes the
+ * real row 62px and so the ghost too), a bar where the name goes, a second
+ * one under it when the rows carry a description, and a trailing bar where
+ * the readings stand, which a phone does not draw. Every piece keeps
+ * `data-slot="skeleton"`, the mark a spec waits on. No rows draws nothing:
+ * the empty slab is the caller's to say.
+ */
+export function ChoiceListSkeleton({
+  rows,
+  mark = "sm",
+  lines = 1,
+  aside = true,
+  className,
+}: {
+  rows: number
+  mark?: "sm" | "md" | false
+  lines?: 1 | 2
+  aside?: boolean
+  className?: string
+}) {
+  if (rows <= 0) return null
+  return (
+    <ul aria-hidden data-slot="choice-list-skeleton" className={cn("min-w-0 space-y-2", className)}>
+      {Array.from({ length: rows }, (_, index) => (
+        <li key={index} className={CHOICE_ROW_EDGE}>
+          <div className={cn(CHOICE_ROW_BOX, "items-center gap-3")}>
+            {mark && (
+              <Skeleton
+                className={cn("shrink-0 rounded-lg", mark === "md" ? "size-10" : "size-8")}
+              />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block text-body">
+                <Bone className={GHOST_WIDTHS[index % GHOST_WIDTHS.length]} />
+              </span>
+              {lines === 2 && (
+                <span className="block text-hint">
+                  <Bone className="w-48" />
+                </span>
+              )}
+            </span>
+            {aside && (
+              <span className="shrink-0 text-body max-sm:hidden">
+                <Bone className="w-24" />
+              </span>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
 }

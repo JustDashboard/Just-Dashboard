@@ -1,7 +1,6 @@
 "use client"
 
 import { Fragment } from "react"
-import { Check } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
 import { PURPOSES, pressPurpose, purposeShown, type SectionKey } from "@/lib/sidebar-sections"
 import { cn } from "@/lib/utils"
@@ -12,10 +11,8 @@ import {
   type NavChild,
   type NavEntry,
 } from "@/components/shell/nav"
-import { ChoiceCard } from "@/components/choice-card"
-import { ProductLogo } from "@/components/product-logo"
+import { PurposeCard } from "@/components/onboarding/purpose-card"
 import { SwitchRow, SwitchRows } from "@/components/settings/settings-column"
-import { Tag } from "@/components/tag"
 
 const NOTHING_HIDDEN: ReadonlySet<string> = new Set()
 
@@ -44,22 +41,6 @@ export function useSectionCount(hidden: ReadonlySet<string>) {
 }
 
 /**
- * What an experimental purpose says on its card. Stable is the rule and
- * carries no mark; the one purpose still being tested is the exception, so
- * it is flagged where it is chosen rather than on a shelf of its own.
- */
-export function ExperimentalMark({ className }: { className?: string }) {
-  return (
-    <span className={cn("flex min-w-0 items-baseline gap-2", className)}>
-      <Tag tone="warning" className="shrink-0">
-        Experimental
-      </Tag>
-      <span className="truncate text-hint text-muted-foreground">Working, still being tested</span>
-    </span>
-  )
-}
-
-/**
  * The first-run question's purposes, after the first run, in its order and
  * with its mark on the experimental one. A purpose is chosen when every
  * section it needs is in the rail —
@@ -85,51 +66,19 @@ export function PurposePicker({
           (purpose.sections as readonly SectionKey[]).includes(key),
         )
         return (
-          <ChoiceCard
+          <PurposeCard
             key={purpose.key}
+            size="row"
+            purpose={purpose}
             selected={on}
-            aria-label={purpose.title}
-            onClick={() => onChange(pressPurpose(purpose.key, hidden, offered))}
-            // One height for every card: the longest purpose lists its sections
-            // on two lines, and a grid whose rows differ reads as a broken one.
-            className="min-h-20 flex-row items-center gap-3 px-3.5 py-3"
-          >
-            <span className="flex shrink-0 gap-1">
-              {purpose.products.map((product) => (
-                <ProductLogo key={product} id={product} size="sm" />
-              ))}
-            </span>
-            <span className="grid min-w-0 flex-1 gap-1">
-              <span className="flex min-w-0 items-baseline gap-2">
-                <span className="shrink-0 text-title leading-tight font-semibold">
-                  {purpose.title}
-                </span>
-                {/* The mark alone: its sentence has no room in a grid of two. */}
-                {purpose.stage === "experimental" && (
-                  <Tag tone="warning" className="shrink-0" title="Working, still being tested">
-                    Experimental
-                  </Tag>
-                )}
-              </span>
-              <span className="line-clamp-2 text-hint text-muted-foreground">
-                {uses.map(({ key, entry }, index) => (
-                  <Fragment key={key}>
-                    {index > 0 && " · "}
-                    <span className={cn(hidden.has(key) && "text-muted-foreground/45")}>
-                      {entry.title}
-                    </span>
-                  </Fragment>
-                ))}
-              </span>
-            </span>
-            <Check
-              aria-hidden
-              className={cn(
-                "size-4 shrink-0 text-brand transition-opacity",
-                on ? "opacity-100" : "opacity-0",
-              )}
-            />
-          </ChoiceCard>
+            onSelect={() => onChange(pressPurpose(purpose.key, hidden, offered))}
+            detail={uses.map(({ key, entry }, index) => (
+              <Fragment key={key}>
+                {index > 0 && " · "}
+                <span className={cn(hidden.has(key) && "text-faint")}>{entry.title}</span>
+              </Fragment>
+            ))}
+          />
         )
       })}
     </div>
@@ -263,10 +212,7 @@ function SectionSwitch({
     <SwitchRow
       className={cn(inner && "pl-6")}
       leading={
-        <entry.icon
-          aria-hidden
-          className={cn(GLYPH, "transition-opacity", !on && "text-muted-foreground opacity-60")}
-        />
+        <entry.icon aria-hidden className={cn(GLYPH, "transition-colors", !on && "text-faint")} />
       }
       title={
         <span className={cn("transition-colors", !on && "text-muted-foreground")}>

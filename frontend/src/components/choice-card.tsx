@@ -1,9 +1,9 @@
 "use client"
 
+import { createContext, useContext, useLayoutEffect, useRef } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { ArrowRight, Check, type Icon } from "@/components/icons"
-import { CONTROL } from "@/components/choice-row"
+import { useChoicePress } from "@/components/choice-row"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
@@ -45,7 +45,16 @@ import { cn } from "@/lib/utils"
  * the logo, the readings or the space beside them did nothing, which read as
  * a click that had not registered. A press with a modifier held opens a new
  * tab, a press that ends a text selection is a selection, and a press on a
- * control inside the card is that control's.
+ * control inside the card is that control's — `useChoicePress`, the rule
+ * `ChoiceRow` and `OpenCard` take too.
+ *
+ * In a `ChoiceGrid mode="single"` the card's control is a radio rather than
+ * a toggle: `aria-checked` in a named radiogroup, so a screen reader hears
+ * that picking one unpicks the rest. Anywhere else `aria-pressed` says what a
+ * pick of several is.
+ *
+ * A card that cannot be taken is set in the faint ink, not faded: an opacity
+ * took its words under 4.5:1 (§3, *three inks*).
  */
 export function ChoiceCard({
   selected,
@@ -86,14 +95,18 @@ export function ChoiceCard({
   /** Position in a grid, for the arrival stagger. */
   index?: number
 }) {
-  const router = useRouter()
+  const single = useContext(SingleChoice)
+  const choice = single
+    ? { role: "radio" as const, "aria-checked": Boolean(selected), "data-choice-control": "" }
+    : { "aria-pressed": selected }
+  const press = useChoicePress({ href, onSelect: onClick, disabled })
   const shape = cn(
     "group/choice flex min-h-20 min-w-0 flex-col items-start gap-1.5 rounded-xl p-3 text-left transition-colors",
     selected && "bg-accent",
     // The chosen card is never faded, disabled or not: to a reader who may
     // not change it, or on a choice that can no longer be taken again, it is
     // still the fact the grid is there to show.
-    disabled && !selected && "opacity-50",
+    disabled && !selected && "text-faint [&_*]:text-faint!",
     className,
   )
   const edge = selected ? "brand" : "border"
@@ -105,7 +118,7 @@ export function ChoiceCard({
         <button
           type="button"
           data-slot="choice-card"
-          aria-pressed={selected}
+          {...choice}
           data-selected={selected || undefined}
           disabled={disabled}
           onClick={onClick}
@@ -119,21 +132,6 @@ export function ChoiceCard({
   }
 
   const Mark = mark
-  const choose = () => {
-    if (!disabled) onClick?.()
-  }
-  const press = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (disabled) return
-    if (event.target !== event.currentTarget && (event.target as HTMLElement).closest(CONTROL))
-      return
-    if (!href) {
-      choose()
-      return
-    }
-    if (window.getSelection()?.toString()) return
-    if (event.metaKey || event.ctrlKey || event.shiftKey) window.open(href, "_blank")
-    else router.push(href)
-  }
   return (
     <BlurFade delay={index * 0.03} className="h-full">
       <SpotlightBorder resting={edge} className="h-full">
@@ -141,7 +139,7 @@ export function ChoiceCard({
         <div
           data-slot="choice-card"
           data-selected={selected || undefined}
-          onClick={press}
+          onClick={press.onClick}
           className={cn(shape, "h-full", logo && "flex-row gap-3", !disabled && "cursor-pointer")}
         >
           {logo}
@@ -181,12 +179,12 @@ export function ChoiceCard({
                 <button
                   type="button"
                   aria-label={verb}
-                  aria-pressed={selected}
+                  {...choice}
                   // The card's own handler already fires on the pointer; this one
                   // is for the keyboard and must not choose twice.
                   onClick={(event) => {
                     event.stopPropagation()
-                    choose()
+                    press.go()
                   }}
                   className="min-w-0 flex-1 truncate rounded-sm text-left text-body font-medium focus-ring"
                 >
@@ -219,10 +217,34 @@ export function ChoiceCard({
   )
 }
 
-/** A run of choices. Layout lives beside the card it lays out. */
+/** Whether the cards inside are one choice out of the set, read by `ChoiceCard`. */
+const SingleChoice = createContext(false)
+
+const NEXT_KEYS: Record<string, 1 | -1 | "first" | "last"> = {
+  ArrowRight: 1,
+  ArrowDown: 1,
+  ArrowLeft: -1,
+  ArrowUp: -1,
+  Home: "first",
+  End: "last",
+}
+
+/**
+ * A run of choices. Layout lives beside the card it lays out.
+ *
+ * `mode="single"` is for a set where picking one unpicks the rest — a kind, a
+ * source, a plan. It was a row of toggle buttons with no name: "GitHub,
+ * toggle button, pressed" said nothing about the set or that it was one
+ * choice. Here it is a radiogroup named by `label`, one tab stop (the picked
+ * card, or the first), and the arrow keys move the pick the way a native
+ * radio does, Home and End to either end.
+ */
 export function ChoiceGrid({
   className,
   columns = 3,
+  mode = "multi",
+  label,
+  onKeyDown,
   ...props
 }: React.ComponentProps<"div"> & {
   /**
@@ -237,23 +259,67 @@ export function ChoiceGrid({
    * five across at `xl`.
    */
   columns?: 2 | 3 | "fill" | "compact"
+  /** `single`: one choice out of the set, a named radiogroup. */
+  mode?: "single" | "multi"
+  /** The set's name, which a single-choice grid needs: "Alert kind". */
+  label?: string
 }) {
+  const grid = useRef<HTMLDivElement>(null)
+  const single = mode === "single"
+  const controls = () =>
+    Array.from(
+      grid.current?.querySelectorAll<HTMLElement>("[data-choice-control]:not(:disabled)") ?? [],
+    )
+  // One tab stop: the picked card, or the first. The cards carry no tabIndex
+  // of their own, so React never writes over this.
+  const rove = () => {
+    const all = controls()
+    const stop = all.find((el) => el.getAttribute("aria-checked") === "true") ?? all[0]
+    for (const el of all) el.tabIndex = el === stop ? 0 : -1
+  }
+  useLayoutEffect(() => {
+    if (single) rove()
+  })
   return (
-    <div
-      data-slot="choice-grid"
-      className={cn(
-        "grid min-w-0 gap-3",
-        columns === "fill"
-          ? "auto-rows-fr grid-cols-[repeat(auto-fill,minmax(16rem,1fr))]"
-          : columns === "compact"
-            ? "grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"
-            : columns === 2
-              ? "sm:grid-cols-2"
-              : "sm:grid-cols-2 lg:grid-cols-3",
-        className,
-      )}
-      {...props}
-    />
+    <SingleChoice.Provider value={single}>
+      <div
+        ref={grid}
+        data-slot="choice-grid"
+        role={single ? "radiogroup" : undefined}
+        aria-label={single ? label : undefined}
+        onKeyDown={(event) => {
+          onKeyDown?.(event)
+          const step = NEXT_KEYS[event.key]
+          if (!single || step === undefined || event.defaultPrevented) return
+          const all = controls()
+          const at = all.indexOf(document.activeElement as HTMLElement)
+          if (at < 0 || all.length === 0) return
+          event.preventDefault()
+          const next =
+            step === "first"
+              ? all[0]
+              : step === "last"
+                ? all[all.length - 1]
+                : all[(at + step + all.length) % all.length]
+          next.focus()
+          // The pick follows the focus, as it does in a native radio group.
+          next.click()
+          rove()
+        }}
+        className={cn(
+          "grid min-w-0 gap-3",
+          columns === "fill"
+            ? "auto-rows-fr grid-cols-[repeat(auto-fill,minmax(16rem,1fr))]"
+            : columns === "compact"
+              ? "grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"
+              : columns === 2
+                ? "sm:grid-cols-2"
+                : "sm:grid-cols-2 lg:grid-cols-3",
+          className,
+        )}
+        {...props}
+      />
+    </SingleChoice.Provider>
   )
 }
 
