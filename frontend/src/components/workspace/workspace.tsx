@@ -32,7 +32,10 @@ export function WorkspaceHelp({ compact = false }: { compact?: boolean }) {
   const help = useContext(Help)
   return help ? (
     <Button
-      size="xs"
+      // The compact one is a single glyph and as square as an icon's button:
+      // 23px wide as text, its 24px press box reached past the end of the
+      // identity line it closes and gave the page half a pixel to scroll.
+      size={compact ? "icon-xs" : "xs"}
       variant="ghost"
       aria-label={`${help.name} shortcuts`}
       title={`${help.name} shortcuts`}

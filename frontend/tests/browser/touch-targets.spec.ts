@@ -191,6 +191,17 @@ test.describe("under a finger", () => {
     await expect(alias).toBeVisible()
     await expect(alias).toHaveClass(/\btext-xs\b/)
     expect(await fontSize(alias)).toBe(16)
+    // At rest: the dialog opens with a zoom from 95%, and a box read during
+    // it is the field scaled (43.9 on a loaded runner), not the field.
+    await alias.evaluate((el) =>
+      Promise.all(
+        el
+          .closest("[role=dialog]")!
+          .getAnimations({ subtree: true })
+          .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+          .map((animation) => animation.finished),
+      ),
+    )
     expect((await alias.boundingBox())!.height).toBe(44)
   })
 

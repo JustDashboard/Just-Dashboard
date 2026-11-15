@@ -257,7 +257,9 @@ function Counted({ title, count }: { title: string; count: number }) {
   return (
     <>
       {title}
-      <span className="numeric ml-2 text-body font-normal text-muted-foreground">{count}</span>
+      <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
+        {count}
+      </span>
     </>
   )
 }
