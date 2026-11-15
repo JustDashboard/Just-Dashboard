@@ -50,6 +50,7 @@ import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldCheck,
+  FieldChecks,
   FieldRow,
   FormFact,
   FormFacts,
@@ -2003,14 +2004,14 @@ function ChannelFields({
               </InputGroup>
             </Field>
             {token && (
-              <p aria-live="polite">
+              <FieldChecks>
                 {/* The id before the colon is the bot's, and is not the secret. */}
                 <FieldCheck met={TELEGRAM_TOKEN.test(token)}>
                   {TELEGRAM_TOKEN.test(token)
                     ? `bot ${token.split(":")[0]}`
                     : "digits, a colon, then the bot's secret"}
                 </FieldCheck>
-              </p>
+              </FieldChecks>
             )}
           </div>
           <div className="space-y-2">
@@ -2026,11 +2027,11 @@ function ChannelFields({
               />
             </Field>
             {chat && (
-              <p aria-live="polite">
+              <FieldChecks>
                 <FieldCheck met={TELEGRAM_CHAT.test(chat)}>
                   {TELEGRAM_CHAT.test(chat) ? chatKind(chat) : "a numeric id or an @name"}
                 </FieldCheck>
-              </p>
+              </FieldChecks>
             )}
           </div>
         </>
@@ -2280,13 +2281,13 @@ function PushFields({
               </InputGroup>
             </Field>
             {topic && (
-              <p aria-live="polite">
+              <FieldChecks>
                 <FieldCheck met={NTFY_TOPIC.test(topic)}>
                   {NTFY_TOPIC.test(topic)
                     ? `${topic.length} characters`
                     : "letters, digits, - and _ only, up to 64"}
                 </FieldCheck>
-              </p>
+              </FieldChecks>
             )}
           </div>
           <div className="space-y-2">
@@ -2304,11 +2305,11 @@ function PushFields({
               />
             </Field>
             {token && (
-              <p aria-live="polite">
+              <FieldChecks>
                 <FieldCheck met={NTFY_TOKEN.test(token)}>
                   {NTFY_TOKEN.test(token) ? "access token" : "tk_ and 29 letters or digits"}
                 </FieldCheck>
-              </p>
+              </FieldChecks>
             )}
           </div>
         </>
@@ -2336,13 +2337,13 @@ function PushFields({
               />
             </Field>
             {token && (
-              <p aria-live="polite">
+              <FieldChecks>
                 <FieldCheck met={GOTIFY_TOKEN.test(token)}>
                   {GOTIFY_TOKEN.test(token)
                     ? "application token"
                     : "an application token, not a client's"}
                 </FieldCheck>
-              </p>
+              </FieldChecks>
             )}
           </div>
         </>
@@ -2366,11 +2367,11 @@ function PushFields({
               />
             </Field>
             {token && (
-              <p aria-live="polite">
+              <FieldChecks>
                 <FieldCheck met={PUSHOVER_KEY.test(token)}>
                   {PUSHOVER_KEY.test(token) ? "application token" : "30 letters and digits"}
                 </FieldCheck>
-              </p>
+              </FieldChecks>
             )}
           </div>
           <div className="space-y-2">
@@ -2387,11 +2388,11 @@ function PushFields({
               />
             </Field>
             {user && (
-              <p aria-live="polite">
+              <FieldChecks>
                 <FieldCheck met={PUSHOVER_KEY.test(user)}>
                   {PUSHOVER_KEY.test(user) ? "user key" : "30 letters and digits"}
                 </FieldCheck>
-              </p>
+              </FieldChecks>
             )}
           </div>
         </>

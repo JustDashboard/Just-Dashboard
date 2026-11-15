@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import Link from "next/link"
 import { Lightning, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
 import { ApiError, del, get, post, put } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
@@ -13,12 +12,11 @@ import type { DeploymentSummary, LogDrain, LogDrainKind, LogDrainStream } from "
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { SidePanel } from "@/components/side-panel"
 import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
@@ -291,93 +289,76 @@ export function LogDrainsPage() {
 
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Log drains"
-      />
-      {drains.error && !list ? (
-        <ErrorState error={drains.error} onRetry={drains.refresh} />
-      ) : (
-        <>
-          {/* On the page's own ground, as Notifications' picture is. */}
-          <div className="mx-auto w-full max-w-5xl lg:py-2">
-            <DrainsPicture
-              drains={list}
-              projects={projects}
-              loading={!list || fleet.waiting}
-              onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
-            />
-          </div>
-          <Panel plain>
-            <PanelHeader
-              title="Drains"
-              actions={
-                <span className="flex flex-wrap items-center gap-3">
-                  {list && list.length > 0 && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {drainsCount(list)}
-                    </span>
-                  )}
-                  {admin && list && list.length > 0 && (
-                    <Button size="sm" onClick={() => open(emptyDraft("otlp"))}>
-                      <Plus className="size-3.5" />
-                      Add drain
-                    </Button>
-                  )}
-                </span>
-              }
-            />
-            <PanelBody>
-              {!list ? (
-                <LoadingRows rows={2} className="[&>*]:h-14 [&>*]:rounded-xl" />
-              ) : list.length === 0 ? (
-                admin ? (
-                  // The empty page is the sheet's first question: which format.
-                  <ChoiceGrid columns={3} className="animate-rise">
-                    {KINDS.map((option, index) => (
-                      <ChoiceCard
-                        key={option.kind}
-                        verb={`Add ${option.title}`}
-                        logo={<ProductLogo id={DRAIN_PRODUCT[option.kind]} />}
-                        title={option.title}
-                        description={option.hint}
-                        index={index}
-                        onClick={() => open(emptyDraft(option.kind))}
-                      />
-                    ))}
-                  </ChoiceGrid>
-                ) : (
-                  <EmptyNote>No log drains</EmptyNote>
-                )
-              ) : (
-                <ChoiceList aria-label="Log drains" className="animate-rise">
-                  {list.map((drain) => (
-                    <DrainRow
-                      key={drain.id}
-                      drain={drain}
-                      projects={projects}
-                      wide={wide}
-                      verbs={verbsFor(drain)}
-                      onEdit={admin ? () => open(draftOf(drain)) : undefined}
-                    />
-                  ))}
-                </ChoiceList>
-              )}
-            </PanelBody>
-          </Panel>
-        </>
-      )}
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Log drains" />
+      {/* On the page's own ground, as Notifications' picture is. */}
+      <div className="mx-auto w-full max-w-5xl lg:py-2">
+        <DrainsPicture
+          drains={list}
+          projects={projects}
+          loading={!list || fleet.waiting}
+          onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
+        />
+      </div>
+      <Panel plain>
+        <PanelHeader
+          title="Drains"
+          count={list && list.length > 0 ? drainsCount(list) : undefined}
+          actions={
+            admin && (
+              <Button size="sm" onClick={() => open(emptyDraft("otlp"))}>
+                <Plus className="size-3.5" />
+                Add drain
+              </Button>
+            )
+          }
+        />
+        <PanelBody>
+          {drains.error && !list ? (
+            <ErrorState error={drains.error} onRetry={drains.refresh} />
+          ) : !list ? (
+            <ChoiceListSkeleton rows={2} />
+          ) : list.length === 0 ? (
+            admin ? (
+              // The empty page is the sheet's first question: which format.
+              <ChoiceGrid columns={3} className="animate-rise">
+                {KINDS.map((option, index) => (
+                  <ChoiceCard
+                    key={option.kind}
+                    verb={`Add ${option.title}`}
+                    logo={<ProductLogo id={DRAIN_PRODUCT[option.kind]} />}
+                    title={option.title}
+                    description={option.hint}
+                    index={index}
+                    onClick={() => open(emptyDraft(option.kind))}
+                  />
+                ))}
+              </ChoiceGrid>
+            ) : (
+              <EmptyNote>No log drains</EmptyNote>
+            )
+          ) : (
+            <ChoiceList aria-label="Log drains" className="animate-rise">
+              {list.map((drain) => (
+                <DrainRow
+                  key={drain.id}
+                  drain={drain}
+                  projects={projects}
+                  wide={wide}
+                  verbs={verbsFor(drain)}
+                  onEdit={admin ? () => open(draftOf(drain)) : undefined}
+                />
+              ))}
+            </ChoiceList>
+          )}
+        </PanelBody>
+      </Panel>
 
       <SidePanel
         open={Boolean(draft)}
         onOpenChange={(next) => !next && close()}
-        title={draft?.id ? "Edit drain" : "Add drain"}
+        title={draft?.id ? `Edit ${editing?.name ?? "drain"}` : "Add drain"}
         description="Copies what deployments say — their containers' output and the requests they served — to a log service, while it happens."
-        width="md"
+        size="md"
         footer={
           <>
             <Button variant="outline" onClick={close} disabled={saving}>

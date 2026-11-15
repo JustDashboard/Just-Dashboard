@@ -41,7 +41,15 @@ import type {
   ForwardAuthProvider,
 } from "@/lib/types"
 import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
-import { Field, FieldCheck, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import {
+  Field,
+  FieldCheck,
+  FieldChecks,
+  FieldRow,
+  FormNote,
+  OptionList,
+  OptionRow,
+} from "@/components/form"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
@@ -50,7 +58,7 @@ import { Status, type DotTone } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
-import { HoverTip } from "@/components/deploy/settings/hover-tip"
+import { Explain } from "@/components/explain"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -1002,12 +1010,12 @@ function DomainRow({
           {certificateRead && (
             <span className="flex min-w-0 animate-rise flex-wrap items-center gap-x-3 gap-y-1">
               {renewal ? (
-                <HoverTip tip={renewal}>
+                <Explain face="wrap" tip={renewal}>
                   {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
                   <span tabIndex={0} className="rounded-sm focus-ring">
                     <CertificateStatus domain={certificateRead} named />
                   </span>
-                </HoverTip>
+                </Explain>
               ) : (
                 <CertificateStatus domain={certificateRead} named />
               )}
@@ -1052,7 +1060,7 @@ function DomainRow({
           disabled={!canAdmin}
           className="shrink-0"
         >
-          <HoverTip tip={httpsTip({ https: domain.https, tunnel, gated: httpsHeld && !tunnel })}>
+          <Explain face="wrap" tip={httpsTip({ https: domain.https, tunnel, gated: httpsHeld && !tunnel })}>
             <Segment
               value="https"
               aria-label={`HTTPS on ${host}`}
@@ -1071,8 +1079,8 @@ function DomainRow({
               />
               HTTPS
             </Segment>
-          </HoverTip>
-          <HoverTip tip={passwordTip({ guarded: Boolean(protection), gated })}>
+          </Explain>
+          <Explain face="wrap" tip={passwordTip({ guarded: Boolean(protection), gated })}>
             <Segment
               value="password"
               aria-label={`Password on ${host}`}
@@ -1090,10 +1098,10 @@ function DomainRow({
               />
               Password
             </Segment>
-          </HoverTip>
+          </Explain>
           {/* Always drawn, so the rows' segments line up down the list and a
               wildcard's says why it is not offered. */}
-          <HoverTip tip={tunnelTip({ tunnel, wildcard, fenced })}>
+          <Explain face="wrap" tip={tunnelTip({ tunnel, wildcard, fenced })}>
             <Segment
               value="tunnel"
               aria-label={`Cloudflare Tunnel on ${host}`}
@@ -1109,7 +1117,7 @@ function DomainRow({
               />
               Tunnel
             </Segment>
-          </HoverTip>
+          </Explain>
         </ToggleGroup>
         <OwnershipSelect
           value={domain.ownership}
@@ -1153,11 +1161,11 @@ function DomainRow({
                 info="Asked before every name this environment serves, whichever one it is set on; the application never sees it. Left empty, a saved password stays as it is."
                 hint={
                   (password || !protection.hash) && (
-                    <span aria-live="polite">
+                    <FieldChecks>
                       <FieldCheck met={password.length > 0 && !typedProblem}>
                         {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
                       </FieldCheck>
-                    </span>
+                    </FieldChecks>
                   )
                 }
               >
@@ -1645,11 +1653,11 @@ function AddDomainPanel({
                 label="Password"
                 htmlFor="add-domain-password"
                 hint={
-                  <span aria-live="polite">
+                  <FieldChecks>
                     <FieldCheck met={password.length > 0 && !typedProblem}>
                       {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
                     </FieldCheck>
-                  </span>
+                  </FieldChecks>
                 }
               >
                 <Input

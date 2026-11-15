@@ -3,7 +3,7 @@
 import { useId } from "react"
 import { ArrowRight, LockClosed, Servers, Trash } from "@/components/icons"
 import { ownershipTip } from "@/components/deploy/settings/domain-rows"
-import { HoverTip } from "@/components/deploy/settings/hover-tip"
+import { Explain } from "@/components/explain"
 import { cn } from "@/lib/utils"
 import type { DeploymentConfiguration } from "@/lib/types"
 import { Field } from "@/components/form"
@@ -86,7 +86,7 @@ export function OwnershipSelect<T extends Ownership>({
       aria-label={label}
       aria-describedby={descriptionId}
       // Wide enough for the longest word, so the rows' selects line up.
-      className={cn("max-sm:text-body", quiet && "w-28")}
+      className={cn(quiet && "w-28")}
     >
       <SelectValue />
     </SelectTrigger>
@@ -97,9 +97,9 @@ export function OwnershipSelect<T extends Ownership>({
         {quiet ? (
           // A wrapper rather than the trigger itself, whose open state its
           // `data-state` has to keep for the chevron and the list.
-          <HoverTip tip={ownershipTip(options.map((option) => OWNERSHIP[option]))}>
+          <Explain face="wrap" tip={ownershipTip(options.map((option) => OWNERSHIP[option]))}>
             <span className="inline-flex">{trigger}</span>
-          </HoverTip>
+          </Explain>
         ) : (
           trigger
         )}

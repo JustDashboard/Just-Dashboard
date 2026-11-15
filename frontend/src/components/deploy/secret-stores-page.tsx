@@ -19,12 +19,11 @@ import type {
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { SidePanel } from "@/components/side-panel"
 import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
@@ -266,95 +265,78 @@ export function SecretStoresPage() {
 
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Secret stores"
-      />
-      {stores.error && !list ? (
-        <ErrorState error={stores.error} onRetry={stores.refresh} />
-      ) : (
-        <>
-          {/* Nothing is wired before the first store, and a picture of two
-              empty rings says less than the cards under it: no picture then. */}
-          {(!list || list.length > 0) && (
-            <div className="mx-auto w-full max-w-5xl lg:py-2">
-              <StoresPicture
-                stores={list}
-                projects={fleet.projects}
-                loading={!list || fleet.waiting}
-                onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
-              />
-            </div>
-          )}
-          <Panel plain>
-            <PanelHeader
-              title="Stores"
-              actions={
-                <span className="flex flex-wrap items-center gap-3">
-                  {list && list.length > 0 && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {storesCount(list)}
-                    </span>
-                  )}
-                  {admin && list && list.length > 0 && (
-                    <Button size="sm" onClick={() => open(emptyDraft("vault"))}>
-                      <Plus className="size-3.5" />
-                      Add store
-                    </Button>
-                  )}
-                </span>
-              }
-            />
-            <PanelBody>
-              {!list ? (
-                <LoadingRows rows={2} className="[&>*]:h-14 [&>*]:rounded-xl" />
-              ) : list.length === 0 ? (
-                admin ? (
-                  // The empty page is the sheet's first question: which store.
-                  <ChoiceGrid columns={3} className="animate-rise">
-                    {STORE_KINDS.map((option, index) => (
-                      <ChoiceCard
-                        key={option.kind}
-                        verb={`Add ${option.title}`}
-                        logo={<StoreLogo kind={option.kind} size="md" />}
-                        title={option.title}
-                        description={option.short}
-                        index={index}
-                        onClick={() => open(emptyDraft(option.kind))}
-                      />
-                    ))}
-                  </ChoiceGrid>
-                ) : (
-                  <EmptyNote>No secret stores</EmptyNote>
-                )
-              ) : (
-                <ChoiceList aria-label="Secret stores" className="animate-rise">
-                  {list.map((store) => (
-                    <StoreRow
-                      key={store.id}
-                      store={store}
-                      wide={wide}
-                      verbs={verbsFor(store)}
-                      onEdit={admin ? () => open(draftOf(store)) : undefined}
-                    />
-                  ))}
-                </ChoiceList>
-              )}
-            </PanelBody>
-          </Panel>
-        </>
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Secret stores" />
+      {/* Nothing is wired before the first store, and a picture of two
+          empty rings says less than the cards under it: no picture then. */}
+      {(!list || list.length > 0) && (
+        <div className="mx-auto w-full max-w-5xl lg:py-2">
+          <StoresPicture
+            stores={list}
+            projects={fleet.projects}
+            loading={!list || fleet.waiting}
+            onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
+          />
+        </div>
       )}
+      <Panel plain>
+        <PanelHeader
+          title="Stores"
+          count={list && list.length > 0 ? storesCount(list) : undefined}
+          actions={
+            admin && (
+              <Button size="sm" onClick={() => open(emptyDraft("vault"))}>
+                <Plus className="size-3.5" />
+                Add store
+              </Button>
+            )
+          }
+        />
+        <PanelBody>
+          {stores.error && !list ? (
+            <ErrorState error={stores.error} onRetry={stores.refresh} />
+          ) : !list ? (
+            <ChoiceListSkeleton rows={2} />
+          ) : list.length === 0 ? (
+            admin ? (
+              // The empty page is the sheet's first question: which store.
+              <ChoiceGrid columns={3} className="animate-rise">
+                {STORE_KINDS.map((option, index) => (
+                  <ChoiceCard
+                    key={option.kind}
+                    verb={`Add ${option.title}`}
+                    logo={<StoreLogo kind={option.kind} size="md" />}
+                    title={option.title}
+                    description={option.short}
+                    index={index}
+                    onClick={() => open(emptyDraft(option.kind))}
+                  />
+                ))}
+              </ChoiceGrid>
+            ) : (
+              <EmptyNote>No secret stores</EmptyNote>
+            )
+          ) : (
+            <ChoiceList aria-label="Secret stores" className="animate-rise">
+              {list.map((store) => (
+                <StoreRow
+                  key={store.id}
+                  store={store}
+                  wide={wide}
+                  verbs={verbsFor(store)}
+                  onEdit={admin ? () => open(draftOf(store)) : undefined}
+                />
+              ))}
+            </ChoiceList>
+          )}
+        </PanelBody>
+      </Panel>
 
       <SidePanel
         open={Boolean(draft)}
         onOpenChange={(next) => !next && close()}
-        title={draft?.id ? `Edit ${draft.name}` : "Add store"}
+        title={draft?.id ? `Edit ${editing?.name ?? draft.name}` : "Add store"}
         description="A deployment's variables read a key from it as ${{store.NAME/path#KEY}}, fresh for each run. Values are never stored here."
-        width="md"
+        size="md"
         footer={
           <>
             <Button variant="outline" onClick={close} disabled={saving}>

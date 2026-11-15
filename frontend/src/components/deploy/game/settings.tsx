@@ -35,7 +35,7 @@ import {
   useGameOverview,
 } from "@/components/deploy/game/identity"
 import { groupFacts, groupProperties } from "@/components/deploy/game/settings-model"
-import { HoverTip } from "@/components/deploy/settings/hover-tip"
+import { Explain } from "@/components/explain"
 import { Segments } from "@/components/segments"
 import {
   SettingForm,
@@ -313,9 +313,9 @@ function PropertyFields({
     )
   // The file's own word for the setting, for a reader who knows the file.
   const named = (property: BlueprintProperty) => (
-    <HoverTip tip={<span className="font-mono">{property.key}</span>}>
+    <Explain face="wrap" tip={<span className="font-mono">{property.key}</span>}>
       <span>{property.label}</span>
-    </HoverTip>
+    </Explain>
   )
 
   const text = known.filter((property) => property.kind === "text")

@@ -46,6 +46,7 @@ import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldCheck,
+  FieldChecks,
   FieldRow,
   FormFact,
   FormFacts,
@@ -1018,11 +1019,11 @@ function CredentialForm({
         </Field>
         {/* The server's own rule for a name, lit as it is met, so a refusal is
             never the first the reader hears of it. */}
-        <p className="flex flex-wrap gap-x-4 gap-y-1" aria-live="polite">
+        <FieldChecks>
           <FieldCheck met={/^[A-Za-z0-9]/.test(name)}>starts with a letter or digit</FieldCheck>
           <FieldCheck met={/^[A-Za-z0-9._-]*$/.test(name)}>letters, digits . - _ only</FieldCheck>
           <FieldCheck met={name.length <= 64}>64 at most</FieldCheck>
-        </p>
+        </FieldChecks>
       </div>
 
       <FormSection title="Where it signs in">
