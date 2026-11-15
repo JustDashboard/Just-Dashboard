@@ -207,7 +207,7 @@ export function ConnectExisting({
   }
 
   return (
-    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_26rem] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch">
+    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_26rem] xl:grid-rows-fill xl:items-stretch">
       <Panel plain id={`${id}-catalogue`} tabIndex={-1} className="min-w-0 scroll-mt-4 xl:min-h-0">
         <PanelHeader title="Engines" />
         <PanelBody className="flex min-h-0 flex-1 flex-col gap-3">
@@ -499,7 +499,6 @@ export function ConnectExisting({
                 </Button>
                 <Button
                   variant="outline"
-                  className="h-11 sm:h-9"
                   disabled={!dsn || saving}
                   pending={testing}
                   onClick={() => void test()}
@@ -510,12 +509,7 @@ export function ConnectExisting({
               </>
             }
           >
-            <Button
-              className="h-11 sm:h-9"
-              disabled={!ready}
-              pending={saving}
-              onClick={() => void save()}
-            >
+            <Button disabled={!ready} pending={saving} onClick={() => void save()}>
               <Linked />
               Connect
             </Button>

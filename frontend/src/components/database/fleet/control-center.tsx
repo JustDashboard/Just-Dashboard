@@ -246,7 +246,7 @@ export function ControlCenter() {
 
   if (!fleet.data) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         {/* The page's commands stay through a failed read: adding a database
             does not need the fleet to have answered. */}
         <PageContext eyebrow="Apps" title="Databases" />
@@ -295,7 +295,7 @@ export function ControlCenter() {
 
   if (entries.length === 0) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Apps" title="Databases" />
         {/* The empty state under it holds the page's one command. */}
         {opening("No database is connected yet", null)}
@@ -377,7 +377,7 @@ export function ControlCenter() {
     .filter(Boolean)
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {/* The commands are at the identity line's end, beside the verdict. */}
       <PageContext eyebrow="Apps" title="Databases" />
 

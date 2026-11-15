@@ -19,8 +19,8 @@ import {
  * words about one, in the quiet voice.
  */
 export const VALUE_KIND_CLASS: Record<ValueKind, string> = {
-  null: "text-muted-foreground/60",
-  empty: "text-muted-foreground/60 italic",
+  null: "text-faint",
+  empty: "text-faint italic",
   string: KIND_HUE.text,
   number: KIND_HUE.number,
   boolean: KIND_HUE.boolean,

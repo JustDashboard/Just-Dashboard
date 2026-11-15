@@ -56,13 +56,10 @@ export function SectionFrame({
   return (
     <Page
       fill={workbench}
+      rise={!workbench}
       register={register}
       className={cn(
-        !workbench
-          ? "animate-rise"
-          : HEADED.includes(section)
-            ? WORKBENCH_FRAME
-            : UNDER_HEADER_FRAME,
+        workbench && (HEADED.includes(section) ? WORKBENCH_FRAME : UNDER_HEADER_FRAME),
         className,
       )}
     >

@@ -216,7 +216,7 @@ export function FleetCard({
             }}
             className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4"
           >
-            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
+            <div className="grid min-w-0 grid-cols-start-main-end items-center gap-x-3 gap-y-1">
               <EngineMark engine={engine} className={cn("row-span-2", down && "opacity-60")} />
               <Link
                 href={href}
@@ -283,7 +283,7 @@ export function FleetCard({
               <div
                 data-slot="fleet-reading"
                 className={cn(
-                  "grid min-h-12 grid-cols-[minmax(0,1fr)_auto] content-center items-center gap-x-4 gap-y-1",
+                  "grid min-h-12 grid-cols-main-end content-center items-center gap-x-4 gap-y-1",
                   down && "opacity-60",
                 )}
               >

@@ -21,7 +21,7 @@ import { useDatabase } from "@/components/database/shell/database-context"
 export function MissingPage() {
   const { conn, engine, href } = useDatabase()
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Databases" title={`${conn.name} · Page not found`} />
       <EmptyState
         mark={<EngineMark engine={engine} />}

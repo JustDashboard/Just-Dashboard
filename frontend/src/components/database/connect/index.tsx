@@ -82,7 +82,7 @@ export function AddDatabase() {
 
   if (!admin) {
     return (
-      <Page register="flow" className="animate-rise">
+      <Page rise register="flow">
         <FlowHeader eyebrow={Eyebrow} question="Where is the database?" />
         <EmptyState
           mark={<ProductLogos ids={["postgres", "mysql", "redis"]} size="md" />}
@@ -99,7 +99,7 @@ export function AddDatabase() {
   }
 
   return (
-    <Page register="flow" fill="xl" className="animate-rise">
+    <Page rise register="flow" fill="xl">
       <FlowHeader
         eyebrow={Eyebrow}
         question="Where is the database?"

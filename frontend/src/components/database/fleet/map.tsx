@@ -170,7 +170,7 @@ export function DatabaseMap() {
         ref={root}
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-          screen.immersive && "fixed inset-0 z-50 p-3",
+          screen.immersive && "fixed inset-0 z-immersive p-3",
         )}
       >
         <Pane className="min-h-0 flex-1 max-lg:rounded-none max-lg:border-0">
