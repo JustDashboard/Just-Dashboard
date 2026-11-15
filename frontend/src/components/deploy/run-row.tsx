@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils"
 import type { DeploymentEngineRun, DeploymentRelease, DeploymentSummary } from "@/lib/types"
 import { ChoiceRow } from "@/components/choice-row"
 import { FactDot } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Status } from "@/components/status-dot"
 import { ProductGlyph, imageProduct } from "@/components/product-logo"
 import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
@@ -159,18 +160,24 @@ export function RunRow({
       actions={actions}
     >
       {wide ? undefined : (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-hint text-muted-foreground">
-          {state}
-          {failure && <span className="text-destructive">{failure}</span>}
-          <FactDot />
-          <span title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
+        <FactLine className="text-hint text-muted-foreground">
+          <Fact>
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
+              {state}
+              {failure && <span className="text-destructive">{failure}</span>}
+            </span>
+          </Fact>
+          <Fact title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
             {duration}
-          </span>
-          <FactDot />
-          <span className="numeric">{when}</span>
-          {stage}
-          {tags}
-        </div>
+          </Fact>
+          <Fact>
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
+              <span className="numeric">{when}</span>
+              {stage}
+              {tags}
+            </span>
+          </Fact>
+        </FactLine>
       )}
     </ChoiceRow>
   )

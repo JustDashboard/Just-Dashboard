@@ -309,9 +309,7 @@ export function RuntimeMap({
                             )}
                           </WireMark>
                           {/* The container's state in the tile's corner, as the overview's runtime mark carries it. */}
-                          <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-                            <StatusDot state={service.state} />
-                          </span>
+                          <StatusDot state={service.state} corner="md" />
                         </span>
                       }
                       eyebrow={

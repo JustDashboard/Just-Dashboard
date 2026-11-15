@@ -153,9 +153,7 @@ export function ReleaseWatch({
               <WireMark tone="logo" size="md">
                 <ProductGlyph id={watchProxy(watch)} />
               </WireMark>
-              <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-                <StatusDot tone={lead.tone} />
-              </span>
+              <StatusDot tone={lead.tone} corner="md" />
             </span>
           }
           title={lead.title}

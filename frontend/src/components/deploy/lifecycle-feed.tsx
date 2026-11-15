@@ -3,14 +3,10 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import {
-  CheckCircle,
   ChevronDown,
-  Clock,
   ClockRewind,
   Cross,
-  Filter,
   MagnifyingGlass,
-  Slash,
   TerminalWindow,
   Warning,
   type Icon,
@@ -29,7 +25,8 @@ import { GroupRule } from "@/components/choice-row"
 import { laneStyle } from "@/components/logs/log-text"
 import { FactDot } from "@/components/identity-header"
 import { PaneFooter } from "@/components/panel"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { ProjectEmpty } from "@/components/deploy/project-empty"
 import { LoadingRows } from "@/components/loading"
 import { InfoTip } from "@/components/form"
 import { Status } from "@/components/status-dot"
@@ -182,11 +179,7 @@ export function LifecycleFeed({
   if (data && data.status !== "available") {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <EmptyState
-          icon={Slash}
-          title="Container events are unavailable"
-          description={data.reason}
-        />
+        <ProjectEmpty title="Container events are unavailable" reason={data.reason} />
       </div>
     )
   }
@@ -295,7 +288,7 @@ export function LifecycleFeed({
         {!data ? (
           <LoadingRows rows={6} />
         ) : shown.length === 0 ? (
-          <EmptyState
+          <ProjectEmpty
             {...emptyReading({
               filtered,
               moment,
@@ -450,20 +443,18 @@ function emptyReading({
   moment?: string
   since?: string
   retentionDays?: number
-}): { title: string; description: string; icon: Icon } {
+}): { title: string; reason: string } {
   if (filtered) {
     return {
-      icon: Filter,
       title: "Nothing matches that filter",
-      description:
+      reason:
         "No recorded event carries that text or belongs to that kind. Clear the filter to see the whole record.",
     }
   }
   if (moment) {
     return {
-      icon: Clock,
       title: "Nothing happened to the container then",
-      description:
+      reason:
         "No exit, restart, OOM kill or health change within two minutes of that request. Whatever failed, it was not the container's life.",
     }
   }
@@ -471,9 +462,8 @@ function emptyReading({
     ? ` The record is kept for ${plural(retentionDays, "day")} and survives a restart of the dashboard.`
     : ""
   return {
-    icon: CheckCircle,
     title: "Nothing has happened to these containers",
-    description: since
+    reason: since
       ? `No start, stop, restart, exit or health change has been recorded for this deployment since the record began on ${timestamp(since)} — which for a running deployment is the reading you want.${kept}`
       : `No start, stop, restart, exit or health change has been recorded for this deployment yet.${kept}`,
   }

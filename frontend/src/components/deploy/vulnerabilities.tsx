@@ -253,9 +253,7 @@ function VulnerabilityBody({
             <WireMark tone="logo" size="md">
               <ProductGlyph id="trivy" />
             </WireMark>
-            <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-              <StatusDot tone={verdict.tone} />
-            </span>
+            <StatusDot tone={verdict.tone} corner="md" />
           </span>
         }
         title={lead.title}

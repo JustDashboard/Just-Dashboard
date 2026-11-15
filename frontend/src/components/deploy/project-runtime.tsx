@@ -48,7 +48,8 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
-import { EmptyNote, EmptyState, Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
+import { ProjectEmpty } from "@/components/deploy/project-empty"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -78,7 +79,6 @@ import {
 import type { ConfirmFn } from "@/components/docker/shared"
 import { JobCard } from "@/components/backups/job-card"
 import { useProject } from "@/components/deploy/project-context"
-import { ProjectMark } from "@/components/project-mark"
 import { ServiceDetails } from "@/components/deploy/runtime-details"
 import {
   isImageDigest,
@@ -441,11 +441,9 @@ export function ProjectRuntime() {
               </Button>
             </Notice>
           ) : services.length === 0 ? (
-            <EmptyState
-              mark={<ProjectMark deployment={deployment} product={project.product} />}
+            <ProjectEmpty
               title="No managed runtime services"
-              description="Docker returned no managed containers for this environment. Observed imports remain under Docker until managed deployment creates a runtime."
-              className="border-0 py-6"
+              reason="Docker returned no managed containers for this environment. Observed imports remain under Docker until managed deployment creates a runtime."
             />
           ) : (
             <ChoiceList aria-label="Runtime services">

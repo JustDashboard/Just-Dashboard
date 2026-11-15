@@ -2,12 +2,12 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowUpRight, Wrench } from "@/components/icons"
+import { ArrowUpRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { relativeTime, timestamp } from "@/lib/format"
 import type { DeploymentEngineRun } from "@/lib/types"
 import { FactDot } from "@/components/identity-header"
-import { EmptyState } from "@/components/state"
+import { ProjectEmpty } from "@/components/deploy/project-empty"
 import { LoadingRows } from "@/components/loading"
 import {
   Select,
@@ -76,10 +76,9 @@ export function ProjectBuilds({
           <LoadingRows rows={6} className="min-w-0 flex-1 p-3" />
         ) : (
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6">
-            <EmptyState
-              icon={Wrench}
+            <ProjectEmpty
               title="Nothing has been built yet"
-              description="A deployment's first run writes its transcript here — every command the build ran and what it printed."
+              reason="A deployment's first run writes its transcript here — every command the build ran and what it printed."
             />
           </div>
         )}
