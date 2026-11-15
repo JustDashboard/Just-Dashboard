@@ -2520,8 +2520,10 @@ test.describe("Files on a phone", () => {
     expect(await boxOf(strip(page))).toEqual(loading.strip)
     expect(await boxOf(bar(page))).toEqual(loading.bar)
 
-    // One row: the way back, where you are, find, New and the rest.
-    expect(loading.strip.height).toBeLessThanOrEqual(46)
+    // One row: the way back, where you are, find, New and the rest. Under a
+    // finger a compact control is 40 tall (0.9.0), so one row is 40 on the
+    // strip's 6px padding and its hairline, 53; a second row would be 90.
+    expect(loading.strip.height).toBeLessThanOrEqual(53)
     for (const name of ["Back to previous folder", "Find", "New", "More"]) {
       await expect(strip(page).getByRole("button", { name, exact: true })).toBeVisible()
     }
@@ -2797,7 +2799,8 @@ test.describe("Files on a phone", () => {
     const sheet = page.getByRole("dialog", { name: "notes.md", exact: true })
     await expect(sheet.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
     const toolbar = sheet.locator("[data-slot=editor-toolbar]")
-    expect((await boxOf(toolbar)).height).toBe(32)
+    // One row of compact controls, which are 40 under a finger.
+    expect((await boxOf(toolbar)).height).toBe(40)
     await expect(toolbar.getByRole("button", { name: "Open full editor" })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       PHONE.width,
@@ -2834,7 +2837,8 @@ test.describe("the file editor on a phone", () => {
 
     // One row: the language, find, undo and redo, and the menu.
     const toolbar = editor(page).locator("[data-slot=editor-toolbar]")
-    expect((await boxOf(toolbar)).height).toBe(32)
+    // One row of compact controls, which are 40 under a finger.
+    expect((await boxOf(toolbar)).height).toBe(40)
     await expect(toolbar.getByRole("combobox", { name: "File language" })).toBeVisible()
     for (const name of ["Find", "Undo", "Redo", "More editor commands"]) {
       await expect(toolbar.getByRole("button", { name, exact: true })).toBeVisible()

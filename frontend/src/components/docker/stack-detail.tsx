@@ -1065,7 +1065,9 @@ function ServicesPanel({
         title={
           <>
             Services
-            <span className="numeric ml-2 text-body font-normal text-muted-foreground">{all}</span>
+            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
+              {all}
+            </span>
           </>
         }
       >
