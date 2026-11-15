@@ -21,7 +21,7 @@ import {
   type ImageTab,
   type Use,
 } from "@/components/docker/images"
-import { DockerRail, DockerRailRow } from "@/components/docker/item-rail"
+import { Rail, RailFigure, RailLine, RailName, RailRow } from "@/components/rail"
 import { StatusDot } from "@/components/status-dot"
 
 const SORT_WORDS: Record<ImageSort, string> = {
@@ -81,7 +81,7 @@ export function useImageRail() {
   const caption = images.data
     ? `${rows.length < list.length ? `${rows.length} of ${plural(list.length, "image")}` : plural(list.length, "image")} · ${SORT_WORDS[sort]}`
     : images.error
-      ? "The images could not be read"
+      ? undefined
       : "Reading the images…"
   const refreshImages = images.refresh
   const refreshUpdates = updates.refresh
@@ -94,6 +94,9 @@ export function useImageRail() {
     running,
     updates: updates.data,
     loading: images.loading && !images.data,
+    /** The list could not be read: the column says so in place of its rows. */
+    error: images.data ? undefined : images.error,
+    refreshImages,
     query,
     setQuery,
     filtered,
@@ -135,16 +138,16 @@ export function ImageRail({
   className?: string
 }) {
   return (
-    <DockerRail<Pick<DockerImage, "id" | "repoTags" | "size">>
+    <Rail<Pick<DockerImage, "id" | "repoTags" | "size">>
       slot="image-rail"
       label="Images"
-      search={{ label: "Search the images", placeholder: "Name, version or id" }}
+      search={{ placeholder: "Name, version or id", query: rail.query, onQuery: rail.setQuery }}
       rows={rail.rows}
       keyOf={(image) => image.id}
       current={(image) => image.id === current}
       pinned={currentRow}
       row={(image, on) => (
-        <RailRow
+        <ImageRow
           image={image}
           current={on}
           tab={tab}
@@ -153,9 +156,10 @@ export function ImageRail({
         />
       )}
       loading={rail.loading}
+      loadingRows={8}
+      error={rail.error}
+      onRetry={rail.refreshImages}
       empty="No image matches."
-      query={rail.query}
-      onQuery={rail.setQuery}
       filtered={rail.filtered}
       onClearFilters={rail.clearFilters}
       caption={rail.caption}
@@ -164,7 +168,7 @@ export function ImageRail({
   )
 }
 
-function RailRow({
+function ImageRow({
   image,
   current,
   tab,
@@ -181,7 +185,7 @@ function RailRow({
   const tag = primaryTag(image)
   const coloured = state === "outdated" || state === "pinned" || state === "local"
   return (
-    <DockerRailRow
+    <RailRow
       item={image.id}
       name={tag ?? shortId(image.id)}
       label={tag ?? `untagged ${shortId(image.id)}`}
@@ -193,27 +197,18 @@ function RailRow({
           <StatusDot state={running ? "running" : "exited"} className="size-1.5" />
         )
       }
-      end={
-        <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
-          {bytes(image.size)}
-        </span>
-      }
+      end={<RailFigure>{bytes(image.size)}</RailFigure>}
     >
-      <span
-        className={cn(
-          "block truncate font-mono text-xs",
-          current ? "font-semibold" : "font-medium",
-          !tag && "font-sans font-normal text-muted-foreground italic",
-        )}
+      <RailName
+        current={current}
+        mono={Boolean(tag)}
+        className={cn(!tag && "font-normal text-muted-foreground italic")}
       >
         {tag ? <ReferenceWords reference={tag} /> : "untagged"}
-      </span>
-      <span
-        className="block truncate text-hint text-muted-foreground"
-        style={state && coloured ? { color: FRESHNESS_COLOR[state] } : undefined}
-      >
+      </RailName>
+      <RailLine style={state && coloured ? { color: FRESHNESS_COLOR[state] } : undefined}>
         {!tag ? shortId(image.id) : state ? FRESHNESS_LABEL[state].toLowerCase() : " "}
-      </span>
-    </DockerRailRow>
+      </RailLine>
+    </RailRow>
   )
 }

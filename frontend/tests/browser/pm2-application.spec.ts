@@ -129,13 +129,13 @@ test("the views are in the address and the list beside it carries the view along
 
   // The list's own order, crashing first, a cluster as one row; the one on
   // screen is filled.
-  const rows = rail(page).getByRole("button")
+  const rows = rail(page).getByRole("link")
   await expect(rows.filter({ hasText: /worker|api|queue/ })).toHaveText([
     /worker[\s\S]*errored · 15 unstable/,
     /api[\s\S]*cluster of 2/,
     /queue[\s\S]*fork/,
   ])
-  await expect(rail(page).getByRole("button", { name: "api", exact: true })).toHaveAttribute(
+  await expect(rail(page).getByRole("link", { name: "api", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   )
@@ -161,7 +161,7 @@ test("the views are in the address and the list beside it carries the view along
   await expect(page.getByRole("button", { name: "Next application" })).toBeDisabled()
 
   // An application that is not running has no environment to read, and says so.
-  await rail(page).getByRole("button", { name: "worker", exact: true }).click()
+  await rail(page).getByRole("link", { name: "worker", exact: true }).click()
   await expect(page).toHaveURL(/\/processes\/pm2\/worker\?tab=environment$/)
   await expect(page.getByText("It is not running")).toBeVisible()
 
@@ -665,7 +665,7 @@ test("every state the pages can be in is one they were drawn for", async ({ page
   await expect(identity(page)).toContainText("fork")
   await expect(identity(page)).toContainText("staging")
   // The list beside it says whose each is, and walking it keeps the account.
-  await expect(rail(page).getByRole("button", { name: "api, deploy" })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "api, deploy" })).toBeVisible()
   await page.keyboard.press("Alt+ArrowUp")
   await expect(page).toHaveURL(/\/processes\/pm2\/api\?account=deploy$/)
   await expect(identity(page)).toContainText("cluster of 2")

@@ -234,7 +234,7 @@ test("the containers stand beside the page, and Alt+↓ walks them with the view
 
   const rail = page.locator("[data-slot=container-rail]")
   await expect(rail).toBeVisible()
-  const rows = rail.getByRole("list", { name: "Containers to open" }).getByRole("button")
+  const rows = rail.getByRole("list", { name: "Containers to open" }).getByRole("link")
   await expect(rows).toHaveCount(6)
   // The table's own order: what is failing first, then by name.
   expect(
@@ -247,10 +247,10 @@ test("the containers stand beside the page, and Alt+↓ walks them with the view
     "automations-worker-1",
     "uptime-kuma",
   ])
-  const current = rail.getByRole("button", { name: "automations-n8n-1", exact: true })
+  const current = rail.getByRole("link", { name: "automations-n8n-1", exact: true })
   await expect(current).toHaveAttribute("aria-current", "page")
   await expect(current).toContainText("automations")
-  await expect(rail.getByRole("button", { name: "automations-runner-1" })).toContainText(
+  await expect(rail.getByRole("link", { name: "automations-runner-1" })).toContainText(
     "restarting",
   )
   await expect(rail.getByText("6 containers · failing first")).toBeVisible()
@@ -266,11 +266,11 @@ test("the containers stand beside the page, and Alt+↓ walks them with the view
     timeout: 15_000,
   })
   await expect(
-    rail.getByRole("button", { name: "automations-postgres-1", exact: true }),
+    rail.getByRole("link", { name: "automations-postgres-1", exact: true }),
   ).toHaveAttribute("aria-current", "page")
   await page.getByRole("button", { name: "Previous container" }).click()
   await expect(page).toHaveURL(new RegExp(`/docker/containers/${N8N}\\?tab=env$`))
-  await rail.getByRole("button", { name: "automations-worker-1" }).click()
+  await rail.getByRole("link", { name: "automations-worker-1" }).click()
   await expect(page).toHaveURL(new RegExp(`/docker/containers/${WORKER}\\?tab=env$`))
 })
 
@@ -289,7 +289,7 @@ test("the rail keeps the table's filters, and still names the container on scree
   await page.goto(`/docker/containers/${N8N}?tab=overview`)
 
   const rail = page.locator("[data-slot=container-rail]")
-  const rows = rail.getByRole("list", { name: "Containers to open" }).getByRole("button")
+  const rows = rail.getByRole("list", { name: "Containers to open" }).getByRole("link")
   await expect(rows).toHaveCount(2)
   // The container on screen first, set apart from what the filter holds.
   await expect(rows.first()).toHaveAttribute("aria-label", "automations-n8n-1")
