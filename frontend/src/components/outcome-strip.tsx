@@ -1,27 +1,15 @@
 import { cn } from "@/lib/utils"
+import { OUTCOME_FILL, type OutcomeTone } from "@/components/tone"
 
-/** How one attempt ended, in the only hues a reading of state may take (§3). */
-export type OutcomeTone = "success" | "danger" | "warning" | "running" | "muted"
+// The vocabulary and its fills live in `components/tone.ts`, beside the
+// status dot's, so a failed attempt is the same red in both.
+export { OUTCOME_FILL, type OutcomeTone } from "@/components/tone"
 
 export type Outcome = {
   key: string
   tone: OutcomeTone
   /** What this one was, said by the square's own title: "failed · 3h ago". */
   title: string
-}
-
-/** Each outcome's fill, for a surface that places the same marks on a timeline. */
-export const OUTCOME_FILL: Record<OutcomeTone, string> = {
-  success: "bg-success/80",
-  danger: "bg-destructive",
-  warning: "bg-warning",
-  // The brand, not a status hue: an attempt still going has no outcome yet,
-  // and the blue is what this product draws "happening now" in.
-  running: "bg-brand",
-  // An attempt that ended without an outcome — cancelled, superseded,
-  // stopped. Present, so the count is honest, and quiet, so it never reads as
-  // either of the two answers the strip is scanned for.
-  muted: "bg-muted-foreground/40",
 }
 
 /**
