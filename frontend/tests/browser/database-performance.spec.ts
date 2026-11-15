@@ -2942,9 +2942,7 @@ test("the queries are named in the engine's words, from the registry and from wh
   await expect(page.getByText("1 statement", { exact: true })).toBeVisible()
   // The engine keeps statement statistics: the third reading is offered.
   await page.getByRole("button", { name: "Top statements" }).click()
-  await expect(region(page, "Top statements").locator("[data-slot=rank-list] button")).toHaveCount(
-    3,
-  )
+  await expect(region(page, "Top statements").locator("[data-slot=rank-row] > a")).toHaveCount(3)
 
   // A list read from the server's own query table is a list of queries.
   await mockOps(page, {
@@ -3644,7 +3642,7 @@ test("a top statement on Logs opens the statement's page, not a dialog of its ow
   })
   await visit(page, "/databases/1/logs")
   await page.getByRole("button", { name: "Top statements" }).click()
-  const top = region(page, "Top statements").locator("[data-slot=rank-list] button")
+  const top = region(page, "Top statements").locator("[data-slot=rank-row] > a")
   await expect(top).toHaveCount(3)
   await top.nth(1).click()
   await expect(dialog(page)).toHaveCount(0)

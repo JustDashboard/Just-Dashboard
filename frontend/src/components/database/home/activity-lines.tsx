@@ -7,13 +7,13 @@ import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { TileTrend } from "@/components/sparkline"
 import { WireMark } from "@/components/wire/wire"
 import { HistoryRange } from "@/components/database/home/activity"
-import { BlockLink } from "@/components/database/home/blocks"
 import { offeredViews, type ChartView } from "@/components/database/home/charts"
 import { lineReading } from "@/components/database/home/lines"
 import type { Sample } from "@/components/database/home/samples"
 import { HISTORY_RANGES, SAMPLE_EVERY_MS, keptFor } from "@/components/database/home/use-samples"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { Stale } from "@/components/stale"
+import { SectionLink } from "@/components/section-link"
 
 /** What a view measures, drawn on its mark. One that is new takes the layers. */
 const GLYPH: Record<string, Icon> = {
@@ -102,7 +102,7 @@ export const ActivityLines = memo(function ActivityLines({
             >
               kept for {keptFor(retentionHours)}
             </span>
-            {performance && <BlockLink href={performance}>Performance</BlockLink>}
+            {performance && <SectionLink href={performance}>Performance</SectionLink>}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }

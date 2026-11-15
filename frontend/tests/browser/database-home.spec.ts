@@ -546,7 +546,7 @@ const reading = (page: Page, name: string) =>
 
 const names = (scope: ReturnType<typeof block>) =>
   scope
-    .locator("[data-slot=rank-list] button")
+    .locator("[data-slot=rank-row] > :is(a, button)")
     .evaluateAll((rows) => rows.map((row) => row.getAttribute("aria-label")))
 const where = (page: Page) => new URL(page.url()).pathname + new URL(page.url()).search
 const menu = (page: Page, name = "shop") =>
@@ -874,9 +874,13 @@ test("the busiest statements are shapes on one line, and the largest tables are 
   await expect
     .poll(() => names(busiest))
     .toEqual([
-      "SELECT * FROM orders WHERE customer_id = $1 — 60% of runtime. Open Performance",
-      "UPDATE carts SET total = $1 WHERE id = $2 — 20% of runtime. Open Performance",
+      "SELECT * FROM orders WHERE customer_id = $1 — 60% of runtime. Open the statement",
+      "UPDATE carts SET total = $1 WHERE id = $2 — 20% of runtime. Open the statement",
     ])
+  // A row opens the statement's own page, as the Queries view's rows do.
+  await expect(
+    busiest.getByRole("link", { name: /^SELECT \* FROM orders WHERE customer_id/ }),
+  ).toHaveAttribute("href", /^\/databases\/1\/performance\/statements\//)
   await expect(busiest.getByRole("link", { name: "Performance" })).toHaveAttribute(
     "href",
     "/databases/1/performance?view=statements",
@@ -1018,7 +1022,7 @@ test("statement statistics that are off say how to turn them on, to the role tha
   await visit(page, "/databases/1")
 
   const busiest = block(page, "Busiest statements")
-  await expect(busiest).toContainText("This server is not counting its statements.")
+  await expect(busiest).toContainText("This server is not counting its statements")
   await expect(busiest).toContainText("the extension has to be created in this database")
   await busiest.getByRole("button", { name: "Turn on statement statistics" }).click()
   await expect(busiest).toContainText("SELECT * FROM orders")

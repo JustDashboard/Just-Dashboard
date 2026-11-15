@@ -21,7 +21,7 @@ import {
   consumerWord,
 } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
-import { Block, BlockLink, CardsSkeleton } from "@/components/database/home/blocks"
+import { Block, CardsSkeleton } from "@/components/database/home/blocks"
 import { copyTone } from "@/components/database/home/holdings"
 import { read } from "@/components/database/home/read"
 import type { DbBackups } from "@/components/database/home/types"
@@ -29,6 +29,7 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
 import { staleOf } from "@/components/database/kit/read"
 import { ErrorState } from "@/components/state"
+import { SectionLink } from "@/components/section-link"
 
 /** One thing the database holds, as the right lane draws it: a schema, a keyspace, a collection. */
 export type Holding = {
@@ -144,7 +145,7 @@ export function HomePicture({
       actions={
         <>
           <WiringLegend className="mr-2 max-xl:hidden" />
-          <BlockLink href={DATABASES_MAP_HREF}>Map</BlockLink>
+          <SectionLink href={DATABASES_MAP_HREF}>Map</SectionLink>
         </>
       }
     >

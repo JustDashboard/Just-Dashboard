@@ -25,7 +25,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { sectionHref } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
-import { Block, BlockLink, CardsSkeleton, Quiet } from "@/components/database/home/blocks"
+import { Block, CardsSkeleton } from "@/components/database/home/blocks"
+import { EmptyNote } from "@/components/state"
 import { nameHue } from "@/components/database/home/kinds"
 import { read, record } from "@/components/database/home/read"
 import { compact } from "@/components/database/home/readings"
@@ -40,6 +41,7 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 import { settingsPageHref } from "@/components/database/shell/settings-pages"
 import { Stale } from "@/components/stale"
 import { Read, staleOf } from "@/components/database/kit/read"
+import { SectionLink } from "@/components/section-link"
 
 /**
  * What a database runs as, where it is reachable from and what is kept of it:
@@ -268,19 +270,21 @@ export function RunsAs({ uptimeSeconds }: { uptimeSeconds?: number }) {
       actions={
         <>
           {container && (
-            <BlockLink href={`/docker/containers/${encodeURIComponent(container.name)}`}>
+            <SectionLink href={`/docker/containers/${encodeURIComponent(container.name)}`}>
               Open container
-            </BlockLink>
+            </SectionLink>
           )}
           {!container && unit && (
-            <BlockLink href={`/processes/services/${encodeURIComponent(unit.name)}`}>
+            <SectionLink href={`/processes/services/${encodeURIComponent(unit.name)}`}>
               Open unit
-            </BlockLink>
+            </SectionLink>
           )}
           {file && (
-            <BlockLink href={`/files?path=${encodeURIComponent(directory)}`}>Open folder</BlockLink>
+            <SectionLink href={`/files?path=${encodeURIComponent(directory)}`}>
+              Open folder
+            </SectionLink>
           )}
-          {logs && <BlockLink href={href("logs")}>Logs</BlockLink>}
+          {logs && <SectionLink href={href("logs")}>Logs</SectionLink>}
         </>
       }
     />
@@ -441,7 +445,7 @@ export function ReachableFrom() {
           </span>
         </span>
       }
-      actions={<BlockLink href={href("settings")}>{admin ? "Change" : "Settings"}</BlockLink>}
+      actions={<SectionLink href={href("settings")}>{admin ? "Change" : "Settings"}</SectionLink>}
     />
   )
 }
@@ -628,7 +632,7 @@ export function BackupsLine({
               Back up now
             </Button>
           )}
-          <BlockLink href={href("backups")}>All backups</BlockLink>
+          <SectionLink href={href("backups")}>All backups</SectionLink>
         </>
       }
     />
@@ -758,7 +762,7 @@ export function ServerDatabases() {
       >
         {() =>
           rows.length === 0 ? (
-            <Quiet>The server lists no database to this account.</Quiet>
+            <EmptyNote>The server lists no database to this account.</EmptyNote>
           ) : (
             <>
               <CardGrid>
@@ -996,7 +1000,7 @@ export function Keyspaces({ server }: { server: PollState<RedisServer> }) {
       >
         {(data) =>
           data.keyspace.length === 0 ? (
-            <Quiet>None of its {data.databases} numbered databases holds a key yet.</Quiet>
+            <EmptyNote>None of its {data.databases} numbered databases holds a key yet.</EmptyNote>
           ) : (
             <>
               <CardGrid>

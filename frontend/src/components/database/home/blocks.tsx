@@ -1,7 +1,5 @@
 "use client"
 
-import Link from "next/link"
-import { ArrowRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Stale } from "@/components/stale"
@@ -19,6 +17,8 @@ import { Skeleton } from "@/components/ui/skeleton"
  */
 export function Block({
   title,
+  count,
+  link,
   actions,
   stale,
   className,
@@ -26,6 +26,14 @@ export function Block({
   children,
 }: {
   title: string
+  /**
+   * The fact or count on the title's line: what the figures are of ("share
+   * of runtime since …"), how many there are. `PanelHeader`'s `count`, so it
+   * is drawn one way and stays at every width.
+   */
+  count?: React.ReactNode
+  /** The way on to the page that holds all of what the block shows the top of. */
+  link?: { href: string; label: string }
   actions?: React.ReactNode
   /** The last poll failed over what is drawn: it is the reading before, not now. */
   stale?: Error
@@ -37,6 +45,8 @@ export function Block({
     <Panel plain aria-label={title} className={className}>
       <PanelHeader
         title={title}
+        count={count}
+        link={link}
         actions={
           (stale || actions) && (
             <>
@@ -48,18 +58,6 @@ export function Block({
       />
       <PanelBody className={bodyClassName}>{children}</PanelBody>
     </Panel>
-  )
-}
-
-/** The quiet way out of a block, to the page that holds all of what it shows the top of. */
-export function BlockLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-    >
-      {children} <ArrowRight className="size-3" />
-    </Link>
   )
 }
 
@@ -143,12 +141,5 @@ export function FactRow({
       <dt className="text-muted-foreground">{label}</dt>
       <dd className={cn("min-w-0", className)}>{children}</dd>
     </div>
-  )
-}
-
-/** A sentence where a list would be: nothing to rank, and what would put something there. */
-export function Quiet({ className, ...props }: React.ComponentProps<"p">) {
-  return (
-    <p className={cn("text-body leading-relaxed text-muted-foreground", className)} {...props} />
   )
 }

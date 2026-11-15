@@ -1,4 +1,4 @@
-import { duration } from "@/lib/format"
+import { compactCount, duration } from "@/lib/format"
 
 /**
  * The figures a database's reading pages print, written once.
@@ -35,4 +35,13 @@ export function shareWords(share: number): string {
  */
 export function capitalize(word: string): string {
   return word ? word[0].toUpperCase() + word.slice(1) : word
+}
+
+/**
+ * A count and its noun agreeing, the count in a row's width: "1 call",
+ * "3,200 calls", "16.1M calls". `plural` from `lib/format` groups every digit,
+ * which is why the pages wrote this one by hand; exact below ten thousand.
+ */
+export function counted(n: number, singular: string, many?: string): string {
+  return `${compactCount(n, { exactBelow: 10_000 })} ${n === 1 ? singular : (many ?? `${singular}s`)}`
 }
