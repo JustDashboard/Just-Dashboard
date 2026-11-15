@@ -1,20 +1,10 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import type { DeploymentEnvironmentConfiguration } from "@/lib/types"
 import { FormNote, FormSection, FormSections } from "@/components/form"
 import { Status } from "@/components/status-dot"
-import {
-  SaveBarProvider,
-  useSaveBarEntry,
-  type SettingApplies,
-} from "@/components/settings/save-bar"
-import { PendingChanges } from "@/components/deploy/settings/pending-changes"
-import { LastFailureRemedy } from "@/components/deploy/settings/last-failure"
-import {
-  ConfigurationState,
-  type useConfiguration,
-} from "@/components/deploy/settings/use-configuration"
+import { useSaveBarEntry, type SettingApplies } from "@/components/settings/save-bar"
+import { SettingsPage as DeploymentSettingsPage } from "@/components/settings/settings-page"
 
 /**
  * The shape every deployment settings page is drawn in.
@@ -30,10 +20,10 @@ import {
  *
  * The pieces, outermost first:
  *
- *   `SettingsPage` — loads the configuration, then the pending strip and the
- *   page's forms, rising once when the first read lands; and the page's one
- *   Save, which floats at the bottom while anything holds an edit
- *   (`save-bar.tsx`).
+ *   `SettingsPage` (`settings-page.tsx`) — loads the configuration, then the
+ *   pending strip and the page's forms in the `SettingsColumn`, rising once
+ *   when the first read lands; and the page's one Save, which floats at the
+ *   bottom while anything holds an edit (`save-bar.tsx`).
  *   `SettingForm` — one form, one write. It may span several sections
  *   (Runtime is five), because what one PUT writes is one form; the bar
  *   saves every dirty form on the page in order.
@@ -46,41 +36,8 @@ import {
  */
 const FIELDS_COLUMN = "mx-auto w-full max-w-3xl"
 
-/**
- * A settings page: its configuration read, what is saved but not live, and
- * its forms in one run of sections — all of it in the one centred column, so
- * the strip lines up with the fields under it.
- *
- * No heading of its own. The project's other pages add none under the
- * project header, and the first section's head already names what the page is.
- * The content rises once when the first read lands and not on every revision
- * after it, because a save is not an arrival. The room at the foot is the
- * save bar's, so it never lies over the last field on the page.
- */
-export function SettingsPage({
-  state,
-  pageKinds,
-  children,
-}: {
-  state: ReturnType<typeof useConfiguration>
-  /** The pending-change kinds this page edits — see `PendingChanges`. */
-  pageKinds?: string[]
-  children: (configuration: DeploymentEnvironmentConfiguration) => React.ReactNode
-}) {
-  return (
-    <SaveBarProvider>
-      <ConfigurationState state={state}>
-        {(configuration) => (
-          <div className={cn("min-w-0 animate-rise space-y-8 pb-20", FIELDS_COLUMN)}>
-            <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
-            <LastFailureRemedy />
-            <FormSections>{children(configuration)}</FormSections>
-          </div>
-        )}
-      </ConfigurationState>
-    </SaveBarProvider>
-  )
-}
+/** @deprecated use `SettingsPage` from `@/components/settings/settings-page`. */
+export const SettingsPage = DeploymentSettingsPage
 
 /**
  * One form of a settings page: its sections, and the refusal when the server
