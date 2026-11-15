@@ -408,11 +408,10 @@ function VolumeMain({
   }
 
   const verbs = volume ? verbsFor(volume).map((verb) => ({ ...verb, inline: false })) : []
-  // The one command is the step the volume is short of — a backup. The way to
-  // its files stays in the menu: the Files view's own Open in Files, which
-  // follows the folder open in it, stood under a copy of it in the header
-  // (PGH-24).
-  const command = verbs.find((verb) => verb.key === "backup")
+  // The one command is the step the volume is short of — a backup — and where
+  // it has one, or the reader may not write one, the way to its files.
+  const command =
+    verbs.find((verb) => verb.key === "backup") ?? verbs.find((v) => v.key === "files")
   const menu = verbs
     .filter((verb) => verb !== command)
     .sort((a, b) => Number(Boolean(a.danger)) - Number(Boolean(b.danger)))
@@ -458,9 +457,7 @@ function VolumeMain({
 
         {VOLUME_TABS.map((key) => (
           <TabsContent key={key} value={key} className="pt-5 pb-2">
-            {tab !== key ? null : !volume ? (
-              <LoadingRows rows={6} />
-            ) : key === "files" ? (
+            {tab !== key ? null : key === "files" ? (
               // The picture opens the volume's first view, as a detail page's
               // Overview holds its picture; the strip stands straight under
               // the line on every view (PGH-17).
@@ -475,8 +472,10 @@ function VolumeMain({
                   onTab={setTab}
                   onBackUp={backUp}
                 />
-                <VolumeFiles volume={volume} />
+                {volume ? <VolumeFiles volume={volume} /> : <LoadingRows rows={6} />}
               </div>
+            ) : !volume ? (
+              <LoadingRows rows={6} />
             ) : key === "mounts" ? (
               <VolumeMounts volume={volume} productOf={productOf} stacks={known} />
             ) : key === "backups" ? (

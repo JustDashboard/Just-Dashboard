@@ -433,9 +433,7 @@ function ImageMain({
             />
             {VIEWS.map((view) => (
               <TabsContent key={view.key} value={view.key} className="pt-6 pb-4">
-                {tab !== view.key ? null : !detail ? (
-                  <LoadingRows rows={5} />
-                ) : view.key === "layers" ? (
+                {tab !== view.key ? null : view.key === "layers" ? (
                   // The picture opens the image's first view, as a detail
                   // page's Overview holds its picture, and the strip stands
                   // straight under the line on every view (PGH-17).
@@ -447,8 +445,10 @@ function ImageMain({
                       pulling={pulling}
                       onContainers={() => setTab("containers")}
                     />
-                    <ImageLayers detail={detail} />
+                    {detail ? <ImageLayers detail={detail} /> : <LoadingRows rows={5} />}
                   </div>
+                ) : !detail ? (
+                  <LoadingRows rows={5} />
                 ) : view.key === "containers" ? (
                   <ImageContainers
                     detail={detail}
