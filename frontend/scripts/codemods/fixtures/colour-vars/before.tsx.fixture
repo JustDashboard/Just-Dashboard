@@ -1,0 +1,12 @@
+export function Demo() {
+  return (
+    <div>
+      <span className="text-[var(--tag-pink)]">a</span>
+      <span className="text-(--git-added) hover:text-(--git-deleted)">b</span>
+      <span className="border-l-(--pull-open) bg-[var(--tag-blue)]/15">c</span>
+      <span className="fill-(--color-tag-red) text-[color:var(--chart-2)]">d</span>
+      <span className="w-(--jd-rail) origin-(--radix-popover-content-transform-origin)">e</span>
+      <span className="text-(--git-colour)">f</span>
+    </div>
+  )
+}

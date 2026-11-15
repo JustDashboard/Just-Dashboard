@@ -1,0 +1,21 @@
+"use client"
+
+import { useIsMobile, useMediaQuery } from "@/hooks/use-mobile"
+import { useBelow, useBreakpoint } from "@/lib/breakpoints"
+
+const WIDE = "(min-width: 1600px)"
+
+export function Demo() {
+  const lg = useBreakpoint("lg")
+  const phone = useBelow("sm")
+  const odd = useMediaQuery("(min-width: 1100px)")
+  const wide = useMediaQuery(WIDE)
+  const mobile = useIsMobile()
+  const list = window.matchMedia("(min-width: 1280px)")
+  return (
+    <div
+      className="max-lg:hidden xl:grid min-[1400px]:flex"
+      data-x={String(lg && phone && odd && wide && mobile && list)}
+    />
+  )
+}

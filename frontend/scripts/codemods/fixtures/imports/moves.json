@@ -1,0 +1,17 @@
+{
+  "files": [
+    { "from": "components/deploy/wire.tsx", "to": "components/wire/wire.tsx" },
+    { "from": "lib/network-*", "to": "lib/network/*" },
+    { "from": "lib/log-*", "to": "lib/log/*" }
+  ],
+  "exports": [
+    { "from": "components/page.tsx", "to": "components/section.tsx", "names": ["Section"] },
+    { "from": "components/page.tsx", "to": "components/toolbar.tsx", "names": ["Toolbar"] },
+    {
+      "from": "components/page.tsx",
+      "to": "components/search-input.tsx",
+      "names": ["SearchInput"]
+    },
+    { "from": "components/tabs.tsx", "to": "components/chips.tsx", "names": ["FilterChip"] }
+  ]
+}
