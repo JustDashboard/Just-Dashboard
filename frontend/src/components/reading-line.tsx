@@ -1,5 +1,8 @@
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import type { Icon } from "@/components/icons"
+import type { Tone } from "@/components/tone"
+import { WireMark } from "@/components/wire/wire"
 
 /**
  * One reading as a sentence on a mark: a tinted glyph, what the reading is,
@@ -40,7 +43,7 @@ export function ReadingLine({
   onPress?: () => void
   /** Where the line goes or what a press does, as its accessible name. */
   label?: string
-  /** A `WireMark`, on the measure's own hue or the reading's tone. */
+  /** A `ReadingMark`: the measure's glyph on its own hue, or on the reading's tone. */
   mark: React.ReactNode
   name: React.ReactNode
   children: React.ReactNode
@@ -95,6 +98,44 @@ export function ReadingLine({
     >
       {body}
     </Link>
+  )
+}
+
+/**
+ * A reading's mark: its glyph on the measure's own hue (§10's `HUE`), or on
+ * the tone of what is wrong with it once it is past a line, so the line that
+ * needs looking at is the one in amber or red. The host Overview, a PM2
+ * application and the database home each drew this switch under a name of
+ * their own.
+ *
+ * `glyph` is an icon component; a mark that is not one (an application's
+ * interpreter) is passed as `children`. `success` is not a reading's worry and
+ * draws as the hue.
+ */
+export function ReadingMark({
+  tone = "default",
+  hue,
+  glyph: Glyph,
+  children,
+  className,
+}: {
+  tone?: Tone
+  hue?: string
+  glyph?: Icon
+  children?: React.ReactNode
+  className?: string
+}) {
+  const drawn = Glyph ? <Glyph aria-hidden /> : children
+  if (tone === "warning" || tone === "danger")
+    return (
+      <WireMark size="md" tone={tone} className={className}>
+        {drawn}
+      </WireMark>
+    )
+  return (
+    <WireMark size="md" hue={hue} className={className}>
+      {drawn}
+    </WireMark>
   )
 }
 

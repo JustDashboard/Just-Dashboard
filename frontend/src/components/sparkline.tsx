@@ -65,7 +65,7 @@ export function Sparkline({
           <stop offset="100%" stopColor={color} stopOpacity={0} />
         </linearGradient>
       </defs>
-      <path d={path.fill} fill={`url(#${gradientId})`} />
+      {path.fill && <path d={path.fill} fill={`url(#${gradientId})`} />}
       <path
         d={path.line}
         fill="none"
@@ -80,18 +80,22 @@ export function Sparkline({
 }
 
 /**
- * A reading's recent shape, in a `StatTile`'s `trend` slot.
+ * A reading's recent shape, in a `StatTile`'s `trend` slot or at a
+ * `ReadingLine`'s end.
  *
  * The deploy tiles put 72px sparklines inside their hints or beside their
- * figures — one idea at three sizes in three places — while the host Overview
- * drew its tiles' last hour from a helper of its own, which it keeps: that one
- * also draws a flat series. This is the deploy section's one shape: the
- * tile's full width, 36px tall, rising once when its points land
+ * figures — one idea at three sizes in three places. This is the one shape:
+ * the slot's full width, 36px tall, rising once when its points land
  * (§11 *arrived*). Nothing is drawn below two points, which is not yet a
- * shape, nor for a series that never moves on a scale of its own: scaled to
- * its own maximum it fills the band and reads as a full meter, and a flat
- * line has no shape to show (§10). With a fixed `max` a flat line sits at its
- * level and says so. The tile leaves no band for what is not drawn.
+ * shape.
+ *
+ * A series that never moves is drawn as what it is, a level line with no
+ * area under it: at its level against a fixed `max`, at mid-height on a scale
+ * of its own, where it has no level to sit at (on the floor when it is
+ * nothing at all). It used to draw nothing, which
+ * on an idle server left three of four lines with an empty slot and read as
+ * broken, and against `max` it drew the area under the line, so a cache
+ * steady at 99% was a grey block pinned to the top of the slot.
  *
  * `label` is the whole accessible name, window included — "CPU over the last
  * hour" — because only the caller knows the window. Colour is a series
@@ -111,7 +115,6 @@ export function TileTrend({
   max?: number
 }) {
   if (values.length < 2) return null
-  if (max === undefined && Math.min(...values) === Math.max(...values)) return null
   return (
     <div className="h-full animate-rise">
       <Sparkline
@@ -127,22 +130,44 @@ export function TileTrend({
   )
 }
 
-function buildPath(
+/** Whether every value is the same: a level line rather than a shape. */
+export function isSteady(values: number[]) {
+  return values.length > 0 && values.every((value) => value === values[0])
+}
+
+export function buildPath(
   values: number[],
   max: number | undefined,
   width: number,
   height: number,
-): { line: string; fill: string } | null {
+): { line: string; fill?: string } | null {
   if (values.length === 0) return null
   if (values.length === 1) values = [values[0], values[0]]
+
+  // One pixel of inset top and bottom so a flat line at zero is still visible
+  // and a line at the maximum is not clipped by the viewbox edge.
+  const usable = height - 2
+
+  // A level line has no shape for an area to fill: under it, the area reads
+  // as a meter at that level. On its own scale it has no level either, so it
+  // runs through the middle, which says "steady" and nothing more; nothing at
+  // all is a level on any scale, and stays on the floor.
+  if (isSteady(values)) {
+    const ceiling = max === undefined ? undefined : Math.max(max, 1)
+    const level = Math.max(values[0], 0)
+    const y =
+      ceiling !== undefined
+        ? 1 + usable - (Math.min(level, ceiling) / ceiling) * usable
+        : level === 0
+          ? 1 + usable
+          : height / 2
+    return { line: `M0,${y.toFixed(2)}L${width.toFixed(2)},${y.toFixed(2)}` }
+  }
 
   // A floor on the ceiling: without one, a container that idled between 0.1%
   // and 0.3% is drawn as a dramatic mountain range, and a table of those is
   // unreadable noise where every row looks like an incident.
   const ceiling = Math.max(max ?? Math.max(...values), 1)
-  // One pixel of inset top and bottom so a flat line at zero is still visible
-  // and a line at the maximum is not clipped by the viewbox edge.
-  const usable = height - 2
   const step = width / (values.length - 1)
 
   const points = values.map((value, i) => {

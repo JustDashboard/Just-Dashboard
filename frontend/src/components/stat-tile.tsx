@@ -17,6 +17,20 @@ import { Meter } from "@/components/meter"
  * thing a reader sees on a page that then goes on to be a stack of more boxes.
  * The figures now sit on the page's own ground, and `StatGrid` draws the one
  * hairline between neighbours that keeps them from running together.
+ *
+ * A reading is said in words first (D4): a `ReadingLine`, a fact on the
+ * identity line or a node of the picture. A tile stays only in a headline set
+ * that is read across as a table (§15 pass 2), and each of its tiles carries
+ * a sparkline or a meter and its tone:
+ *
+ * - Metrics' five readings (processor, memory, load, network, disks), which a
+ *   reader compares in one sweep before choosing a chart;
+ * - the Docker overview's band of figures over its table;
+ * - a log lens's counts, as `StatButton`s that narrow the log.
+ *
+ * Every other row of tiles is a page waiting for its pass, and a project's
+ * Overview and the host's carry none. A tile that is a destination is a
+ * `Link` around a `StatTile`; `StatLink`, which drew that, went in 0.9.0.
  */
 export function StatTile({
   label,
