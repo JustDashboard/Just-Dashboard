@@ -46,10 +46,19 @@ test("an address under a section offers that section's page before the Overview"
 test("an address under no page offers the Overview alone", async ({ page }) => {
   await page.goto("/this-page-does-not-exist")
   const state = page.locator("[data-slot=empty-state]")
-  // The node names the address's last part, cut where it runs long; the
-  // sentence under the picture says it whole.
-  await expect(state.locator("[data-slot=wire-flow]")).toContainText("/this-page-does-not-exi…")
-  await expect(state.getByText("/this-page-does-not-exist", { exact: true })).toBeVisible()
+  // The node names the address's last part on one line, cut once by its
+  // width rather than wrapped and cut again; the sentence under the picture
+  // says it whole.
+  const asked = state.locator("[data-slot=wire-flow]").getByTitle("/this-page-does-not-exist")
+  await expect(asked).toHaveText("/this-page-does-not-exist")
+  const line = await asked.evaluate((node) => ({
+    height: node.getBoundingClientRect().height,
+    lineHeight: parseFloat(getComputedStyle(node).lineHeight),
+  }))
+  expect(line.height).toBeLessThanOrEqual(line.lineHeight + 1)
+  await expect(state.locator("p", { hasText: "Nothing is at" })).toContainText(
+    "/this-page-does-not-exist",
+  )
   await expect(state.getByRole("link", { name: /^Open / })).toHaveCount(1)
   await expect(state.getByRole("link", { name: "Back to the Overview" })).toHaveAttribute(
     "data-variant",

@@ -1,13 +1,206 @@
 # Readings
 
-A reading in words, a figure that moves, a band, a rank and a chart (D4, D10).
+A reading in words, a figure that moves, a band, a rank, a share and a chart (D4, D10).
 
-**Members:** `ReadingLine`, `StatTile`, `StatGrid`, `StatButton`, `Meter`, `BarReading`,
-`RankList`, `SplitBar`, `RankSkeleton`, `Sparkline`, `TileTrend`, `ChartPanel`, `LiveFigure`.
+**Members:** `ReadingLine`, `ReadingLines`, `ReadingMark`, `NoReading` (`reading-line.tsx`);
+`StatTile`, `StatGrid`, `StatButton`, `TileBand` (`stat-tile.tsx`); `Meter`, `utilisationTone`
+(`meter.tsx`); `BarReading` (`bar-reading.tsx`, its arithmetic in `bar-reading-model.ts`);
+`RankList`, `RankSkeleton`, `SplitBar`, `percent` (`rank-list.tsx`); `Sparkline`, `TileTrend`
+(`sparkline.tsx`); `LiveFigure`, `LiveBytes`, `LandedFigures`, `HUE`, `CoreBars`, `SeriesKey`,
+`StreamState` (`live-figure.tsx`); `ChartPanel` (`chart-panel.tsx`) and `components/metrics/`.
 
-**Status: moved text.** WP-17 rewrites this page in wave 1 as purpose, anatomy, use when and when
-not (and what instead), props, states, the phone, accessibility, an example call site, what enforces
-it, and related families. Until then it holds the rules that were in `design-system.md`, below.
+## Which one
+
+| You are saying | Use | Not |
+| --- | --- | --- |
+| One reading the page is opened for, in words | `ReadingLine` with a `ReadingMark` | a `StatTile` row |
+| A run of figures read across as a table, in a sanctioned headline set | `StatGrid` of `StatTile`s | tiles on a project's or the host's Overview |
+| A figure whose press narrows what is under it | `StatButton` | a tile wrapped in a button by hand |
+| How full something is, 0 to 100 | `Meter` | a hand-drawn track and fill |
+| What one whole is made of | `SplitBar` (with `legend` when nothing else names the parts) | four widths in a hand-built `flex` |
+| A band between the identity line and the table | `BarReading` | a bar with rows under it |
+| The heaviest few, ranked | `RankList` (a `SplitBar` over it for the proportion) | `BarList`, bars that grow row to row |
+| A reading's last hour | `TileTrend`; in a table cell `Sparkline` | a chart in a tile |
+| A figure fed by a socket | `LiveFigure` / `LiveBytes` | a number re-rendered every frame |
+| A measure over time to read values off | `ChartPanel` / `MetricChart` | a sparkline with an axis |
+
+A latency is said in words ("19 in 20 inside 412ms"), never as p95 (standard, T6 not adopted).
+
+## ReadingLine and ReadingMark
+
+**Purpose.** One reading as a sentence on a mark: what a row of `StatTile`s becomes when the figure
+is better said than shown ("21.4 requests a minute" under "Traffic").
+
+**Anatomy.** `mark` (a `ReadingMark`), `name` as an eyebrow, the reading in words, one line of
+`hint`, and `trend` (a `TileTrend`) at the end from `sm`. `ReadingLines` runs them two to a row from
+`xl`, out by the lines' inset so the marks stand on the page's edge.
+
+**Use when** a page reports a handful of measures and the reader wants the words. **Not** for a
+part of a whole (`SplitBar`) or a ranked set (`RankList`).
+
+**Props.** `href` makes the line a link and `label` names where it goes; `onPress` makes it a
+button laid over the line (a lens narrowing the log) and `label` is what the press does; neither
+and it is a reading with no hover and no tab stop. `ReadingMark({ tone, hue, glyph | children })`
+draws the measure's glyph on its own hue (`HUE.cpu`) and switches to the warning or danger tile
+once the reading is past a line; `success` is not a reading's worry and draws as the hue.
+
+**States.** Every state is one height: the third line holds its place with no hint, and a reading
+that has not landed is `NoReading` ("No reading yet", "Not running") in the reading's own place.
+
+**Phone.** The trend hides below `sm`; the words wrap no further than the line's three rows.
+
+**Accessibility.** The link's or button's name is `label`; the mark and the trend are decoration
+(the trend carries its own `label` as an image).
+
+**Example.** `components/procs/pm2-app-overview.tsx` (`AppReadings`), the database home's
+activity lines (`database/home/activity-lines.tsx`).
+
+```tsx
+<ReadingLine
+  href={performance}
+  label="Sessions on Performance"
+  mark={<ReadingMark hue={HUE.cpu} glyph={Users} tone={worry} />}
+  name="Sessions"
+  hint="2 active · 0 waiting on a lock"
+  trend={<TileTrend values={values} label="Sessions over the last hour" />}
+>
+  12 open of 100
+</ReadingLine>
+```
+
+The host Overview's `Mark` and the PM2 page's local `ReadingMark` are this mark under other names;
+the page passes (WP-28, WP-29) move them and the service and container overviews' `StatGrid`s onto
+`ReadingLine`, keeping the `service-readings` and `container-readings` test ids on the wrapper.
+
+## StatTile, StatGrid and StatButton
+
+**Purpose.** A headline figure in a set read across as a table: a small name over a 24px figure,
+then a meter or a trend, then at most one hint. `StatGrid` runs them with a hairline between and
+nothing around them.
+
+**Use when** the page is one of the sanctioned headline sets, and each tile carries a sparkline or
+a meter and its tone:
+
+- Metrics' five readings (processor, memory, load, network, disks);
+- the Docker overview's band of figures over its table;
+- a log lens's counts, as `StatButton`s that narrow the log.
+
+**Not** on a project's Overview or the host's (the operator's rule: a logo, a sentence, one
+picture), and not as the row of bare grey tiles that opens a page (D4). Every other tile row is a
+page waiting for its pass (PRM-29). A tile that is a destination is a `Link` around a `StatTile`;
+`StatLink`, which drew that, went in 0.9.0.
+
+**Props.** `label`, `value`, `trailing` (a unit or a delta beside the figure), `meter` (0–100) or
+`trend`, `tone` (colours the figure, never a mark beside it), `hint`. `StatGrid dense` sets two to a
+row on a phone; `framed` restores a box. `StatButton` adds `pressed` and the revealed funnel.
+
+**Example.** `app/(dashboard)/metrics/page.tsx`.
+
+## Meter
+
+**Purpose.** A bar for a figure between 0 and 100, coloured by the same `utilisationTone` that
+colours the figure above it.
+
+**Props.** `value` (clamped), `tone` or `color` (a measure's hue, for a bar that says which reading
+it is rather than how worried to be), `size` (`thin` under a figure in a tile, `default` in a row,
+`cell` a 32px bar beside a figure in a table cell, which is what the process table's `MiniBar` is),
+`mark` (a threshold line, in the muted ink), `label`, `decorative`.
+
+**Accessibility.** `role="meter"` with its value and `label`; `decorative` hides it from a screen
+reader where the figure beside it already says the reading (a table cell).
+
+## SplitBar
+
+**Purpose.** One whole as one strip of coloured parts, the block's width whatever the figures, so
+only the join between the parts moves when the window changes.
+
+**Anatomy.** An 8px track (`size="sm"` 4px, for a table cell), the parts in the order given with
+the one 2px gap between them (`gap={false}` for a bar too small to show it), and the track only
+where no part is. A part above zero is never narrower than `minShare` (1% by default), taken back
+out of the others, so the one key type of a hundred still shows.
+
+**Props.** `parts: { key, count, color, label?, figure?, note?, mark?, pickLabel? }[]`, `label` (the
+bar's accessible name), `total` (scale against a larger whole: an interface against the busiest,
+the track showing past it), `legend`:
+
+- `none` (the default): the bar alone, for a bar a `RankList` or a sentence names;
+- `static`: under it, each part's dot (or its own `mark`), name, figure and a quieter `note`;
+- `pick`: each entry a button that narrows the page to the part (`onPick`), `aria-pressed` while it
+  is `picked`; pressing it again is the caller's to clear.
+
+**Use when** the reading is parts of one whole: a table's bytes, a database's keys by type, traffic
+by country, in and out. **Not** for a list of the heaviest few (`RankList`) or a band
+(`BarReading`). Four bars were drawn by hand beside it (the schema's `Composition`, the home's
+`TypeBar`, Redis's `TypeComposition`, a table's `Split`) and the metrics page's own `SplitBar`
+against the busiest; the page passes move them here (WP-20, WP-23, WP-28).
+
+**Example.**
+
+```tsx
+<SplitBar
+  label="Keys by type: string 600, hash 399"
+  legend="pick"
+  picked={type}
+  onPick={(key) => setType(key === type ? undefined : key)}
+  parts={shares.map((share) => ({
+    key: share.type,
+    count: share.weight,
+    color: kindOf(share.type).color,
+    mark: <KindMark type={share.type} className="size-3" />,
+    label: kindLabel(share.type),
+    figure: share.figure,
+    note: percent(share.weight / whole),
+  }))}
+/>
+```
+
+**Enforced by** `rank-list.test.js` (widths, floor, the legend's two forms) and the specs that
+read `[data-slot=split-bar]`.
+
+## RankList
+
+**Purpose.** A ranked list that is read: a name, a figure and the name's share in columns that
+line up and end on the block head's right edge, every row 32px. **Not** `BarList`: bars of
+different lengths are white slabs with figures floating beside them (the `bar-list` lint rule).
+A proportion that wants a picture is a `SplitBar` over the list, a row's `swatch` its legend.
+`RankSkeleton` waits at the list's own height.
+
+## BarReading
+
+The band's block, one height in every state; the rules are below under *The bar reading*.
+
+## Sparkline and TileTrend
+
+`Sparkline` is one SVG path the width of a table cell, with no axis and no tooltip: it answers "did
+anything happen here". `TileTrend` is the one shape of a reading's last hour, the slot's full width
+and 36px. A steady series is a level line with no area; under two points nothing is drawn. The
+rules are below (§10).
+
+**Enforced by** `sparkline.test.js`.
+
+## LiveFigure and its kin
+
+`LiveFigure` glides to each socket frame's value, counting up once when it lands; `LiveBytes` is
+the same on the bytes ladder. The unit stays outside the count, so a change of unit swaps the
+figure without counting, and **the space before a unit is a no-break space in the unit's own
+span**: as a plain text node it became an anonymous item of a flex parent and lost its space ("Held
+by 31.4GB"). `LandedFigures` marks figures that have already landed (a line that swaps which part it
+shows). `HUE` is each measure's colour wherever it is drawn; `SeriesKey` the key before a reading's
+name; `CoreBars` every core's share; `StreamState` whether the socket is live.
+
+**Enforced by** `live-figure.test.js`.
+
+## Related
+
+[Wiring pictures](wiring.md) (a reading in a node's hint), [Status and tags](status-tag.md) (a
+state is a `Status`, never a tinted figure), [Facts lines](values-facts.md) (a fact on the identity
+line), [`../patterns/readings-in-words.md`](../patterns/readings-in-words.md),
+[`../patterns/page-holds-still.md`](../patterns/page-holds-still.md).
+
+## Rules carried over from design-system.md
+
+The sections below are the rules that were in `design-system.md` §10, kept verbatim but for what
+0.9.0 changed.
 
 ## 10. Charts
 
@@ -79,11 +272,14 @@ rather than assembling its own recharts tree — adding a measurement should mea
   metrics read the same as the host's: its network is the line the host's network is.
 - **A reading's last hour in a deployment page's `StatTile` or an Overview reading line is `TileTrend`**
   (`sparkline.tsx`), the one shape for it: its slot's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
-  below two points, which is not yet a shape, nor for a series that never moves on a scale of its
-  own — scaled to its own maximum a flat line fills the band and reads as a full meter — and the
-  tile's trend band then collapses rather than leave a gap. With a fixed `max` a flat line sits at
-  its level and says so. Its colour is a series colour, never a status one: a failing share is
-  `--chart-3`, because `--destructive` on a line says the line itself is an error (§3).
+  below two points, which is not yet a shape. **A series that never moves is a level line with no
+  area under it**: at its level against a fixed `max`, through the middle on a scale of its own
+  (where it has no level to sit at), on the floor when it is nothing at all. Until 0.9.0 a steady
+  series drew nothing, which on an idle server left three of the database home's four activity
+  lines with an empty slot, and against `max` it drew the area under the line, so a cache steady at
+  99% was a grey block pinned to the top of the slot. Its colour is a series colour, never a status
+  one: a failing share is `--chart-3`, because `--destructive` on a line says the line itself is an
+  error (§3).
 - **A part of a tree is one bar of two inks.** A measured plan step's time on the Query page
   (`query/plan-view.tsx`) is drawn against the whole plan's: the step's own share in the time
   series' colour and, behind it at a third of that ink, the share of the step with everything under
@@ -119,8 +315,8 @@ of one bar and keep their own shapes.
   change places, so neighbours within a rounding of each other stop swapping and a mark stays where
   it was pointed at. `fixed` keeps the order given: standings, kinds, newest first.
 - **`trail`** draws the part's readings since the page opened as a sparkline on the line, only for
-  readings that move. A flat trail or one under three readings draws nothing, for the reason
-  `TileTrend` does not.
+  readings that move. A flat trail or one under three readings draws nothing: the line already
+  says the part's figure, and a trail is there to show it moving.
 - **`live` is reserved for socket-fed figures** (§11's rule) and draws a breathing cap at the end of
   the filled bar. The container socket's bands carry it; a polled reading has a trail and no cap, even
   beside a head figure that is live.
@@ -164,13 +360,12 @@ series.
 - `series-legend.tsx` — min/mean/max/last, plus **"At cursor"**: while the pointer is over any chart, every
   legend shows the value its series held at that instant. Max reads the peak column where a series has
   one, since the maximum of the *means* is exactly what a downsampled window hides.
-- `sparkline.tsx` — a bare SVG path for a table cell, not recharts: forty containers would otherwise mount
-  forty responsive containers and resize observers. It also exports `TileTrend`, the one shape a
-  reading's last hour takes in a `StatTile`'s `trend` slot on the deployment pages (and, on Metrics,
-  the window on screen): the tile's full
-  width, 36px, rising once. It draws nothing below two points, or for a series that never moves on a
-  scale of its own, and the tile then leaves no band. Its colour is a series colour, never a status
-  one, so a failing share is `--chart-3`.
+- `components/sparkline.tsx` (shared since 0.9.0) — a bare SVG path for a table cell, not recharts:
+  forty containers would otherwise mount forty responsive containers and resize observers. It also
+  exports `TileTrend`, the one shape a reading's last hour takes in a `StatTile`'s `trend` slot or at
+  a `ReadingLine`'s end: the slot's full width, 36px, rising once. It draws nothing below two points;
+  a steady series is a level line with no area. Its colour is a series colour, never a status one,
+  so a failing share is `--chart-3`.
 - `range-picker.tsx` — the window control (pan and zoom-out appear only once a window has been
   dragged).
 

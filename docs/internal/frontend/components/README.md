@@ -1,12 +1,281 @@
 # Components
 
-The catalogue: one row per shared export, so a page can find what to use in five minutes. WP-17
-fills the table in wave 1, and from WP-40 on `src/docs-catalogue.test.js` fails when a shared export
-has no row or a row names something that is not an export. Each family's own page carries the
-detail.
+The catalogue: every shared export, so a page can find what to use in five minutes. Shared means
+`components/*.tsx`, `components/ui/`, `components/wire/`, `components/settings/`,
+`components/shell/` and `hooks/`; a component of one area (`components/docker/`, …) is that area's
+and is found from [`../features/`](../features/). Each family's own page carries the detail:
+anatomy, when to use it and when not, props, states, the phone and accessibility.
+
+How to read it:
+
+- **One row per export**, except where several are the parts of one thing: a Radix primitive's
+  parts, a model file's helpers, a component and its run (`RowList`, `Row`). Those share a row and
+  every name in its first cell is an export. A file's exported types sit in the row of what they
+  describe, marked *(type)*. The icons are listed under the table.
+- **Status** is where the export stands in 0.9.0. *keep*: use it. *new (WP-xx)*: the package named
+  adds it in this release; until it lands, use what it replaces. *deprecated (use X)*: still
+  exported so its callers keep working, moved off in the page passes and deleted by WP-39; a new page
+  takes X. *retired*: gone; the row says what does its job.
+- From WP-40 on, `src/docs-catalogue.test.js` fails when a shared export has no row or a row names
+  something that is not an export (rows marked *new* excepted until their package lands).
+
+Looking for a shape rather than a name? Start from the families below, or from the recipe for the
+page you are building ([`../recipes/`](../recipes/README.md)).
+
+## Catalogue
 
 | Export | Family | File | One line | Status |
 | --- | --- | --- | --- | --- |
+| `HostIdentity` | [Page header](page-header.md) | `components/identity-header.tsx` | The identity line: a mark, the title, its state and a line of facts. | deprecated (use `IdentityHeader`, WP-09) |
+| `IdentityHeader` | [Page header](page-header.md) | `components/identity-header.tsx` | `HostIdentity` under its own name, with a `loading` form that stands at the loaded shape. | new (WP-09) |
+| `platformName` | [Page header](page-header.md) | `components/identity-header.tsx` | The distribution as its own name spells it, for an identity line. | keep |
+| `PageContext` | [Page header](page-header.md) | `components/page.tsx` | A page's accessible name and its verbs, with no visual title; gains `back={{href, label}}`. | keep |
+| `BackLink` | [Page header](page-header.md) | `components/page.tsx` | The way back to a parent page, for the few eyebrows outside `PageContext`. | new (WP-09) |
+| `IdentityVerbs`, `Verb` (type) | [Page header](page-header.md) | `components/verbs.tsx` | Splits a page's verbs into the header's one command and its overflow menu. | new (WP-09) |
+| `Metric`, `MetricStrip` | [Facts lines](values-facts.md) | `components/detail-list.tsx` | One figure with its name, and a run of them under a chart, ruled apart. | keep |
+| `DetailList`, `Detail` | [Facts lines](values-facts.md) | `components/detail-list.tsx` | Label and value pairs in a stacked list; gains a `ruled` form. | keep |
+| `FactLine`, `Fact` | [Facts lines](values-facts.md) | `components/fact-line.tsx` | A line of facts with the dot between them drawn once, in the faint ink. | new (WP-09) |
+| `HostFact` | [Facts lines](values-facts.md) | `components/identity-header.tsx` | A fact in the identity line with the product it names drawn before it. | deprecated (use `Fact`, WP-09) |
+| `FactDot` | [Facts lines](values-facts.md) | `components/identity-header.tsx` | The dot between two facts of a line. | deprecated (use `FactLine`, WP-09) |
+| `FactsLine` | [Facts lines](values-facts.md) | `components/settings/facts-line.tsx` | A settings section's facts line, with the paragraph it used to print behind a mark. | keep |
+| `SectionLink` | [Section head](section-head.md) | `components/section-link.tsx` | The way on to the page a block stands for, at the end of its head. | keep |
+| `Section` | [Section head](section-head.md) | `components/section.tsx` | A titled group of blocks inside a page: the title and a hairline. | keep |
+| `Page` | [Surfaces](surfaces.md) | `components/page.tsx` | The frame every page renders into: one measure, gutter and rhythm; `fill` for a page whose content is the viewport. | keep |
+| `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter` | [Surfaces](surfaces.md) | `components/panel.tsx` | The content block: a header on its own ground and a hairline; `plain` drops the frame. PanelHeader gains `count`, `level` and a `link` slot (WP-10). | keep |
+| `Pane`, `PaneHeader`, `PaneFooter` | [Surfaces](surfaces.md) | `components/panel.tsx` | The framed working region of a page (a rail, a tree, a console), its strips tinted. | keep |
+| `PaneSection` | [Surfaces](surfaces.md) | `components/panel.tsx` | An eyebrow-titled section inside a pane, a hairline under each. | new (WP-10) |
+| `Well` | [Surfaces](surfaces.md) | `components/panel.tsx` | A recessed ground inside a body, for a value set apart. | keep |
+| `Group` | [Surfaces](surfaces.md) | `components/panel.tsx` | A fenced group of fields inside a body. | keep |
+| `Separator` | [Surfaces](surfaces.md) | `components/ui/separator.tsx` | A hairline between two things. | keep |
+| `SearchInput` | [Search and toolbar](search-toolbar.md) | `components/search-input.tsx` | The one filter box: 40px and its own line on a phone; gains deferred apply and a clear (WP-10). | keep |
+| `SearchInputSkeleton` | [Search and toolbar](search-toolbar.md) | `components/search-input.tsx` | The search box's bone at the box's own size. | new (WP-10) |
+| `Toolbar` | [Search and toolbar](search-toolbar.md) | `components/toolbar.tsx` | A row of filters and actions standing on its own, outside a panel. | keep |
+| `ListToolbar` | [Search and toolbar](search-toolbar.md) | `components/toolbar.tsx` | A list's search, sort, actions and chips in one order with one phone layout. | new (WP-10) |
+| `useDeferredSearch` | [Search and toolbar](search-toolbar.md) | `hooks/use-deferred-search.ts` | Applies a typed search after a pause, without echoing the applied value back. | new (WP-10) |
+| `FindingList`, `FindingAction` (type), `Finding` (type) | [List row](list-row.md) | `components/finding-list.tsx` | Results of a diagnostic tool: the problem, its consequence and the next step, the evidence folded. | keep |
+| `RowLink` | [List row](list-row.md) | `components/row-link.tsx` | A table cell's primary column as the row's way into its detail page. | keep |
+| `RowList`, `Row` | [List row](list-row.md) | `components/row-list.tsx` | The list of rows you read: a mark, a title, a second line and the right edge, one height in every state. | keep |
+| `ROW_BLEED` | [List row](list-row.md) | `components/row-list.tsx` | The bleed a row takes inside a plain panel, for a list laid out by hand. | keep |
+| `useColumnWidth` | [List row](list-row.md) | `hooks/use-column-width.ts` | The width a list is drawn in, for a row that sets its readings beside its name or under it. | keep |
+| `ChoiceList`, `ChoiceRow` | [Card row](card-row.md) | `components/choice-row.tsx` | The card row you take: a project to enter, a site to open; the arrow always drawn. | keep |
+| `GroupRule` | [Card row](card-row.md) | `components/choice-row.tsx` | What the next run of cards is and how many, as a rule over them. | keep |
+| `CONTROL` | [Card row](card-row.md) | `components/choice-row.tsx` | The selector for anything inside a card that owns its own press. | keep |
+| `ChoiceListSkeleton` | [Card row](card-row.md) | `components/choice-row.tsx` | Card rows that have not arrived, at the card's own box. | new (WP-11) |
+| `useChoicePress` | [Card row](card-row.md) | `components/choice-row.tsx` | A card's press: skips inner controls and opens a new tab on a modified click. | new (WP-11) |
+| `ChoiceGrid`, `ChoiceCard`, `ChoiceCardTitle`, `ChoiceCardHint` | [Choice card](choice-card.md) | `components/choice-card.tsx` | A block you pick one of, in a grid of choices. | keep |
+| `ProductCard` | [Choice card](choice-card.md) | `components/choice-card.tsx` | One product as a picker of products draws it: its logo, name and a line. | keep |
+| `OpenCard` | [Choice card](choice-card.md) | `components/open-card.tsx` | The press-anywhere card shell under a repository, a drawing or a fleet card. | new (WP-11) |
+| `DetailPage`, `StepArrows`, `useSiblingSteps`, `useDetailTab`, `DetailRail` | [Rail](rail.md) | `components/detail-page.tsx` | An item's detail page: the rail, the steps to its neighbours and the `?tab=` views. | new (WP-07) |
+| `Rail`, `RailRow`, `RailGhosts` | [Rail](rail.md) | `components/rail.tsx` | The sibling list beside a detail page from `xl`, its rows, and the rows it waits on. | new (WP-07) |
+| `FilterChip`, `ChipStrip`, `ChipCount` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/chips.tsx` | A filter chip, the run chips sit in (scrolling on a phone), and a count beside a label. | keep |
+| `Segments` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/segments.tsx` | A closed choice of two to five short words as one segmented control. | keep |
+| `tabClasses` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The underlined tab, for views of the page you are on. | keep |
+| `ViewTabs` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The one strip of views: Radix tabs that scroll on a phone, with counts and dots. | new (WP-08) |
+| `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`, `tabsListVariants` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/tabs.tsx` | Radix tabs; the pill list is retired for `ViewTabs`. | keep (under `ViewTabs`, WP-08) |
+| `ToggleGroup`, `ToggleGroupItem` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/toggle-group.tsx` | A Radix toggle group; a single choice is a `Segments`, which draws with it. | keep (inside `Segments` only, WP-08) |
+| `Toggle`, `toggleVariants` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/toggle.tsx` | A Radix toggle; a single choice is a `Segments`. | keep |
+| `WindowPicker` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/window-picker.tsx` | The time window over a chart, on `Segments`. | new (WP-08) |
+| `useViewTab` | [Tabs, chips, segments](tabs-chips-segments.md) | `hooks/use-view-tab.ts` | The view a page shows, held in `?tab=`. | new (WP-08) |
+| `Bone` | [States](states.md) | `components/bone.tsx` | A bone in a line of words that keeps the height the words will give it. | keep |
+| `Spinner` | [States](states.md) | `components/loading.tsx` | A small turning mark for a wait too short for a skeleton. | keep |
+| `LoadingRows`, `LoadingPanel` | [States](states.md) | `components/loading.tsx` | Skeleton rows, and a panel's skeleton at the panel's height. | keep |
+| `Hold`, `HOLD_AT_MOST_MS` | [States](states.md) | `components/loading.tsx` | Keeps what is under a block off the page until the read above it answers, so nothing moves. | keep |
+| `nearestPage`, `addressTail`, `NearestPage` (type) | [States](states.md) | `components/missing-page-model.ts` | The not-found page's nearest page and the address as its picture says it. | keep |
+| `MissingPage` | [States](states.md) | `components/missing-page.tsx` | An address no page claims, as a picture of the address and the pages that are there. | keep |
+| `noSystemd`, `moduleOff`, `missingFromError`, `unreadLine`, `saysDockerUnreachable`, `logKindMissing`, `SYSTEMD_RUN_DIR`, `SYSTEMD_MOUNT`, `MissingStep` (type), `Missing` (type), `MissingReason` (type), `SystemdReader` (type), `Refusal` (type), `MissingLineWords` (type) | [States](states.md) | `components/missing-thing-model.ts` | The words of every absence, so a missing systemd or a module switched off reads the same everywhere. | keep |
+| `MissingThing`, `MissingScreen`, `MissingOrError`, `MissingLine`, `MissingGain` (type) | [States](states.md) | `components/missing-thing.tsx` | A thing that is not there, drawn as itself with the next step; whole, from a model, from an error, or as one line. | keep |
+| `PageState` | [States](states.md) | `components/page.tsx` | A page that has not got its data yet, or cannot get it, in the shell's frame. | keep |
+| `Stale` | [States](states.md) | `components/stale.tsx` | A reading that stopped updating: a mark beside it or a strip with Try again. | new (WP-12) |
+| `StandaloneState`, `RenderFailure` | [States](states.md) | `components/standalone-state.tsx` | A whole window with no shell: sign-in's failures and a render error above the shell. | keep |
+| `EmptyState` | [States](states.md) | `components/state.tsx` | An empty list, drawn as what it would hold, with the next step. | keep |
+| `EmptyNote` | [States](states.md) | `components/state.tsx` | "Nothing here" inside something already: a rail, a filtered body; gains `action` and `dense` (WP-12). | keep |
+| `ErrorState` | [States](states.md) | `components/state.tsx` | A failed read, said calmly when it is an absence; gains `what`, `every` and a pending retry (WP-12). | keep |
+| `Notice` | [States](states.md) | `components/state.tsx` | A short banner for a fact the reader needs before acting on the page. | keep |
+| `StaleNotice` | [States](states.md) | `components/state.tsx` | The last good reading's age and a refresh, over a page whose read now fails. | new (WP-12) |
+| `NeedsAdmin` | [States](states.md) | `components/state.tsx` | The closed door under a page's identity line for a page only an administrator opens. | new (WP-12) |
+| `Sweep` | [States](states.md) | `components/state.tsx` | The one indeterminate bar: a third of a track sweeping across. | new (WP-12) |
+| `Skeleton` | [States](states.md) | `components/ui/skeleton.tsx` | The one skeleton fill. | keep |
+| `OutcomeStrip`, `OUTCOME_FILL`, `OutcomeTone` (type), `Outcome` (type) | [Status and tags](status-tag.md) | `components/outcome-strip.tsx` | The last few attempts at something as a square each in how it ended, oldest first. | keep |
+| `StateMark`, `StateCorner` | [Status and tags](status-tag.md) | `components/product-logo.tsx` | A product's tile with its status dot in the corner, on one size ladder. | new (WP-13) |
+| `Status`, `DotTone` (type), `Verdict` (type) | [Status and tags](status-tag.md) | `components/status-dot.tsx` | The one live-state indicator: a coloured dot and its word. | keep |
+| `StatusDot` | [Status and tags](status-tag.md) | `components/status-dot.tsx` | The dot alone, for a place that already says the state; gains `corner` for a mark's corner (WP-13). | keep |
+| `toneFor`, `DOT_COLOR` | [Status and tags](status-tag.md) | `components/status-dot.tsx` | Maps docker, systemd and pm2 states onto one tone, and each tone's fill as a colour. | keep |
+| `Tag` | [Status and tags](status-tag.md) | `components/tag.tsx` | Small caps for a fixed property of a row; no chip, no border; gains `hue` (WP-13). | keep |
+| `Tone` | [Status and tags](status-tag.md) | `components/tone.ts` | The four signal tones (default, success, warning, danger) a coloured state is said in. | keep |
+| `Ago` | [Values](values.md) | `components/ago.tsx` | A relative time that keeps itself current ("checked 4 min ago"). | new (WP-14) |
+| `ClientMark`, `BadgedLogo` | [Values](values.md) | `components/client-mark.tsx` | What signed a session in as the product it is, and a tile with a second product in its corner. | keep |
+| `NetworkFact`, `NETWORK_GLYPH` | [Values](values.md) | `components/client-mark.tsx` | Where an address is (the tailnet drawn as Tailscale) and the address itself. | keep |
+| `CodeBlock`, `CodeLines` | [Values](values.md) | `components/code.tsx` | A titled block of code with its copy, and numbered lines in the faint gutter. | new (WP-18) |
+| `CopyButton`, `CopyAction`, `CopyValue` | [Values](values.md) | `components/copy.tsx` | Copying: a button that says Copied, an icon action that ticks, a mono value with its copy. | new (WP-14) |
+| `DiffCount` | [Values](values.md) | `components/diff-count.tsx` | Lines added and removed, in git's two colours. | new (WP-25) |
+| `InOut`, `RX`, `TX`, `formatRate`, `axisRate`, `inOutSeries` | [Values](values.md) | `components/in-out.tsx` | In and out as one pair in their two hues, and the rate formatters every network figure takes. | new (WP-14) |
+| `Keycaps`, `ShortcutList` | [Values](values.md) | `components/keycaps.tsx` | A shortcut as one cap per key (hidden on touch), and a list of shortcuts. | new (WP-36) |
+| `LanguageMark` | [Values](values.md) | `components/language-icon.tsx` | A repository's language as its logo and its name. | keep |
+| `Logo`, `LogoGlyph`, `LogoStacked`, `LogoMark` | [Values](values.md) | `components/logo.tsx` | The product's own lockups and mark, inline on `currentColor`. | keep |
+| `DashboardMark` | [Values](values.md) | `components/logo.tsx` | The dashboard drawn as one thing among others: the mark on a product tile. | new (WP-13) |
+| `ProductLogo`, `ProductGlyph`, `ProductGlyphs`, `ProductLogos` | [Values](values.md) | `components/product-logo.tsx` | A product drawn as itself: on its tile, bare in a line, a row after words, an overlapping run. | keep |
+| `hasProductLogo` | [Values](values.md) | `components/product-logo.tsx` | Whether a product has a logo file, before choosing between it and a glyph. | keep |
+| `imageProduct`, `containerProduct`, `imageProducts`, `containerProducts`, `processProduct`, `unitProduct`, `pm2Product`, `portProduct`, `programProduct`, `platformProduct`, `cpuProduct`, `virtualizationProduct`, `interfaceProduct`, `sensorProduct`, `hostProduct`, `gitProviderProduct`, `recipeProduct`, `packageManagerProduct`, `frameworkProduct`, `buildMethodProduct`, `channelProduct`, `webhookProduct`, `issuerProduct`, `variableProduct` | [Values](values.md) | `components/product-logo.tsx` | Which product a thing is (an image, a unit, a port, a channel, a certificate's issuer), by whatever names it. | keep |
+| `ProjectMark`, `ProjectMarkOf`, `ProjectFavicon`, `projectFavicon`, `useProjectFavicon` | [Values](values.md) | `components/project-mark.tsx` | A deployed project drawn as its own website's icon, on a tile or bare. | keep |
+| `Avatar`, `AvatarImage`, `AvatarFallback`, `AvatarBadge`, `AvatarGroup`, `AvatarGroupCount` | [Values](values.md) | `components/ui/avatar.tsx` | The avatar primitive under `UserAvatar`. | keep |
+| `UserAvatar`, `InitialsMark`, `AvatarRun` | [Values](values.md) | `components/user-avatar.tsx` | An account's picture or silhouette, a person from a name alone, and a run of them. | keep |
+| `displayNameOf`, `avatarSrc` | [Values](values.md) | `components/user-avatar.tsx` | The name an account shows as, and where its picture is served from. | keep |
+| `useCopy` | [Values](values.md) | `hooks/use-copy.ts` | Copying with an inline tick for 1.6 s instead of a toast. | keep |
+| `useDebounced` | [Values](values.md) | `hooks/use-debounced.ts` | A value that follows another after it has held still for a delay. | new (WP-14) |
+| `useElapsed` | [Values](values.md) | `hooks/use-elapsed.ts` | Milliseconds since a start, ticking, for a wait or a run's time. | new (WP-14) |
+| `useNow` | [Values](values.md) | `hooks/use-now.ts` | The one clock: the time, advancing every `intervalMs`, for a figure that is a distance from now. | keep |
+| `useShortcuts` | [Values](values.md) | `hooks/use-shortcuts.ts` | A page's keys, skipped while typing or while a dialog or menu has them. | new (WP-36) |
+| `ConfirmDialog`, `useConfirm`, `ConfirmRequest` (type) | [Overlays](overlays-confirm.md) | `components/confirm-dialog.tsx` | The one confirmation: a dialog driven from anywhere in a page. | keep |
+| `Dock` | [Overlays](overlays-confirm.md) | `components/dock.tsx` | A floating dock at the bottom right, stacked over the ones below it. | new (WP-15) |
+| `Explain`, `ExplainEntry` (type), `ExplainProps` (type) | [Overlays](overlays-confirm.md) | `components/explain.tsx` | The one toggletip for an explanation: an ⓘ, a dotted term or a wrapped control. | keep |
+| `ImageLightbox`, `LightboxImage` (type) | [Overlays](overlays-confirm.md) | `components/image-lightbox.tsx` | A picture as large as the window allows, over a dark ground. | keep |
+| `Modal`, `PaletteModal` | [Overlays](overlays-confirm.md) | `components/modal.tsx` | The centred task surface, and the search overlay whose input is its header. | keep |
+| `DialogSubject` | [Overlays](overlays-confirm.md) | `components/modal.tsx` | What a dialog acts on, as a mark, a name and its facts. | new (WP-15) |
+| `PromptDialog`, `usePrompt` | [Overlays](overlays-confirm.md) | `components/prompt-dialog.tsx` | Asks for one value (a name) in a dialog, from a component or imperatively. | new (WP-15) |
+| `RailNotice` | [Overlays](overlays-confirm.md) | `components/rail-notice.tsx` | A notice card at the sidebar's foot that folds to a tile on the collapsed rail. | new (WP-15) |
+| `SidePanel`, `SidePanelFooter`, `useInSidePanel` | [Overlays](overlays-confirm.md) | `components/side-panel.tsx` | The sheet, for a small add or edit form; a command the body brings to its footer. | keep |
+| `Command`, `CommandDialog`, `CommandInput`, `CommandList`, `CommandEmpty`, `CommandGroup`, `CommandItem`, `CommandShortcut`, `CommandSeparator` | [Overlays](overlays-confirm.md) | `components/ui/command.tsx` | cmdk's command list, under the command palette. | keep |
+| `Dialog`, `DialogClose`, `DialogContent`, `DialogDescription`, `DialogFooter`, `DialogHeader`, `DialogOverlay`, `DialogPortal`, `DialogTitle`, `DialogTrigger` | [Overlays](overlays-confirm.md) | `components/ui/dialog.tsx` | Radix dialog, assembled only in `modal.tsx` (and `ui/command`); a page opens a `Modal`. | keep |
+| `HoverCard`, `HoverCardTrigger`, `HoverCardContent` | [Overlays](overlays-confirm.md) | `components/ui/hover-card.tsx` | A card shown on hover, for a preview a pointer asks for. | keep |
+| `Popover`, `PopoverTrigger`, `PopoverContent`, `PopoverAnchor`, `PopoverHeader`, `PopoverTitle`, `PopoverDescription` | [Overlays](overlays-confirm.md) | `components/ui/popover.tsx` | A floating panel, one of the three things that may cast a shadow. | keep |
+| `Sheet`, `SheetTrigger`, `SheetClose`, `SheetContent`, `SheetHeader`, `SheetFooter`, `SheetTitle`, `SheetDescription` | [Overlays](overlays-confirm.md) | `components/ui/sheet.tsx` | Radix sheet, assembled only in `SidePanel` (and the sidebar's phone drawer). | keep |
+| `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider` | [Overlays](overlays-confirm.md) | `components/ui/tooltip.tsx` | A label for an icon-only control; an explanation is an `Explain`. | keep |
+| `useFocusReturn`, `firstReachable`, `claimFocusReturn` | [Overlays](overlays-confirm.md) | `hooks/use-focus-return.ts` | Where the keyboard goes when a dialog closes. | keep |
+| `menuOpener` | [Overlays](overlays-confirm.md) | `hooks/use-focus-return.ts` | The one walk from a menu item back to the control that opened its menu. | new (WP-23) |
+| `IconAction`, `RevealGroup` (type) | [Menus](menus.md) | `components/icon-action.tsx` | An icon-only control with a real tooltip label. | keep |
+| `RowActions`, `DimActions`, `rowReveal`, `ROW_REVEAL`, `ROW_DIM` | [Menus](menus.md) | `components/icon-action.tsx` | Where a row's controls are: revealed on hover and focus, or always drawn and dimmed. | keep |
+| `ContextMenu`, `ContextMenuTrigger`, `ContextMenuContent`, `ContextMenuItem`, `ContextMenuCheckboxItem`, `ContextMenuRadioItem`, `ContextMenuLabel`, `ContextMenuSeparator`, `ContextMenuShortcut`, `ContextMenuGroup`, `ContextMenuPortal`, `ContextMenuSub`, `ContextMenuSubContent`, `ContextMenuSubTrigger`, `ContextMenuRadioGroup` | [Menus](menus.md) | `components/ui/context-menu.tsx` | The right-click menu, drawn as the dropdown is. | keep |
+| `DropdownMenu`, `DropdownMenuPortal`, `DropdownMenuTrigger`, `DropdownMenuContent`, `DropdownMenuGroup`, `DropdownMenuLabel`, `DropdownMenuItem`, `DropdownMenuCheckboxItem`, `DropdownMenuRadioGroup`, `DropdownMenuRadioItem`, `DropdownMenuSeparator`, `DropdownMenuShortcut`, `DropdownMenuSub`, `DropdownMenuSubTrigger`, `DropdownMenuSubContent` | [Menus](menus.md) | `components/ui/dropdown-menu.tsx` | The dropdown, drawn from `menu-styles`; a row's or a page's verbs are a `VerbMenu`. | keep |
+| `MenuItemText` | [Menus](menus.md) | `components/ui/menu-item-text.tsx` | An option's name and its metadata in one text column. | keep |
+| `menuSurfaceClasses`, `menuItemClasses`, `menuDangerClasses`, `menuLabelClasses`, `menuIndicatorClasses` | [Menus](menus.md) | `components/ui/menu-styles.ts` | The one look of a menu's surface, rows, labels and marks, for select, dropdown and context menu. | keep |
+| `Select`, `SelectContent`, `SelectGroup`, `SelectItem`, `SelectLabel`, `SelectScrollDownButton`, `SelectScrollUpButton`, `SelectSeparator`, `SelectTrigger`, `SelectValue` | [Menus](menus.md) | `components/ui/select.tsx` | The select, its trigger a `Button` and its rows the menu rows. | keep |
+| `VerbActions`, `VerbBar`, `VerbMenu` | [Menus](menus.md) | `components/verbs.tsx` | A row's icon verbs, a detail's verb bar, and the overflow menu where a verb is a word. | keep |
+| `VerbItems` | [Menus](menus.md) | `components/verbs.tsx` | One list of verbs drawn into a dropdown or a context menu. | new (WP-15) |
+| `FloatingBar` | [Forms and settings](forms.md) | `components/floating-bar.tsx` | The floating bar a save or a pending change stands in. | new (WP-15) |
+| `Field`, `FieldRow`, `useField`, `useFieldControl`, `FieldControl` (type) | [Forms and settings](forms.md) | `components/form.tsx` | A label, a control and one line under it; two or three on a line; what a control reads from its field. | keep |
+| `FieldChecks`, `FieldCheck` | [Forms and settings](forms.md) | `components/form.tsx` | The rules a value has to meet, lit as they are met and spoken as they change. | keep |
+| `InfoTip` | [Forms and settings](forms.md) | `components/form.tsx` | The ⓘ beside a label. | deprecated (use `Explain`) |
+| `FormSection`, `FormSections` | [Forms and settings](forms.md) | `components/form.tsx` | A titled part of a longer form, and a run of them held to the fields' width. | keep |
+| `Disclosure` | [Forms and settings](forms.md) | `components/form.tsx` | A part of a form folded away until it is wanted. | keep |
+| `OptionList`, `OptionRow` | [Forms and settings](forms.md) | `components/form.tsx` | A switch with its sentence, in a run ruled apart. | keep |
+| `FormFacts`, `FormFact` | [Forms and settings](forms.md) | `components/form.tsx` | What a form operates on, as data under its title. | keep |
+| `Statement` | [Forms and settings](forms.md) | `components/form.tsx` | The statement a form will run, shown before it runs. | keep |
+| `FormNote` | [Forms and settings](forms.md) | `components/form.tsx` | A short piece of guidance under a form, quieter than a `Notice`. | keep |
+| `ListField` | [Forms and settings](forms.md) | `components/list-field.tsx` | A field that holds a list of entries (addresses, headers), each checked as typed. | new (WP-16) |
+| `ScheduleBuilder`, `SchedulePreset` (type), `ScheduleFields` (type) | [Forms and settings](forms.md) | `components/schedule-builder.tsx` | A schedule as a sentence with the moments it fires under it. | keep |
+| `scheduleFields`, `scheduleExpression`, `scheduleValid`, `schedulePreview`, `SCHEDULE_PRESETS`, `WEEKDAYS` | [Forms and settings](forms.md) | `components/schedule-builder.tsx` | A schedule's fields, its cron expression and its next firings, both ways. | keep |
+| `SecretField` | [Forms and settings](forms.md) | `components/secret-field.tsx` | A password or token field with show, generate and copy. | new (WP-16) |
+| `DangerRow` | [Forms and settings](forms.md) | `components/settings/danger-row.tsx` | One destructive verb in a settings page's danger zone, with its sentence. | new (WP-16) |
+| `PendingStrip`, `PendingItem` (type) | [Forms and settings](forms.md) | `components/settings/pending-strip.tsx` | What is saved and not in force yet, at the head of a settings column. | keep |
+| `appliesLine`, `namesLine`, `pendingLine`, `SettingApplies` (type) | [Forms and settings](forms.md) | `components/settings/save-bar-words.ts` | The save bar's second line in words. | keep |
+| `SaveBarProvider`, `useSaveBarEntry`, `useSaveBarHost`, `saveShortcut`, `SettingApplies` (type) | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | The page's one floating save bar, the forms on it, and its shortcut. | keep |
+| `SettingsPage`, `SettingForm`, `SettingSection`, `settingStatus` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | A deployment's settings page, one form of it, one section, and where a section stands against what is live. | keep |
+| `SettingsColumn` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | The one centred settings column for a page that is not a deployment's. | keep |
+| `SwitchRows`, `SwitchRow` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | A switch as a full-width row, in a run ruled apart. | keep |
+| `EditedTag` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | A section holding a change not applied yet, in git's modified colour. | keep |
+| `NoticeLines`, `NoticeLine` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | One-line notices under a page's identity line, ruled apart. | keep |
+| `Accordion`, `AccordionItem`, `AccordionTrigger`, `AccordionContent` | [Forms and settings](forms.md) | `components/ui/accordion.tsx` | Folding sections; a form's fold is a `Disclosure`. | keep |
+| `Button`, `buttonVariants`, `hitAreaClasses` | [Forms and settings](forms.md) | `components/ui/button.tsx` | The button: faces and sizes, touch heights, and the 24px hit area for a small one. | keep |
+| `Checkbox` | [Forms and settings](forms.md) | `components/ui/checkbox.tsx` | A 16px box with a 24px press box (44px under a finger) and the control edge. | keep |
+| `Collapsible`, `CollapsibleTrigger`, `CollapsibleContent` | [Forms and settings](forms.md) | `components/ui/collapsible.tsx` | A part that folds away; the primitive under `Disclosure`. | keep |
+| `InputGroup`, `InputGroupAddon`, `InputGroupButton`, `InputGroupInput`, `InputGroupText`, `InputGroupToggle` | [Forms and settings](forms.md) | `components/ui/input-group.tsx` | A field with things inside its edge: a unit, a prefix, a button. | keep |
+| `Input` | [Forms and settings](forms.md) | `components/ui/input.tsx` | A text field, 44px under a finger and 36px under a pointer, with the control edge. | keep |
+| `Label` | [Forms and settings](forms.md) | `components/ui/label.tsx` | A field's label. | keep |
+| `Slider` | [Forms and settings](forms.md) | `components/ui/slider.tsx` | A range slider. | keep |
+| `Switch` | [Forms and settings](forms.md) | `components/ui/switch.tsx` | An on/off switch; in a form it sits in an `OptionRow` or `SwitchRow`. | keep |
+| `Textarea` | [Forms and settings](forms.md) | `components/ui/textarea.tsx` | A multi-line text field. | keep |
+| `settleOrder`, `sameOrder`, `trailSignature`, `pushTrails`, `trailMoves`, `spanPercent`, `tickPercent`, `timeAt`, `OVERTAKE`, `TRAIL_LENGTH` | [Readings](readings.md) | `components/bar-reading-model.ts` | A band's arithmetic: the order that holds between polls, the trails, and where a span or tick falls. | keep |
+| `BarReading`, `ReadingPart` (type) | [Readings](readings.md) | `components/bar-reading.tsx` | A band's block: a head, one bar of parts, one line and a strip of marks, one height in every state. | keep |
+| `shade` | [Readings](readings.md) | `components/bar-reading.tsx` | A part's colour at a step of its own lightness, for neighbours of one hue. | keep |
+| `ChartPanel`, `ChartPlaceholder` | [Readings](readings.md) | `components/chart-panel.tsx` | A chart's head, plot and legend, and its empty state. | keep |
+| `LiveFigure`, `LiveBytes`, `LandedFigures` | [Readings](readings.md) | `components/live-figure.tsx` | A socket-fed figure that glides to each value, its unit kept beside it. | keep |
+| `HUE` | [Readings](readings.md) | `components/live-figure.tsx` | Each measure's colour, wherever it is drawn. | keep |
+| `CoreBars`, `SeriesKey`, `StreamState` | [Readings](readings.md) | `components/live-figure.tsx` | Every core's share, the key before a reading's name, and whether the socket is live. | keep |
+| `utilisationTone` | [Readings](readings.md) | `components/meter.tsx` | The thresholds that colour a utilisation figure and its bar alike. | keep |
+| `Meter` | [Readings](readings.md) | `components/meter.tsx` | A bar for a figure between 0 and 100, with a threshold mark; `color`, `size="cell"` and `decorative`. | keep |
+| `RankList`, `RankSkeleton`, `RankItem` (type), `SplitPart` (type) | [Readings](readings.md) | `components/rank-list.tsx` | A ranked list read in columns (a name, a figure, its share), and its rows waiting. | keep |
+| `percent` | [Readings](readings.md) | `components/rank-list.tsx` | A share in whole percent that never calls a sliver nothing. | keep |
+| `SplitBar`, `splitWidths` | [Readings](readings.md) | `components/rank-list.tsx` | One whole as one strip of coloured parts, with an optional legend that names or narrows. | keep |
+| `ReadingLine`, `ReadingLines` | [Readings](readings.md) | `components/reading-line.tsx` | One reading as a sentence on a mark with its last hour at the end; two columns from `xl`. | keep |
+| `ReadingMark` | [Readings](readings.md) | `components/reading-line.tsx` | A reading's glyph on its measure's hue, or on the tone of what is wrong with it. | new |
+| `NoReading` | [Readings](readings.md) | `components/reading-line.tsx` | A reading that has not arrived, in the reading's own place and height. | keep |
+| `Sparkline` | [Readings](readings.md) | `components/sparkline.tsx` | A trend the width of a table cell, as one SVG path. | keep |
+| `TileTrend`, `isSteady`, `buildPath` | [Readings](readings.md) | `components/sparkline.tsx` | A reading's last hour at a tile's or a reading line's end; a steady series is a level line. | keep |
+| `StatTile`, `StatGrid` | [Readings](readings.md) | `components/stat-tile.tsx` | A headline figure, and a run of them as a table; only in a sanctioned headline set. | keep |
+| `StatButton` | [Readings](readings.md) | `components/stat-tile.tsx` | A tile whose press narrows what is under it (a lens's counts). | keep |
+| `TileBand` | [Readings](readings.md) | `components/stat-tile.tsx` | A tile's picture on the one line every tile of a row keeps for it. | keep |
+| `StatLink` | [Readings](readings.md) | `components/stat-tile.tsx` | A tile that was a link; a `Link` around a `StatTile` is. | retired (0.9.0) |
+| `ChartContainer`, `ChartTooltip`, `ChartTooltipContent`, `ChartLegend`, `ChartLegendContent`, `ChartStyle`, `ChartConfig` (type) | [Readings](readings.md) | `components/ui/chart.tsx` | shadcn's recharts frame; a page's chart is a `MetricChart` or `ChartPanel`. | keep |
+| `SettingPicture` | [Wiring pictures](wiring.md) | `components/settings/setting-picture.tsx` | A settings section's picture of what its fields decide: two or three marks in a row. | keep |
+| `AnimatedBeam` | [Wiring pictures](wiring.md) | `components/ui/animated-beam.tsx` | A line between two marks with a pulse along it; still, dashed or toned by what it carries. | keep |
+| `useMotionHeld` | [Wiring pictures](wiring.md) | `components/wire/use-motion-held.ts` | Whether the wires hold still: the tab is hidden or motion is paused. | new |
+| `beamOf`, `staggerOf`, `fitColumn`, `isLit`, `PORT`, `flowTemplate`, `loadingRows`, `waitingLines`, `WireState` (type), `WireLine` (type), `BeamProps` (type), `WaitingHint` (type), `WaitingLine` (type) | [Wiring pictures](wiring.md) | `components/wire/wire-flow-model.ts` | WireFlow's arithmetic: what a line's state draws, what a column has room for, what stays lit. | keep |
+| `WireFlow`, `WireFlowNode` (type), `WireFlowWaiting` (type), `WireFlowColumn` (type), `WireFlowHub` (type), `WaitingHint` (type), `WireLine` (type), `WireState` (type) | [Wiring pictures](wiring.md) | `components/wire/wire-flow.tsx` | A picture of things wired through one hub, from data: columns, the hub, lines by state, loading and phone forms. | keep |
+| `WireLane`, `WireLaneTitle` | [Wiring pictures](wiring.md) | `components/wire/wire-lane.tsx` | One column of a hand-laid picture (its heading, count and list), and the heading alone. | new |
+| `WireNode`, `WireMark`, `WireHost`, `WirePlaceholder`, `WireLink`, `WireLabel` | [Wiring pictures](wiring.md) | `components/wire/wire.tsx` | A picture's parts: a node, a filled mark, this server, a mark not there yet, a linked mark, a caption on a line. | keep |
+| `CANVAS_MOVE`, `zoomKey`, `zoomAbout`, `useCanvasPinch` | [Workbench](workbench.md) | `components/canvas-move.ts` | How a canvas moves, Excalidraw's way: trackpad pans, pinch and keys zoom about a point. | keep |
+| `CanvasZoom` | [Workbench](workbench.md) | `components/canvas-zoom.tsx` | A canvas's zoom out, percent, in, Fit and Tidy. | new (WP-15) |
+| `CodeEditor`, `EditorCommands` (type) | [Workbench](workbench.md) | `components/code-editor.tsx` | Monaco, wired to the dashboard's palette and keys. | keep |
+| `PaneBar`, `PaneBack`, `paneShown`, `PaneBreak` (type), `PaneStop` (type) | [Workbench](workbench.md) | `components/phone-panes.tsx` | One pane at a time on a phone: the bar at the foot, the way back, and which pane shows. | keep |
+| `ResizeHandle` | [Workbench](workbench.md) | `components/resize-handle.tsx` | The grab strip between a side column and the work, by pointer or by keys. | keep |
+| `WorkbenchHeader` | [Workbench](workbench.md) | `components/workbench-header.tsx` | A workbench's top bar: the way back, the mark, the name, state, command and tools. | new (WP-33) |
+| `XtermPane`, `XtermActions` (type) | [Workbench](workbench.md) | `components/xterm-pane.tsx` | An xterm.js terminal wired to a PTY over a socket. | keep |
+| `useFullscreen` | [Workbench](workbench.md) | `hooks/use-fullscreen.ts` | Full screen, or an immersive overlay where the browser refuses it, with Escape and focus return. | new (WP-15) |
+| `useIsPhone`, `useIsMobile`, `useMediaQuery` | [Workbench](workbench.md) | `hooks/use-mobile.ts` | A phone, the drawer's width, and any media query, as state. | keep |
+| `useRevealOnWheel` | [Workbench](workbench.md) | `hooks/use-reveal-on-wheel.ts` | The page moves first to bring a partly shown region on screen before the wheel scrolls it. | keep |
+| `ConsoleView` | [Feedback](feedback.md) | `components/console-view.tsx` | One console for a job or a run: its state, lines, cancel and dismiss. | new (WP-32) |
+| `JobConsole`, `useJobConsole`, `RecentJobs` | [Feedback](feedback.md) | `components/job-console.tsx` | Watching an operation that outlives the page, and the ones that ran recently. | deprecated (use `ConsoleView`, WP-32) |
+| `OperationProgress`, `OperationReading` (type) | [Feedback](feedback.md) | `components/operation-progress.tsx` | A dialog's action in flight, as part of its footer. | keep |
+| `RunPhases`, `phaseStates`, `RunPhase` (type) | [Feedback](feedback.md) | `components/run-phases.tsx` | Where a restart or an upgrade is, as a deployment's release path draws it. | keep |
+| `RunTranscript` | [Feedback](feedback.md) | `components/run-transcript.tsx` | A restart's or an upgrade's transcript, read line by line. | keep |
+| `TranscriptRow`, `useTranscriptDrip` | [Feedback](feedback.md) | `components/transcript-line.tsx` | One line of a transcript, and the drip that lets lines arrive readably. | keep |
+| `Toaster` | [Feedback](feedback.md) | `components/ui/sonner.tsx` | The one place a toast is drawn; raise one with `notify` from `lib/toast.ts`. | keep |
+| `Table`, `TableHeader`, `TableBody`, `TableFooter`, `TableHead`, `TableRow`, `TableCell`, `TableCaption`, `stickyTableHeader` | [Table](table.md) | `components/ui/table.tsx` | Tables, for readings only: hairlines, a row wash, a header that can stay put. | keep |
+| `SortHead` | [Table](table.md) | `components/ui/table.tsx` | A sortable column head with `aria-sort` and one chevron. | new (WP-34) |
+| `FlowHeader`, `FlowSteps`, `FlowPanel`, `FlowPanelHeader`, `FlowPanelBody`, `FlowActions` | [Flow pages](../recipes/flow-page.md) | `components/flow.tsx` | A flow page's head, its spine of steps, the one focused surface and its foot. | keep |
+| `BlurFade` | [Motion](../foundations/motion.md) | `components/ui/blur-fade.tsx` | A block arriving by fading in from a blur, staggered by its place. | keep |
+| `BorderBeam` | [Motion](../foundations/motion.md) | `components/ui/border-beam.tsx` | A light travelling round a frame: work is happening inside it. | keep |
+| `Confetti`, `ConfettiRef` (type) | [Motion](../foundations/motion.md) | `components/ui/confetti.tsx` | A burst of paper for a release that went live while it was watched, and the first run's landing. | keep |
+| `NumberTicker` | [Motion](../foundations/motion.md) | `components/ui/number-ticker.tsx` | A figure that counts up to its value when it arrives. | keep |
+| `SpotlightBorder` | [Motion](../foundations/motion.md) | `components/ui/spotlight-border.tsx` | A border that lights while the pointer is on the card. | keep |
+| `TextShimmer` | [Motion](../foundations/motion.md) | `components/ui/text-shimmer.tsx` | Words with a light passing over them while something waits. | keep |
+| `AppSidebar` | [Shell](../shell.md) | `components/shell/app-sidebar.tsx` | The rail: groups, sections drilled into, and the account at its foot. | keep |
+| `CommandPaletteProvider`, `useCommandPalette` | [Shell](../shell.md) | `components/shell/command-palette.tsx` | The command palette and the way to open it. | keep |
+| `NavScopeProvider`, `useNavScope`, `useNavScopeValue`, `NavScopeEntry` (type), `NavScope` (type) | [Shell](../shell.md) | `components/shell/nav-scope.tsx` | A section handing the rail its own panel while it is mounted. | keep |
+| `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`, `PROJECT_SETTINGS_NAV`, `APP_NAME`, `NavChild` (type), `NavItem` (type), `NavGroup` (type), `NavEntry` (type), `ProjectNavEntry` (type), `TabName` (type) | [Shell](../shell.md) | `components/shell/nav.ts` | The rail's entries, the account's pages and a project's, in their order. | keep |
+| `groupedChildren`, `navMatches`, `navOwns`, `navCurrent`, `shownFor`, `hideableSections`, `sectionEntry`, `sectionsFor`, `navLocation`, `tabTitle` | [Shell](../shell.md) | `components/shell/nav.ts` | Where a path sits in the rail, what the rail shows for it, and what the tab says. | keep |
+| `useTabTitle`, `TabHeading`, `useTabName` | [Shell](../shell.md) | `components/shell/tab-title.tsx` | Names the browser tab from the page on screen. | keep |
+| `Sidebar`, `SidebarContent`, `SidebarFooter`, `SidebarGroup`, `SidebarGroupAction`, `SidebarGroupContent`, `SidebarGroupLabel`, `SidebarHeader`, `SidebarInput`, `SidebarInset`, `SidebarMenu`, `SidebarMenuAction`, `SidebarMenuBadge`, `SidebarMenuButton`, `SidebarMenuItem`, `SidebarMenuSkeleton`, `SidebarMenuSub`, `SidebarMenuSubButton`, `SidebarMenuSubItem`, `SidebarProvider`, `SidebarRail`, `SidebarSeparator`, `SidebarTrigger`, `useSidebar` | [Shell](../shell.md) | `components/ui/sidebar.tsx` | The sidebar primitive the shell's rail is built on. | keep |
+| `useHiddenSections` | [Shell](../shell.md) | `hooks/use-hidden-sections.ts` | The sections an account keeps out of its sidebar, and the way to change them. | keep |
+| `pollLoop`, `PollPage` (type), `PollFailure` (type), `PollHandle` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/poll-loop.ts` | Fetches, then schedules the next fetch once the last settled. | keep |
+| `sharedPoll`, `createPollShare`, `forgetSharedPolls`, `releaseSharedPolls`, `FRESH_MS`, `KEEP_MS`, `NO_SHARED_ANSWER`, `SharedSnapshot` (type), `SharedReader` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/poll-share.ts` | One answer for every reader of a key, kept a while for whoever opens the page again. | keep |
+| `useAccountLink` | [Data and reads](../patterns/data-flow.md) | `hooks/use-account-link.ts` | This server's link to a just-dashboard.com account. | keep |
+| `useArrivals` | [Data and reads](../patterns/data-flow.md) | `hooks/use-arrivals.ts` | The rows a poll just brought, for them to rise in (§11). | keep |
+| `useAuth`, `AuthProvider` | [Data and reads](../patterns/data-flow.md) | `hooks/use-auth.tsx` | The signed-in account and what it can do. | keep |
+| `useContainerLive`, `useContainerFrame`, `ContainerLive` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-container-live.ts` | One container's stats socket as a reading and a rolling window, and its newest frame. | keep |
+| `useGitHubAccount`, `useGitHubApp`, `githubAppStage`, `forgeMediaUrl`, `githubAvatarUrl`, `GitHubAppStage` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-github.ts` | Who the dashboard is to GitHub, its GitHub App, and media through this server. | keep |
+| `useHubLink`, `HubLinkProvider`, `useShellHub`, `outdated`, `ShellHubValue` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-hub-link.tsx` | This server's link to a Just Hub, and the hub the shell draws. | keep |
+| `useMetricsHistory`, `useStorageHistory`, `useMetricEvents`, `useRangePreference`, `HistoryState` (type), `StorageState` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-metrics-history.ts` | The recorded history over a window, its filesystems, its events and the chosen window. | keep |
+| `useMetricsWindow`, `WindowControls` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-metrics-window.ts` | The window charts are drawn over, and how it was reached. | keep |
+| `useMetrics`, `useMetricsValue`, `useHostName`, `MetricsStream` | [Data and reads](../patterns/data-flow.md) | `hooks/use-metrics.ts` | The live metrics store, one value of it, the host's name, and the stream that feeds it. | keep |
+| `useNearViewport` | [Data and reads](../patterns/data-flow.md) | `hooks/use-near-viewport.ts` | Whether a block is within reach of the screen, so a chart draws when it is about to be seen. | keep |
+| `usePoll`, `PollState` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-poll.ts` | A read that asks again on an interval after each answer, shared between readers of one key. | keep |
+| `useProjects` | [Data and reads](../patterns/data-flow.md) | `hooks/use-projects.ts` | The fleet's project summaries by id. | keep |
+| `useQuerySelection`, `openRepoPull`, `closeRepo`, `workspaceTab` | [Data and reads](../patterns/data-flow.md) | `hooks/use-query-selection.ts` | A selection held in the address, and the git workspace's own. | keep |
+| `useSelfConfig`, `configPhaseLabel` | [Data and reads](../patterns/data-flow.md) | `hooks/use-self-config.tsx` | The dashboard's own settings and the restart that applies a change, its phases in words. | keep |
+| `useSelfUninstall` | [Data and reads](../patterns/data-flow.md) | `hooks/use-self-uninstall.tsx` | Removing the dashboard, watched from the page it removes. | keep |
+| `useSelfUpdate`, `SelfUpdateProvider`, `updateHasNews`, `phaseLabel` | [Data and reads](../patterns/data-flow.md) | `hooks/use-self-update.tsx` | The dashboard's own upgrade: its state, whether the rail has news, and its phases in words. | keep |
+| `useSocket`, `retryDelay`, `Envelope` (type), `SocketState` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-socket.ts` | One of the dashboard's push sockets, reconnecting with jittered backoff. | keep |
+| `useUpdateHistory` | [Data and reads](../patterns/data-flow.md) | `hooks/use-update-history.ts` | The release notes this build was compiled with, newest first. | keep |
+| `useUsagePing` | [Data and reads](../patterns/data-flow.md) | `hooks/use-usage-ping.ts` | The optional daily count of servers, and this server's answer to it. | keep |
+
+### Icons
+
+`components/icons.tsx` is the icon vocabulary: Heroicons, re-exported under the names the product
+uses, plus the panel toggles drawn inline (Heroicons has none). A glyph not on this list is added
+there rather than imported from `@heroicons/react` in a feature. The names:
+
+`AcronymCsv`, `AcronymJson`, `AcronymMarkdown`, `Archive`, `ArrowCircleUp`, `ArrowDown`, `ArrowLeft`, `ArrowLeftRight`, `ArrowMove`, `ArrowRight`, `ArrowUp`, `ArrowUpDown`, `ArrowUpRight`, `Backspace`, `Bell`, `BlendMode`, `BookOpen`, `Box`, `BranchPlus`, `Bridge`, `Bug`, `Calculator`, `ChartActivity`, `ChatBubble`, `Check`, `CheckCircle`, `ChevronDoubleDown`, `ChevronDoubleUp`, `ChevronDown`, `ChevronLeft`, `ChevronRight`, `ChevronUp`, `Clipboard`, `Clock`, `ClockRewind`, `CloudDownload`, `CloudUpload`, `Code`, `CodeBracket`, `CodeWrap`, `Command`, `Connection`, `Copy`, `CornerDownLeft`, `CornerUpLeft`, `CornerUpRight`, `Cpu`, `Crop`, `Cross`, `CrossCircle`, `Crosshair`, `Database`, `DesktopDevice`, `DotMark`, `Download`, `Envelope`, `External`, `Eye`, `EyeOff`, `File`, `FileText`, `FileZip`, `Filter`, `Fingerprint`, `FirewallCheck`, `FloppyDisk`, `FolderClosed`, `FolderOpen`, `FolderPlus`, `Fullscreen`, `FullscreenClose`, `Gauge`, `GitBranch`, `GitCommit`, `GitHubMark`, `GitMerge`, `GitPullRequest`, `GitTag`, `Globe`, `GridMasonry`, `GridSquare`, `Hash`, `Heart`, `Home`, `Hub`, `Icon`, `IconProps`, `Image`, `Inbox`, `Information`, `Inspect`, `Key`, `Layers`, `Layout`, `Lifebuoy`, `Lightning`, `LineChart`, `Link`, `Linked`, `ListOrdered`, `ListUnordered`, `LoaderCircle`, `Location`, `LockClosed`, `LockOpen`, `Logout`, `Logs`, `MagnifyingGlass`, `MagnifyingGlassMinus`, `MagnifyingGlassPlus`, `Minus`, `Monitoring`, `Monorepo`, `MoreHorizontal`, `Music`, `NetworkDevice`, `Notes`, `PaperAirplane`, `Pause`, `Pencil`, `PhoneDevice`, `Pin`, `Play`, `Plus`, `PlusSquareSmall`, `PreviewDocument`, `Puzzle`, `Question`, `RefreshClockwise`, `Rocket`, `RotateClockwise`, `RotateCounterClockwise`, `Route`, `Router`, `Rss`, `SecureConnection`, `ServerMap`, `Servers`, `SettingsGear`, `SettingsSliders`, `Shield`, `ShieldCheck`, `ShieldOff`, `SidebarLeftClose`, `SidebarLeftOpen`, `SidebarRightClose`, `SidebarRightOpen`, `SignIn`, `Slash`, `SlashForward`, `Sparkles`, `Star`, `StarFill`, `Stop`, `StopCircle`, `Stopwatch`, `Table`, `TabletDevice`, `Terminal`, `TerminalWindow`, `TextFormat`, `TextTitle`, `TextUppercase`, `Topology`, `Trash`, `UserMinus`, `UserPlus`, `UserSettings`, `Users`, `Video`, `Warning`, `WarningFill`, `Wrench`
 
 ## Families
 
@@ -36,8 +305,9 @@ detail.
 
 Adding one: [`../contributing-a-component.md`](../contributing-a-component.md).
 
-Until the table is filled, the map below is the one that closed `shell.md`. It covers the
-first shared files, not all of them.
+The map below is the one that closed `shell.md`, kept for the rules it carries until their family
+pages hold them (WP-41). The catalogue above is the index; where the two differ, the catalogue and
+the family page are current.
 
 ## The map carried over from the shell page
 

@@ -9,6 +9,8 @@ import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { DashboardMark } from "@/components/backups/marks"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { WireLane } from "@/components/wire/wire-lane"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
 import {
   LANE_WORDS,
   laneFilter,
@@ -73,6 +75,7 @@ export function PortsPicture({
   const model = useMemo(() => reachPicture(sockets, 6), [sockets])
   const container = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
+  const held = useMotionHeld()
   const ids = [
     ...model.lanes.map((l) => `l:${l.lane}`),
     ...model.owners.map((o) => `o:${o.key}`),
@@ -114,7 +117,7 @@ export function PortsPicture({
               shape="s"
               startXOffset={22}
               endXOffset={-18}
-              still={!wire.busy}
+              still={!wire.busy || held}
               tone={wire.tone}
               duration={3}
               delay={(index % 6) * 0.35}
@@ -126,11 +129,12 @@ export function PortsPicture({
         <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(4rem,14vw,14rem)_minmax(0,1fr)] lg:items-center">
           {/* Narrow, each program says who reaches it, and the chips under the
               picture narrow by it, so the networks are not drawn twice. */}
-          <Lane
+          <WireLane
             title="Who can reach it"
             count={model.lanes.length}
-            className="lg:text-right"
-            outerClassName="max-lg:hidden"
+            align="end"
+            float
+            className="max-lg:hidden lg:py-4"
           >
             {model.lanes.map(({ lane, sockets: count, tone }) => {
               const filter = laneFilter(lane)
@@ -166,11 +170,17 @@ export function PortsPicture({
                 </li>
               )
             })}
-          </Lane>
+          </WireLane>
 
           <div aria-hidden className="max-lg:hidden" />
 
-          <Lane title="What listens" count={model.owners.length + model.hidden} dense>
+          <WireLane
+            title="What listens"
+            count={model.owners.length + model.hidden}
+            float
+            dense
+            className="lg:py-4"
+          >
             {model.owners.map((owner) => (
               <li
                 key={owner.key}
@@ -196,7 +206,7 @@ export function PortsPicture({
                 />
               </li>
             )}
-          </Lane>
+          </WireLane>
         </div>
       </div>
     </div>
@@ -285,45 +295,5 @@ function OwnerNode({
         </span>
       }
     />
-  )
-}
-
-function Lane({
-  title,
-  count,
-  className,
-  dense,
-  outerClassName,
-  children,
-}: {
-  title: string
-  count: number
-  className?: string
-  /** Smaller marks, closer together: the programs outnumber the networks. */
-  dense?: boolean
-  outerClassName?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div
-      className={cn(
-        "min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center lg:py-4",
-        outerClassName,
-      )}
-    >
-      <div className="lg:relative">
-        <p className={cn("eyebrow mb-4 lg:absolute lg:inset-x-0 lg:bottom-full", className)}>
-          {title}
-          {count > 0 && (
-            <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-              {count}
-            </span>
-          )}
-        </p>
-        <ol className={cn("flex flex-col", dense ? "gap-3" : "gap-4")} aria-label={title}>
-          {children}
-        </ol>
-      </div>
-    </div>
   )
 }
