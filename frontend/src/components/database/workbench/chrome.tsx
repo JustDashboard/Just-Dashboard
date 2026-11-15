@@ -213,33 +213,33 @@ function FrameHead({
             </div>
             {/* What it is for comes before what it is: "production" and
                 "protected" stay, and the facts after them give way first. */}
-            <FactLine nowrap className="text-micro text-muted-foreground">
+            <div className="flex min-w-0 items-center text-micro text-muted-foreground">
               {labelled && (
-                <Fact className="shrink-0! overflow-visible!">
-                  <span
-                    data-slot="database-labels"
-                    className="inline-flex items-center gap-1.5 align-top"
-                  >
-                    <EnvironmentTag environment={conn.environment} className="max-w-32" />
-                    {readOnly && <ProtectedTag />}
-                  </span>
-                </Fact>
+                <span data-slot="database-labels" className="flex shrink-0 items-center gap-1.5">
+                  <EnvironmentTag environment={conn.environment} className="max-w-32" />
+                  {readOnly && <ProtectedTag />}
+                </span>
               )}
-              {facts.map((fact, index) => (
-                <Fact
-                  key={fact.key}
-                  title={fact.title ?? fact.text}
-                  mono={fact.mono}
-                  className={cn(
+              <FactLine
+                nowrap
+                className={cn("min-w-0 shrink-[1000]", labelled && "@max-xl:hidden")}
+              >
+                {/* After the labels the first fact keeps its dot: an empty
+                    first fact stands where the line's first dot is clipped. */}
+                {labelled && <Fact aria-hidden className="shrink-0!" />}
+                {facts.map((fact, index) => (
+                  <Fact
+                    key={fact.key}
+                    title={fact.title ?? fact.text}
+                    mono={fact.mono}
                     // The address and the database go before the engine does.
-                    index > 0 && "@max-md:hidden",
-                    labelled && "@max-xl:hidden",
-                  )}
-                >
-                  {fact.text}
-                </Fact>
-              ))}
-            </FactLine>
+                    className={cn(index > 0 && "@max-md:hidden")}
+                  >
+                    {fact.text}
+                  </Fact>
+                ))}
+              </FactLine>
+            </div>
           </div>
         </div>
 
