@@ -199,7 +199,7 @@ function statTiles(page: Page) {
 }
 
 const picture = (page: Page) =>
-  page.getByRole("list", { name: "How this server connects to just-dashboard.com" })
+  page.getByRole("group", { name: "How this server connects to just-dashboard.com" })
 
 function scrollsSideways(page: Page) {
   return page.evaluate(

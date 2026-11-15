@@ -5,6 +5,8 @@ import { createRef, useLayoutEffect, useMemo, useRef, useState, type RefObject }
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { WireNode } from "@/components/wire/wire"
+import { WireLaneTitle } from "@/components/wire/wire-lane"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -82,6 +84,11 @@ export type WireFlowColumn = {
   /** A count beside the heading, where the column is a part of something larger. */
   count?: number
   /**
+   * The page that lists the column, which its heading then opens, on a phone
+   * too: an account's sessions and keys.
+   */
+  href?: string
+  /**
    * Where the heading is drawn: `narrow` only where the columns stack (the
    * wide picture says it by position), `always` hung above the column wide too.
    */
@@ -136,10 +143,14 @@ export type WireFlowHub = {
  * - `stack` (the default): the columns stack under their headings with every
  *   word kept and the lines not drawn. For a picture that is the only place its
  *   nodes are named — the Network overview, the gateway.
- * - `marks`: the hub's words over a row of the start column's marks, the hub,
- *   and a row of the end column's, the lines running down between them. For a
- *   picture whose nodes a list under it names again — Notifications, Backups,
- *   the proxy's alerts — where the words would be said twice.
+ * - `marks`: a row of the start column's marks, the hub with its words
+ *   beside it, and a row of the end column's, the lines running down between
+ *   them. For a picture whose nodes a list under it names again —
+ *   Notifications, Backups, the proxy's alerts — where the words would be said
+ *   twice. The hub's words stand to the right of its mark, as a narrow
+ *   `WireNode`'s do, clear of the lines running down through it: printed over
+ *   the first row they named that row (the not-found page's "?" read "This
+ *   server"), and under the mark the lines ran through them.
  *
  * `loading` draws the picture's final shape — the hub, and grey rows where
  * the nodes will be — so nothing under it moves when the data lands. A column
@@ -176,6 +187,8 @@ export function WireFlow({
   const hubRef = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
   const compact = phone === "marks" && !wide
+  // A hidden tab or paused motion draws every line still, as reduced motion does.
+  const held = useMotionHeld()
 
   const left = useMemo(() => laid(start, "start", loading), [start, loading])
   const right = useMemo(() => laid(end, "end", loading), [end, loading])
@@ -220,7 +233,7 @@ export function WireFlow({
         startXOffset={compact ? 0 : port}
         endXOffset={compact ? 0 : -port}
         reverse={node.line?.reverse}
-        still={beam.still}
+        still={beam.still || held}
         dashed={beam.dashed}
         tone={beam.tone}
         duration={node.line?.duration}
@@ -244,29 +257,42 @@ export function WireFlow({
       >
         <div ref={container} className="relative flex flex-col items-center text-center">
           {beams}
-          {hub.eyebrow && <p className="eyebrow">{hub.eyebrow}</p>}
-          {loading ? (
-            <>
-              <p className="text-body leading-snug font-medium">
-                {hub.loadingLines?.title ?? <WaitingWords className="w-32" />}
-              </p>
-              {hubWaits && (
-                <div className="text-hint leading-snug text-muted-foreground">{hubWaits}</div>
-              )}
-            </>
-          ) : (
-            <>
-              {hub.title && <p className="text-body leading-snug font-medium">{hub.title}</p>}
-              {hub.hint && (
-                <div className="text-hint leading-snug text-muted-foreground">{hub.hint}</div>
-              )}
-            </>
+          {start.href && (
+            <WireLaneTitle title={start.title} count={start.count} href={start.href} />
           )}
-          <MarkRow column={start} nodes={left} refs={refs} />
-          <div ref={hubRef} className="relative z-10 mt-10 flex">
-            {draw(hub.mark, "lg")}
+          <MarkRow column={start} nodes={left} refs={refs} className={start.href && "mt-3"} />
+          {/* The mark in the middle column, so it stays on the picture's
+              centre line; its words in the right-hand one, beside it. */}
+          <div className="mt-10 grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
+            <span aria-hidden />
+            <div ref={hubRef} className="relative z-10 flex">
+              {draw(hub.mark, "lg")}
+            </div>
+            <div data-slot="wire-hub-words" className="min-w-0 text-left">
+              {hub.eyebrow && <p className="eyebrow">{hub.eyebrow}</p>}
+              {loading ? (
+                <>
+                  <p className="text-body leading-snug font-medium">
+                    {hub.loadingLines?.title ?? <WaitingWords className="w-24" />}
+                  </p>
+                  {hubWaits && (
+                    <div className="text-hint leading-snug text-muted-foreground">{hubWaits}</div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {hub.title && <p className="text-body leading-snug font-medium">{hub.title}</p>}
+                  {hub.hint && (
+                    <div className="text-hint leading-snug text-muted-foreground">{hub.hint}</div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
           <MarkRow column={end} nodes={right} refs={refs} className="mt-10" />
+          {end.href && (
+            <WireLaneTitle title={end.title} count={end.count} href={end.href} className="mt-3" />
+          )}
         </div>
       </div>
     )
@@ -444,19 +470,12 @@ function Column({
 }) {
   const always = column.heading === "always"
   const heading = (
-    <p
-      className={cn(
-        "eyebrow mb-4",
-        always ? "lg:absolute lg:inset-x-0 lg:bottom-full" : "lg:hidden",
-      )}
-    >
-      {column.title}
-      {column.count !== undefined && column.count > 0 && (
-        <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-          {column.count}
-        </span>
-      )}
-    </p>
+    <WireLaneTitle
+      title={column.title}
+      count={column.count}
+      href={column.href}
+      className={cn("mb-4", always ? "lg:absolute lg:inset-x-0 lg:bottom-full" : "lg:hidden")}
+    />
   )
   const body =
     bare && column.empty ? (
@@ -634,7 +653,7 @@ function MarkRow({
   className?: string
 }) {
   return (
-    <section aria-label={column.title} className={cn("mt-5", className)}>
+    <section aria-label={column.title} className={className}>
       <ol className="flex flex-wrap justify-center gap-4">
         {nodes.map((node) => (
           <li key={node.id} data-node={node.more ? undefined : node.id} className="min-w-0">

@@ -4,6 +4,8 @@ import { createRef, useMemo, useRef, useState, type RefObject } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { WireNode } from "@/components/wire/wire"
+import { WireLane } from "@/components/wire/wire-lane"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
 import { Section } from "@/components/section"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 
@@ -61,6 +63,7 @@ export function WiringPicture({
 }) {
   const container = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
+  const held = useMotionHeld()
   const ids = ["c", ...left.nodes.map((n) => n.id), ...right.nodes.map((n) => n.id)].join("\n")
   const refs = useMemo(() => {
     const map = new Map<string, RefObject<HTMLSpanElement | null>>()
@@ -88,7 +91,7 @@ export function WiringPicture({
               shape="s"
               startXOffset={port}
               endXOffset={-port - 4}
-              still={!node.wire.carries}
+              still={!node.wire.carries || held}
               dashed={node.wire.dashed}
               tone={node.wire.tone}
               duration={2.4}
@@ -105,7 +108,7 @@ export function WiringPicture({
               shape="s"
               startXOffset={port + 4}
               endXOffset={-port}
-              still={!node.wire.carries}
+              still={!node.wire.carries || held}
               dashed={node.wire.dashed}
               tone={node.wire.tone}
               duration={2.8}
@@ -114,7 +117,7 @@ export function WiringPicture({
             />
           ))}
           <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(2.5rem,5vw,5rem)_minmax(0,0.8fr)_clamp(2.5rem,5vw,5rem)_minmax(0,1fr)] lg:items-center">
-            <Lane title={left.title} count={left.nodes.length} className="lg:text-right">
+            <WireLane title={left.title} count={left.nodes.length} align="end">
               {left.nodes.length === 0 ? (
                 <li>{left.empty}</li>
               ) : (
@@ -129,7 +132,7 @@ export function WiringPicture({
                   />
                 ))
               )}
-            </Lane>
+            </WireLane>
             <div aria-hidden className="hidden lg:block" />
             <div className="min-w-0 lg:flex lg:justify-center lg:pb-16">
               <WireNode
@@ -145,7 +148,7 @@ export function WiringPicture({
               />
             </div>
             <div aria-hidden className="hidden lg:block" />
-            <Lane title={right.title} count={right.nodes.length}>
+            <WireLane title={right.title} count={right.nodes.length}>
               {right.nodes.length === 0 ? (
                 <li>{right.empty}</li>
               ) : (
@@ -159,7 +162,7 @@ export function WiringPicture({
                   />
                 ))
               )}
-            </Lane>
+            </WireLane>
           </div>
         </div>
       </div>
@@ -224,33 +227,5 @@ function PictureItem({
         body
       )}
     </li>
-  )
-}
-
-function Lane({
-  title,
-  count,
-  className,
-  children,
-}: {
-  title: string
-  count: number
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center">
-      <p className={cn("eyebrow mb-4", className)}>
-        {title}
-        {count > 0 && (
-          <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-            {count}
-          </span>
-        )}
-      </p>
-      <ol className="flex flex-col gap-5" aria-label={title}>
-        {children}
-      </ol>
-    </div>
   )
 }

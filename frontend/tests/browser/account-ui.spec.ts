@@ -210,15 +210,17 @@ test("the profile opens on the account's identity line and what is signed in as 
 
   // The four tiles went; what they counted is the picture's two sides.
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  const signedIn = page.getByRole("group", { name: "Signed in" })
+  // The picture is a WireFlow: each side a column named by its heading, and
+  // the heading the way to the side's page.
+  const signedIn = page.getByRole("region", { name: "Sessions" })
   for (const logo of ["chrome", "safari", "curl"]) {
     await expect(signedIn.locator(`img[src="/logos/${logo}.svg"]`)).toBeVisible()
   }
-  await expect(page.getByRole("link", { name: /3 sessions/ })).toHaveAttribute(
+  await expect(signedIn.getByRole("link", { name: /^Sessions 3/ })).toHaveAttribute(
     "href",
     "/account/sessions",
   )
-  const keyring = page.getByRole("group", { name: "API keys" })
+  const keyring = page.getByRole("region", { name: "API keys" })
   await expect(keyring.locator('img[src="/logos/github.svg"]')).toBeVisible()
   // Maria's grafana key is hers, not something signed in as this account.
   await expect(keyring.locator('img[src="/logos/grafana.svg"]')).toHaveCount(0)
