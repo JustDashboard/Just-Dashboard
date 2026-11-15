@@ -3,16 +3,7 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronUp,
-  CloudUpload,
-  Globe,
-  Logs,
-  Warning,
-} from "@/components/icons"
+import { CloudUpload, Globe, Logs, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { useSessionState } from "@/lib/view-state"
@@ -20,18 +11,17 @@ import type { DeploymentRequests, SiteSpec, UpstreamReport, VHost } from "@/lib/
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
-import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { DetailPage, useDetailTab, type Step } from "@/components/detail-page"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader, IdentityVerbs } from "@/components/identity-header"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { EMPTY_REQUEST_QUERY, type RequestQuery } from "@/components/deploy/requests-workspace"
 import { siteProduct } from "@/components/proxy/marks"
 import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
@@ -88,14 +78,7 @@ const PAGE_VERBS = [
   "retire",
 ]
 
-const BACK = (
-  <Link
-    href="/proxy/sites"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Sites
-  </Link>
-)
+const BACK = { href: "/proxy/sites", label: "Sites" }
 
 /**
  * The chips the rail can answer from the listing and the certificates. Not
@@ -140,7 +123,6 @@ export function SitePage() {
   const name = decodeSegment(params.name)
   const { can } = useAuth()
   const admin = can("system.admin")
-  const asked = siteTab(search.get("tab"))
   const view = settingsView(search.get("view"))
 
   // The section's own read of the sites, which the Sites page answers from
@@ -154,6 +136,13 @@ export function SitePage() {
   // The form is an administrator's, for a file it saves back where it read
   // it. Until the listing says which this is, the view asked for is kept.
   const editable = admin && Boolean(vhost?.formEditable)
+  // The view is kept in the address and remembered for the visit, as a port's
+  // and a certificate's are, so the next site opened from the list opens on
+  // it. Settings is never what a site opens on unasked: a form is gone to on
+  // purpose, not walked through or remembered into.
+  const [chosen, choose] = useDetailTab(SITE_TABS, { remember: "proxy.site.tab" })
+  const asked: SiteTab =
+    chosen === "settings" && search.get("tab") !== "settings" ? "overview" : chosen
   const tab: SiteTab = asked === "settings" && vhosts.data && !editable ? "overview" : asked
 
   // Settings ask before unsaved changes are left: the form holds the
@@ -164,10 +153,8 @@ export function SitePage() {
     else go()
   }, [])
   const setTab = useCallback(
-    // Replaced rather than pushed: the view is not a place Back should step through.
-    (next: string) =>
-      guarded(() => router.replace(siteHref(name, siteTab(next)), { scroll: false })),
-    [router, name, guarded],
+    (next: string) => guarded(() => choose(siteTab(next))),
+    [choose, guarded],
   )
 
   const [chip, setChip] = useSessionState<SiteChip>("proxy.sites.chip.075", "all")
@@ -192,75 +179,46 @@ export function SitePage() {
       guarded(() => router.push(siteHref(next.name, tab === "settings" ? "overview" : tab)))
     }
   }
-  const previous = { disabled: at <= 0, run: () => step(-1) }
-  const next = { disabled: railed.length === 0 || at >= railed.length - 1, run: () => step(1) }
+  const steps: { previous: Step; next: Step } = {
+    previous: { disabled: at <= 0, run: () => step(-1) },
+    next: { disabled: railed.length === 0 || at >= railed.length - 1, run: () => step(1) },
+  }
   const narrowed = shownChip !== "all" || query.trim() !== ""
   const caption = vhosts.data
     ? `${narrowed ? `${railed.length} of ${hosts.length}` : `${hosts.length} ${hosts.length === 1 ? "site" : "sites"}`}${shownChip !== "all" ? ` · ${CHIP_LABEL[shownChip]}` : sort === "urgency" ? " · worst first" : ""}`
     : "Reading the sites…"
 
   return (
-    <Workspace
-      name="Site"
-      stateKey="proxy.site.page"
-      refresh={vhosts.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous site",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next site",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
-    >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-5 xl:min-h-0">
-          <SiteRail
-            className="hidden w-64 shrink-0 xl:flex"
-            sites={railed}
-            current={name}
-            tab={tab}
-            loading={vhosts.loading}
-            listeners={ports.error ? undefined : ports.data}
-            query={query}
-            onQuery={setQuery}
-            filtered={shownChip !== "all"}
-            onClearFilter={() => setChip("all")}
-            caption={caption}
-          />
-          <SiteMain
-            key={name}
-            name={name}
-            admin={admin}
-            vhost={vhost}
-            editable={editable}
-            tab={tab}
-            setTab={setTab}
-            view={view}
-            guardRef={guardRef}
-            previous={previous}
-            next={next}
-          />
-        </div>
-      </Page>
-    </Workspace>
+    <SiteMain
+      key={name}
+      name={name}
+      admin={admin}
+      vhost={vhost}
+      editable={editable}
+      tab={tab}
+      setTab={setTab}
+      view={view}
+      guardRef={guardRef}
+      steps={steps}
+      rail={
+        <SiteRail
+          sites={railed}
+          current={name}
+          tab={tab}
+          loading={vhosts.loading}
+          error={vhosts.data ? undefined : vhosts.error}
+          onRetry={vhosts.refresh}
+          listeners={ports.error ? undefined : ports.data}
+          query={query}
+          onQuery={setQuery}
+          filtered={shownChip !== "all"}
+          onClearFilter={() => setChip("all")}
+          caption={caption}
+        />
+      }
+    />
   )
 }
-
-type Step = { disabled: boolean; run: () => void }
 
 function SiteMain({
   name,
@@ -271,8 +229,8 @@ function SiteMain({
   setTab,
   view,
   guardRef,
-  previous,
-  next,
+  steps,
+  rail,
 }: {
   name: string
   admin: boolean
@@ -282,8 +240,8 @@ function SiteMain({
   setTab: (tab: string) => void
   view: ReturnType<typeof settingsView>
   guardRef: React.RefObject<LeaveGuard | null>
-  previous: Step
-  next: Step
+  steps: { previous: Step; next: Step }
+  rail: React.ReactNode
 }) {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
@@ -375,18 +333,22 @@ function SiteMain({
       }),
   }).filter((verb) => PAGE_VERBS.includes(verb.key))
 
-  const walk = (
-    <span className="flex items-center">
-      <IconAction label="Previous site" disabled={previous.disabled} onClick={previous.run}>
-        <ChevronUp />
-      </IconAction>
-      <IconAction label="Next site" disabled={next.disabled} onClick={next.run}>
-        <ChevronDown />
-      </IconAction>
-      <span className="max-sm:hidden">
-        <WorkspaceHelp compact />
-      </span>
-    </span>
+  // The frame every detail page has (D9): the way back with the arrows, the
+  // rail from `xl`, and the identity line held still over the views.
+  const frame = (identity: React.ReactNode, body: React.ReactNode) => (
+    <DetailPage
+      name="Site"
+      what="site"
+      stateKey="proxy.site.page"
+      refresh={vhosts.refresh}
+      steps={steps}
+      rail={rail}
+      back={BACK}
+      title={name}
+      identity={identity}
+    >
+      {body}
+    </DetailPage>
   )
 
   // A route on the Docker Caddy ingress is read through the ingress the
@@ -394,43 +356,38 @@ function SiteMain({
   // waits for its file: drawn before, it said the ingress was not running.
   const routed = vhost?.kind === "caddy" && !vhost.path && !vhost.name.startsWith("docker-caddy:")
   if (!vhosts.data || (nginx && !read.data && !read.error) || (routed && !status && loading)) {
-    return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name} actions={walk} />
-        {vhosts.error && !vhosts.data ? (
-          <ErrorState error={vhosts.error} onRetry={refresh} />
-        ) : (
-          // The page's own silhouette, so nothing moves when the site lands.
-          <>
-            <HostIdentity
-              className="border-b-0 pb-0"
-              mark={vhost ? siteProduct(vhost) : undefined}
-              fallback={Globe}
-              title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
-              facts={<span>&nbsp;</span>}
-              state={<span>&nbsp;</span>}
-            />
-            <LoadingRows />
-          </>
-        )}
-      </div>
+    if (vhosts.error && !vhosts.data)
+      return frame(undefined, <ErrorState error={vhosts.error} onRetry={refresh} />)
+    // The page's own silhouette, so nothing moves when the site lands: the
+    // line keeps a place for its state and its verbs, as the loaded line
+    // has them, so it is as tall on a phone as the line that replaces it.
+    return frame(
+      <IdentityHeader
+        loading
+        className="border-b-0 pb-0"
+        mark={vhost ? siteProduct(vhost) : undefined}
+        fallback={Globe}
+        title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
+        state
+        command
+        menu={false}
+      />,
+      <LoadingRows />,
     )
   }
   if (!vhost || !plan) {
-    return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name} actions={walk} />
-        <EmptyState
-          icon={Globe}
-          title={`No site called ${name}`}
-          description="It may have been deleted or renamed. The Sites list has every site this host serves."
-          action={
-            <Button size="sm" variant="outline" asChild>
-              <Link href="/proxy/sites">All sites</Link>
-            </Button>
-          }
-        />
-      </div>
+    return frame(
+      undefined,
+      <EmptyState
+        icon={Globe}
+        title={`No site called ${name}`}
+        description="It may have been deleted or renamed. The Sites list has every site this host serves."
+        action={
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/proxy/sites">All sites</Link>
+          </Button>
+        }
+      />,
     )
   }
 
@@ -472,89 +429,70 @@ function SiteMain({
       : (offered.find((verb) => verb.key === "edit") ?? offered.find((verb) => verb.key === "raw")))
   const rest = offered.filter((verb) => verb !== primary)
   const tabs = SITE_TABS.filter((key) => key !== "settings" || editable)
+  // The identity line's verbs by the one rule (`IdentityVerbs`): the command
+  // first, the rest behind `⋯`. On Settings there is no command, only the menu.
+  const lineVerbs = primary
+    ? IdentityVerbs({ verbs: [{ ...primary, inline: true }, ...rest], name })
+    : {
+        command: undefined,
+        menu: rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${name}`} />,
+      }
 
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
+  // Plain HTTP in front of an application is the one fact here that wants action.
+  const plainWarned = !vhost.tls && vhost.enabled && vhost.upstreams.length > 0
+  const tlsFact = (
+    <Fact>
+      <SiteTLS vhost={vhost} />
+    </Fact>
+  )
+  // What the site is, as the facts the Sites row carries, laid out as a
+  // project's header: beside its name whether it is serving and whether it
+  // is well, and at the far end its command and the rest of its verbs. A
+  // fact that wants action (the certificate) comes before the expected ones,
+  // so a phone's one line of facts never clips it.
+  const identity = (
+    <IdentityHeader
+      className="animate-rise border-b-0 pb-0"
+      mark={siteProduct(vhost)}
+      fallback={Globe}
+      label={`About ${name}`}
+      title={<span className="truncate">{name}</span>}
+      state={
+        <>
+          <ServingStatus vhost={vhost} />
+          {verdict && <Verdict verdict={verdict} pressed={failedOnly} onPress={narrowToFailed} />}
+        </>
+      }
+      facts={
+        <>
+          {plainWarned && tlsFact}
+          <Fact>{kindWord(vhost, spec)}</Fact>
+          {read.data && !read.data.managed && <Fact>written by hand</Fact>}
+          {!plainWarned && tlsFact}
+          {vhost.modified && <Fact>edited {relativeTime(vhost.modified)}</Fact>}
+        </>
+      }
+      command={lineVerbs.command}
+      menu={lineVerbs.menu}
+    />
+  )
+
+  return frame(
+    identity,
+    <>
       {dialog}
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name} actions={walk} />
-
-        {/* What the site is, as the facts the Sites row carries, laid out as
-            a project's header: beside its name whether it is serving and
-            whether it is well, and at the far end its command and the rest
-            of its verbs. */}
-        <HostIdentity
-          className="animate-rise border-b-0 pb-0"
-          mark={siteProduct(vhost)}
-          fallback={Globe}
-          label={`About ${name}`}
-          title={<span className="truncate">{name}</span>}
-          state={
-            <>
-              <ServingStatus vhost={vhost} />
-              {verdict && (
-                <Verdict verdict={verdict} pressed={failedOnly} onPress={narrowToFailed} />
-              )}
-            </>
-          }
-          facts={
-            <>
-              <span>{kindWord(vhost, spec)}</span>
-              {read.data && !read.data.managed && (
-                <>
-                  <FactDot />
-                  <span>written by hand</span>
-                </>
-              )}
-              <FactDot />
-              <SiteTLS vhost={vhost} />
-              {vhost.modified && (
-                <>
-                  <FactDot />
-                  <span>edited {relativeTime(vhost.modified)}</span>
-                </>
-              )}
-            </>
-          }
-          command={
-            primary && (
-              <Button size="sm" onClick={primary.run} disabled={primary.disabled}>
-                <primary.icon className="size-4" />
-                {primary.label}
-              </Button>
-            )
-          }
-          menu={rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${name}`} />}
-        />
-      </div>
-
       {/* Chosen by a press, not by focus: Settings ask before they are
           left, and the focus that question hands back to the tab it came
           from would choose that tab again and ask again. */}
-      <Tabs
-        value={tab}
-        onValueChange={setTab}
-        activationMode="manual"
-        className="min-h-0 flex-1 gap-0"
-      >
-        <div className="flex shrink-0 border-b border-hairline">
-          <TabsPrimitive.List
-            aria-label={`Views of ${name}`}
-            className="flex min-w-0 [scrollbar-width:none] gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
-          >
-            {tabs.map((key) => (
-              <TabsPrimitive.Trigger
-                key={key}
-                value={key}
-                className={tabClasses(tab === key, "h-10")}
-              >
-                {SITE_TAB_LABEL[key]}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
-        </div>
+      <Tabs value={tab} onValueChange={setTab} activationMode="manual" className="gap-0">
+        <ViewTabList
+          label={`Views of ${name}`}
+          value={tab}
+          views={tabs.map((key) => ({ key, label: SITE_TAB_LABEL[key] }))}
+          sticky
+        />
 
-        <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="overview" className="pt-6">
           {tab === "overview" && (
             <div className="flex min-w-0 flex-col gap-8 pb-2">
               <SiteRouteMap
@@ -576,7 +514,7 @@ function SiteMain({
           )}
         </TabsContent>
 
-        <TabsContent value="logs" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="logs" className="pt-6">
           {tab === "logs" &&
             (nginx && !spec && read.error ? (
               // Where an nginx site logs is its file's to say. Unread, the
@@ -627,7 +565,7 @@ function SiteMain({
         </TabsContent>
 
         {editable && (
-          <TabsContent value="settings" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+          <TabsContent value="settings" className="pt-6">
             {tab === "settings" &&
               (owner && !overridden && !anyway ? (
                 <EmptyState
@@ -675,7 +613,7 @@ function SiteMain({
           />
         )}
       />
-    </div>
+    </>,
   )
 }
 
