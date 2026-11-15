@@ -2,6 +2,7 @@
 
 import { Check } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { BackLink, type Back } from "@/components/page"
 
 /**
  * The flow register (§16).
@@ -41,14 +42,21 @@ import { cn } from "@/lib/utils"
  * one back at a rank invented for it is how the ladder grew thirteen sizes the
  * first time. The step count lives in the eyebrow, where the reading register
  * already puts "which part of the product is this".
+ *
+ * `back` is the way out to the list the new thing will join, drawn as every
+ * page's back link (`BackLink`) above the question. It was a link passed as
+ * the eyebrow, so it took the eyebrow's capitals on one flow ("REMOTE
+ * DESKTOP") and undid them by hand on the other ("System users").
  */
 export function FlowHeader({
+  back,
   eyebrow,
   question,
   actions,
   steps,
   className,
 }: {
+  back?: Back
   /** Where this sits — "New project", and the step, if there is a sequence. */
   eyebrow?: React.ReactNode
   /** What the screen is asking. A question, not a label for itself. */
@@ -61,6 +69,11 @@ export function FlowHeader({
     <div data-slot="flow-header" className={cn("flex min-w-0 flex-col gap-4", className)}>
       <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div className="min-w-0 space-y-1.5">
+          {back && (
+            <p className="flex min-w-0 text-body text-muted-foreground">
+              <BackLink href={back.href}>{back.label}</BackLink>
+            </p>
+          )}
           {eyebrow && <p className="eyebrow">{eyebrow}</p>}
           <h1 className="min-w-0 text-2xl leading-tight font-semibold tracking-tight text-balance">
             {question}
