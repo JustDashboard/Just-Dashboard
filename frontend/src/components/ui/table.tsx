@@ -167,12 +167,19 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   )
 }
 
+/**
+ * A cell's figures are tabular (`.numeric`) by default. A table is the one
+ * place every figure is compared with the one above it, and leaving it to each
+ * column meant every figure column opted in by hand — and the ones that forgot
+ * shimmered as they polled. On a cell of words it changes only the tracking,
+ * by a hundredth of an em.
+ */
 function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   return (
     <td
       data-slot="table-cell"
       className={cn(
-        "px-4 py-3 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "numeric px-4 py-3 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className,
       )}
       {...props}
