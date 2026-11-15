@@ -90,7 +90,7 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
 
   // One section per resource, in the order a reader asks about them.
   const sections = await page
-    .locator("[data-slot=page] > section > div:first-child h2")
+    .locator("[data-slot=page] > section > [data-slot=panel-header] h2")
     .evaluateAll((heads) => heads.map((h) => h.textContent))
   expect(sections).toEqual(["Resources", "Processor", "Memory", "Network", "Storage", "Saturation"])
 

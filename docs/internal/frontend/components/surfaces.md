@@ -1,13 +1,139 @@
 # Surfaces
 
-Which surface a block is: `Panel`, `Pane`, `Well`, `Group`, and when a block is framed.
+Which surface a block is (`Panel`, `Pane`, `Well`, `Group`), and when a block is framed.
 
-**Members:** `Page`, `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`, `Pane`,
-`PaneHeader`, `PaneFooter`, `Well`, `Group`.
+**Members:** `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`, `Pane`,
+`PaneHeader`, `PaneSection`, `PaneFooter`, `Well`, `Group` (all in `components/panel.tsx`). `Page`
+is in [`page-header.md`](page-header.md). The head of a panel has its own page,
+[`section-head.md`](section-head.md). Grounds, elevation and radius are in
+[`../foundations/surfaces.md`](../foundations/surfaces.md).
 
-**Status: moved text.** WP-10 rewrites this page in wave 1 as purpose, anatomy, use when and when
-not (and what instead), props, states, the phone, accessibility, an example call site, what enforces
-it, and related families. Until then it holds the rules that were in `design-system.md`, below.
+## Panel
+
+The one content block. A page is a stack of them: an optional head, an optional toolbar, a body and
+an optional footer. The props decide what a panel holds, not how it is drawn.
+
+**Anatomy.**
+
+```
+Panel plain                      Panel framed
+Title                  4  Verb   ┌──────────────────────────────┐
+───────────────────────────────  │ Title               4  Verb  │
+[toolbar]                        ├──────────────────────────────┤
+───────────────────────────────  │ [toolbar]                    │
+body                             ├──────────────────────────────┤
+───────────────────────────────  │ body                         │
+footer                           ├──────────────────────────────┤
+                                 │ footer                       │
+                                 └──────────────────────────────┘
+```
+
+A plain panel's head sits on the page's own edge, and the hairline is the only rule under it. A
+framed panel is the same anatomy inside a border on the card ground (`rounded-xl`, 20px gutters).
+Nothing lifts, and neither has a shadow.
+
+**Plain or framed.** A block on a page is plain unless it can say why it needs an edge (D6). A
+table can say why: its container scrolls, and without an edge a row cut off at the right reads as
+a row with nothing more. A danger zone can say why too. A panel that is a destination (`interactive`)
+is a card. Everything else is plain.
+
+| Prop | What it does |
+| --- | --- |
+| `plain` | No frame: the title, the hairline, the content. 400 of 424 panels pass it. |
+| `framed` | The frame, said out loud. Framed is still the default, so today a panel without `plain` is framed. The wave-2 passes mark each framed caller with `framed` and the reason in a comment. WP-39 then flips the default to plain and retires `plain` (PRM-08). `framed={false}` is plain. |
+| `interactive` | The panel is a link or a button. Its border steps up under the pointer, and nothing else moves. |
+| `…section props` | `aria-label`, `id`, `className` and the rest of a `<section>`'s props. |
+
+`PanelBody` takes `flush` for a body that is one full-bleed table or list. A plain panel keeps 8px
+under the hairline even when flush, so a row's hover wash does not butt into the rule. It takes
+`scroll` for a body that owns its scrolling. `PanelToolbar` is the row of filters under the head on
+the panel's own ground, with a hairline under it. In it, a list's search, sort and chips are a
+`ListToolbar` ([`search-toolbar.md`](search-toolbar.md)). `PanelFooter` closes the panel, and it
+holds a count, a retention note or one verb.
+
+```tsx
+{/* Framed: the table owns a scroll region, and the edge is what says so. */}
+<Panel framed>
+  <PanelHeader title="Services" count={installed.length} />
+  <PanelToolbar>…</PanelToolbar>
+  <PanelBody flush>
+    <Table>…</Table>
+  </PanelBody>
+</Panel>
+```
+
+**The phone.** A framed panel inside a `Page` runs to the screen's edges below `sm`. It drops its
+side borders and radius and keeps its ground and its top and bottom hairlines. Its own 20px
+padding is then the page's gutter, so its rows line up with everything above them instead of
+sitting 20px of gutter, a border and 16px of padding in from the edge (318 of 390px, MOB-19). An
+`interactive` panel keeps its card on a phone, because the card is what you press.
+
+**States.** A panel is drawn with the page, its head first. Its body holds the loading, empty and
+error states ([`states.md`](states.md)), in the box the content will fill.
+
+**Accessibility.** A panel is a `<section>`. Give it an `aria-label` when it has no visible head.
+Otherwise its head names it. The head's `level` keeps the outline in order where a panel sits under
+a `Section` ([`section-head.md`](section-head.md)).
+
+## Pane
+
+A sized region of a workspace that owns its own scrolling: the terminal's session rail, a file
+tree, a log console, a diff. Structurally it matches a framed `Panel`. The difference is in how it
+is composed: a panel is a block stacked in a page's flow, and a pane is a region of a workbench.
+`flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a
+hairline between columns.
+
+`PaneHeader` is the pane's chrome strip: `min-h-9`, `px-2.5 py-1.5`, on `--surface-header`. It is
+tighter than `PanelHeader` on purpose, and in a split view the strips are what line the regions up.
+`PaneFooter` is the closing strip.
+
+### PaneSection
+
+A titled group inside a pane beside the work: the files inspector's Details and Contents, the map
+inspector's Ports, a remote session's Clipboard. Four inspector columns used to draw this four
+ways: two eyebrow heads, a semibold h2 and an unruled eyebrow, with the rule above in one column and
+below in the others (WSP-08).
+
+```
+PORTS  3                      [Copy]
+rows…
+────────────────────────────────────
+CLIPBOARD
+…
+```
+
+| Prop | What it does |
+| --- | --- |
+| `title` | The group's name, drawn as the `eyebrow` (10px caps, 600). It also names the `<section>` for a screen reader. |
+| `count` | How many the group holds, beside the name, tabular in the hint size. |
+| `aside` | One control at the head's end: a copy, a toggle, a small verb. |
+| `level` | The heading element: 3 by default. Use 4 under a pane whose own head is an h3, or 2 at the top of a page. |
+
+A `PaneSection` is `px-4 py-3.5`, with the head 24px tall and 10px over the body. A hairline runs
+under each group except the last. It is not for a page's sections: those are `PanelHeader` heads.
+
+## Well and Group
+
+`Well` is a recessed region for output you read: command output, a log tail, a diff, a stored
+secret. It is mono by default, and `plain` gives the same ground for prose or controls. `Group` is
+a fence around part of a body: a set of ports, one release task, a repeated form row. It has one
+radius and one padding, with a `tone` for a group that holds an error or a warning, and `tinted`
+for a region that should read as distinct. A `Group` of related inputs takes `role="group"` with an
+`aria-labelledby`.
+
+## What enforces it
+
+- `src/components/panel.test.js`: `framed` and `plain`, the phone rule's classes, and
+  `PaneSection`'s anatomy.
+- The `no-restricted-imports` rule keeps raw `Dialog` and `Sheet` inside `Modal`, `PaletteModal`
+  and `SidePanel`.
+- `tests/browser/design-system.spec.ts` walks every page at desktop and phone widths for the shared rules (centred rows, no filled pill, names on icon controls).
+
+## Related
+
+[`section-head.md`](section-head.md), [`search-toolbar.md`](search-toolbar.md),
+[`list-row.md`](list-row.md), [`table.md`](table.md), [`workbench.md`](workbench.md),
+[`../foundations/surfaces.md`](../foundations/surfaces.md).
 
 ## 7. Which surface
 
