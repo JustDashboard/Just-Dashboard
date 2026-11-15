@@ -167,7 +167,7 @@ function AddressLine({ url, published }: { url: string; published: boolean }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="font-mono text-foreground/85 underline-offset-2 hover:underline"
+      className="font-mono text-foreground underline-offset-2 hover:underline"
     >
       {host}
       <External aria-hidden className="ml-1 inline-block size-3 align-[-1px]" />
@@ -332,7 +332,7 @@ export function Previews({
         previewTriggers.length === 0
           ? "Off — no webhook creates them"
           : patterns.length > 0 && (
-              <span className="font-mono text-foreground/85">{patterns.join(", ")}</span>
+              <span className="font-mono text-foreground">{patterns.join(", ")}</span>
             )
       }
       actions={
@@ -521,7 +521,7 @@ function ApprovalCard({
           <span className="font-mono">{approval.headRepository || approval.repository}</span>
           {approval.headRef && (
             <>
-              <SourceBranch aria-hidden className="mx-1 inline size-3 align-[-2px]" />
+              <SourceBranch aria-hidden className="mx-1 glyph-inline size-3" />
               <span className="font-mono">{approval.headRef}</span>
             </>
           )}

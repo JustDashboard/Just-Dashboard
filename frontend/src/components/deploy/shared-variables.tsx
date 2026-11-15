@@ -354,7 +354,7 @@ export function SharedVariables({
                 </FormFact>
               </FormFacts>
             )}
-            <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="grid min-w-0 gap-4 sm:grid-cols-main-end">
               {!draft.editing && (
                 <Field
                   label="Variable name"
@@ -463,7 +463,7 @@ function SharedRow({
     revealed !== undefined ? (
       <RevealedValue name={variable.name} value={revealed} />
     ) : (
-      <span className="block h-4 truncate font-mono leading-4 text-foreground/90">
+      <span className="block h-4 truncate font-mono leading-4 text-foreground">
         {variable.reference}
       </span>
     )

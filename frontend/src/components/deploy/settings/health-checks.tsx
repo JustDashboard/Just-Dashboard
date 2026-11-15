@@ -422,7 +422,7 @@ function CheckEditor({
       </div>
 
       <p className="min-w-0 font-mono text-xs break-words text-muted-foreground">
-        <span className="text-foreground/80">{checkSummary(check, port)}</span> · gives up after{" "}
+        <span className="text-muted-foreground">{checkSummary(check, port)}</span> · gives up after{" "}
         <span className="whitespace-nowrap">~{formatDuration(givesUpAfter(check))}</span>
       </p>
 

@@ -8,7 +8,6 @@ import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentSummary, LogDrain, LogDrainKind, LogDrainStream } from "@/lib/types"
 import { Page, PageContext } from "@/components/page"
@@ -50,6 +49,7 @@ import {
   traceLinkProblem,
   type DrainHeaderDraft,
 } from "@/components/deploy/log-drains"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const KINDS: {
   kind: LogDrainKind
@@ -180,7 +180,7 @@ export function LogDrainsPage() {
   const projects = fleet.projects
   // Beside the name where a row has the room, under it on a phone, as a
   // channel's card does.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const [draft, setDraft] = useState<Draft>()
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string>()
@@ -673,7 +673,7 @@ function DrainStatus({ drain }: { drain: LogDrain }) {
           <p className={cn("break-words", health.tone === "warning" && "text-warning")}>
             {health.line}
           </p>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
+          <dl className="grid grid-cols-start-main gap-x-4 gap-y-1">
             {facts.map(([name, value]) => (
               <div key={name} className="contents">
                 <dt className="text-muted-foreground">{name}</dt>

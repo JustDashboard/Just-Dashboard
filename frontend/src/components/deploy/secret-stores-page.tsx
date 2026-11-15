@@ -8,7 +8,6 @@ import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentSummary,
@@ -56,6 +55,7 @@ import {
   storeSettingsProblem,
   validStoreName,
 } from "@/components/deploy/secret-stores"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Draft = {
   id?: number
@@ -166,7 +166,7 @@ export function SecretStoresPage() {
   )
   const fleet = useFleet()
   // Beside the name where a row has the room, under it on a phone.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const [draft, setDraft] = useState<Draft>()
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string>()
@@ -683,9 +683,7 @@ function StoreReaders({ store, className }: { store: SecretStore; className?: st
               {project.uses.map((use) => (
                 <span key={`${use.environmentId}-${use.variable}`} className="block break-words">
                   {use.environmentName} as <span className="font-mono">{use.variable}</span>
-                  <span className="block font-mono break-all text-muted-foreground/80">
-                    {use.reference}
-                  </span>
+                  <span className="block font-mono break-all text-faint">{use.reference}</span>
                 </span>
               ))}
             </li>
@@ -783,7 +781,7 @@ function StoreForm({
         {name && validStoreName(name) && (
           <FormNote className="animate-rise">
             Variables read it as{" "}
-            <span className="font-mono text-foreground/90">
+            <span className="font-mono text-foreground">
               {storeReference({ store: name, ...info.sample })}
             </span>
             {info.keyOptional &&

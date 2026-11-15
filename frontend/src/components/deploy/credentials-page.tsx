@@ -24,7 +24,6 @@ import { sshKeyShape, tokenProduct, type SshKeyShape } from "@/lib/secrets"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentCredential,
@@ -77,6 +76,7 @@ import { AccountFace, GitHubAppPanel, projectsUsing } from "@/components/deploy/
 import { SourceBranch } from "@/components/git/glyphs"
 import { ProjectMark } from "@/components/project-mark"
 import { useGitHubApp } from "@/hooks/use-github"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Fleet-level secrets: the tokens and keys the server uses on behalf of every
@@ -396,7 +396,7 @@ export function CredentialsPage() {
   const { confirm, dialog } = useConfirm()
   // On a phone the kind goes under the name, which otherwise had the width the
   // kind and the verbs left it — none. Chosen once, so it is in the page once.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   const installations = githubApp.data?.installations ?? []
   const installationOf = (credential: DeploymentCredential) =>
@@ -792,7 +792,7 @@ function CredentialCard({
           className="inline-flex min-w-0 items-center gap-1.5"
         >
           <ProjectMark deployment={project} size="xs" />
-          <span className={cn("truncate text-foreground/80", wide && "max-w-36 max-xl:sr-only")}>
+          <span className={cn("truncate text-muted-foreground", wide && "max-w-36 max-xl:sr-only")}>
             {project.name}
           </span>
         </span>

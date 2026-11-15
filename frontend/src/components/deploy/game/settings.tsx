@@ -449,7 +449,7 @@ function RawFile({ raw, path, label }: { raw: string; path?: string; label?: str
       title={label ?? "The file on disk"}
       state={
         <>
-          {path && <span className="font-mono text-foreground/80">{path}</span>}
+          {path && <span className="font-mono text-muted-foreground">{path}</span>}
           {path && " · "}
           {plural(lines.length, "line")} edited here · the rest kept as written and not shown
         </>
@@ -462,7 +462,7 @@ function RawFile({ raw, path, label }: { raw: string; path?: string; label?: str
               <li key={index} className="flex gap-3 px-3 hover:bg-row-hover">
                 <span
                   aria-hidden
-                  className="numeric w-7 shrink-0 text-right text-muted-foreground/60 select-none"
+                  className="numeric w-7 shrink-0 text-right text-faint select-none"
                 >
                   {index + 1}
                 </span>

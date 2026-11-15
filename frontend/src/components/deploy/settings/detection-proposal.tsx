@@ -47,7 +47,7 @@ export function DetectionProposalPanel({
   const framework = frameworkProduct(detected?.framework)
   const detectedName = detected ? (
     <>
-      {framework && <ProductGlyph id={framework} className="mr-1 inline align-[-2px]" />}
+      {framework && <ProductGlyph id={framework} className="mr-1 glyph-inline" />}
       {detected.framework ? frameworkLabel(detected.framework) : detected.name}
       {detected.root ? ` in ${detected.root}` : ""}
     </>
@@ -65,7 +65,7 @@ export function DetectionProposalPanel({
           {detected?.framework && (
             <>
               {" — "}
-              {framework && <ProductGlyph id={framework} className="mr-1 inline align-[-2px]" />}
+              {framework && <ProductGlyph id={framework} className="mr-1 glyph-inline" />}
               {frameworkLabel(detected.framework)}
             </>
           )}

@@ -570,7 +570,7 @@ function WebhookCard({
           )}
           {trigger.config.ref && (
             <>
-              <SourceBranch aria-hidden className="mx-1 inline size-3 align-[-2px]" />
+              <SourceBranch aria-hidden className="mx-1 glyph-inline size-3" />
               <span className="font-mono">{trigger.config.ref}</span>
             </>
           )}
@@ -1432,7 +1432,7 @@ function TryAChange({
             >
               {current.matched ? (
                 <>
-                  <Check aria-hidden className="mr-1 inline size-3 align-[-1px]" />
+                  <Check aria-hidden className="mr-1 glyph-inline size-3" />
                   Would deploy
                 </>
               ) : (

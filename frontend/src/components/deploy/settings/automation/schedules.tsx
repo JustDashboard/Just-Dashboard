@@ -19,7 +19,6 @@ import { useSessionState } from "@/lib/view-state"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   BackupJob,
@@ -105,6 +104,7 @@ import {
   zonedMoment,
   type ScheduleAction,
 } from "@/components/deploy/settings/automation/marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Schedules — deploy, restart, back up or run a command on a clock, in a
@@ -515,7 +515,7 @@ function StepChain({
           <span key={index} className="inline-flex min-w-0 items-center gap-1.5">
             {index > 0 && <ArrowRight aria-label="then" className="size-3 shrink-0 opacity-60" />}
             {Glyph && <Glyph aria-hidden className="size-3.5 shrink-0" />}
-            <span className="text-foreground/85">{label}</span>
+            <span className="text-foreground">{label}</span>
             {/* The dot is an item of its own, so the gap stands on both sides. */}
             {job && (
               <>
@@ -548,9 +548,7 @@ function StepWords({ schedule, jobs }: { schedule: DeploymentSchedule; jobs?: Ba
         const { label, job, program } = stepOf(step, jobs)
         return (
           <Fragment key={index}>
-            {index > 0 && (
-              <ArrowRight aria-label="then" className="mx-1 inline size-3 align-[-2px]" />
-            )}
+            {index > 0 && <ArrowRight aria-label="then" className="mx-1 glyph-inline size-3" />}
             {label}
             {job && ` · ${job}`}
             {program && (
@@ -784,7 +782,7 @@ function ScheduleTimeline({
   schedule: DeploymentSchedule
   firings: Firing[]
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const now = useNow(60_000)
   const next = nextRunsOf(schedule, now)
   const past = firings.slice(0, STRIP).reverse()
@@ -804,7 +802,7 @@ function ScheduleTimeline({
                     aria-hidden
                     className="h-3 w-1.5 shrink-0 rounded-sm border border-border-strong"
                   />
-                  <span className="numeric text-foreground/85">
+                  <span className="numeric text-foreground">
                     {when.day} · {when.time}
                   </span>
                   <span className="text-muted-foreground">{untilLabel(at.toISOString())}</span>
@@ -878,7 +876,7 @@ function ScheduleTimeline({
             <span className="mt-1.5 text-micro leading-tight whitespace-nowrap text-muted-foreground">
               {moment.day.split(" ")[0]}
             </span>
-            <span className="numeric text-micro leading-tight whitespace-nowrap text-foreground/85">
+            <span className="numeric text-micro leading-tight whitespace-nowrap text-foreground">
               {moment.time}
             </span>
           </span>
@@ -1094,7 +1092,7 @@ function TimezonePicker({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="h-11 w-full justify-between font-normal sm:h-9"
+          className="w-full justify-between font-normal"
         >
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate">{value}</span>
@@ -1310,7 +1308,7 @@ export function ScheduleSheet({
                 {test?.answer && (
                   <Check
                     aria-label="checked by the server"
-                    className="ml-1 inline size-3 animate-rise align-[-1px] text-success"
+                    className="ml-1 glyph-inline size-3 animate-rise text-success"
                   />
                 )}
               </>

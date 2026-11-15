@@ -25,7 +25,6 @@ import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentFleet,
@@ -85,6 +84,7 @@ import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { ProjectMark } from "@/components/project-mark"
 import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { ChannelGlyph, channelMark, mailProduct } from "@/components/deploy/vocabulary"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Where a deployment outcome is announced.
@@ -561,7 +561,7 @@ export function NotificationsPage() {
   const { confirm, dialog } = useConfirm()
   // On a phone the last delivery goes under the name, which otherwise had the
   // width the outcome and the verbs left it. Chosen once, so it is drawn once.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   const list = channels.data ?? []
   // The open sheet's log, held here so a test or a pause sent from the sheet
@@ -1208,7 +1208,7 @@ function Fanout({
   fleet: DeploymentSummary[]
   onAdd?: (kind: NotificationChannelKind) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const missing = KINDS.filter(
@@ -1286,7 +1286,7 @@ function Fanout({
           <div {...sources} className="mt-5 flex flex-wrap justify-center gap-4">
             {projects}
           </div>
-          <div ref={hub} className="relative z-10 mt-10 flex">
+          <div ref={hub} className="relative z-raised mt-10 flex">
             <WireHost />
           </div>
           <div {...group} className="mt-10 flex flex-wrap justify-center gap-4">
@@ -1331,7 +1331,7 @@ function FanoutProject({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           <ProjectMark deployment={deployment} size="sm" />
         </div>
         <span className="sr-only">{deployment.name}</span>
@@ -1395,7 +1395,7 @@ function FanoutRest({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {drawn}
         </div>
       </div>
@@ -1473,7 +1473,7 @@ function FanoutTarget({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {drawn}
         </div>
         {channel && <span className="sr-only">{`${title}: ${hint}`}</span>}
@@ -1670,7 +1670,7 @@ function ChannelSheet({
   switching?: string
   onClose: () => void
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const log = deliveries.data ?? []
   const arrived = useArrivals(log.map((delivery) => String(delivery.id)))
   const days: { label: string; rows: NotificationDelivery[] }[] = []
