@@ -901,8 +901,13 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await expect(
     picture.getByRole("button", { name: /PM2 v6.0.5: God Daemon \(900\)/ }),
   ).toBeVisible()
-  await expect(page.getByRole("button", { name: "Terminate", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeVisible()
+  // Its verbs are the identity line's: Terminate as the command, Kill and
+  // the other signals behind the line's menu.
+  const line = page.locator("[data-slot='host-identity']")
+  await expect(line.getByRole("button", { name: "Terminate", exact: true })).toBeVisible()
+  await line.getByRole("button", { name: "More actions for node" }).click()
+  await expect(page.getByRole("menuitem", { name: "Kill", exact: true })).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
@@ -1161,10 +1166,11 @@ test("a process that exits while its page is open says so and stops", async ({ p
       : route.fallback(),
   )
   await page.goto("/processes/4021")
-  await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Terminate", exact: true })).toBeVisible()
   gone = true
   await expect(page.getByText("This process has exited")).toBeVisible({ timeout: 6000 })
-  await expect(page.getByRole("button", { name: "Kill", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Terminate", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "More actions for node" })).toHaveCount(0)
   await expect(page.locator("[data-slot='stat-tile']", { hasText: "Memory" })).toBeVisible()
 })
 
