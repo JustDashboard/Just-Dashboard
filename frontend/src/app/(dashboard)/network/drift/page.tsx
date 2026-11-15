@@ -21,11 +21,12 @@ import { useNow } from "@/components/deploy/vocabulary"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { LogoGlyph } from "@/components/logo"
 import { Page, PageContext } from "@/components/page"
-import { StatusDot } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { RefreshClockwise } from "@/components/icons"
 import { DriftPicture } from "@/components/network/drift/drift-picture"
 import { DriftRhythm, useDriftHistory } from "@/components/network/drift/drift-rhythm"
@@ -59,8 +60,13 @@ const POLL = 30_000
  *   what moved between them (`drift-rhythm.tsx`).
  *
  * Under them, one framed table of every comparison worst first, the boot
- * unit's last activation as the run of its commands, each blocklist's three
- * generations as a chain, and the repair plan as cards you pick.
+ * unit as one line with its state (its activation's commands open from the
+ * line), each blocklist's three generations as a chain, and the repair plan
+ * as one-line rows you pick.
+ *
+ * The line is laid out as a project's header: the verdict beside the name,
+ * Inspect again as its command. It stands before the first inspection lands,
+ * saying one is in flight.
  */
 export default function NetworkDriftPage() {
   const read = usePoll<DriftReport>((signal) => get("/network/drift", undefined, signal), POLL)
@@ -68,6 +74,33 @@ export default function NetworkDriftPage() {
     return (
       <Page className="animate-rise">
         <PageContext title="Network drift" />
+        <HostIdentity
+          label="About the managed network"
+          logo={<ManagedMark />}
+          title="Managed network"
+          state={
+            read.error ? (
+              <Status tone="danger" label="Not inspected" />
+            ) : (
+              <span className="text-xs font-medium">
+                <TextShimmer>Inspecting…</TextShimmer>
+              </span>
+            )
+          }
+          facts={
+            read.error ? (
+              <span>The inspection could not be read.</span>
+            ) : (
+              <Skeleton className="my-0.5 h-3 w-64 max-w-full" />
+            )
+          }
+          command={
+            <Button size="sm" disabled={!read.error} onClick={read.refresh}>
+              <RefreshClockwise className={cn("size-3.5", !read.error && "animate-spin")} />
+              Inspect again
+            </Button>
+          }
+        />
         {read.error ? (
           <ErrorState error={read.error} onRetry={read.refresh} />
         ) : (
@@ -147,12 +180,30 @@ function Drift({ read, data }: { read: PollState<DriftReport>; data: DriftReport
     <Page className="animate-rise">
       <PageContext title="Network drift" />
       <HostIdentity
-        logo={
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-rule-brand bg-wash-brand text-brand">
-            <LogoGlyph className="h-6" />
-          </span>
-        }
+        label="About the managed network"
+        logo={<ManagedMark />}
         title="Managed network"
+        state={
+          <Verdict
+            {...verdict}
+            inspecting={inspecting}
+            pressed={verdict.narrows !== undefined && scope === verdict.narrows}
+            onPress={
+              verdict.narrows
+                ? () => {
+                    setDomain(undefined)
+                    setScope(scope === "differ" ? "all" : "differ")
+                  }
+                : undefined
+            }
+          />
+        }
+        command={
+          <Button size="sm" disabled={busy} onClick={inspect}>
+            <RefreshClockwise className={cn("size-3.5", inspecting && "animate-spin")} />
+            Inspect again
+          </Button>
+        }
         facts={
           <>
             <span className="numeric">
@@ -180,27 +231,6 @@ function Drift({ read, data }: { read: PollState<DriftReport>; data: DriftReport
               </>
             )}
           </>
-        }
-        aside={
-          <div className="flex flex-wrap items-center gap-3">
-            <Verdict
-              {...verdict}
-              inspecting={inspecting}
-              pressed={verdict.narrows !== undefined && scope === verdict.narrows}
-              onPress={
-                verdict.narrows
-                  ? () => {
-                      setDomain(undefined)
-                      setScope(scope === "differ" ? "all" : "differ")
-                    }
-                  : undefined
-              }
-            />
-            <Button size="sm" variant="outline" disabled={busy} onClick={inspect}>
-              <RefreshClockwise className={cn("size-3.5", inspecting && "animate-spin")} />
-              Inspect again
-            </Button>
-          </div>
         }
       />
       <NetworkReadWarning
@@ -242,15 +272,8 @@ function Drift({ read, data }: { read: PollState<DriftReport>; data: DriftReport
         onQuery={setQuery}
       />
 
-      <div
-        className={cn(
-          "grid min-w-0 gap-x-10 gap-y-8",
-          data.blocklists.length > 0 && "xl:grid-cols-2",
-        )}
-      >
-        <DriftBoot boot={data.boot} />
-        {data.blocklists.length > 0 && <DriftBlocklists lists={data.blocklists} />}
-      </div>
+      <DriftBoot boot={data.boot} />
+      {data.blocklists.length > 0 && <DriftBlocklists lists={data.blocklists} />}
 
       <DriftRepairs
         plan={data.repairPlan}
@@ -288,8 +311,17 @@ function Drift({ read, data }: { read: PollState<DriftReport>; data: DriftReport
   )
 }
 
+/** The dashboard's own mark on the identity's tile: the managed network is what it wrote. */
+function ManagedMark() {
+  return (
+    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-rule-brand bg-wash-brand text-brand">
+      <LogoGlyph className="h-5" />
+    </span>
+  )
+}
+
 /**
- * The verdict at the line's end: the worst thing true of the managed
+ * The verdict beside the line's name: the worst thing true of the managed
  * network, counted. A press narrows the comparisons to the differences it
  * counts. While an inspection is in flight its words shimmer, since what it
  * says is about to be re-read.
@@ -310,7 +342,7 @@ function Verdict({
   const words = (
     <span
       className={cn(
-        "text-body font-medium",
+        "text-xs font-medium",
         tone === "warning" && "text-warning",
         tone === "danger" && "text-destructive",
         tone === "running" && "text-success",
@@ -335,7 +367,7 @@ function Verdict({
       title="Show only the differences"
       onClick={onPress}
       className={cn(
-        "inline-flex h-8 items-center gap-2 rounded-md px-2 focus-ring transition-colors hover:bg-row-hover",
+        "-mx-1.5 inline-flex h-6 items-center gap-2 rounded-md px-1.5 focus-ring transition-colors hover:bg-row-hover",
         pressed && "bg-accent",
       )}
     >

@@ -7,8 +7,10 @@ reservation release and pool retirement use the existing destructive-action gate
 
 ## Pools, allocation and overlap
 
-`/network/ipam` shows immutable IPv4/IPv6 pool prefixes and allocation widths, held reservations,
-exact decimal block counts, current native observations and per-source coverage. SQLite transactions
+`/network/ipam` (Address planning) shows immutable IPv4/IPv6 pool prefixes and allocation widths,
+each pool as one band of planned, observed and free blocks with the exact decimal counts and its
+owners, held reservations, and per-source coverage; the count of native observations is on its
+identity line. SQLite transactions
 serialize allocation and reservation handoffs. Allocation merges occupied intervals and jumps over
 them; it never enumerates a large IPv6 space. Utilization counts the union of observed and planned
 blocks, so an observed allocation with a held plan is counted once. Candidate counts describe the

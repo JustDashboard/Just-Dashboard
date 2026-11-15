@@ -31,6 +31,8 @@ export type BackupReading = {
   newest: string | undefined
   /** A dump, restore or copy is running against it now. */
   running: boolean
+  /** Its newest dumps, newest first, where the summary lists them. */
+  recent?: { takenAt: string; size: number }[]
 }
 
 /** The later of two instants, either of which may be missing. */
@@ -59,6 +61,7 @@ export function backupReadings(
     out.set(row.id, {
       newest: later(row.newest?.takenAt, out.get(row.id)?.newest),
       running: row.job?.status === "running",
+      recent: row.recent,
     })
   }
   return out

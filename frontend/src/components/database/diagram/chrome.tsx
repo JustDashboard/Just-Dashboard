@@ -4,7 +4,7 @@ import { MenuItemText } from "@/components/ui/menu-item-text"
 
 import { useEffect, useId, useRef, useState } from "react"
 import Link from "next/link"
-import { useReactFlow } from "@xyflow/react"
+import { useReactFlow, useStore } from "@xyflow/react"
 import {
   ChevronDown,
   Crosshair,
@@ -14,10 +14,12 @@ import {
   LockClosed,
   Minus,
   Plus,
+  RotateCounterClockwise,
   Trash,
 } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { KEYCAP } from "@/components/command-search/keycaps"
 import { Field } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
@@ -40,14 +42,11 @@ import type { MemoryStatus } from "@/components/database/diagram/memory"
 export const FIT = { duration: 300 }
 
 /**
- * The room a fitted picture leaves around itself, by side: the zoom controls
- * stand over the top of the canvas, the legend over the bottom, and the
- * minimap — when it is drawn — over the bottom right. What is fitted is
- * fitted clear of them, not under them.
+ * The room a fitted picture leaves around itself: what the canvas is held to
+ * stands over its top, and the zoom bar and the legend over its foot. What
+ * is fitted is fitted clear of them, not under them.
  */
-export function fitPadding(minimap: boolean) {
-  return { top: "56px", right: "24px", bottom: minimap ? "132px" : "56px", left: "24px" } as const
-}
+export const FIT_PADDING = { top: "56px", right: "24px", bottom: "56px", left: "24px" } as const
 
 /**
  * Which schema the picture is of, said in the toolbar and changed there.
@@ -157,47 +156,86 @@ export function Saved({
   )
 }
 
+/** A control floating on the canvas, drawn as the server map draws its own. */
+export const FLOAT =
+  "absolute flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5"
+
 /**
- * Zoom controls of our own rather than React Flow's, which ship their own
- * borders, shadows and icon set and look like a different product dropped onto
- * the page.
+ * The bar at the foot of the canvas, as the server's map has it: out, how
+ * far in the picture is drawn (pressed, the real size), in, Fit, and — while
+ * something has been moved — putting every table back where the layout would.
+ *
+ * It took the place of three glyphs in a card at the top of the canvas and a
+ * minimap in the corner opposite. A whiteboard in this product is zoomed and
+ * fitted from one place, and where the reader is in the picture is said by
+ * the percentage rather than by a second, smaller picture.
  */
-export function ZoomControls({
+export function ZoomBar({ onFit, onTidy }: { onFit: () => void; onTidy?: () => void }) {
+  const flow = useReactFlow()
+  const percent = useStore((state) => Math.round(state.transform[2] * 100))
+  return (
+    <div data-slot="diagram-zoom" className={cn(FLOAT, "bottom-3 left-3")}>
+      <IconAction
+        label="Zoom out"
+        className="size-7"
+        onClick={() => void flow.zoomOut({ duration: 150 })}
+      >
+        <Minus />
+      </IconAction>
+      <Button
+        size="xs"
+        variant="ghost"
+        title="Back to the real size (Ctrl 0)"
+        aria-label={`Zoom ${percent}%: back to the real size`}
+        className="numeric h-7 min-w-12 px-1.5 text-hint"
+        onClick={() => void flow.zoomTo(1, { duration: 150 })}
+      >
+        {percent}%
+      </Button>
+      <IconAction
+        label="Zoom in"
+        className="size-7"
+        onClick={() => void flow.zoomIn({ duration: 150 })}
+      >
+        <Plus />
+      </IconAction>
+      <Button
+        size="xs"
+        variant="ghost"
+        title="Fit the picture to the canvas (F)"
+        className="h-7 px-2 text-hint"
+        onClick={onFit}
+      >
+        Fit
+      </Button>
+      {onTidy && (
+        <IconAction label="Tidy: lay every table out again" className="size-7" onClick={onTidy}>
+          <RotateCounterClockwise />
+        </IconAction>
+      )}
+    </div>
+  )
+}
+
+/**
+ * What the canvas is held to, said where it is and undone by pressing it:
+ * the table it is focused on, and a layout that is locked.
+ */
+export function CanvasHolds({
   focus,
   locked,
-  onFit,
   onClear,
   onUnlock,
 }: {
-  onFit: () => void
   /** The focused table's name, as the canvas says it. */
   focus: string | null
   locked: boolean
   onClear: () => void
   onUnlock: () => void
 }) {
-  const flow = useReactFlow()
+  if (!focus && !locked) return null
   return (
-    <div className="pointer-events-none absolute top-3 left-3 flex flex-wrap items-center gap-2">
-      <div className="pointer-events-auto flex items-center gap-0.5 rounded-md border bg-card p-0.5">
-        <IconAction
-          label="Zoom in"
-          className="size-7"
-          onClick={() => flow.zoomIn({ duration: 150 })}
-        >
-          <Plus />
-        </IconAction>
-        <IconAction
-          label="Zoom out"
-          className="size-7"
-          onClick={() => flow.zoomOut({ duration: 150 })}
-        >
-          <Minus />
-        </IconAction>
-        <IconAction label="Fit to view (F)" className="size-7" onClick={onFit}>
-          <Crosshair />
-        </IconAction>
-      </div>
+    <div className="pointer-events-none absolute top-3 left-3 flex max-w-[calc(100%-7rem)] flex-wrap items-center gap-2">
       {focus && (
         <Button
           size="xs"
@@ -225,6 +263,31 @@ export function ZoomControls({
   )
 }
 
+/** The diagram's keys, as caps, at the foot of its inspector — where the map says its own. */
+export function KeyLegend() {
+  return (
+    <div
+      data-slot="diagram-keys"
+      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-3 py-2.5 text-hint text-muted-foreground"
+    >
+      <Keycap cap="F">Fit</Keycap>
+      <Keycap cap="/">Find</Keycap>
+      <Keycap cap="I">Panel</Keycap>
+      <Keycap cap="H">Hide</Keycap>
+      <Keycap cap="Esc">Let go</Keycap>
+    </div>
+  )
+}
+
+function Keycap({ cap, children }: { cap: string; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <kbd className={KEYCAP}>{cap}</kbd>
+      {children}
+    </span>
+  )
+}
+
 /** How many schemas the legend names before it counts the rest. */
 const SCHEMAS_NAMED = 4
 
@@ -234,7 +297,7 @@ const SCHEMAS_NAMED = 4
  */
 export function Legend({ schemas }: { schemas?: readonly string[] }) {
   return (
-    <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-13rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-card px-2.5 py-1.5 text-micro text-muted-foreground max-sm:hidden">
+    <div className="pointer-events-none absolute right-3 bottom-3 flex max-w-[calc(100%-17rem)] flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-md border border-hairline bg-popover px-2.5 py-1.5 text-micro text-muted-foreground max-md:hidden">
       <span className="flex items-center gap-1">
         <Key className="size-3 text-chart-2" /> primary key
       </span>

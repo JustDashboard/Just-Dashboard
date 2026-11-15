@@ -557,7 +557,7 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `w
   against those same locked preferences before writing; the separate classifier is advisory only.
   External CLI writers are outside this process lock. **Headscale** is read where its binary or container runs.
   `prefsReadable` explicitly distinguishes failed preference reads from empty advertised routes; the
-  editor retains a rejected subnet draft and retries against refreshed authoritative preferences.
+  editor (one form on the VPN page's save bar) retains rejected edits and retries against refreshed authoritative preferences.
   `approval` says which advertised offers the tailnet serves from this node's own status, and the
   node's key expiry warns 14 days before it takes the server off the tailnet; further off, the
   Tailscale view shows a tip to disable key expiry (`keyExpiryTip`, `components/network/vpn/record-logic.ts`). Headscale reads snake_case

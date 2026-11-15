@@ -12,16 +12,28 @@ import {
 // approval on the VPN page, against recorded API shapes. Every mutation is
 // captured so a test reads back exactly what a control sent.
 
-test("stale handshakes, captured transports and passed budgets are called out on the tunnel", async ({
+test("stale handshakes, captured transports and passed budgets are called out on their peers", async ({
   page,
 }) => {
   await open(page, [])
   await page.goto("/network/vpn")
-  const alerts = page.getByLabel("wg0 alerts", { exact: true })
-  await expect(alerts).toContainText("Office keeps its session alive")
-  await expect(alerts).toContainText("goes into the WireGuard device wg0")
-  await expect(alerts).toContainText("does not disconnect")
-  await expect(page.getByText("3 things on wg0 need a look")).toBeVisible()
+  await expect(page.getByRole("region", { name: "About wg0" })).toContainText("3 need a look")
+  await expect(page.getByRole("note", { name: "Office findings" })).toHaveText(
+    "handshake stale · past its budget",
+  )
+  await expect(page.getByRole("note", { name: "Backup server findings" })).toHaveText(
+    "transport inside a tunnel",
+  )
+  // The sentences are in the sheet of the peer they are about.
+  await page.getByRole("button", { name: "Open Office" }).click()
+  const office = page.getByRole("dialog").getByLabel("Office findings")
+  await expect(office).toContainText("Office keeps its session alive")
+  await expect(office).toContainText("does not disconnect")
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Open Backup server" }).click()
+  await expect(page.getByRole("dialog").getByLabel("Backup server findings")).toContainText(
+    "goes into the WireGuard device wg0",
+  )
 })
 
 test("a peer's record shows its trend, where it dialled from and its history", async ({ page }) => {
@@ -229,7 +241,7 @@ test("exits show how many client connections they translated", async ({ page }) 
   )
 })
 
-test("the tunnel history checks its endpoint and lists its lifecycle with outcomes", async ({
+test("the tunnel's page checks its endpoint and lists its lifecycle with outcomes", async ({
   page,
 }) => {
   await open(page, [], {
@@ -250,15 +262,16 @@ test("the tunnel history checks its endpoint and lists its lifecycle with outcom
       checkedAt: now(),
     },
   })
-  await page.goto("/network/vpn")
-  await page.getByRole("button", { name: "History", exact: true }).click()
-  const panel = page.getByRole("dialog", { name: "wg0 history" })
-  await panel.getByRole("button", { name: "Check endpoint" }).click()
-  const evidence = panel.getByLabel("Endpoint evidence")
+  await page.goto("/network/vpn/wg0")
+  // Nothing is asked of the endpoint until the reader asks.
+  await expect(page.getByText("not checked yet")).toBeVisible()
+  await page.getByRole("button", { name: "Check endpoint" }).click()
+  const evidence = page.getByLabel("Endpoint evidence")
   await expect(evidence).toContainText("Not an address of this host")
   await expect(evidence).toContainText("clients may be dialling another machine")
   await expect(evidence).toContainText("not held here")
-  const lifecycle = panel.getByLabel("wg0 lifecycle")
+  await page.getByRole("tab", { name: /^History/ }).click()
+  const lifecycle = page.getByLabel("wg0 lifecycle")
   await expect(lifecycle).toContainText("Created")
   await expect(lifecycle).toContainText("rolled back")
   await expect(lifecycle).toContainText("failed")
@@ -355,7 +368,7 @@ test("the tailnet says which offers it serves, when this node's key expires and 
   page,
 }) => {
   await open(page, [])
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=tailscale")
   await expect(
     page.getByText("Awaiting approval on the control server", { exact: true }),
   ).toBeVisible()
@@ -370,7 +383,7 @@ test("a Headscale in a container shows its users, expired keys and routes awaiti
   page,
 }) => {
   await open(page, [])
-  await page.goto("/network/vpn")
+  await page.goto("/network/vpn?tab=headscale")
   await expect(page.getByText("container headscale · 1 node · 1 user")).toBeVisible()
   await expect(page.getByLabel("Headscale users")).toContainText("bob (1)")
   const nodes = page.getByLabel("Headscale nodes")

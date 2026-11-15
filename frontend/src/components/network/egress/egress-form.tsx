@@ -59,7 +59,8 @@ export function EgressGroupForm({
   initial: EgressDraft
   editing?: EgressGroup
   links: NetworkLink[]
-  onSaved: () => void
+  /** Called with the name the group was saved under, so a page addressed by it can follow a rename. */
+  onSaved: (name: string) => void
 }) {
   const [draft, setDraft] = useState<EgressDraft>(initial)
   const [busy, setBusy] = useState(false)
@@ -90,7 +91,7 @@ export function EgressGroupForm({
           : "Its members are measured from now; it carries no traffic until you enable it.",
       })
       onOpenChange(false)
-      onSaved()
+      onSaved(draft.name.trim())
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

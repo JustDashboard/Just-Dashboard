@@ -12,6 +12,8 @@ import {
   Inspect,
   Linked,
   Minus,
+  PaperAirplane,
+  RefreshClockwise,
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -23,18 +25,16 @@ import {
   scanSuggestions,
   targetHint,
   targetLabel,
+  tlsReportHref,
   withRecent,
   type ScanTarget,
 } from "@/lib/scan-target"
 import {
   addressAnswer,
   addressKindLabel,
-  certificateLeft,
   chainPem,
-  connectedTo,
   checkOutcome,
   diagnosisLinks,
-  failureSteps,
   findingAnchor,
   plainVerdict,
   reportFileName,
@@ -42,13 +42,19 @@ import {
   reproduceCommands,
   STARTTLS_NAMES,
   STARTTLS_PORTS,
-  termLeft,
   termText,
 } from "@/lib/tls-report"
+import {
+  chainNodes,
+  gradeVerdict,
+  pendingNodes,
+  serverProduct,
+  type ChainNode,
+  type ChainTone,
+} from "@/lib/tls-chain"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import type {
-  Certificate,
   ChainLink,
   GradeCheck,
   HTTPScan,
@@ -65,14 +71,18 @@ import { Detail, DetailList, Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { RowList } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { FindingList } from "@/components/finding-list"
-import { EmptyState, ErrorState, Notice, Spinner } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { ErrorState, Notice, Spinner } from "@/components/state"
+import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { useNow } from "@/components/deploy/vocabulary"
-import { expiryTone } from "@/components/proxy/expiry-status"
+import { CertLife } from "@/components/proxy/expiry-status"
+import { useProxyRead } from "@/components/proxy/proxy-context"
+import { sitePath } from "@/components/proxy/site-verbs"
+import { TLSChainPicture } from "@/components/proxy/tls-chain-picture"
 import { TLSDNSPanel } from "@/components/proxy/tls-dns"
 import { TLSServedBy } from "@/components/proxy/tls-served-by"
 import { useTLSFixes } from "@/components/proxy/tls-fix-sheet"
@@ -80,7 +90,7 @@ import { RequestTester, TLSTools } from "@/components/proxy/request-tester"
 import { TLSResponseHeaders } from "@/components/proxy/tls-http-audit"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
-import { Disclosure, Field, FieldRow } from "@/components/form"
+import { Disclosure, Field, FieldRow, InfoTip } from "@/components/form"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import {
@@ -106,9 +116,14 @@ import { ScanHistoryPanel, useScanHistory } from "@/components/proxy/tls-history
  *
  * The grade is coarse on purpose and every finding carries its reasoning: a
  * letter with no working is a number to optimise rather than a thing to fix.
- * The four readings are tiles and the findings are a plain list, as they are
- * on every other verdict page; the grade used to be a tinted plate, which is
- * the one decoration this system does not draw.
+ *
+ * It opens on the target as the section's other destinations open on theirs:
+ * an identity line with the host and port, the grade as a word in its
+ * verdict's colour and what answered, then a picture of the way the scan got
+ * there (`tls-chain-picture.tsx`), each step in its verdict's colour. The four
+ * readings were tiles over the form, "—" before a scan; each now stands on the
+ * step it belongs to — the certificate's days on the leaf, the protocol on what
+ * answered, the trust on the root.
  */
 export function TLSReportPage() {
   const params = useSearchParams()
@@ -263,19 +278,10 @@ function TLSReport() {
     }
   }, [scan, setRecent])
   const [offering, setOffering] = useState(false)
-  const offered = { enabled: admin && offering }
-  const sites = usePoll(
-    (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
-    0,
-    [],
-    offered,
-  )
-  const certificates = usePoll(
-    (signal) => get<Certificate[]>("/certificates/", undefined, signal),
-    0,
-    [],
-    offered,
-  )
+  // The sites and the certificates are the section's own reads, which the
+  // layout already polls for every page of it.
+  const sites = useProxyRead("vhosts")
+  const certificates = useProxyRead("certs")
   // check=false reads the stored results: suggesting a name is no reason to
   // handshake with every watched endpoint.
   const watched = usePoll(
@@ -283,7 +289,7 @@ function TLSReport() {
       get<{ domain: string; port: number }[]>("/certificates/watched", { check: false }, signal),
     0,
     [],
-    offered,
+    { enabled: admin && offering },
   )
   const suggestions = useMemo(
     () =>
@@ -321,252 +327,234 @@ function TLSReport() {
     else router.push(reportHref(withAdvanced(params, next), typed.target), { scroll: false })
   }
 
+  // The picture is drawn from the first frame: unjudged before anything is
+  // asked or while the first answer is on its way, so the report lands in a
+  // place that was already there rather than pushing the page down.
+  const nodes = scan
+    ? chainNodes(scan, Date.parse(scan.checkedAt))
+    : pendingNodes(targetKey || undefined)
+  const offeredSites = tlsSiteNames(sites.data)
+
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Proxy" title="TLS report" />
+      <HostIdentity
+        // The view strip under the line draws the rule: the line's own under
+        // it made two.
+        className="border-b-0 pb-0"
+        mark={scan?.certificate ? issuerProduct(scan.certificate.issuer) : undefined}
+        fallback={Inspect}
+        title={
+          <span role="heading" aria-level={2} className="break-all">
+            {scanned || targetKey || "Live TLS report"}
+          </span>
+        }
+        facts={
+          <ReportFacts
+            scan={scan}
+            busy={busy}
+            asked={target !== undefined}
+            admin={admin}
+            past={history.viewingId !== undefined}
+            sites={offeredSites.length}
+          />
+        }
+        // Laid out as a project's header: the answer's sentence beside the
+        // name, the report's verbs behind `⋯`. Scan is the form's, under it.
+        state={
+          // Held from the moment a target is asked: on a phone the verdict is
+          // a row of its own, and arriving with the answer it pushed the
+          // picture down.
+          (scan || target) && (
+            <p
+              data-slot="report-verdict"
+              className={cn(
+                "max-w-md min-w-0 text-hint text-pretty",
+                scan ? TONE_TEXT[gradeVerdict(scan.grade)] : "text-muted-foreground",
+              )}
+            >
+              {scan ? scan.summary : busy ? "waiting for its answer" : "no answer"}
+            </p>
+          )
+        }
+        menu={
+          (scan || target) && (
+            <VerbMenu
+              label={`More actions for ${scanned || targetKey}`}
+              verbs={
+                scan
+                  ? reportVerbs({
+                      scan,
+                      admin,
+                      busy,
+                      onScanAgain: scanAgain,
+                      onGo: (href) => router.push(href),
+                    })
+                  : [COPY_LINK]
+              }
+            />
+          )
+        }
+      />
       <TLSTools current="report" />
 
-      {scan?.reachable ? (
-        <StatGrid columns={4} dense>
-          <StatTile
-            label={scanned}
-            value={scan.grade}
-            tone={gradeTone(scan.grade)}
-            hint={scan.summary}
-          />
-          <StatTile
-            label="Certificate"
-            value={
-              scan.certificate
-                ? scan.certificate.expired
-                  ? "expired"
-                  : certificateLeft(scan.certificate, Date.parse(scan.checkedAt))
-                : "none"
-            }
-            // Amber inside the renewal window, the Certificates page's own
-            // rule: the backend judges both against the certificate's term.
-            tone={scan.certificate ? expiryTone(scan.certificate) : "danger"}
-            meter={
-              scan.certificate ? termLeft(scan.certificate, Date.parse(scan.checkedAt)) : undefined
-            }
-            hint={
-              scan.certificate ? (
-                <span className="inline-flex max-w-full items-center gap-1.5">
-                  <span className="truncate">until {timestamp(scan.certificate.notAfter)}</span>
-                  <IssuerFact issuer={scan.certificate.issuer} />
-                </span>
-              ) : (
-                "the handshake completed without one"
-              )
-            }
-          />
-          <StatTile
-            label="Negotiated"
-            value={scan.negotiated ?? "—"}
-            hint={scan.cipherSuite}
-            tone={
-              scan.legacyOnly ? "danger" : scan.negotiated === "TLS 1.3" ? "success" : "default"
-            }
-          />
-          <StatTile
-            label="Chain"
-            value={scan.trusted ? "trusted" : "untrusted"}
-            tone={scan.trusted ? (scan.chainComplete ? "success" : "warning") : "danger"}
-            hint={
-              scan.chainComplete
-                ? `${scan.chain.length} certificate${scan.chain.length === 1 ? "" : "s"} presented`
-                : "the intermediate was not sent"
-            }
-          />
-        </StatGrid>
-      ) : scan?.failure ? (
-        // A failed scan is graded and read like any other: the letter, then
-        // the three steps a connection takes, the one that failed in red and
-        // the ones after it not reached.
-        <StatGrid columns={4} dense>
-          <StatTile label={scanned} value={scan.grade} tone="danger" hint={scan.summary} />
-          {failureSteps(scan).map((step) => (
-            <StatTile
-              key={step.label}
-              label={step.label}
-              value={step.value}
-              tone={step.tone}
-              hint={step.hint}
-            />
-          ))}
-        </StatGrid>
-      ) : (
-        <StatGrid columns={4} dense>
-          <StatTile label="Grade" value="—" hint="Run a live handshake" />
-          <StatTile label="Certificate" value="—" hint="Validity at the endpoint" />
-          <StatTile label="Negotiated" value="—" hint="Protocol and cipher" />
-          <StatTile label="Chain" value="—" hint="Trust and intermediates" />
-        </StatGrid>
+      {/* As wide as the field's row: a long name in the hint or the error
+          wraps under the field rather than widening the form. */}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (admin && !busy) run()
+        }}
+        className="w-full min-w-0 sm:w-min"
+      >
+        {/* The button sits in the field's row so an error line under the
+            input does not pull it down with it. The hint says what the
+            scan will reach, so a pasted URL or imaps:// shows its port
+            before anything is sent. */}
+        <Field
+          label="Domain to scan"
+          htmlFor="tls-domain"
+          hint={
+            <span className="wrap-anywhere">
+              {typed.target ? `Scans ${targetHint(typed.target)}` : "A name, host:port or URL"}
+            </span>
+          }
+          error={fieldError && <span className="wrap-anywhere">{fieldError}</span>}
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <InputGroup className="w-full sm:w-96">
+              <InputGroupInput
+                id="tls-domain"
+                list={admin ? "tls-targets" : undefined}
+                value={fields.domain}
+                onChange={(event) => edit({ domain: event.target.value })}
+                onFocus={() => setOffering(true)}
+                placeholder="app.example.com"
+                aria-invalid={fieldError ? true : undefined}
+                autoComplete="off"
+                spellCheck={false}
+                autoCapitalize="none"
+                autoCorrect="off"
+                inputMode="url"
+              />
+              {/* The port is part of the address, so it sits inside the
+                  same edge; empty, it shows the port the address implies. */}
+              <label
+                htmlFor="tls-port"
+                className="flex shrink-0 cursor-text items-center border-l border-hairline pl-2.5 text-hint text-muted-foreground select-none"
+              >
+                port
+              </label>
+              <InputGroupInput
+                id="tls-port"
+                value={fields.port}
+                onChange={(event) => edit({ port: event.target.value })}
+                placeholder={String(parseScanTarget(fields.domain).target?.port ?? 443)}
+                aria-invalid={fieldError ? true : undefined}
+                autoComplete="off"
+                inputMode="numeric"
+                className="w-16 flex-none pl-1.5 font-mono sm:text-xs"
+              />
+            </InputGroup>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={
+                busy ||
+                !fields.domain.trim() ||
+                !admin ||
+                connectError !== undefined ||
+                requestError !== undefined
+              }
+              pending={busy}
+            >
+              Scan
+            </Button>
+          </div>
+        </Field>
+        <AdvancedScan
+          key={address}
+          port={typed.target?.port}
+          value={advanced}
+          error={connectError}
+          requestError={requestError}
+          onChange={(next) => setAdvanced((current) => ({ ...current, ...next }))}
+        />
+        {admin && (
+          <datalist id="tls-targets">
+            {suggestions.map((suggestion) => (
+              <option key={suggestion.value} value={suggestion.value} label={suggestion.source} />
+            ))}
+          </datalist>
+        )}
+      </form>
+
+      <TLSChainPicture
+        nodes={nodes}
+        moving={busy}
+        arrived={scan ? `${scan.domain}:${scan.port}@${scan.checkedAt}` : undefined}
+        products={chainProducts(scan, nodes)}
+        extra={
+          // The leaf's term as a meter, its place held while there is none.
+          scan?.reachable || !scan
+            ? {
+                leaf: scan?.certificate ? (
+                  <CertLife cert={scan.certificate} className="w-24" />
+                ) : (
+                  <span />
+                ),
+              }
+            : undefined
+        }
+      />
+
+      {(busy || cancelled || (report.error && !busy) || (admin && !scan)) && (
+        <div className="min-w-0">
+          {busy && <ScanProgress key={askKey} onCancel={cancel} />}
+          {cancelled && (
+            <p className="text-body text-muted-foreground">
+              {cancelled.over
+                ? `The new scan was cancelled after ${duration(cancelled.after)}. The report below is the one from before.`
+                : `The scan was cancelled after ${duration(cancelled.after)}. Scan to run it again.`}
+            </p>
+          )}
+          {report.error && !busy && <ErrorState error={report.error} onRetry={scanAgain} />}
+          {admin && !scan && !busy && !report.error && !cancelled && (
+            <NothingScanned names={offeredSites} />
+          )}
+        </div>
       )}
 
-      <div className="flex min-w-0 flex-wrap items-end justify-between gap-4 border-b border-hairline pb-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <ProductLogo
-            id={scan?.certificate ? issuerProduct(scan.certificate.issuer) : undefined}
-            size="md"
-            fallback={Inspect}
-          />
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold tracking-tight break-all">
-              {scanned || targetKey || "Live TLS report"}
-            </h2>
-            {scan && <CheckedAgo at={scan.checkedAt} />}
-            {scan && connectedTo(scan) && (
-              <p className="text-hint wrap-anywhere text-muted-foreground">{connectedTo(scan)}</p>
-            )}
-          </div>
-        </div>
-        {/* As wide as the field's row: a long name in the hint or the error
-            wraps under the field rather than widening the form off the
-            header's row. */}
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (admin && !busy) run()
-          }}
-          className="w-full min-w-0 sm:w-min"
-        >
-          {/* The button sits in the field's row so an error line under the
-              input does not pull it down with it. The hint says what the
-              scan will reach, so a pasted URL or imaps:// shows its port
-              before anything is sent. */}
-          <Field
-            label="Domain to scan"
-            htmlFor="tls-domain"
-            hint={
-              <span className="wrap-anywhere">
-                {typed.target ? `Scans ${targetHint(typed.target)}` : "A name, host:port or URL"}
-              </span>
-            }
-            error={fieldError && <span className="wrap-anywhere">{fieldError}</span>}
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              <InputGroup className="w-full sm:w-96">
-                <InputGroupInput
-                  id="tls-domain"
-                  list={admin ? "tls-targets" : undefined}
-                  value={fields.domain}
-                  onChange={(event) => edit({ domain: event.target.value })}
-                  onFocus={() => setOffering(true)}
-                  placeholder="app.example.com"
-                  aria-invalid={fieldError ? true : undefined}
-                  autoComplete="off"
-                  spellCheck={false}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  inputMode="url"
-                />
-                {/* The port is part of the address, so it sits inside the
-                    same edge; empty, it shows the port the address implies. */}
-                <label
-                  htmlFor="tls-port"
-                  className="flex shrink-0 cursor-text items-center border-l border-hairline pl-2.5 text-hint text-muted-foreground select-none"
+      {/* Why no handshake completed is the report's one finding, with
+          advice for the step that failed and the pages where it is fixed
+          when the fault can be on this server. */}
+      {scan &&
+        !scan.reachable &&
+        scan.findings.map((finding) => (
+          <Notice key={finding.id} tone="danger" icon={CrossCircle} title={finding.title}>
+            <p className="break-words">{finding.detail}</p>
+            {finding.advice && <p className="break-words">{finding.advice}</p>}
+            {admin && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={scanAgain}
+                  disabled={busy}
+                  pending={rescanning}
                 >
-                  port
-                </label>
-                <InputGroupInput
-                  id="tls-port"
-                  value={fields.port}
-                  onChange={(event) => edit({ port: event.target.value })}
-                  placeholder={String(parseScanTarget(fields.domain).target?.port ?? 443)}
-                  aria-invalid={fieldError ? true : undefined}
-                  autoComplete="off"
-                  inputMode="numeric"
-                  className="w-16 flex-none pl-1.5 font-mono sm:text-xs"
-                />
-              </InputGroup>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={
-                  busy ||
-                  !fields.domain.trim() ||
-                  !admin ||
-                  connectError !== undefined ||
-                  requestError !== undefined
-                }
-                pending={busy}
-              >
-                Scan
-              </Button>
-            </div>
-          </Field>
-          <AdvancedScan
-            key={address}
-            port={typed.target?.port}
-            value={advanced}
-            error={connectError}
-            requestError={requestError}
-            onChange={(next) => setAdvanced((current) => ({ ...current, ...next }))}
-          />
-          {admin && (
-            <datalist id="tls-targets">
-              {suggestions.map((suggestion) => (
-                <option key={suggestion.value} value={suggestion.value} label={suggestion.source} />
-              ))}
-            </datalist>
-          )}
-        </form>
-      </div>
-      <div>
-        {!admin && (
-          <Notice title="Scanning needs an administrator">
-            The report reaches a domain of your choosing from this server, so it is held to the same
-            account level as the network probes.
-          </Notice>
-        )}
-        {admin && !scan && !busy && !report.error && !cancelled && (
-          <EmptyState
-            icon={Inspect}
-            title="Nothing scanned yet"
-            description="Enter a domain, host:port or URL, or pick one this server knows. The scan connects to it from this server and grades what it serves."
-          />
-        )}
-        {busy && <ScanProgress key={askKey} onCancel={cancel} />}
-        {cancelled && (
-          <p className="text-body text-muted-foreground">
-            {cancelled.over
-              ? `The new scan was cancelled after ${duration(cancelled.after)}. The report below is the one from before.`
-              : `The scan was cancelled after ${duration(cancelled.after)}. Scan to run it again.`}
-          </p>
-        )}
-        {report.error && !busy && <ErrorState error={report.error} onRetry={scanAgain} />}
-        {/* Why no handshake completed is the report's one finding, with
-            advice for the step that failed and the pages where it is fixed
-            when the fault can be on this server. */}
-        {scan &&
-          !scan.reachable &&
-          scan.findings.map((finding) => (
-            <Notice key={finding.id} tone="danger" icon={CrossCircle} title={finding.title}>
-              <p className="break-words">{finding.detail}</p>
-              {finding.advice && <p className="break-words">{finding.advice}</p>}
-              {admin && (
-                <div className="flex flex-wrap gap-2 pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={scanAgain}
-                    disabled={busy}
-                    pending={rescanning}
-                  >
-                    Scan again
+                  Scan again
+                </Button>
+                {diagnosisLinks(scan).map((link) => (
+                  <Button key={link.href} variant="outline" size="xs" asChild>
+                    <Link href={link.href}>{link.label}</Link>
                   </Button>
-                  {diagnosisLinks(scan).map((link) => (
-                    <Button key={link.href} variant="outline" size="xs" asChild>
-                      <Link href={link.href}>{link.label}</Link>
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </Notice>
-          ))}
-      </div>
+                ))}
+              </div>
+            )}
+          </Notice>
+        ))}
 
       {scan?.reachable && (
         <div className="flex min-w-0 animate-rise flex-col gap-6 md:gap-8">
@@ -598,43 +586,44 @@ function TLSReport() {
                 </PanelBody>
               </Panel>
               {scan.checks.length > 0 && <GradeChecks checks={scan.checks} />}
-              <div>
-                <Panel plain>
-                  <PanelHeader title="Protocol versions" />
-                  <PanelBody flush>
-                    <RowList>
-                      {scan.protocols.map((protocol) => (
-                        <ReportRow
-                          key={protocol.name}
-                          title={<span className="font-mono text-xs">{protocol.name}</span>}
-                          subtitle={protocol.detail}
-                          trailing={
-                            <Status
-                              verdict={
-                                protocol.status === "offered"
-                                  ? isOldProtocol(protocol.name)
-                                    ? "critical"
-                                    : "ok"
-                                  : "notice"
-                              }
-                              label={protocol.status}
-                            />
-                          }
-                          className="py-2"
-                        />
-                      ))}
-                    </RowList>
-                    <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
-                      Each version is asked for on a connection of its own, so the answer is the
-                      server&rsquo;s rather than a negotiation. &ldquo;refused&rdquo; is the server
-                      saying no. &ldquo;unknown&rdquo; is no answer to stand behind — the connection
-                      failed, this dashboard&rsquo;s TLS library would not ask, or the
-                      server&rsquo;s answer could mean either — and the row says which; reporting it
-                      as absent would be a false reassurance.
-                    </p>
-                  </PanelBody>
-                </Panel>
-              </div>
+              <Panel plain>
+                <PanelHeader
+                  title={
+                    <>
+                      Protocol versions{" "}
+                      <InfoTip label="How each version is asked">
+                        Each version is asked for on a connection of its own, so the answer is the
+                        server&rsquo;s. &ldquo;refused&rdquo; is the server saying no;
+                        &ldquo;unknown&rdquo; is no answer to stand behind, and the row says why.
+                      </InfoTip>
+                    </>
+                  }
+                />
+                <PanelBody flush>
+                  <RowList aria-label="Protocol versions">
+                    {scan.protocols.map((protocol) => (
+                      <ReportRow
+                        key={protocol.name}
+                        title={<span className="font-mono text-xs">{protocol.name}</span>}
+                        subtitle={protocol.detail}
+                        trailing={
+                          <Status
+                            verdict={
+                              protocol.status === "offered"
+                                ? isOldProtocol(protocol.name)
+                                  ? "critical"
+                                  : "ok"
+                                : "notice"
+                            }
+                            label={protocol.status}
+                          />
+                        }
+                        className="py-2"
+                      />
+                    ))}
+                  </RowList>
+                </PanelBody>
+              </Panel>
               {scan.http?.service === "other" && (
                 <Panel plain>
                   <PanelHeader title="HTTP behaviour" />
@@ -656,10 +645,6 @@ function TLSReport() {
                         className="py-2"
                       />
                     </RowList>
-                    <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
-                      Only TLS was checked. HSTS, the security headers and the plain-HTTP redirect
-                      are for websites, and this service is something else.
-                    </p>
                   </PanelBody>
                 </Panel>
               )}
@@ -755,9 +740,8 @@ function TLSReport() {
                     </RowList>
                     {scan.http.httpsError && (
                       <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
-                        Only TLS was checked. HSTS, the security headers and the plain-HTTP redirect
-                        need an HTTP answer, which a mail server or another service that is not a
-                        website does not give.
+                        Only TLS was checked. HSTS, the headers and the redirect need an HTTP
+                        answer.
                       </p>
                     )}
                   </PanelBody>
@@ -766,10 +750,12 @@ function TLSReport() {
               {scan.http?.service === "http" && !scan.http.httpsError && (
                 <TLSResponseHeaders http={scan.http} />
               )}
-              {scan.preload && <PreloadPanel preload={scan.preload} domain={scan.domain} />}
+              {scan.preload && (
+                <PreloadPanel preload={scan.preload} domain={scan.domain} admin={admin} />
+              )}
             </div>
             <div className="min-w-0 space-y-8">
-              {scan.origin && <TLSServedBy origin={scan.origin} onRescan={rescan} />}
+              {scan.origin && <TLSServedBy origin={scan.origin} onRescan={rescan} admin={admin} />}
               <Panel plain>
                 <PanelHeader title="Live certificate" />
                 <PanelBody>
@@ -870,7 +856,7 @@ function TLSReport() {
                   {scan.trustPath?.length ? <TrustPathList path={scan.trustPath} /> : null}
                 </PanelBody>
               </Panel>
-              <ReportExport scan={scan} />
+              <Reproduce scan={scan} />
             </div>
           </div>
           <DeepScanSection scan={scan} />
@@ -889,6 +875,231 @@ function TLSReport() {
       )}
       {fixes.element}
     </Page>
+  )
+}
+
+const TONE_TEXT: Record<ChainTone, string> = {
+  success: "text-success",
+  warning: "text-warning",
+  danger: "text-destructive",
+  neutral: "text-muted-foreground",
+}
+
+/**
+ * The target's line of live facts: its grade as a coloured word, the
+ * protocol it took, what answered and how old the report is. Before anything
+ * is asked it says what this server offers to scan.
+ */
+function ReportFacts({
+  scan,
+  busy,
+  asked,
+  admin,
+  past,
+  sites,
+}: {
+  scan: TLSScan | null
+  busy: boolean
+  asked: boolean
+  admin: boolean
+  past: boolean
+  sites: number
+}) {
+  const facts: React.ReactNode[] = []
+  if (scan) {
+    facts.push(<GradeWord key="grade" grade={scan.grade} />)
+    if (scan.reachable && scan.negotiated)
+      facts.push(
+        <span key="protocol" className={cn(scan.legacyOnly && "font-medium text-destructive")}>
+          {scan.negotiated}
+        </span>,
+      )
+    const served = scan.origin?.site
+    if (served)
+      facts.push(
+        <HostFact key="served" product="nginx">
+          <Link href={sitePath(served)} className="font-mono hover:underline">
+            {served}
+          </Link>
+        </HostFact>,
+      )
+    else if (scan.http?.server)
+      facts.push(
+        <HostFact key="served" product={serverProduct(scan.http.server)}>
+          {scan.http.server}
+        </HostFact>,
+      )
+    facts.push(<CheckedAgo key="checked" at={scan.checkedAt} />)
+    if (past)
+      facts.push(
+        <span key="past" className="font-medium text-warning">
+          a past scan
+        </span>,
+      )
+  } else if (busy) {
+    facts.push(
+      <span key="busy" className="inline-flex items-center gap-1.5">
+        <Spinner className="size-3" /> scanning
+      </span>,
+    )
+  } else if (asked) {
+    facts.push(<span key="none">no report yet</span>)
+  } else if (sites > 0) {
+    facts.push(
+      <HostFact key="sites" product="nginx">
+        {sites === 1 ? "1 name" : `${sites} names`} served over TLS here
+      </HostFact>,
+    )
+  } else {
+    facts.push(<span key="what">what a visitor is served</span>)
+  }
+  if (!admin)
+    facts.push(
+      <span key="admin" className="font-medium text-warning">
+        scanning needs an administrator
+      </span>,
+    )
+  return facts.flatMap((fact, index) =>
+    index === 0 ? [fact] : [<FactDot key={`dot-${index}`} />, fact],
+  )
+}
+
+/** The grade as a word in its verdict's colour, its dot before it. */
+function GradeWord({ grade }: { grade: string }) {
+  const verdict = gradeVerdict(grade)
+  return (
+    <span
+      data-slot="grade"
+      className={cn("inline-flex items-center gap-1.5 font-medium", TONE_TEXT[verdict])}
+    >
+      <StatusDot
+        tone={verdict === "success" ? "running" : verdict === "warning" ? "warning" : "danger"}
+      />
+      grade {grade}
+    </span>
+  )
+}
+
+/** The report's address on the clipboard, which asks the same question when opened. */
+const COPY_LINK: Verb = {
+  key: "link",
+  label: "Copy link",
+  icon: Linked,
+  run: () => void copyText(window.location.href, "Link to the report copied"),
+}
+
+/**
+ * What the report offers past its own page: ask again, take it elsewhere —
+ * Markdown for a ticket, the scan as JSON, the chain as sent — or send the
+ * same name's request to nginx here.
+ */
+function reportVerbs({
+  scan,
+  admin,
+  busy,
+  onScanAgain,
+  onGo,
+}: {
+  scan: TLSScan
+  admin: boolean
+  busy: boolean
+  onScanAgain: () => void
+  onGo: (href: string) => void
+}): Verb[] {
+  const verbs: Verb[] = []
+  if (admin)
+    verbs.push({
+      key: "again",
+      label: "Scan again",
+      icon: RefreshClockwise,
+      run: onScanAgain,
+      disabled: busy,
+    })
+  verbs.push(
+    {
+      key: "markdown",
+      label: "Copy as Markdown",
+      icon: Copy,
+      run: () => void copyText(reportToMarkdown(scan), "Report copied as Markdown"),
+    },
+    {
+      key: "json",
+      label: "Download JSON",
+      icon: Download,
+      run: () =>
+        downloadText(
+          reportFileName(scan, "tls.json"),
+          JSON.stringify(scan, null, 2),
+          "application/json",
+        ),
+    },
+  )
+  if (scan.chain.length > 0)
+    verbs.push({
+      key: "pem",
+      label: "Download chain.pem",
+      icon: Download,
+      run: () =>
+        downloadText(reportFileName(scan, "chain.pem"), chainPem(scan), "application/x-pem-file"),
+    })
+  verbs.push(COPY_LINK)
+  if (admin && scan.origin?.site && !scan.starttls)
+    verbs.push({
+      key: "request",
+      label: "Send a request here",
+      icon: PaperAirplane,
+      group: "Request tester",
+      run: () =>
+        onGo(
+          `/proxy/tls?tool=request&url=${encodeURIComponent(`https://${scan.domain}${scan.port === 443 ? "" : `:${scan.port}`}/`)}`,
+        ),
+    })
+  return verbs
+}
+
+/**
+ * The products the picture draws as themselves: what answered, from the
+ * node's own reading, and the authority that signed the chain.
+ */
+function chainProducts(scan: TLSScan | null, nodes: ChainNode[]) {
+  const out: Record<string, string | undefined> = {}
+  for (const node of nodes) if (node.product) out[node.key] = node.product
+  if (scan?.reachable) {
+    const signer = issuerProduct(scan.chain[1]?.issuer ?? scan.certificate?.issuer)
+    if (scan.chainComplete) out.intermediate = signer
+    out.root = issuerProduct(nodes.at(-1)?.title) ?? signer
+  }
+  return out
+}
+
+/** The names this server serves over TLS that a scan can ask for as they are. */
+function tlsSiteNames(vhosts: VHost[] | undefined) {
+  const names = new Set<string>()
+  for (const vhost of vhosts ?? []) {
+    if (!vhost.enabled || !vhost.tls) continue
+    for (const name of vhost.serverNames)
+      if (name && name !== "_" && !name.startsWith("~") && !name.includes("*")) names.add(name)
+  }
+  return [...names].sort()
+}
+
+/**
+ * Nothing asked yet: one sentence and the names this server serves, each a
+ * scan a press away.
+ */
+function NothingScanned({ names }: { names: string[] }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+      <p className="text-body font-medium">Nothing scanned yet</p>
+      {names.slice(0, 3).map((name) => (
+        <Button key={name} variant="outline" size="xs" asChild>
+          <Link href={tlsReportHref({ host: name, port: 443 })}>
+            <Inspect className="size-3" />
+            Scan <span className="font-mono">{name}</span>
+          </Link>
+        </Button>
+      ))}
+    </div>
   )
 }
 
@@ -953,7 +1164,17 @@ function FindingLink({ id }: { id: string }) {
 function GradeChecks({ checks }: { checks: GradeCheck[] }) {
   return (
     <Panel plain>
-      <PanelHeader title="How this grade was reached" />
+      <PanelHeader
+        title={
+          <>
+            How this grade was reached{" "}
+            <InfoTip label="How the grade is worked out">
+              The grade is the lowest cap among the rules that failed, and A+ when none did. A rule
+              the scan could not judge caps nothing; a missing header never lowers the letter.
+            </InfoTip>
+          </>
+        }
+      />
       <PanelBody flush>
         <RowList aria-label="Grade rules">
           {checks.map((check) => (
@@ -983,11 +1204,6 @@ function GradeChecks({ checks }: { checks: GradeCheck[] }) {
             />
           ))}
         </RowList>
-        <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
-          The grade is the lowest cap among the rules that failed, and A+ when none did. A rule the
-          scan could not judge caps nothing. Notices such as a missing security header are findings
-          only: they never lower the letter.
-        </p>
       </PanelBody>
     </Panel>
   )
@@ -1160,55 +1376,14 @@ function CopyDetail({
 }
 
 /**
- * The report taken elsewhere — Markdown for a ticket, the scan as JSON, the
- * chain as sent — and the commands that repeat what the scan saw from a shell.
+ * The commands that repeat what the scan saw from a shell. Taking the report
+ * elsewhere — Markdown, JSON, the chain as sent — is in the target's menu.
  */
-function ReportExport({ scan }: { scan: TLSScan }) {
+function Reproduce({ scan }: { scan: TLSScan }) {
   return (
     <Panel plain>
-      <PanelHeader title="Reproduce and export" />
-      <PanelBody className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={() => void copyText(reportToMarkdown(scan), "Report copied as Markdown")}
-          >
-            <Copy className="size-3" />
-            Copy as Markdown
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={() =>
-              downloadText(
-                reportFileName(scan, "tls.json"),
-                JSON.stringify(scan, null, 2),
-                "application/json",
-              )
-            }
-          >
-            <Download className="size-3" />
-            JSON
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={() =>
-              downloadText(
-                reportFileName(scan, "chain.pem"),
-                chainPem(scan),
-                "application/x-pem-file",
-              )
-            }
-          >
-            <Download className="size-3" />
-            chain.pem
-          </Button>
-        </div>
+      <PanelHeader title="Reproduce" />
+      <PanelBody>
         <ul className="space-y-3">
           {reproduceCommands(scan).map((command) => (
             <li key={command.label} className="group min-w-0 space-y-1">
@@ -1662,10 +1837,10 @@ function PlainChain({ http }: { http: HTTPScan }) {
   )
 }
 
-/** "Checked 3 minutes ago", kept true while the page stays open. */
+/** "checked 3 minutes ago", kept true while the page stays open. */
 function CheckedAgo({ at }: { at: string }) {
   useNow(30_000)
-  return <p className="text-hint text-muted-foreground">Checked {relativeTime(at)}</p>
+  return <span title={timestamp(at)}>checked {relativeTime(at)}</span>
 }
 
 /**
@@ -1673,12 +1848,28 @@ function CheckedAgo({ at }: { at: string }) {
  * it. A subdomain is never submitted, so it gets the one rule that says so and
  * a way to the name that would be.
  */
-function PreloadPanel({ preload, domain }: { preload: PreloadCheck; domain: string }) {
+function PreloadPanel({
+  preload,
+  domain,
+  admin,
+}: {
+  preload: PreloadCheck
+  domain: string
+  admin: boolean
+}) {
   const parent = preload.domain && preload.domain !== domain ? preload.domain : undefined
   return (
     <Panel plain>
       <PanelHeader
-        title="HSTS preload"
+        title={
+          <>
+            HSTS preload{" "}
+            <InfoTip label="What preloading does">
+              Browsers use HTTPS for a preloaded domain and every name under it before the first
+              visit. Coming off the list takes months.
+            </InfoTip>
+          </>
+        }
         actions={
           <Status
             verdict={preload.eligible ? "ok" : "notice"}
@@ -1709,13 +1900,8 @@ function PreloadPanel({ preload, domain }: { preload: PreloadCheck; domain: stri
             />
           ))}
         </RowList>
-        <div className="space-y-2 pt-3 text-hint leading-relaxed text-muted-foreground">
-          <p>
-            Preloading has browsers use HTTPS for a domain and every name under it before the first
-            visit. Coming off the list takes months, so it suits a domain whose every subdomain
-            already serves HTTPS.
-          </p>
-          {parent && (
+        <div className="flex flex-wrap gap-2 pt-3 empty:hidden">
+          {parent && admin && (
             <Button variant="outline" size="xs" asChild>
               <Link href={`/proxy/tls?domain=${encodeURIComponent(parent)}`}>Scan {parent}</Link>
             </Button>
@@ -1736,12 +1922,6 @@ function PreloadPanel({ preload, domain }: { preload: PreloadCheck; domain: stri
       </PanelBody>
     </Panel>
   )
-}
-
-export function gradeTone(grade: string): Tone {
-  if (grade === "A+" || grade === "A") return "success"
-  if (grade === "B" || grade === "C") return "warning"
-  return "danger"
 }
 
 function isOldProtocol(name: string) {

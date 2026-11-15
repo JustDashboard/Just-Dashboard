@@ -8,9 +8,10 @@ import { admin, json, mockNetwork, type Mutation } from "./network-fixture"
  * this Engine can create a network with. Every preview here is the backend's
  * shape; the page decides nothing the preview did not say.
  *
- * It is the redesigned Networks page that is read: the networks table and its
- * verbs, a network's sheet with its members as a table, and the dialogs they
- * open (`docker-networks.spec.ts` covers the page's own readings).
+ * It is the Networks page and a network's own page that are read: the networks
+ * table and its verbs, a network's members, and the dialogs they open
+ * (`docker-networks.spec.ts` and `docker-network-page.spec.ts` cover the pages'
+ * own readings).
  */
 
 const now = new Date().toISOString()
@@ -128,21 +129,27 @@ const preview = (over: Record<string, unknown>) => ({
   ...over,
 })
 
-/** A network's name in the table (wide) or the list (narrow): the button that opens its sheet. */
-const networkButton = (page: Page, name: string) =>
+/** A network's name in the table (wide) or the list (narrow): the link to its own page. */
+const networkLink = (page: Page, name: string) =>
   page
     .getByRole("table")
     .first()
     .or(page.getByRole("list", { name: "Networks" }))
-    .getByRole("button", { name, exact: true })
+    .getByRole("link", { name, exact: true })
+
+/** A network's members, one line each, on its page's Members view. */
+const member = (page: Page, text: string) =>
+  page.locator("[data-slot=choice-row]").filter({ hasText: text })
 
 async function setup(page: Page, mutations: Mutation[] = [], list: unknown[] = networks) {
   await mockNetwork(page, mutations, {
     overrides: {
       "/docker/ping": { available: true },
       "/docker/networks/": list,
-      "/docker/networks/n-lab": labDetail,
-      "/docker/networks/n-internal": internalDetail,
+      // The page asks for a network by the name in its address; the Engine
+      // resolves a name or an id.
+      "/docker/networks/lab": labDetail,
+      "/docker/networks/just-dashboard_internal": internalDetail,
       "/docker/containers/": candidates,
     },
   })
@@ -191,7 +198,7 @@ test("networks name their owners, and unread membership never reads as unused", 
   ).toBeDisabled()
 })
 
-test("a network's sheet names its owner, both families and the networks its members join", async ({
+test("a network's page names its owner, both families and the networks its members join", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -204,36 +211,46 @@ test("a network's sheet names its owner, both families and the networks its memb
       name: "The dashboard's own private network takes no other containers",
     }),
   ).toBeDisabled()
-  await table.getByRole("button", { name: "lab", exact: true }).click()
-  const panel = page.getByRole("dialog", { name: "lab" })
-  await expect(panel.getByText("compose · shop", { exact: true })).toBeVisible()
-  await expect(
-    panel.getByText("Compose recreates it the next time its project comes up."),
-  ).toBeVisible()
-  // Attaching depends on the scope, not on --attachable: a local bridge takes members.
-  await expect(panel.getByText("yes, while running", { exact: true })).toBeVisible()
-  const api = panel.getByRole("row").filter({ hasText: "10.4.0.3" })
+  await table.getByRole("link", { name: "lab", exact: true }).click()
+  await expect(page).toHaveURL(/\/docker\/networks\/lab$/)
+  const line = page.locator("[data-slot=network-identity]")
+  await expect(line.getByText("compose · shop", { exact: true })).toBeVisible()
+
+  await page.getByRole("tab", { name: /^Members/ }).click()
+  const api = member(page, "10.4.0.3")
   await expect(api.getByText("fd00:4::3", { exact: true })).toBeVisible()
   await expect(api.getByText("also on bridge")).toBeVisible()
-  const ingress = panel.getByRole("row").filter({ hasText: "10.4.0.4" })
+  const ingress = member(page, "10.4.0.4")
   await expect(ingress.getByText("Shared ingress", { exact: true })).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Detach api", exact: true })).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "Detach api", exact: true })).toHaveCount(1)
   await expect(
-    panel.getByRole("button", { name: "Detach just-dashboard-ingress", exact: true }),
+    page.getByRole("button", { name: "Detach just-dashboard-ingress", exact: true }),
   ).toHaveCount(0)
-  await expect(panel.getByRole("button", { name: /^The shared public Caddy/ })).toHaveCount(1)
-  await page.keyboard.press("Escape")
+  await expect(page.getByRole("button", { name: /^The shared public Caddy/ })).toHaveCount(1)
 
-  await table.getByRole("button", { name: "just-dashboard_internal", exact: true }).click()
-  const own = page.getByRole("dialog", { name: "just-dashboard_internal" })
+  await page.getByRole("tab", { name: "Configuration" }).click()
   await expect(
-    own.getByText("The dashboard's own private network takes no other containers."),
+    page.getByText("Compose recreates it the next time its project comes up."),
   ).toBeVisible()
-  await expect(own.getByRole("button", { name: "Attach a container", exact: true })).toHaveCount(0)
+  // Attaching depends on the scope, not on --attachable: a local bridge takes members.
+  await expect(page.getByText("yes, while running", { exact: true })).toBeVisible()
+
+  await page.goto("/docker/networks/just-dashboard_internal?tab=members")
+  await expect(line.getByText("made by this dashboard", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Attach a container", exact: true })).toHaveCount(0)
   // The member's own mark, beside the owner line that says the same of the network.
-  await expect(own.locator('[data-slot="tag"]', { hasText: "This dashboard" })).toBeVisible()
-  await expect(own.getByRole("button", { name: "Detach jd-frontend", exact: true })).toHaveCount(0)
-  await expect(own.getByRole("button", { name: /^Part of the dashboard itself/ })).toHaveCount(1)
+  await expect(
+    member(page, "jd-frontend").locator('[data-slot="tag"]', { hasText: "This dashboard" }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Detach jd-frontend", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Part of the dashboard itself/ })).toHaveCount(1)
+  // Why it takes no container is where the command would be.
+  await line.getByRole("button", { name: "More actions for just-dashboard_internal" }).click()
+  await expect(
+    page.getByRole("menuitem", {
+      name: "The dashboard's own private network takes no other containers",
+    }),
+  ).toBeDisabled()
 })
 
 test("attaching previews shared names and refusals, and keeps the draft when the preview fails", async ({
@@ -279,7 +296,7 @@ test("attaching previews shared names and refusals, and keeps the draft when the
     )
   })
   await page.goto("/docker/networks")
-  await networkButton(page, "lab").click()
+  await networkLink(page, "lab").click()
   await page.getByRole("button", { name: "Attach a container", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Attach a container" })
   await dialog.getByRole("combobox").click()
@@ -356,8 +373,7 @@ test("detaching names who loses the member, and a refused detach cannot be confi
           }),
     ),
   )
-  await page.goto("/docker/networks")
-  await networkButton(page, "lab").click()
+  await page.goto("/docker/networks/lab?tab=members")
   await page.getByRole("button", { name: "Detach api", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Detach api" })
   await expect(dialog.getByText(/worker reaches api on lab as api, app/)).toBeVisible()
@@ -619,8 +635,7 @@ for (const width of [390, 1440]) {
         }),
       ),
     )
-    await page.goto("/docker/networks")
-    await networkButton(page, "lab").click()
+    await page.goto("/docker/networks/lab?tab=members")
     await page.getByRole("button", { name: "Detach api", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: "Detach api" })
     await expect(dialog.getByText(/reporting-service reach api/)).toBeVisible()
@@ -640,20 +655,18 @@ test("readers see owners and previews' results but are offered no change", async
     overrides: {
       "/docker/ping": { available: true },
       "/docker/networks/": networks,
-      "/docker/networks/n-lab": labDetail,
+      "/docker/networks/lab": labDetail,
     },
   })
   await page.goto("/docker/networks")
   await expect(page.getByText("compose · shop", { exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Remove unused", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0)
-  await networkButton(page, "lab").click()
-  const panel = page.getByRole("dialog", { name: "lab" })
-  const api = panel.getByRole("row").filter({ hasText: "10.4.0.3" })
+  await networkLink(page, "lab").click()
+  await page.getByRole("tab", { name: /^Members/ }).click()
+  const api = member(page, "10.4.0.3")
   await expect(api.getByText("fd00:4::3", { exact: true })).toBeVisible()
   await expect(api.getByText("also on bridge")).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Detach api", exact: true })).toHaveCount(0)
-  await expect(panel.getByRole("button", { name: "Attach a container", exact: true })).toHaveCount(
-    0,
-  )
+  await expect(page.getByRole("button", { name: "Detach api", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Attach a container", exact: true })).toHaveCount(0)
 })

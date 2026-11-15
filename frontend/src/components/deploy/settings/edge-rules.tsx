@@ -15,6 +15,7 @@ import type {
   DeploymentRateLimit,
   RequestFacet,
 } from "@/lib/types"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Well } from "@/components/panel"
@@ -37,6 +38,7 @@ import {
 } from "@/components/deploy/settings/setting-card"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { useProject } from "@/components/deploy/project-context"
+import { WirePlaceholder } from "@/components/deploy/wire"
 import {
   EDGE_ACTIONS,
   EDGE_METHODS,
@@ -225,7 +227,7 @@ export function EdgeRulesForm({
           </OptionRow>
           <OptionRow
             title="Refuse CrowdSec's bans"
-            hint="The addresses CrowdSec's engine on this server has banned are answered 403 here, from a list refreshed every minute. Without CrowdSec installed nothing is refused."
+            hint="Addresses it has banned get a 403; without CrowdSec nothing is refused"
             checked={value.crowdSec}
             onCheckedChange={(crowdSec) => draft.set({ ...value, crowdSec })}
             disabled={!canAdmin}
@@ -250,10 +252,28 @@ export function EdgeRulesForm({
           </div>
         )}
         {value.edgeRules.length === 0 ? (
-          <EmptyNote className="px-0 text-left">
-            No rules: every request reaches the application. A rule blocks, answers, redirects or
-            lets through the requests it matches, and the first rule a request meets decides.
-          </EmptyNote>
+          // A row where the rules will stand, which is also the way to add the
+          // first: two lines of grey prose closed the section before. What a
+          // rule does is the rule's own form to show.
+          canAdmin ? (
+            <ChoiceList aria-label="Edge rules">
+              <ChoiceRow
+                verb="Add the first rule"
+                onSelect={() => setRules([newEdgeRule([])])}
+                leading={
+                  <WirePlaceholder size="sm">
+                    <Plus />
+                  </WirePlaceholder>
+                }
+                title="Add a rule"
+                description="No rules: every request reaches the application"
+              />
+            </ChoiceList>
+          ) : (
+            <EmptyNote className="px-0 text-left">
+              No rules: every request reaches the application.
+            </EmptyNote>
+          )
         ) : (
           <ol aria-label="Edge rules" className="space-y-3">
             {value.edgeRules.map((rule, index) => (

@@ -129,14 +129,15 @@ const rule = {
  * as a `label`, `title`, `name` or `hint`. A bare `"p95"` anywhere else is a
  * key — a series, a sort, a field of the server's answer — and is left alone.
  *
- * Two files are outside it: the words' own module, which names the term for
- * tooltips, and the interface charts, whose percentiles are of throughput
- * rather than of how long anything took.
+ * One file is outside it: the words' own module, which names the term for
+ * tooltips. The interface charts were too, because their percentiles are of
+ * throughput rather than of how long anything took; they say their shares in
+ * the same words since 0.8.7.
  */
 const NOTATION = /(?:^|[^\w.$])p(?:50|75|90|95|99)(?![\w(])/
 const NOTATION_BARE = /^\s*p(?:50|75|90|95|99)\s*$/
 const NOTATION_EXEMPT =
-  /(?:\.test\.[jt]sx?$|[\\/]tests[\\/]|[\\/]eslint-rules[\\/]|src[\\/]lib[\\/]latency-words\.ts$|network[\\/]traffic[\\/]interface-charts\.tsx$)/
+  /(?:\.test\.[jt]sx?$|[\\/]tests[\\/]|[\\/]eslint-rules[\\/]|src[\\/]lib[\\/]latency-words\.ts$)/
 const WORDED_PROPS = new Set(["label", "title", "name", "hint", "info", "aria-label"])
 
 const latencyWords = {

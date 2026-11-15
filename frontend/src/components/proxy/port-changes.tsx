@@ -103,13 +103,23 @@ export function NewMark({ socket, now }: { socket: DatedSocket; now: number }) {
  * host where programs open fixed ports all day, a week's changes are
  * hundreds of lines, and one port's are a handful.
  */
-export function PortChanges({ query, onClearQuery }: { query: string; onClearQuery: () => void }) {
+export function PortChanges({
+  query = "",
+  onClearQuery,
+  port,
+}: {
+  query?: string
+  onClearQuery?: () => void
+  /** One port's history, on its own page: the list's search does not apply. */
+  port?: { protocol: string; port: number }
+}) {
   const [windowValue, setWindow] = useSessionState<string>("proxy.ports.changes.window", "24")
   const [reachValue, setReach] = useSessionState<string>("proxy.ports.changes.reach", "all")
   // Values another version of the page remembered read as the default.
   const hours: Window = WINDOWS.find((w) => w.value === windowValue)?.value ?? "24"
-  const reach = parseReachFilter(reachValue) ?? "all"
-  const search = query.trim()
+  // One port's history is all of it: the list's reach chips are not on its page.
+  const reach = port ? "all" : (parseReachFilter(reachValue) ?? "all")
+  const search = port ? `port:${port.port} proto:${port.protocol}` : query.trim()
   const terms = useMemo(() => parseQuery(search), [search])
   // How far the list has been paged, for the view it was paged in: another
   // window, reach or search starts from the first page again.
@@ -179,6 +189,16 @@ export function PortChanges({ query, onClearQuery }: { query: string; onClearQue
         />
       )
     }
+    if (searched.length === 0 && port) {
+      return (
+        <EmptyState
+          icon={Router}
+          title={`Port ${port.port} did not open or close in the last ${WINDOW_WORDS[hours]}`}
+          description="The listening sockets were compared once a minute while the dashboard ran."
+          className="mt-4"
+        />
+      )
+    }
     if (searched.length === 0) {
       return (
         <EmptyState
@@ -186,9 +206,11 @@ export function PortChanges({ query, onClearQuery }: { query: string; onClearQue
           title="No changes match the search"
           description={`Nothing that opened or closed in the last ${WINDOW_WORDS[hours]} matches “${search}”.`}
           action={
-            <Button variant="outline" size="sm" onClick={onClearQuery}>
-              Clear the search
-            </Button>
+            onClearQuery && (
+              <Button variant="outline" size="sm" onClick={onClearQuery}>
+                Clear the search
+              </Button>
+            )
           }
           className="mt-4"
         />
@@ -283,7 +305,7 @@ export function PortChanges({ query, onClearQuery }: { query: string; onClearQue
           </Button>
         </Notice>
       )}
-      {changes.length > 0 && (
+      {changes.length > 0 && !port && (
         <Toolbar className="mt-3 gap-x-3">
           <ChipStrip role="group" aria-label="Changes by reach">
             {(Object.keys(REACH_LABEL) as ReachFilter[])

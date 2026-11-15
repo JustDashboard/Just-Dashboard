@@ -237,10 +237,14 @@ screen.
 gutter, and its workspace has no frame of its own: the 1440 px measure, the gutter and the card's
 border were all space taken from the screen. Fullscreen still takes the whole window.
 
-**Session tools fit narrow screens.** Below 1280 px the visible tools button opens a `SidePanel`
-containing the same mode switch, clipboard, file transfer, quality, pointer and pairing controls as
-the desktop column. Switching modes closes the panel; Close and Escape return keyboard focus to the
-tools button so it can be opened again with Enter. Each mode exposes its own applicable controls.
+**Session tools fit narrow screens.** From 1024 to 1279 px the visible tools button opens a
+`SidePanel` containing the same mode switch, clipboard, file transfer, quality, pointer and pairing
+controls as the desktop column. Switching modes closes the panel; Close and Escape return keyboard
+focus to the tools button so it can be opened again with Enter. Each mode exposes its own applicable
+controls. Below 1024 px there is no sheet and no tools button: the session is one pane at a time
+(Screen, Tools, Computers) over the bar at its foot (`components/phone-panes.tsx`), switching modes
+goes back to the screen, and the screen pane keeps its tunnel or stream while another pane is shown
+(a frame that is not drawn has no size, so no size is sent until it is shown again).
 
 **A session outlives its page.** Sessions are drawn by the shell, not the session page
 (`components/remote-desktop/held-sessions.tsx`): the dashboard layout holds every session opened in

@@ -6,6 +6,7 @@ import { gauge, sqlSample } from "@/components/database/home/samples"
 import { useSamples } from "@/components/database/home/use-samples"
 import { BlockedState, SectionFrame } from "@/components/database/kit"
 import { tallySessions } from "@/components/database/ops/performance-activity"
+import { formerSheetHref } from "@/components/database/ops/performance-address"
 import { readActivity } from "@/components/database/ops/performance-api"
 import { FileView, MergesView, PartsView } from "@/components/database/ops/performance-engine"
 import { type LiveSessions } from "@/components/database/ops/performance-figures"
@@ -15,15 +16,17 @@ import { LocksView } from "@/components/database/ops/performance-locks"
 import { OverviewView } from "@/components/database/ops/performance-overview"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { ReplicationView } from "@/components/database/ops/performance-replication"
+import { activityKey } from "@/components/database/ops/performance-lists"
 import { SessionsView } from "@/components/database/ops/performance-sessions"
 import { StatementsView } from "@/components/database/ops/performance-statements"
 import { StatementsSetupHost } from "@/components/database/ops/statements-setup"
 import { TablesView } from "@/components/database/ops/performance-tables"
 import type { DbServerStats } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { Notice } from "@/components/state"
+import { LoadingPanel, Notice } from "@/components/state"
 import { ChipCount, tabClasses } from "@/components/tabs"
 import { usePoll } from "@/hooks/use-poll"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 type View =
@@ -55,7 +58,12 @@ const SESSIONS_EVERY_MS = 5000
 
 /** One live session list supplies the views and their counts. */
 function useLiveSessions(id: number, enabled: boolean) {
-  const poll = usePoll((signal) => readActivity(id, signal), SESSIONS_EVERY_MS, [id], { enabled })
+  // Named, so a session's own page and this list are one request and one
+  // answer: a session opens on what the list already held.
+  const poll = usePoll((signal) => readActivity(id, signal), SESSIONS_EVERY_MS, [id], {
+    enabled,
+    key: activityKey(id),
+  })
   const { data, error } = poll
   const live = useMemo<LiveSessions | undefined>(() => {
     // A list whose poll has failed since is the reading before: the server's
@@ -68,6 +76,7 @@ function useLiveSessions(id: number, enabled: boolean) {
 
 function Answering() {
   const { id, engine, param, goto } = useDatabase()
+  const router = useRouter()
   const analytic = engine.can("clickhouseViews")
   const { activity, live } = useLiveSessions(id, engine.can("sessions") && !analytic)
   const stats = useSamples<DbServerStats>(
@@ -139,6 +148,15 @@ function Answering() {
     })
   }
 
+  // A statement, a table and a session were each a sheet over their list,
+  // opened by a key of this address. Each is a page now, and the address
+  // that opened the sheet goes to it — replaced, so Back is not the sheet.
+  // A string or nothing: it is what the effect below is keyed on.
+  const former = formerSheetHref(id, view, { get: (name) => param(name) || null })
+  useEffect(() => {
+    if (former) router.replace(former)
+  }, [former, router])
+
   // On a phone the strip is wider than the page and scrolls sideways: the
   // view on screen is kept in sight in it.
   const strip = useRef<HTMLDivElement>(null)
@@ -165,6 +183,9 @@ function Answering() {
         : entry === "merges"
           ? merging || undefined
           : undefined
+
+  // The page it is on its way to draws itself: this one holds its shape.
+  if (former) return <LoadingPanel plain rows={8} />
 
   if (!view) {
     return (

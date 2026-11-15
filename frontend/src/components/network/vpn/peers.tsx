@@ -1,10 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { del, get, post } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { WGInterface, WGPeer, WGPeerCreated } from "@/lib/types"
+import type { NetworkOverview, WGInterface, WGPeer, WGPeerCreated } from "@/lib/types"
+import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
 import { Field, FieldRow } from "@/components/form"
@@ -15,10 +17,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
+import { useHubSession } from "@/components/network/hub-session"
 import { ClientConfig } from "@/components/network/vpn/client-config"
 import { EditPeer, KillSwitchFile, SiteVerify } from "@/components/network/vpn/peer-actions"
 import { PeerRecord } from "@/components/network/vpn/record"
 import { handshakeReading, killSwitchOffered } from "@/components/network/vpn/record-logic"
+import { findingSentence } from "@/components/network/vpn/tunnel-picture"
+import { peerFindings } from "@/components/network/vpn/tunnel-reading"
 
 const list = (raw: string) =>
   raw
@@ -249,19 +254,27 @@ export function PeerSheet({
   peer,
   onOpenChange,
   onChanged,
+  hub = false,
 }: {
   tunnel: WGInterface | undefined
   peer: WGPeer | undefined
   onOpenChange: (open: boolean) => void
   onChanged: () => void
+  /** The session was opened through Just Hub: no edit, and no configuration to show. */
+  hub?: boolean
 }) {
   const { confirm, dialog } = useConfirm()
+  const { can } = useAuth()
   const [config, setConfig] = useState<{ config: string; qr: string }>()
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState(false)
   if (!tunnel || !peer) return dialog
   const handshake = handshakeReading(peer)
   const made = peer.id > 0 && tunnel.managed
+  // Removing a peer and forgetting its saved copy are destructive routes.
+  const destructive = can("destructive")
+  const findings = peerFindings(tunnel, peer)
+  const name = peer.name || peer.address
   const base = `/network/vpn/wireguard/${encodeURIComponent(tunnel.name)}/peers/${peer.id}`
   const show = async () => {
     setLoading(true)
@@ -316,24 +329,37 @@ export function PeerSheet({
           if (!next) setConfig(undefined)
         }}
         title={peer.name || peer.address}
-        description={`The ${peer.name} peer on ${tunnel.name}`}
+        description={`${name}, a ${peer.kind === "site" ? "site" : "device"} on ${tunnel.name}`}
         actions={
           <>
             <Status tone={handshake.tone} label={handshake.label} />
             {made && (
               <span className="ml-auto flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-                  Edit
-                </Button>
-                <Button size="sm" variant="outline" onClick={remove}>
-                  Remove
-                </Button>
+                {!hub && (
+                  <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                    Edit
+                  </Button>
+                )}
+                {destructive && (
+                  <Button size="sm" variant="outline" onClick={remove}>
+                    Remove
+                  </Button>
+                )}
               </span>
             )}
           </>
         }
       >
         <div className="flex flex-col gap-6">
+          {findings.length > 0 && (
+            <Notice tone="warning" title={findings.length === 1 ? "Needs a look" : "Need a look"}>
+              <ul className="space-y-1" aria-label={`${name} findings`}>
+                {findings.map((finding) => (
+                  <li key={finding.kind}>{findingSentence(finding)}</li>
+                ))}
+              </ul>
+            </Notice>
+          )}
           <DetailList>
             <Detail label="Kind">{peer.kind === "site" ? "Site" : "Device"}</Detail>
             <Detail label="Address">
@@ -375,17 +401,34 @@ export function PeerSheet({
             <ClientConfig name={peer.name} config={config.config} qr={config.qr} />
           ) : peer.hasConfig ? (
             <div className="space-y-2">
+              {hub && (
+                <p className="text-hint text-muted-foreground">
+                  Its configuration holds its key, and is shown to a session signed in on this
+                  server itself.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => void show()} pending={loading} disabled={loading}>
-                  Show QR code
-                </Button>
-                <Button size="sm" variant="outline" onClick={forget}>
-                  Forget the saved copy
-                </Button>
+                {!hub && (
+                  <Button
+                    size="sm"
+                    onClick={() => void show()}
+                    pending={loading}
+                    disabled={loading}
+                  >
+                    Show QR code
+                  </Button>
+                )}
+                {destructive && (
+                  <Button size="sm" variant="outline" onClick={forget}>
+                    Forget the saved copy
+                  </Button>
+                )}
               </div>
-              <p className="text-hint text-muted-foreground">
-                Forgetting keeps {peer.name} connected; removing it revokes its key.
-              </p>
+              {destructive && (
+                <p className="text-hint text-muted-foreground">
+                  Forgetting keeps {peer.name} connected; removing it revokes its key.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-hint text-muted-foreground">
@@ -393,7 +436,7 @@ export function PeerSheet({
               until it is removed.
             </p>
           )}
-          {made && peer.hasConfig && killSwitchOffered(peer) && (
+          {made && !hub && peer.hasConfig && killSwitchOffered(peer) && (
             <KillSwitchFile tunnel={tunnel} peer={peer} />
           )}
           {made && peer.kind === "site" && <SiteVerify tunnel={tunnel} peer={peer} />}
@@ -412,4 +455,72 @@ export function PeerSheet({
       {dialog}
     </>
   )
+}
+
+/** A network address from an interface address: 192.168.50.1/24 is 192.168.50.0/24. */
+function network(cidr: string) {
+  const [address, bits] = cidr.split("/")
+  const n = Number(bits)
+  const parts = address.split(".").map(Number)
+  if (parts.length !== 4 || !Number.isInteger(n)) return cidr
+  const value = parts.reduce((v, p) => (v << 8) | p, 0) >>> 0
+  const masked = n === 0 ? 0 : (value & (~0 << (32 - n))) >>> 0
+  return `${[24, 16, 8, 0].map((s) => (masked >>> s) & 255).join(".")}/${n}`
+}
+
+/**
+ * The two surfaces a tunnel's peers open, held once for a page that draws one
+ * tunnel or several: the dialog that adds a device or a site, and the sheet of
+ * the peer that was pressed. The networks a new peer may be offered are read
+ * here too: Docker's, and the bridges made on this server.
+ */
+export function usePeerSheets(tunnels: WGInterface[], onChanged: () => void) {
+  const overview = usePoll<NetworkOverview>(
+    (signal) => get("/network/overview", undefined, signal),
+    60_000,
+  )
+  const [adding, setAdding] = useState<{ tunnel: string; kind: "device" | "site" }>()
+  const [opened, setOpened] = useState<{ tunnel: string; key: string }>()
+  // A session opened through Just Hub is refused a new peer, a change to one
+  // and a peer's configuration, which holds its key: none of them is offered.
+  const hub = useHubSession()
+  const offer = useCallback(
+    (tunnel: string, kind: "device" | "site") => setAdding({ tunnel, kind }),
+    [],
+  )
+  const open = useCallback(
+    (tunnel: string, peer: WGPeer) => setOpened({ tunnel, key: peer.publicKey }),
+    [],
+  )
+  const localNetworks = [
+    ...(overview.data?.dockerNetworks.flatMap((n) => n.subnets) ?? []),
+    ...(overview.data?.links
+      .filter((l) => l.managed && l.role === "bridge")
+      .flatMap((l) => l.addresses.map((a) => network(a.cidr))) ?? []),
+  ]
+  const addingTunnel = tunnels.find((t) => t.name === adding?.tunnel)
+  const openTunnel = tunnels.find((t) => t.name === opened?.tunnel)
+  const openPeer = openTunnel?.peers.find((p) => p.publicKey === opened?.key)
+  const sheets = (
+    <>
+      {addingTunnel && adding && (
+        <AddPeer
+          tunnel={addingTunnel}
+          kind={adding.kind}
+          open
+          onOpenChange={(next) => !next && setAdding(undefined)}
+          onAdded={onChanged}
+          localNetworks={localNetworks}
+        />
+      )}
+      <PeerSheet
+        tunnel={openTunnel}
+        peer={openPeer}
+        onOpenChange={(next) => !next && setOpened(undefined)}
+        onChanged={onChanged}
+        hub={hub}
+      />
+    </>
+  )
+  return { add: hub ? undefined : offer, open, sheets }
 }

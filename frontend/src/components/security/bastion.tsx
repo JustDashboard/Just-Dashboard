@@ -6,21 +6,22 @@ import { get } from "@/lib/api"
 import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
 import type { NetworkOverview, VPNView } from "@/lib/types"
-import { Field, FieldRow, FormSection, InfoTip } from "@/components/form"
+import { Field, FieldRow, InfoTip } from "@/components/form"
+import { SettingSection, settingStatus } from "@/components/deploy/settings/setting-card"
 import { Well } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { useSecurity } from "@/components/security/security-context"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipStrip, FilterChip } from "@/components/tabs"
-import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 /**
  * The five directives that decide whether this server can be somebody's
- * jump host. They are drawn here, under the preset that sets four of them,
- * and are left out of the Settings list so each is on the page once.
+ * jump host. They are drawn in their own section, under the preset that sets
+ * four of them, and are left out of the other groups so each is on the page
+ * once.
  */
 export const JUMP_KEYS = [
   "allowtcpforwarding",
@@ -67,92 +68,102 @@ const PER_GROUP = 8
 const HOST = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 const USER = /^[A-Za-z_][A-Za-z0-9._-]*$/
 
+/** Whether the draft already holds every value of the bastion's profile. */
+export function jumpProfiled(value: (key: string) => string | undefined) {
+  return Object.entries(BASTION_PROFILE).every(([key, want]) => value(key) === want)
+}
+
 /**
- * Using this server as a jump host: the preset that makes it one, and the
- * `~/.ssh/config` block and `ssh -J` line that go through it.
+ * Using this server as a jump host: the section of the SSH settings that
+ * holds the five directives and the preset that sets four of them.
  *
- * The settings are the five directives (`rows`, drawn by the SSH page's own
- * setting rows so they stage into the same draft and apply bar as every other
- * directive) and the preset only writes into that draft: nothing is changed
- * until Test and apply is pressed. Beside them, the generator. Hosts behind
- * this one are suggested from what the dashboard already knows — WireGuard
- * peers, tailnet machines, the subnets of Docker networks — or typed; an
- * address that comes from typing is checked before it is put into a snippet
- * somebody will paste into their shell config.
- *
- * What it says about whether jumping works follows the draft, and notes when
- * the saved value disagrees: "allowed" while the file still says no is a
- * snippet that will fail until the change is applied.
+ * The rows are drawn by the SSH page's own setting rows, so they stage into
+ * the same draft and save bar as every other directive, and the preset only
+ * writes into that draft: nothing is changed until the change is applied.
+ * What the head says about whether jumping works follows the draft.
  */
-export function JumpHost({
+export function JumpHostSection({
   value,
-  saved,
   edited,
-  port,
-  user,
+  profiled,
   rows,
   onPreset,
 }: {
-  /** A directive's value as the page holds it — the draft over the saved one. */
+  /** A directive's value as the page holds it: the draft over the saved one. */
   value: (key: string) => string | undefined
-  /** AllowTcpForwarding as sshd reports it now. */
-  saved?: string
   edited: boolean
-  port: string
-  /** An account that holds a key here: the likeliest user to jump as. */
-  user: string
+  profiled: boolean
   rows: React.ReactNode
   onPreset: () => void
 }) {
   const forwarding = value("allowtcpforwarding") ?? "yes"
   const allowed = JUMPS.includes(forwarding)
-  const profiled = Object.entries(BASTION_PROFILE).every(([key, want]) => value(key) === want)
-
   return (
-    <div className="grid min-w-0 gap-x-12 gap-y-12 pt-6 xl:grid-cols-2">
-      <FormSection
-        aside
-        title="Forwarding"
-        className="max-w-none py-0"
-        actions={
-          <>
-            {edited && <Tag style={{ color: "var(--git-modified)" }}>Edited</Tag>}
-            <InfoTip label="What the profile sets">
-              Allows TCP forwarding, which is what <span className="font-mono">ssh -J</span> rides
-              on, and refuses agent forwarding, gateway ports and tunnel devices, none of which a
-              machine that only relays connections needs. Staged here; nothing changes until Test
-              and apply.
-            </InfoTip>
-            <Button size="xs" variant="outline" onClick={onPreset} disabled={profiled}>
-              Use it as a jump host
-            </Button>
-          </>
-        }
-        hint={
-          <Status
-            tone={allowed ? "running" : forwarding === "remote" ? "notice" : "stopped"}
-            label={
-              allowed
-                ? "Other hosts can be reached through it"
-                : forwarding === "remote"
-                  ? "Remote forwards only — jumping is refused"
-                  : "Forwarding is refused — jumping is refused"
-            }
-          />
-        }
-      >
-        <div className="divide-y divide-hairline">{rows}</div>
-      </FormSection>
-
-      <FormSection aside title="Connect through it" className="max-w-none py-0">
-        <Generator
-          allowed={allowed}
-          applied={saved === undefined || JUMPS.includes(saved)}
-          port={port}
-          user={user}
+    <SettingSection
+      title="Jump host"
+      state={
+        <Status
+          tone={allowed ? "running" : forwarding === "remote" ? "notice" : "stopped"}
+          label={
+            allowed
+              ? "Other hosts can be reached through it"
+              : forwarding === "remote"
+                ? "Remote forwards only: jumping is refused"
+                : "Forwarding is refused: jumping is refused"
+          }
         />
-      </FormSection>
-    </div>
+      }
+      status={settingStatus({ dirty: edited })}
+      actions={
+        <>
+          <InfoTip label="What the profile sets">
+            Allows TCP forwarding, which is what <span className="font-mono">ssh -J</span> rides on,
+            and refuses agent forwarding, gateway ports and tunnel devices, none of which a machine
+            that only relays connections needs. Staged here; nothing changes until it is applied.
+          </InfoTip>
+          <Button type="button" size="xs" variant="outline" onClick={onPreset} disabled={profiled}>
+            Use it as a jump host
+          </Button>
+        </>
+      }
+    >
+      <div className="divide-y divide-hairline">{rows}</div>
+    </SettingSection>
+  )
+}
+
+/**
+ * The `~/.ssh/config` block and `ssh -J` line that go through this server.
+ * Hosts behind it are suggested from what the dashboard already knows
+ * (WireGuard peers, tailnet machines, the subnets of Docker networks) or
+ * typed; an address that comes from typing is checked before it is put into a
+ * snippet somebody will paste into their shell config.
+ *
+ * Whether jumping works follows the draft, and the snippet notes when the
+ * saved value disagrees: "allowed" while the file still says no is a snippet
+ * that will fail until the change is applied.
+ */
+export function JumpGenerator({
+  value,
+  saved,
+  port,
+  user,
+}: {
+  value: (key: string) => string | undefined
+  /** AllowTcpForwarding as sshd reports it now. */
+  saved?: string
+  port: string
+  /** An account that holds a key here: the likeliest user to jump as. */
+  user: string
+}) {
+  const forwarding = value("allowtcpforwarding") ?? "yes"
+  return (
+    <Generator
+      allowed={JUMPS.includes(forwarding)}
+      applied={saved === undefined || JUMPS.includes(saved)}
+      port={port}
+      user={user}
+    />
   )
 }
 
@@ -230,7 +241,7 @@ function Generator({
         <Field
           label="This server"
           htmlFor="jump-address"
-          hint="Where you reach it from"
+          info="Where you reach it from: its tailnet address when it has one, else the name this page was opened on."
           error={valid.here ? undefined : "Not a host name or address"}
         >
           <Input
@@ -245,7 +256,7 @@ function Generator({
         <Field
           label="Your user here"
           htmlFor="jump-user"
-          hint={user === jump ? "An account with a key" : undefined}
+          info="An account that holds a key here."
           error={valid.jump ? undefined : "Letters, digits, dot, dash and underscore"}
         >
           <Input
@@ -356,7 +367,8 @@ function Generator({
       {!allowed ? (
         <Notice tone="warning" title="Jumping through this server is refused">
           sshd closes the channel <span className="font-mono">ssh -J</span> opens while
-          AllowTcpForwarding is not yes, local or all. Allow it above, or use the preset, and apply.
+          AllowTcpForwarding is not yes, local or all. Allow it under Jump host, or use the preset,
+          and apply.
         </Notice>
       ) : targets.length === 0 ? (
         <p className="text-hint text-muted-foreground">

@@ -1719,7 +1719,7 @@ are decided here, not by the page.
   `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE`, `SET`, `COMMENT`, a column `DEFAULT`, a `DO` body. The
   pass reads the text by PostgreSQL's own lexical rules (dollar quoting; `E''`, `U&''`, `N''`, `B''` and
   `X''` strings; block comments that nest; numbers in every base 16 takes, underscores included), keeps
-  the `$n` markers the Statements panel asks a value for, and replaces every literal with `?`. That is
+  the `$n` markers a statement's Plan view asks a value for, and replaces every literal with `?`. That is
   every literal, not every value the extension missed: a type's modifiers and an `ORDER BY` position read
   `?` too. In a statement the extension keeps as it came, two values that need no quotes are masked
   however they are written, a bare word included: whatever follows a role's `PASSWORD` (`CREATE`/`ALTER`
@@ -2475,7 +2475,9 @@ the detail of each classifier is below, with the surface it guards.
   test a restore applies, read once per fleet request). The listing alone called a database a nightly
   job protects never backed up. `GET /databases/backups/summary` is every connection's newest dump in
   the directory in one read that dials nothing, polled every few seconds while a dump runs, so the
-  control center takes the later of its answer and the fleet's. What a dump holds — the options it was
+  control center takes the later of its answer and the fleet's. Each row also lists when the
+  connection's newest fourteen dumps were written and how large each is (`recent`, newest first, from
+  the directory entries alone), which a database's card draws as a strip. What a dump holds — the options it was
   taken with, the tool and version that wrote it, how long it took, a note, who asked — is in a small
   file beside it (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed.
   Beside it rather than in a table because the directory is what gets copied off the machine. A file

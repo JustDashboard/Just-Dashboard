@@ -131,7 +131,7 @@ or one database inside Databases — or, inside a group, the group, a section in
 pages (Monitoring → Processes → PM2; Administration → Proxy & TLS → Sites).
 
 `components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
-`PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation`, and for the sections an
+`PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `navCurrent`, `sectionsFor`, `navLocation`, and for the sections an
 account hides `shownFor`, `hideableSections` and `sectionEntry` — so `app-sidebar.tsx` and
 `command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
 may carry a `capability`, and every reader hides what the role cannot use. ⌘K covers every page and is
@@ -142,13 +142,24 @@ shows** — "Browse", "Live", "Version", otherwise "Overview" — so every desti
 and "where am I" points at exactly one row. The palette skips the child whose href is the section's own,
 which is how one array serves both.
 
+**Which row is lit** is `navCurrent` in `nav.ts`, for a section's panel and for a database's or a
+project's own alike: a row is current on its page and on the pages opened from it (a volume under
+Volumes, a jail under Intrusion, a statement under a database's Performance), so an item's page two
+levels down still lights one row. The exception keeps a parent and its child from both being lit: a row
+other rows of the panel hang under (Docker's Overview at `/docker`, a database's Home, Metrics above its
+Alerts) is the landing page and is current on its own address alone, unless it is the list its items
+open under (`LIST_LANDINGS`: Live for `/processes/<pid>`, Projects for a project and `/deploy/new`,
+Control center for a database), which keeps the addresses no other row owns. A run is one of its
+project's Deployments. An address under a section that no row owns lights nothing.
+
 A section with more pages than a reader scans as one list puts them under **headings**, as a project's
 rail does with *Settings*: a `NavChild` names its `group`, `groupedChildren` (`nav.ts`) turns the list
 into the panel's groups, and a section that names none is the single list it always was. Network is the
 one that does, since 0.8.6: Overview above every heading, then *Setup* (Interfaces, Routing, Egress
 groups, Firewall, Gateway, Protection, VPN, DNS, Address planning), *Activity* (Traffic, Socket history,
-Connections, Drift) and *Diagnostics* (Tools, Connection path, Packet captures, External checks, Saved
-runs). It was nineteen siblings with four glyphs each used twice. No two pages of one section share a
+Connections, Drift) and *Diagnostics* (Tools, Packet captures, External checks, Saved
+runs; Connection path left the rail in 0.8.7, when it became a tool of the Tools workbench). It was
+nineteen siblings with four glyphs each used twice. No two pages of one section share a
 glyph, which `nav.test.js` holds for every section: the glyph is what a row is found by before it is
 read.
 
@@ -194,7 +205,7 @@ What a hidden section loses is exactly three things, each read through `useHidde
   whose remaining entries the role cannot open goes with them — Administration with Packages
   hidden, to an account without `system.admin`). A section's root is hidden, never a page inside it.
   **While you are inside a hidden section it is drawn anyway**: a deployment's domain links to
-  `/proxy/sites?site=…`, about 150 such links cross sections, and the rail must still say where you
+  `/proxy/sites/<name>`, about 150 such links cross sections, and the rail must still say where you
   are. It says why the row is there, too — `HiddenHere` in `app-sidebar.tsx` puts one line under the
   panel's head, "Proxy & TLS is hidden from your sidebar. Show it", and Show it removes the section
   from the list. The line is in the rail rather than over the page so a `fill` page (the terminal, a
@@ -241,14 +252,15 @@ wide screen: a bar holding them at the foot of the window drew a dark strip the 
 have.
 
 Nothing is saved until *Continue* or *Show me everything*. `/account/workspace` is the answer after
-the fact, in the reading register (`components/account/workspace.tsx`), and nothing on it is framed
-but the rail. *What you use this server for* is the question's purposes in its order as lit cards
+the fact (`components/account/workspace.tsx`), and nothing on it is framed: one line that says
+where the answer stands (*15 of 15 shown · 6 purposes*), then one centred settings column (design
+system §7). *What you use this server for* is the question's purposes in its order as a grid of lit cards
 (`PurposePicker`), each its three products, its name — with the same mark on Route the network —
 and the sections it brings with the ones out of the rail dimmed; *Ask me again* goes back to `/welcome`. Only sections are stored, so a
 purpose is chosen when every section of it the role is offered is shown (`purposeShown`); pressing a
 chosen one takes its sections out and pressing any other brings them back whole (`pressPurpose`).
-Purposes share no section, so a press never moves another card. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked
-from the same registry in its groups and order with a switch on every row the role may hide;
+Purposes share no section, so a press never moves another card. Under it, *Sidebar* is the rail's entries (`SidebarEditor`), walked
+from the same registry in its groups and order as full-width switch rows on hairlines, one for every row the role may hide;
 Overview, Map, Monitoring and Settings say *Always* instead, and Administration heads the three
 sections it holds. A list of sections beside a separate picture of the rail was the same list twice.
 Both edit one draft, and an edit raises the settings pages' floating Save (`SaveBarProvider`,
@@ -312,7 +324,8 @@ never by hand. `database/shell/routes.ts` holds the one spelling of an id (`DATA
 no leading zero), which the layout, the rail and the palette all read, so `/databases/007` is not
 database 7 to one of them and an unknown address to another. An id no saved connection has is
 "Database not found" with a way back, never some other database; any other path under a database is
-"Page not found" inside its shell (`[id]/[...missing]/page.tsx`), rail and strip kept. A database's
+"Page not found" inside its shell (`[id]/[...missing]/page.tsx`), rail and header kept, drawn with
+the database's engine. A database's
 panel has Home alone and then Work, Schema, Insights and Operate (`database/shell/nav-groups.ts`),
 each holding only what the engine has, in the engine's words. The connection used to be a query
 parameter (`/databases/browse?conn=3`), and those addresses are still out there — a board stores the
@@ -535,7 +548,11 @@ phone keeps the whole width for the list.
 
 Each resource result uses its existing detail address. Sites open `/proxy/sites/<name>` for
 inspection rather than the legacy `?site=` editing link. Containers and stacks open their dedicated
-pages; Git, systemd and PM2 retain query-selection links, including PM2's daemon and numeric ID.
+pages, and a PM2 application opens its own (`/processes/pm2/<name>`, with `?account=` where two
+accounts run one of that name); Git and systemd retain query-selection links. Nothing in the product
+writes an address that opened a sheet any more (the server map, the palette, a project's deep links,
+the investigator's evidence and the pictures all name the item's page); every such address still
+redirects, for the links already out there.
 Names with the same spelling retain separate identities. The current database keeps the existing
 engine-dependent pages and broken-connection restriction; saved databases also retain the
 `open <name>` search phrase. Page commands, proxy commands and

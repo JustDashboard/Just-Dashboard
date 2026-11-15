@@ -607,16 +607,22 @@ of a host's logs.
 
 ## Frontend
 
-`ProjectLogs` is a `StatGrid` of four readings (requests/min with page views, failing share, p95,
-bytes served — the figures count up on arrival through `NumberTicker`) and the
-alerts line over a `Pane` with the five views, the pane a definite height (`max(28rem, 100dvh − 6rem)`,
-`40rem` from `sm`) with each view scrolling inside it — a 307-line live tail had stretched it to
-nearly seven thousand pixels. Each reading carries its last hour in the tile, as
-the host Overview's do: the request rate, the p95 and the bytes as lines from the buckets, the
-browsers, programs and crawlers that asked as their logos beside the tile's name, the failing share
+`ProjectLogs` is four `ReadingLine`s (`components/reading-line.tsx`, the project Overview's: Traffic
+as requests a minute with page views, Errors as the failing share, Response time as what 19 in 20 were
+inside, Served as bytes sent — the rate counts up on arrival through `NumberTicker`) and the
+alerts line over a `Pane` with the five views, the pane a definite height (`max(40rem, 100dvh − 6rem)`
+from `md`) with each view scrolling inside it — a 307-line live tail had stretched it to
+nearly seven thousand pixels. They were a `StatGrid` of four tiles until 0.8.7. Each line is one height
+with a reading and without one, and carries its last hour at its end, as
+the project Overview's do: the request rate, the slow tail and the bytes as lines from the buckets, the
+browsers, programs and crawlers that asked as their logos beside the line's name, the failing share
 as a strip of the hour's sixty minutes (`traffic-strip.tsx`, the Backups run strip's shape: green
-where a minute went fine, red where it had a 5xx, grey where nothing came in), two to a row on a
-phone. What the container did is the Events tab's: its count is the hour's disruptions — an exit
+where a minute went fine, red where it had a 5xx, grey where nothing came in). Below `md` the page is
+one pane the height of the window under the project's header (`components/phone-panes.tsx`; the shell
+holds `/logs` to the window there), the five views the stops of a bar along its foot with the hour's
+disruptions counted on Events; the hour is one line at the pane's head on every view (rate, failing
+share, firing alerts) and opens the four readings and the alerts line as a page with a way back, the
+view behind it kept as it was. What the container did is the Events tab's: its count is the hour's disruptions — an exit
 that was not clean, an OOM kill, a restart. An exit with status 0 is not a disruption: it is a
 routine stop or the old container of a release swap, which the server already logs as a notice, and
 the Events tab does not count it. A kill is not counted either, because Docker reports the exit
@@ -750,9 +756,11 @@ figure and its share of the whole in columns that end on the head's right edge, 
 A share of the whole that wants a picture is one `SplitBar` over the list (Visitors' breakdowns, Status
 codes, the Came from and On tiles). A failing path says so in its hint. A path row narrows the rows to
 it; a client row narrows to the client and, for an admin, blocks it. **Response times**
-(`latency-readings.tsx`) are four figures in words (Half, 19 in 20, 99 in 100, Slowest), each past a
-second, or past the line a latency alert watches, in amber, and each narrowing the rows to the requests
-at least that slow. The five audience tiles keep one picture line each, so their hints share a baseline.
+(`latency-readings.tsx`) are one sentence on the measure's mark ("Half inside 24ms, 19 in 20 inside
+412ms, 99 in 100 inside 2.84s; the slowest took 3.12s."; four tiles until 0.8.7), each figure past a
+second, or past the line a latency alert watches, in amber, and each a button narrowing the rows to the
+requests at least that slow. What was served is a line under Pages (bytes sent, and each on average),
+and the heaviest of the busiest pages keep a list of their own. The five audience tiles keep one picture line each, so their hints share a baseline.
 **Slowest** is a table with its own column heads. Every narrowing the page makes is one of the API's own
 filters — `host`, exact `status` codes, `minMs` — and the poll, the socket and the CSV export are asked
 the same query, so what is exported is what is on screen.

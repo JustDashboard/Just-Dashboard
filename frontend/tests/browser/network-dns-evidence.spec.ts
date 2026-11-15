@@ -166,10 +166,9 @@ async function setup(
     if (path.endsWith(`/${id}`)) return json(route, saved)
     return json(route, [{ ...saved, result: undefined }])
   })
-  await page.goto("/network/dns")
-  await expect(
-    page.getByRole("heading", { name: "Policy investigation", exact: true }),
-  ).toBeVisible()
+  // The policy investigation is one of the page's lookups, named in the address.
+  await page.goto("/network/dns?tab=lookups&tool=policy")
+  await expect(page.getByRole("textbox", { name: "Name", exact: true })).toBeVisible()
   return calls
 }
 
@@ -231,11 +230,11 @@ test("explicit launch sends only the question and expected native policy link", 
   page,
 }) => {
   const calls = await setup(page)
-  await page.getByLabel("Investigation name", { exact: true }).fill("secret.corp.example")
-  await page.getByLabel("Record type", { exact: true }).click()
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("secret.corp.example")
+  await page.getByRole("combobox", { name: "Record", exact: true }).click()
   await page.getByRole("option", { name: "AAAA", exact: true }).click()
-  await page.getByLabel("Expected policy link (optional)", { exact: true }).fill("vpn0")
-  await page.getByRole("button", { name: "Investigate policy", exact: true }).click()
+  await page.getByLabel("Expected link", { exact: true }).fill("vpn0")
+  await page.getByRole("button", { name: "Investigate", exact: true }).click()
   await expect
     .poll(() => calls)
     .toEqual([{ name: "secret.corp.example", type: "AAAA", expectedInterface: "vpn0" }])
@@ -250,8 +249,8 @@ test("failed launch preserves dated selected evidence without an automatic retry
     .getByRole("button", { name: "secret.corp.example · AAAA · completed", exact: true })
     .click()
   await expect(page.getByLabel("DNS policy evidence report")).toContainText("2001:db8::7")
-  await page.getByLabel("Investigation name", { exact: true }).fill("other.corp.example")
-  await page.getByRole("button", { name: "Investigate policy", exact: true }).click()
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("other.corp.example")
+  await page.getByRole("button", { name: "Investigate", exact: true }).click()
   await expect(
     page.getByRole("alert").filter({ hasText: "Investigation unavailable" }),
   ).toContainText("No automatic retry")
@@ -272,17 +271,37 @@ test("interrupted saved questions have no fabricated trust and never rerun on re
   expect(calls).toHaveLength(0)
 })
 
-test("reader sees the diagnostic boundary without private-history requests", async ({ page }) => {
+test("a reader is offered no policy investigation and makes no private-history request", async ({
+  page,
+}) => {
   const requests: string[] = []
   page.on("request", (request) => {
     if (request.url().includes("/dns/evidence")) requests.push(request.url())
   })
   await setup(page, { readonly: true })
-  await expect(
-    page.getByText(
-      "Policy investigations and saved private answers require system administration access.",
-    ),
-  ).toBeVisible()
-  await expect(page.getByRole("button", { name: "Investigate policy", exact: true })).toHaveCount(0)
+  // The address asked for the policy lookup; a reader is given the one it may run.
+  await expect(page.getByRole("button", { name: "Resolve", exact: true })).toBeVisible()
+  await expect(page.getByRole("radiogroup", { name: "Lookup" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Investigate", exact: true })).toHaveCount(0)
   expect(requests).toHaveLength(0)
+})
+
+test("deleting a kept report asks first", async ({ page }) => {
+  const deletes: string[] = []
+  await setup(page)
+  await page.route(`**/api/v1/network/dns/evidence/${id}`, (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback()
+    deletes.push(route.request().url())
+    return json(route, { output: "ok" })
+  })
+  await page
+    .getByRole("button", { name: "secret.corp.example · AAAA · completed", exact: true })
+    .click()
+  await page.getByRole("button", { name: "Delete saved report", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Delete the kept report" })
+  await expect(dialog).toContainText("secret.corp.example")
+  expect(deletes).toHaveLength(0)
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click()
+  await expect.poll(() => deletes).toHaveLength(1)
+  await expect(page.getByLabel("DNS policy evidence report")).toHaveCount(0)
 })

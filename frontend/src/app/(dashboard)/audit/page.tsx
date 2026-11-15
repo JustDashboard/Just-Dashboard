@@ -4,39 +4,46 @@ import { Fragment, useMemo, useState } from "react"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useFilterHistory } from "@/components/workspace/history"
 import { useHeldList } from "@/components/workspace/held-list"
-import { CrossCircle, FileText } from "@/components/icons"
-import { get } from "@/lib/api"
-import { calendarDate, clock, plural, relativeTime } from "@/lib/format"
+import { CrossCircle, Download, FileText, Notes, RefreshClockwise } from "@/components/icons"
+import { ApiError, get } from "@/lib/api"
+import { calendarDate, clock, plural, relativeTime, timestamp } from "@/lib/format"
+import { downloadText } from "@/lib/metrics-export"
+import type { MetricsState } from "@/lib/metrics-store"
+import { notify } from "@/lib/toast"
 import type { AuditEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/hooks/use-auth"
+import { useMetricsValue } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
+import { dayReading, dayStart, failedWords, peopleWords } from "@/components/audit/day"
+import { DayStrip } from "@/components/audit/day-strip"
+import { EntryDetail, EntryResult } from "@/components/audit/entry-detail"
+import { EXPORT_MOST, EXPORT_PAGE, auditCsv, exportName } from "@/components/audit/export"
 import {
   AUDIT_SECTIONS,
   ActionMark,
   ActionName,
   ActorMark,
   actorName,
-  auditSection,
   isMachine,
   keyTitle,
   keyWords,
 } from "@/components/audit/marks"
-import { MethodWord, RequestPath, StatusCode } from "@/components/deploy/request-marks"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { ProductGlyph } from "@/components/product-logo"
+import { ProductGlyph, platformProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Address } from "@/components/security/marks"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, Hold, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { FaceRun } from "@/components/system-users/marks"
 import { ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { NumberTicker } from "@/components/ui/number-ticker"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   stickyTableHeader,
   Table,
@@ -46,6 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { VerbMenu, type Verb } from "@/components/verbs"
 
 const PAGE_SIZE = 100
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -56,25 +64,42 @@ const CHIPS = ["signin", "docker", "deploy", "database", "files", "terminal", "g
 type AuditPage = { entries: AuditEntry[]; total: number }
 
 /**
+ * The line of facts as one block. On a phone it wraps to three lines, so it
+ * holds that room there from the start and the strip under it does not move
+ * when the day's read lands.
+ */
+const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-14"
+
+const hostOf = (state: MetricsState) => state.host
+
+/** A row's action, underlined while the pointer is on the button it names. */
+const NAME = "text-xs underline-offset-2 group-hover/entry:underline"
+
+/**
  * Who changed this server, and what they changed.
  *
- * The page opens on four readings of the last day — how much was changed and
- * when, as a trend across its hours; how much of it the server refused; who
- * did it, drawn as their faces; and how many sign-ins there were and whether
- * any were turned away — read from their own query, so a filter narrows the
- * trail without narrowing the readings above it (§15 pass 2).
+ * The page opens on what it is about, as a project's page does: an identity
+ * line saying how the last day went (how much was changed, how much of it the
+ * server refused, who did it, drawn as their faces, and where the last sign-in
+ * came from), with the export behind its menu. Under it the day is one strip,
+ * an hour to a stretch in the colour of how its changes went
+ * (`audit/day-strip`). Both are read from their own query, so a filter narrows
+ * the trail without narrowing the day above it. Four tiles said this until
+ * 0.8.7, three of them bare figures.
  *
- * The trail is a table of readings (§16), so it keeps its frame, its density
- * and its hairlines, and gains what it could not say before (§14): each entry
- * is drawn with the mark of the part of the product it touched — Docker's
- * whale, Git's branch, the sidebar's glyph for the rest — its actor as a face
- * in their own hue, the address as the network it is on, the route's method
- * and path in the request log's hues and the outcome in its family's colour.
- * The rows are shelved by day, and a row that arrives on a poll rises into
- * place (§11 *arrived*). The sections a trail is usually narrowed to are chips
- * over it, each with the same mark.
+ * The trail is a table of readings (§16), so it keeps its frame and its
+ * hairlines: each entry is one line, drawn with the mark of the part of the
+ * product it touched (Docker's whale, Git's branch, the sidebar's glyph for
+ * the rest), its actor as a face in their own hue, the address as the network
+ * it is on and the outcome in its family's colour. The action is the row's
+ * button: it opens the entry whole, with the method and path, the key's record
+ * and whatever a one-line cell cut short. The rows are shelved by day, and a
+ * row that arrives on a poll rises into place (§11 *arrived*). The sections a
+ * trail is usually narrowed to are one row of chips over it.
  */
 export default function AuditPage() {
+  const { can } = useAuth()
+  const admin = can("system.admin")
   // `?action=` is how the Docker event feed hands off: an event correlated to
   // an audit entry offers a link, and a link that lands on an unfiltered list
   // of everything the dashboard has ever done is not the entry it promised.
@@ -94,11 +119,8 @@ export default function AuditPage() {
       : 0
   const setUsername = (username: string) => setFilters((previous) => ({ ...previous, username }))
   const setAction = (action: string) => setFilters((previous) => ({ ...previous, action }))
-  const setOnlyFailed = (next: boolean | ((value: boolean) => boolean)) =>
-    setFilters((previous) => ({
-      ...previous,
-      failed: (typeof next === "function" ? next(previous.failed === "1") : next) ? "1" : "",
-    }))
+  const setOnlyFailed = (next: boolean) =>
+    setFilters((previous) => ({ ...previous, failed: next ? "1" : "" }))
   const setOffset = (offset: number | ((value: number) => number)) =>
     setFilters(
       (previous) => ({
@@ -122,19 +144,30 @@ export default function AuditPage() {
       ),
     15000,
     [username, action, onlyFailed, offset],
+    { enabled: admin },
   )
 
-  // The last day, unfiltered: what the readings are about. Five hundred is the
-  // most the server hands back in one page, and past it the trend and the
+  // The last day, unfiltered: what the opening is about. Five hundred is the
+  // most the server hands back in one page, and past it the strip and the
   // faces are read from the newest five hundred while the counts stay exact.
-  const day = usePoll(async (signal) => {
-    const since = new Date(Date.now() - DAY_MS).toISOString()
-    const [recent, failed] = await Promise.all([
-      get<AuditPage>("/audit/", { since, limit: 500 }, signal),
-      get<AuditPage>("/audit/", { since, failed: true, limit: 1 }, signal),
-    ])
-    return { ...recent, failed: failed.total, since }
-  }, 60000)
+  const day = usePoll(
+    async (signal) => {
+      const start = dayStart(Date.now())
+      const since = new Date(start).toISOString()
+      const [recent, failed] = await Promise.all([
+        get<AuditPage>("/audit/", { since, limit: 500 }, signal),
+        get<AuditPage>("/audit/", { since, failed: true, limit: 1 }, signal),
+      ])
+      return { ...recent, failed: failed.total, start }
+    },
+    60000,
+    [],
+    { enabled: admin },
+  )
+  const reading = useMemo(
+    () => (day.data ? dayReading(day.data.entries, day.data.start) : undefined),
+    [day.data],
+  )
 
   // The header's figure outlives a filter change: a new filter empties `data`
   // while it loads, and a total that blinked out on every keystroke would
@@ -153,16 +186,88 @@ export default function AuditPage() {
     next()
     setFilters((previous) => ({ ...previous, offset: "0" }))
   }
+  const refresh = () => {
+    held.reveal()
+    trailRefresh()
+    day.refresh()
+  }
+
+  // What the filters match, as a file: every page of it, up to a bound, and
+  // none of it newer than the press, so an entry written while the pages are
+  // being read moves no row from one page onto the next.
+  const [exporting, setExporting] = useState(false)
+  const exportTrail = async () => {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const until = new Date().toISOString()
+      const rows: AuditEntry[] = []
+      let matching = 0
+      while (rows.length < EXPORT_MOST) {
+        const page = await get<AuditPage>("/audit/", {
+          username,
+          action,
+          failed: onlyFailed,
+          until,
+          limit: EXPORT_PAGE,
+          offset: rows.length,
+        })
+        matching = page.total
+        rows.push(...page.entries)
+        if (page.entries.length < EXPORT_PAGE || rows.length >= page.total) break
+      }
+      if (rows.length === 0) {
+        notify.info(
+          filtered ? "No entries match, so there is nothing to export" : "Nothing to export",
+        )
+        return
+      }
+      downloadText(exportName({ username, action, failed: onlyFailed }, new Date()), auditCsv(rows))
+      notify.success(`Exported ${plural(rows.length, "entry", "entries")}`, {
+        description:
+          matching > rows.length
+            ? `The newest ${rows.length.toLocaleString()} of ${matching.toLocaleString()}. Narrow the trail to export the rest.`
+            : undefined,
+      })
+    } catch (err) {
+      notify.error("Could not export the trail", err)
+    } finally {
+      setExporting(false)
+    }
+  }
+  const verbs: Verb[] = [
+    {
+      key: "export",
+      label: filtered ? "Export what matches as CSV" : "Export as CSV",
+      icon: Download,
+      disabled: exporting,
+      run: () => void exportTrail(),
+    },
+    { key: "refresh", label: "Refresh", icon: RefreshClockwise, run: refresh },
+  ]
+
+  // The trail is an administrator's: it names every account, address and key.
+  // The server refuses anyone else, so the page says that in place of a toolbar
+  // of filters over a refusal.
+  const refused = (failure: Error | null | undefined) =>
+    failure instanceof ApiError && failure.status === 403
+  if (!admin || refused(error) || refused(day.error)) {
+    return (
+      <Page className="animate-rise">
+        <PageContext eyebrow="Advanced" title="Audit log" />
+        <EmptyState
+          icon={Notes}
+          title="The audit log is for administrators"
+          description="It names every account, address and key that changed this server."
+        />
+      </Page>
+    )
+  }
 
   return (
     <Workspace
       name="Audit"
-      openItems={false}
-      refresh={() => {
-        held.reveal()
-        trailRefresh()
-        day.refresh()
-      }}
+      refresh={refresh}
       escape={() => {
         if (!filtered) return false
         setFilters({ username: "", action: "", failed: "", offset: "0" }, true)
@@ -172,100 +277,119 @@ export default function AuditPage() {
       <Page className="animate-rise">
         <PageContext eyebrow="Advanced" title="Audit log" />
 
-        {day.data && <DayReadings day={day.data} />}
-        {/* The readings land over the trail: it waits for them rather than
-            being pushed down by them. */}
-        <Hold until={!day.loading} />
+        {/* The line and the day under it are one block: what happened, then
+            when. Both stand at their final height before the day is read. */}
+        <div className="flex min-w-0 flex-col gap-4">
+          <AuditIdentity
+            day={day.data}
+            reading={reading}
+            failed={Boolean(day.error && !day.data)}
+            verbs={verbs}
+          />
+          <DayStrip day={reading} error={day.error} onRetry={day.refresh} />
+        </div>
 
         {/* The table is the whole of the trail, and it is framed: a grid that
-          owns its own scrolling takes an edge, or a row whose actions sit past
-          the right of it reads as a row with no actions (§2). The toolbar stays
-          mounted across a filter change so the box being typed into never
-          loses its caret to a skeleton. */}
+          owns its own scrolling takes an edge (§2). The filters stay mounted
+          across a filter change so the box being typed into never loses its
+          caret to a skeleton. */}
         <Panel>
-          <PanelHeader
-            title="Recorded requests"
-            actions={
-              total !== undefined && (
-                <span className="text-hint text-muted-foreground">
-                  {filtered ? "Matching" : "Recorded"}{" "}
-                  <span key={total} className="numeric inline-block animate-rise text-foreground">
-                    {total.toLocaleString()}
-                  </span>
+          <PanelHeader title="Recorded requests" className="gap-x-3">
+            <span className="mr-auto flex min-w-0 items-center gap-3">
+              {total !== undefined && (
+                <span
+                  key={total}
+                  className="numeric animate-rise text-hint text-muted-foreground"
+                  aria-label={
+                    filtered
+                      ? `${total.toLocaleString()} matching`
+                      : `${total.toLocaleString()} recorded`
+                  }
+                >
+                  {total.toLocaleString()}
+                  {filtered && " matching"}
                 </span>
-              )
-            }
-          />
+              )}
+              {held.pending > 0 && (
+                <Button
+                  size="xs"
+                  aria-label={`Show ${held.pending} new audit ${held.pending === 1 ? "entry" : "entries"}`}
+                  onClick={held.reveal}
+                >
+                  <span role="status">
+                    {held.pending} new {held.pending === 1 ? "entry" : "entries"}
+                  </span>{" "}
+                  · Show
+                </Button>
+              )}
+            </span>
+            <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+              <SearchInput
+                containerClassName="max-sm:basis-0 max-sm:flex-1 sm:w-40"
+                value={username}
+                onChange={(e) => narrow(() => setUsername(e.target.value))}
+                placeholder="User"
+                aria-label="User"
+              />
+              <Input
+                value={action}
+                onChange={(e) => narrow(() => setAction(e.target.value))}
+                data-workspace-search
+                placeholder="Action, e.g. docker.container"
+                aria-label="Action"
+                className="h-10 min-w-0 flex-[1.4] text-body sm:h-8 sm:w-60 sm:flex-none"
+              />
+            </div>
+          </PanelHeader>
           <PanelToolbar>
-            <SearchInput
-              containerClassName="sm:w-48"
-              value={username}
-              onChange={(e) => narrow(() => setUsername(e.target.value))}
-              placeholder="User"
-            />
-            <Input
-              value={action}
-              onChange={(e) => narrow(() => setAction(e.target.value))}
-              data-workspace-search
-              placeholder="Action, e.g. docker.container"
-              className="h-8 w-full text-body sm:w-64"
-            />
-            <FilterChip
-              selected={onlyFailed}
-              onClick={() => narrow(() => setOnlyFailed(!onlyFailed))}
-            >
-              <CrossCircle aria-hidden className="size-3.5 text-destructive" />
-              Failures only
-            </FilterChip>
-            <WorkspaceHelp />
-            {held.pending > 0 && (
-              <Button
-                size="xs"
-                aria-label={`Show ${held.pending} new audit ${held.pending === 1 ? "entry" : "entries"}`}
-                onClick={held.reveal}
+            <ChipStrip>
+              <FilterChip
+                selected={onlyFailed}
+                onClick={() => narrow(() => setOnlyFailed(!onlyFailed))}
               >
-                <span role="status">
-                  {held.pending} new {held.pending === 1 ? "entry" : "entries"}
-                </span>{" "}
-                · Show
-              </Button>
-            )}
-          </PanelToolbar>
-          <PanelToolbar>
-            <ChipStrip role="group" aria-label="Sections">
-              {AUDIT_SECTIONS.filter((section) => CHIPS.includes(section.key)).map((section) => {
-                const selected = action === section.filter
-                return (
-                  <FilterChip
-                    key={section.key}
-                    selected={selected}
-                    onClick={() => narrow(() => setAction(selected ? "" : section.filter))}
-                  >
-                    {section.product ? (
-                      <ProductGlyph id={section.product} />
-                    ) : (
-                      <section.glyph aria-hidden className="size-3.5 text-muted-foreground" />
-                    )}
-                    {section.label}
-                  </FilterChip>
-                )
-              })}
+                <CrossCircle aria-hidden className="size-3.5 text-destructive" />
+                Failures only
+              </FilterChip>
+              <span aria-hidden className="h-4 w-px shrink-0 bg-border" />
+              <div role="group" aria-label="Sections" className="contents">
+                {AUDIT_SECTIONS.filter((section) => CHIPS.includes(section.key)).map((section) => {
+                  const selected = action === section.filter
+                  return (
+                    <FilterChip
+                      key={section.key}
+                      selected={selected}
+                      onClick={() => narrow(() => setAction(selected ? "" : section.filter))}
+                    >
+                      {section.product ? (
+                        <ProductGlyph id={section.product} />
+                      ) : (
+                        <section.glyph aria-hidden className="size-3.5 text-muted-foreground" />
+                      )}
+                      {section.label}
+                    </FilterChip>
+                  )
+                })}
+              </div>
             </ChipStrip>
           </PanelToolbar>
 
           <PanelBody flush>
-            {loading && !data && <LoadingPanel rows={8} />}
-            {error && !data && <ErrorState error={error} />}
+            {loading && !data && <TrailSkeleton />}
+            {error && !data && (
+              <div className="p-4">
+                <ErrorState error={error} onRetry={trailRefresh} retryable />
+              </div>
+            )}
             {data && (
               <div key="rows" className="animate-rise">
                 {/* The outer columns take the gutter from their own cell padding,
                   so the first column starts in the title's column; the `-mx`
                   bleed that does the same on a plain panel is gated to it (§2). */}
                 <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
-                  <Table containerClassName="max-h-[calc(100svh-22rem)]">
+                  <Table containerClassName="max-h-[calc(100svh-21rem)]">
                     <TableHeader className={stickyTableHeader}>
                       <TableRow>
-                        <TableHead className="w-28">When</TableHead>
+                        <TableHead className="w-24">When</TableHead>
                         <TableHead>Who</TableHead>
                         <TableHead>Action</TableHead>
                         <TableHead className="w-full">Target</TableHead>
@@ -285,53 +409,51 @@ export default function AuditPage() {
                               key={entry.id}
                               data-workspace-item={String(entry.id)}
                               data-workspace-name={entry.action}
-                              tabIndex={0}
-                              className={cn(
-                                "focus-ring-inset",
-                                arrived.has(String(entry.id)) && "animate-rise",
-                              )}
+                              className={cn(arrived.has(String(entry.id)) && "animate-rise")}
                             >
-                              <TableCell>
-                                <div className="numeric font-mono text-xs">{clock(entry.ts)}</div>
-                                <p className="text-hint text-muted-foreground">
-                                  {relativeTime(entry.ts)}
-                                </p>
+                              <TableCell
+                                className="numeric font-mono text-xs"
+                                title={`${timestamp(entry.ts)} · ${relativeTime(entry.ts)}`}
+                              >
+                                {clock(entry.ts)}
                               </TableCell>
                               <TableCell>
                                 <Actor entry={entry} />
                               </TableCell>
                               <TableCell>
-                                <div className="flex max-w-[20rem] min-w-0 items-center gap-3">
+                                <EntryButton
+                                  entry={entry}
+                                  className="max-w-[15rem] 2xl:max-w-[20rem]"
+                                >
                                   <ActionMark action={entry.action} />
-                                  <div className="min-w-0">
-                                    <ActionName action={entry.action} className="block text-xs" />
-                                    {entry.path && (
-                                      <p className="flex min-w-0 items-baseline gap-1.5 text-hint">
-                                        <MethodWord method={entry.method} />
-                                        <RequestPath path={entry.path} />
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
+                                  <ActionName action={entry.action} className={NAME} />
+                                </EntryButton>
                               </TableCell>
                               {/* The column that yields: `max-w-0` beside `w-full` lets it
                                 shrink to what the others leave and truncate, where a
                                 path longer than that pushed Result past the frame. */}
                               <TableCell className="max-w-0">
-                                <div className="truncate font-mono text-xs" title={entry.target}>
-                                  {entry.target}
-                                </div>
-                                {entry.detail && (
-                                  <p
-                                    className="truncate text-hint text-muted-foreground"
-                                    title={entry.detail}
-                                  >
-                                    {entry.detail}
-                                  </p>
-                                )}
+                                <p className="flex min-w-0 items-baseline gap-2.5">
+                                  {entry.target && (
+                                    <span
+                                      className="min-w-0 truncate font-mono text-xs"
+                                      title={entry.target}
+                                    >
+                                      {entry.target}
+                                    </span>
+                                  )}
+                                  {entry.detail && (
+                                    <span
+                                      className="min-w-12 flex-1 truncate text-hint text-muted-foreground"
+                                      title={entry.detail}
+                                    >
+                                      {entry.detail}
+                                    </span>
+                                  )}
+                                </p>
                               </TableCell>
                               <TableCell>
-                                <Result entry={entry} />
+                                <EntryResult entry={entry} />
                               </TableCell>
                             </TableRow>
                           ))}
@@ -340,9 +462,9 @@ export default function AuditPage() {
                     </TableBody>
                   </Table>
                 </div>
-                {/* Below `lg` the same entries are drawn down the row instead of
-                  across it, so the phone still sees who did what to what, and
-                  whether it worked. */}
+                {/* Below `lg` an entry is two lines, the same two whatever it
+                  carries: what was done and when, then who did it to what. The
+                  rest is in the entry the row opens. */}
                 <div className="px-4 group-data-[plain]/panel:px-0 lg:hidden">
                   {days.map(({ label, entries: rows }) => (
                     <section key={label} className="pt-4">
@@ -353,41 +475,38 @@ export default function AuditPage() {
                             key={entry.id}
                             data-workspace-item={String(entry.id)}
                             data-workspace-name={entry.action}
-                            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- an entry takes the keyboard so that the trail can be read row by row and the Workspace's keys can land on it
-                            tabIndex={0}
                             className={cn(
-                              "flex min-w-0 items-start gap-3 py-3 focus-ring-inset",
+                              "flex min-w-0 items-center gap-3 py-2.5",
                               ROW_BLEED,
                               arrived.has(String(entry.id)) && "animate-rise",
                             )}
                           >
-                            <ActionMark action={entry.action} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex min-w-0 items-baseline gap-2">
-                                <ActionName action={entry.action} className="text-xs font-medium" />
-                                <span className="numeric shrink-0 text-hint text-muted-foreground">
-                                  {clock(entry.ts)}
-                                </span>
-                              </div>
-                              <p className="truncate font-mono text-hint text-muted-foreground">
-                                {entry.target}
-                              </p>
-                              <p className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-                                <span className="shrink-0 text-foreground">{actorName(entry)}</span>
-                                {entry.ip && <Address ip={entry.ip} className="min-w-0" />}
-                                {keyWords(entry) && (
-                                  <span className="min-w-0 truncate" title={keyTitle(entry)}>
-                                    · {keyWords(entry)}
+                            <EntryButton entry={entry} className="flex-1">
+                              <ActionMark action={entry.action} />
+                              <span className="block min-w-0 flex-1">
+                                <span className="flex min-w-0 items-baseline gap-2">
+                                  <ActionName
+                                    action={entry.action}
+                                    className={cn(NAME, "font-medium")}
+                                  />
+                                  <span className="numeric shrink-0 text-hint text-muted-foreground">
+                                    {clock(entry.ts)}
                                   </span>
-                                )}
-                              </p>
-                              {entry.detail && (
-                                <p className="truncate text-hint text-muted-foreground">
-                                  {entry.detail}
-                                </p>
-                              )}
-                            </div>
-                            <Result entry={entry} className="shrink-0" />
+                                </span>
+                                <span className="block truncate text-hint text-muted-foreground">
+                                  <span className="text-foreground">{actorName(entry)}</span>
+                                  {(entry.target || entry.detail) && (
+                                    <>
+                                      {" · "}
+                                      <span className={cn(entry.target && "font-mono")}>
+                                        {entry.target || entry.detail}
+                                      </span>
+                                    </>
+                                  )}
+                                </span>
+                              </span>
+                            </EntryButton>
+                            <EntryResult entry={entry} className="shrink-0" />
                           </li>
                         ))}
                       </ul>
@@ -405,7 +524,7 @@ export default function AuditPage() {
                         ? "Every request that changes something on this host is written here."
                         : "Clear a filter, or look further back with the pager."
                     }
-                    className="mt-4"
+                    className="m-4"
                   />
                 )}
               </div>
@@ -415,7 +534,9 @@ export default function AuditPage() {
           <PanelFooter className="justify-between">
             <span className="numeric text-hint text-muted-foreground">
               {!data
-                ? "Loading…"
+                ? error
+                  ? "Not read"
+                  : "Loading…"
                 : data.total === 0
                   ? filtered
                     ? "No matching entries"
@@ -444,6 +565,111 @@ export default function AuditPage() {
         </Panel>
       </Page>
     </Workspace>
+  )
+}
+
+type Day = AuditPage & { failed: number; start: number }
+
+/**
+ * What the page is about, as a project's header says what a project is: the
+ * log's own mark and name, how the last day went as a state beside it (what
+ * the server refused, in red only when it refused something; a sign-in turned
+ * away, in amber), then the day's facts in a line: this server, how much was
+ * changed, who changed it, and where the last sign-in came from.
+ */
+function AuditIdentity({
+  day,
+  reading,
+  failed,
+  verbs,
+}: {
+  day: Day | undefined
+  reading: ReturnType<typeof dayReading> | undefined
+  /** The day could not be read, and there is no earlier reading to show. */
+  failed: boolean
+  verbs: Verb[]
+}) {
+  const host = useMetricsValue(hostOf)
+  const who = reading && peopleWords(reading.people, reading.machines)
+  const last = reading?.signIns.last
+  return (
+    <HostIdentity
+      label="About the audit log"
+      className="border-b-0 pb-0"
+      fallback={Notes}
+      title="Audit log"
+      state={
+        failed ? (
+          <Status tone="danger" label="Not read" />
+        ) : !day || !reading ? (
+          <Skeleton className="h-4 w-28" />
+        ) : (
+          <>
+            <Status
+              tone={day.failed > 0 ? "danger" : day.total > 0 ? "running" : "stopped"}
+              label={failedWords(day.failed, day.total)}
+            />
+            {reading.signIns.refused > 0 && (
+              <Status
+                tone="warning"
+                label={`${plural(reading.signIns.refused, "sign-in")} refused`}
+              />
+            )}
+          </>
+        )
+      }
+      facts={
+        failed ? (
+          <span className={FACTS}>The last day could not be read.</span>
+        ) : !day || !reading ? (
+          <span className={FACTS}>
+            <Skeleton className="my-0.5 h-3 w-96 max-w-full" />
+          </span>
+        ) : (
+          <span className={FACTS}>
+            {host?.hostname && (
+              <>
+                <HostFact product={platformProduct(host.platform)}>{host.hostname}</HostFact>
+                <FactDot />
+              </>
+            )}
+            <span className="numeric">
+              <span className="text-foreground">{day.total.toLocaleString()}</span>{" "}
+              {day.total === 1 ? "change" : "changes"} in the last day
+            </span>
+            {who && (
+              <>
+                <FactDot />
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <FaceRun names={reading.people} />
+                  <span className="truncate">{who}</span>
+                </span>
+              </>
+            )}
+            <FactDot />
+            {last ? (
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0">
+                  {plural(reading.signIns.ok, "sign-in")}, the last by{" "}
+                  <span className="text-foreground">{last.username || "someone"}</span>
+                  {last.ip && " from"}
+                </span>
+                {last.ip && <Address ip={last.ip} className="min-w-0" />}
+                <span className="numeric shrink-0">{relativeTime(last.ts)}</span>
+              </span>
+            ) : (
+              <span>nobody signed in</span>
+            )}
+          </span>
+        )
+      }
+      command={
+        <span className="max-sm:hidden">
+          <WorkspaceHelp compact />
+        </span>
+      }
+      menu={<VerbMenu verbs={verbs} label="Audit log actions" />}
+    />
   )
 }
 
@@ -481,151 +707,99 @@ function DayLabel({ label, count }: { label: string; count: number }) {
   )
 }
 
-/** Who acted, as themselves, and where they acted from. */
+/**
+ * Who acted, as themselves, and where they acted from, on one line: the face,
+ * the name, the address as the network it is on, and the key or the session
+ * they came through.
+ *
+ * The column is as wide as its widest row, and what it takes it takes from the
+ * target. So below `2xl` a row that came through a key, the assistant or a hub
+ * session says that in the place of its address's digits and keeps the
+ * network's mark: which key it was tells more than which address the key was
+ * used from, and the address is in the entry the row opens.
+ */
 function Actor({ entry }: { entry: AuditEntry }) {
+  const key = keyWords(entry)
   return (
-    <div className="flex max-w-[14rem] min-w-0 items-center gap-3">
+    <div className="flex max-w-[15rem] min-w-0 items-center gap-2.5 2xl:max-w-[24rem]">
       <ActorMark entry={entry} />
-      <div className="min-w-0">
-        <div
-          className={cn(
-            "truncate text-body",
-            !entry.username && !isMachine(entry) && "text-muted-foreground",
-          )}
-        >
-          {actorName(entry)}
-        </div>
-        <p className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-          {entry.ip && <Address ip={entry.ip} className="min-w-0" />}
-          {keyWords(entry) && (
-            <span className="min-w-0 truncate" title={keyTitle(entry)}>
-              · {keyWords(entry)}
-            </span>
-          )}
-        </p>
-      </div>
+      <span
+        className={cn(
+          "max-w-[9rem] shrink-0 truncate text-body",
+          !entry.username && !isMachine(entry) && "text-muted-foreground",
+        )}
+      >
+        {actorName(entry)}
+      </span>
+      <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+        {entry.ip && (
+          <Address
+            ip={entry.ip}
+            // The digits are `Address`'s second child, after the network's mark.
+            className={cn("shrink-0", key && "max-2xl:[&>:nth-child(2)]:hidden")}
+          />
+        )}
+        {key && (
+          <span className="min-w-0 truncate" title={keyTitle(entry)}>
+            · {key}
+          </span>
+        )}
+      </span>
     </div>
   )
 }
 
-type Day = AuditPage & { failed: number; since: string }
-
 /**
- * The last day in four readings. The trend is the day's changes per hour,
- * oldest on the left; the faces are the people behind them, most active first.
+ * A row's name as its button: the keyboard's place on the row (the arrows walk
+ * from one to the next) and the way to the entry whole, in a popover beside
+ * the row it is about, so the trail under it keeps its place.
  */
-function DayReadings({ day }: { day: Day }) {
-  const readings = useMemo(() => {
-    const start = new Date(day.since).getTime()
-    const hours = Array.from({ length: 24 }, () => 0)
-    const people = new Map<string, number>()
-    const sections = new Map<string, number>()
-    let machines = 0
-    const signIns = { ok: 0, refused: 0, lastFrom: "" }
-    for (const entry of day.entries) {
-      const hour = Math.floor((new Date(entry.ts).getTime() - start) / 3_600_000)
-      if (hour >= 0 && hour < 24) hours[hour]++
-      if (isMachine(entry)) machines++
-      else if (entry.username && entry.actor !== "anonymous") {
-        people.set(entry.username, (people.get(entry.username) ?? 0) + 1)
-      }
-      const section = auditSection(entry.action)
-      if (section) sections.set(section.label, (sections.get(section.label) ?? 0) + 1)
-      if (entry.action === "auth.login") {
-        if (entry.success) {
-          signIns.ok++
-          signIns.lastFrom ||= entry.ip
-        } else signIns.refused++
-      }
-    }
-    const rank = (map: Map<string, number>) =>
-      [...map.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name)
-    return { hours, people: rank(people), sections: rank(sections), machines, signIns }
-  }, [day])
-
-  const { hours, people, sections, machines, signIns } = readings
+function EntryButton({
+  entry,
+  className,
+  children,
+}: {
+  entry: AuditEntry
+  className?: string
+  children: React.ReactNode
+}) {
   return (
-    <StatGrid columns={4} className="animate-rise">
-      <StatTile
-        label="Last 24 hours"
-        value={<NumberTicker value={day.total} />}
-        trailing={day.total === 1 ? "change" : "changes"}
-        trend={<TileTrend values={hours} label="Changes per hour over the last day" />}
-        hint={sections.length > 0 ? sections.slice(0, 3).join(" · ") : "nothing was changed"}
-      />
-      <StatTile
-        label="Failed"
-        value={<NumberTicker value={day.failed} />}
-        tone={day.failed > 0 ? "danger" : "success"}
-        hint={
-          day.failed > 0
-            ? `${Math.round((day.failed / Math.max(day.total, 1)) * 100)}% of the day's requests`
-            : "every change went through"
-        }
-      />
-      <StatTile
-        label="People"
-        value={<NumberTicker value={people.length} />}
-        hint={
-          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-            <FaceRun names={people} />
-            <span className="truncate">
-              {people.length === 0
-                ? machines > 0
-                  ? `only automations · ${machines}`
-                  : "nobody changed anything"
-                : machines > 0
-                  ? `and ${plural(machines, "automated change")}`
-                  : people.length === 1
-                    ? people[0]
-                    : people.slice(0, 2).join(", ")}
-            </span>
-          </span>
-        }
-      />
-      <StatTile
-        label="Sign-ins"
-        value={<NumberTicker value={signIns.ok} />}
-        tone={signIns.refused > 0 ? "warning" : "default"}
-        hint={
-          signIns.refused > 0 ? (
-            `${plural(signIns.refused, "attempt")} refused`
-          ) : signIns.lastFrom ? (
-            <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
-              <span className="shrink-0">last from</span>
-              <Address ip={signIns.lastFrom} className="min-w-0" />
-            </span>
-          ) : (
-            "none refused"
-          )
-        }
-      />
-    </StatGrid>
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-workspace-primary
+          className={cn(
+            "group/entry flex min-w-0 items-center gap-2.5 rounded-md text-left focus-ring",
+            className,
+          )}
+        >
+          {children}
+        </button>
+      </PopoverTrigger>
+      {/* Kept off the window's edge: on a phone the entry is as wide as the
+          screen allows, and a card flush with both sides reads as a sheet. */}
+      <PopoverContent align="start" collisionPadding={12} className="w-[26rem]">
+        <EntryDetail entry={entry} />
+      </PopoverContent>
+    </Popover>
   )
 }
 
-/**
- * The outcome as a reading: a dot and the status code in its family's colour,
- * the way the request log draws one, with the word for a failure beside it —
- * "403 Forbidden" says the capability check refused it before the row is
- * opened. Red arrives only here, attached to the code that failed, rather
- * than washed across the whole row. An entry the dashboard wrote for itself
- * carries no code, and says whether it worked in a word.
- */
-function Result({ entry, className }: { entry: AuditEntry; className?: string }) {
+/** The trail before it is read: the table's own rows, at their height, in grey. */
+function TrailSkeleton() {
   return (
-    <Status
-      tone={entry.success ? "running" : "danger"}
-      label={
-        entry.status ? (
-          <StatusCode status={entry.status} word={!entry.success} />
-        ) : entry.success ? (
-          "done"
-        ) : (
-          "failed"
-        )
-      }
-      className={className}
-    />
+    <div aria-busy className="divide-y divide-hairline" data-testid="audit-loading">
+      {Array.from({ length: 8 }, (_, index) => (
+        <div key={index} className="flex h-14 items-center gap-4 px-4">
+          <Skeleton className="h-3 w-14 max-lg:hidden" />
+          <Skeleton className="size-8 shrink-0 rounded-full max-lg:hidden" />
+          <Skeleton className="h-3 w-24 max-lg:hidden" />
+          <Skeleton className="size-8 shrink-0 rounded-md" />
+          <Skeleton className="h-3 flex-1" style={{ maxWidth: `${30 + ((index * 13) % 30)}%` }} />
+          <Skeleton className="ml-auto h-3 w-12" />
+        </div>
+      ))}
+    </div>
   )
 }

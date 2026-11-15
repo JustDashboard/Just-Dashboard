@@ -595,7 +595,7 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 		evidence.Route = &routeEvidence
 		if applyErr != nil {
 			// The proxy restored its own prior route when it could.
-			return fail("proxy_cutover_failed", "The proxy refused the route back to the warm release.", nil)
+			return fail("proxy_cutover_failed", "The proxy refused the route back to the warm release"+proxyRefusal(applyErr)+".", nil)
 		}
 		applied = &result
 	}

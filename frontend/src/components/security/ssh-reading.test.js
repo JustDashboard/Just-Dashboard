@@ -17,7 +17,7 @@ const config = (settings, over = {}) => ({
   ...over,
 })
 
-test("the tile says the riskiest fact about how a login gets in", () => {
+test("sshd in one line is the riskiest fact about how a login gets in", () => {
   expect(
     sshReading(config({ passwordauthentication: "no", permitrootlogin: "prohibit-password" })),
   ).toEqual({ value: "Keys only", tone: "default", hint: "port 22" })

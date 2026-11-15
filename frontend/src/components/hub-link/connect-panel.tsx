@@ -20,10 +20,11 @@ import { CopyButton } from "@/components/account-link/link-panel"
 import { ScopeCards } from "@/components/account-link/scope-cards"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import { FailureWords } from "@/components/hub-link/status-panel"
-import { Field } from "@/components/form"
+import { Field, InfoTip } from "@/components/form"
 import { Meter } from "@/components/meter"
 import { Section } from "@/components/page"
 import { Well } from "@/components/panel"
+import { ProductGlyph } from "@/components/product-logo"
 import { Notice } from "@/components/state"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
@@ -51,6 +52,10 @@ const CHECK_AFTER = 400
  * connection refused") is said in the dashboard's words, as the Activity section says a failed
  * exchange (`exchangeFailure`): "Could not reach <host>: the connection was refused.", with Go's
  * words behind a disclosure.
+ *
+ * The form carries no sentence under a field: what the address has to be, what no scope ever
+ * allows and why the key's expiry matters are each behind the ⓘ beside what they explain, and the
+ * tip is one line with its link.
  */
 export function ConnectPanel({
   address,
@@ -121,7 +126,7 @@ export function ConnectPanel({
         <Field
           label="Hub address"
           htmlFor={field}
-          hint="The hub's name on this server's tailnet, ending in .ts.net. Nothing is sent to it until you press Connect."
+          info="The hub's name on this server's tailnet, ending in .ts.net. Nothing is sent to it until you press Connect."
           className="max-w-xl"
         >
           <Input
@@ -139,13 +144,16 @@ export function ConnectPanel({
         {url && <MachineLine check={checked} />}
 
         <div className="flex min-w-0 flex-col gap-3">
-          <p className="eyebrow">What the hub can do</p>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <p className="eyebrow">What the hub can do</p>
+            <InfoTip label="What no scope allows">
+              No scope gives the hub a shell, files or accounts, and this server refuses any command
+              aimed at its own containers. The scope can be lowered at any time.
+            </InfoTip>
+            {/* Only while Connect is held for it: a prompt, not a caption. */}
+            {!scope && <span className="ml-2 text-xs text-warning">Choose a scope to connect</span>}
+          </div>
           <ScopeCards value={scope} onChange={onScope} disabled={busy} />
-          <p className="text-xs text-muted-foreground">
-            {scope ? "" : "Choose a scope to connect. "}
-            No scope gives the hub a shell, files or accounts, and this server refuses any command
-            aimed at its own containers. The scope can be lowered at any time.
-          </p>
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-4">
@@ -168,19 +176,23 @@ export function ConnectPanel({
           )}
         </div>
       </form>
-      <p className="text-xs text-muted-foreground">
-        Tip: turn off key expiry for this server&apos;s machine{" "}
+      {/* One line and where to do it; why is behind the ⓘ. */}
+      <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+        <ProductGlyph id="tailscale" />
+        Turn off key expiry for this server
         <a
           href="https://login.tailscale.com/admin/machines"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+          className="inline-flex items-center gap-1 rounded-sm text-foreground underline-offset-4 focus-ring hover:underline"
         >
           in the Tailscale admin console
           <External aria-hidden className="size-3" />
         </a>
-        . Tailscale gives every new machine a key that expires, 180 days later by default, and a
-        server whose key has expired drops off the tailnet and out of the hub.
+        <InfoTip label="Why key expiry matters">
+          Tailscale gives every new machine a key that expires, 180 days later by default, and a
+          server whose key has expired drops off the tailnet and out of the hub.
+        </InfoTip>
       </p>
       {refusal && (
         <div role="alert">

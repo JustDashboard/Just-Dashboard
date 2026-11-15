@@ -37,6 +37,22 @@ export type SearchItem = {
   href?: string
 }
 
+/**
+ * A tool of a workbench, found by its own name. The palette lists the pages
+ * the navigation names, and a tool that lives inside one of them is not among
+ * those: Connection path was a page, became one of Network's Tools, and could
+ * no longer be found by the name people know it by. `page` is the rail page
+ * the tool is on; the entry is offered to whoever may open that page.
+ */
+export const TOOL_ALIASES: { title: string; href: string; page: string; keywords: string[] }[] = [
+  {
+    title: "Connection path",
+    href: "/network/tools?tool=path",
+    page: "/network/tools",
+    keywords: ["investigate", "trace", "reach"],
+  },
+]
+
 const ALIASES: Record<string, SearchScope> = {
   db: "database",
   domain: "site",

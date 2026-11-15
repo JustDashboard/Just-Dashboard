@@ -231,7 +231,7 @@ export function holderHue(holder: Pick<Holder, "kind" | "name">): string {
 
 export type Backup = {
   state: "protected" | "paused" | "none"
-  jobs: { id: number; name: string }[]
+  jobs: { id: number; name: string; enabled: boolean }[]
   lastAt?: string
 }
 
@@ -241,7 +241,11 @@ export type Backup = {
  */
 export function backupOf(resource: BackupResource | undefined): Backup | undefined {
   if (!resource) return undefined
-  const jobs = resource.coveredBy.map((c) => ({ id: c.jobId, name: c.jobName }))
+  const jobs = resource.coveredBy.map((c) => ({
+    id: c.jobId,
+    name: c.jobName,
+    enabled: c.enabled,
+  }))
   if (resource.protected) return { state: "protected", jobs, lastAt: resource.lastBackupAt }
   if (resource.coveredBy.length > 0) return { state: "paused", jobs, lastAt: resource.lastBackupAt }
   return { state: "none", jobs }
@@ -349,4 +353,86 @@ export function visibleVolumes(
 export function pruneShare(volumes: VolumeDetail[]) {
   const taken = volumes.filter(prunable)
   return { volumes: taken, size: taken.reduce((sum, v) => sum + Math.max(v.size, 0), 0) }
+}
+
+/** A volume's views, the first the one its page opens on. */
+export const VOLUME_TABS = ["files", "mounts", "backups", "configuration"] as const
+export type VolumeTab = (typeof VOLUME_TABS)[number]
+
+/** A volume's own page, opened on one of its views. */
+export function volumeHref(name: string, tab?: string): string {
+  const base = `/docker/volumes/${encodeURIComponent(name)}`
+  return tab && tab !== VOLUME_TABS[0] ? `${base}?tab=${encodeURIComponent(tab)}` : base
+}
+
+/** The Volumes table's filters and order, which a volume's rail reads as its own. */
+export const VOLUME_FILTER_KEYS = {
+  query: "docker.volumes.query",
+  show: "docker.volumes.show",
+  standing: "docker.volumes.standing",
+  holder: "docker.volumes.holder",
+  sort: "docker.volumes.sort",
+} as const
+
+/** The name as a row has room for it: a hash nobody chose is its first twelve characters. */
+export function shortName(volume: Pick<VolumeDetail, "name" | "labels">): string {
+  return isAnonymous(volume) ? volume.name.slice(0, 12) : volume.name
+}
+
+/**
+ * Where a volume stands, as the words its row and its page say. What nothing
+ * mounts is said as what a prune does to it, since that is why the word is
+ * read; `warning` is that it would be deleted.
+ */
+export function standingWords(
+  volume: Pick<VolumeDetail, "usedBy" | "labels" | "name" | "driver" | "mountType">,
+  long = true,
+): { word: string; warning: boolean } {
+  const s = standing(volume)
+  if (s === "running" || s === "stopped") return { word: STANDING_WORD[s], warning: false }
+  if (prunable(volume)) return { word: long ? "prune deletes it" : "prune deletes", warning: true }
+  return { word: "not mounted", warning: false }
+}
+
+/**
+ * The containers a row names in the lines it has: all of them when they fit,
+ * else one fewer and the rest counted on the last line, so a volume six
+ * containers mount is as tall as one a single container does.
+ */
+export function mountLines<T>(users: T[], lines = 2): { shown: T[]; more: number } {
+  if (users.length <= lines) return { shown: users, more: 0 }
+  return { shown: users.slice(0, lines - 1), more: users.length - (lines - 1) }
+}
+
+const ORDER_WORDS: Record<SortKey, [desc: string, asc: string]> = {
+  size: ["largest first", "smallest first"],
+  name: ["by name, reversed", "by name"],
+  mounted: ["most mounted first", "least mounted first"],
+  standing: ["by state, reversed", "by state"],
+  created: ["newest first", "oldest first"],
+}
+
+/** The line under the rail's search: how many it lists, and by what or in what order. */
+export function railCaption(options: {
+  total: number
+  shown: number
+  /** What the list is narrowed to, in words; empty when it is not. */
+  narrowed: string[]
+  sort: VolumeSort
+}): string {
+  const { total, shown, narrowed, sort } = options
+  const count =
+    shown === total ? `${total} ${total === 1 ? "volume" : "volumes"}` : `${shown} of ${total}`
+  const after = narrowed.length > 0 ? narrowed.join(", ") : ORDER_WORDS[sort.key][sort.desc ? 0 : 1]
+  return `${count} · ${after}`
+}
+
+/** A filter chip's words, for the rail's caption. */
+export const SHOW_LABEL: Record<Show, string> = {
+  all: "",
+  running: "in use",
+  stopped: "stopped",
+  unmounted: "not mounted",
+  prunable: "a prune would delete",
+  unprotected: "not backed up",
 }

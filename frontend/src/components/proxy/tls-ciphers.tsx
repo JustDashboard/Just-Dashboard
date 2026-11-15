@@ -41,6 +41,7 @@ import { Tag } from "@/components/tag"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { useNow } from "@/components/deploy/vocabulary"
 import { Button } from "@/components/ui/button"
+import { siteSettingsHref } from "@/components/proxy/site-tabs"
 
 /**
  * The TLS report's deep scan: what the quick report leaves out because it
@@ -102,11 +103,9 @@ export function DeepScanSection({ scan }: { scan: TLSScan }) {
           }
         />
         <PanelBody>
-          <p className="text-body leading-relaxed text-muted-foreground">
-            A deep scan lists every cipher suite each version accepts, the key exchange groups,
-            post-quantum ones included, HTTP/2 against the site form, HTTP/3, session resumption,
-            and the certificate a client gets when it names no site. It opens about forty more
-            connections to this address.
+          <p className="text-body text-muted-foreground">
+            Every suite and key exchange group, HTTP/2 and HTTP/3, resumption and the default
+            certificate: about forty more connections.
           </p>
         </PanelBody>
       </Panel>
@@ -215,7 +214,8 @@ function DeepReport({
           ...finding,
           action: {
             label: `Open ${site.name}`,
-            onClick: () => router.push(`/proxy/sites?site=${encodeURIComponent(site.name)}`),
+            // Where the site is changed, which is what the finding asks for.
+            onClick: () => router.push(siteSettingsHref(site.name)),
           },
         }
       : finding,

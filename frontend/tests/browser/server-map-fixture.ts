@@ -218,7 +218,7 @@ const stacks = [
 ]
 
 const volume = (name: string, tone: Tone, state: string, size: string) =>
-  item(`volume:${name}`, name, tone, state, `/docker/volumes?volume=${name}`, {
+  item(`volume:${name}`, name, tone, state, `/docker/volumes/${name}`, {
     detail: size,
     facts: facts("Size", size, "Driver", "local"),
   })
@@ -295,11 +295,18 @@ const domains = [
 ]
 
 const cert = (id: string, name: string, tone: Tone, state: string) =>
-  item(`cert:/etc/letsencrypt/live/${id}`, name, tone, state, `/proxy/certificates?cert=${id}`, {
-    product: "lets-encrypt",
-    detail: "Let's Encrypt R11",
-    facts: facts("Covers", name, "Issuer", "Let's Encrypt R11"),
-  })
+  item(
+    `cert:/etc/letsencrypt/live/${id}`,
+    name,
+    tone,
+    state,
+    `/proxy/certificates/${name}?path=${encodeURIComponent(`/etc/letsencrypt/live/${id}`)}`,
+    {
+      product: "lets-encrypt",
+      detail: "Let's Encrypt R11",
+      facts: facts("Covers", name, "Issuer", "Let's Encrypt R11"),
+    },
+  )
 
 const certificates = [
   cert("shop", "shop.example.com", "ok", "54 days left"),
@@ -388,11 +395,11 @@ const services = [
 ]
 
 const pm2 = [
-  item("pm2:d1:0", "telegram-bot", "ok", "online", "/processes/pm2?app=d1:0", {
+  item("pm2:d1:0", "telegram-bot", "ok", "online", "/processes/pm2/telegram-bot?account=d1", {
     product: "pm2",
     facts: facts("Status", "online", "Memory", "92 MB"),
   }),
-  item("pm2:d1:1", "scraper", "danger", "errored", "/processes/pm2?app=d1:1", {
+  item("pm2:d1:1", "scraper", "danger", "errored", "/processes/pm2/scraper?account=d1", {
     product: "pm2",
     detail: "14 restarts",
     facts: facts("Status", "errored", "Restarts", "14"),
@@ -439,7 +446,7 @@ const tunnels = [
 ]
 
 const streams = [
-  item("stream:pg-main", "pg-main", "ok", "listening", "/proxy/streams?stream=pg-main", {
+  item("stream:pg-main", "pg-main", "ok", "listening", "/proxy/streams/pg-main", {
     product: "nginx",
     detail: ":5433 → 127.0.0.1:5432",
   }),
@@ -461,11 +468,15 @@ export const busyMap = {
     kind("stacks", stacks),
     kind("volumes", volumes),
     kind("networks", [
-      item("network:n1", "jd-shop_default", "ok", "2 containers", "/docker/networks?network=n1"),
+      item(
+        "network:n1",
+        "jd-shop_default",
+        "ok",
+        "2 containers",
+        "/docker/networks/jd-shop_default",
+      ),
     ]),
-    kind("images", [
-      item("image:node", "node:22-alpine", "ok", "in use", "/docker/images?image=node"),
-    ]),
+    kind("images", [item("image:node", "node:22-alpine", "ok", "in use", "/docker/images/node")]),
     kind("databases", databases),
     kind("domains", domains),
     kind("certificates", certificates),

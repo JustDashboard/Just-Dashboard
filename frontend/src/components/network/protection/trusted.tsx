@@ -9,11 +9,12 @@ import type { ProtectionTrusted, ProtectionView } from "@/lib/types"
 import { Check, Pencil, Trash, Warning } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, FieldRow } from "@/components/form"
-import { DimActions, IconAction } from "@/components/icon-action"
+import { DimActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Row, RowList } from "@/components/row-list"
 import { Notice } from "@/components/state"
-import { Tag } from "@/components/tag"
+import { Status } from "@/components/status-dot"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -24,11 +25,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Cidr } from "@/components/network/address"
+import { ROW_HEIGHT } from "@/components/network/protection/exceptions"
 import {
   EXPIRY_CHOICES,
-  expiryFrom,
+  KEEP_EXPIRY,
   ORIGIN_WORD,
+  trustedExpiry,
+  trustedExpiryChoice,
   trustedNoteWord,
+  trustedState,
 } from "@/components/network/protection/reading"
 
 /**
@@ -59,6 +64,7 @@ export function TrustedList({
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<ProtectionTrusted>()
+  const [confirming, setConfirming] = useState<string>()
   const remove = (address: string, you: boolean) =>
     confirm({
       title: `Stop trusting ${address}`,
@@ -74,9 +80,13 @@ export function TrustedList({
         await del("/network/protection/trusted", { query: { address } })
         notify.success(`${address} is no longer trusted`)
         onChanged()
+        return "reported"
       },
     })
   const confirmStill = async (entry: ProtectionTrusted) => {
+    // One review per press: a second press while the first is out sent a second.
+    if (confirming) return
+    setConfirming(entry.address)
     try {
       await put("/network/protection/trusted", {
         address: entry.address,
@@ -88,16 +98,39 @@ export function TrustedList({
       onChanged()
     } catch (err) {
       notify.error(`${entry.address} was not confirmed`, err)
+    } finally {
+      setConfirming(undefined)
     }
   }
+  const verbs = (entry: ProtectionTrusted): Verb[] => [
+    {
+      key: "confirm",
+      label: "Confirm still needed",
+      icon: Check,
+      disabled: confirming !== undefined,
+      run: () => void confirmStill(entry),
+    },
+    { key: "edit", label: "Edit why and until when", icon: Pencil, run: () => setEditing(entry) },
+    ...(can("destructive")
+      ? [
+          {
+            key: "remove",
+            label: "Stop trusting",
+            icon: Trash,
+            danger: true,
+            run: () => remove(entry.address, entry.origin === "you"),
+          },
+        ]
+      : []),
+  ]
   const stale = view.trusted.filter((t) => t.stale).length
+  const admin = can("system.admin")
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {!view.clientTrusted && (
         <Notice tone="warning" icon={Warning} title="Your own address is not trusted">
-          This browser reads the dashboard from{" "}
-          <span className="font-mono text-foreground">{view.client}</span>, which no entry below
-          covers, so a blocklist or a limit that matches it would cut you off.
+          <span className="font-mono text-foreground">{view.client}</span> is in no entry below, so
+          a blocklist or a limit that matches it would cut you off.
         </Notice>
       )}
       {stale > 0 && (
@@ -107,55 +140,35 @@ export function TrustedList({
           title={`${stale} kept ${stale === 1 ? "address is" : "addresses are"} stale`}
         >
           Nobody has signed in from {stale === 1 ? "it" : "them"} or confirmed{" "}
-          {stale === 1 ? "it" : "them"} in thirty days. Confirm what is still needed and stop
-          trusting the rest.
+          {stale === 1 ? "it" : "them"} in thirty days.
         </Notice>
       )}
       <RowList>
         {view.trusted.map((entry) => {
           const note = entry.removable ? trustedNoteWord(entry, relativeTime) : undefined
+          const state = trustedState(entry)
           return (
             <Row
               key={entry.address}
-              title={
-                <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
-                  <Cidr cidr={entry.address} />
-                  {entry.stale && <Tag tone="warning">stale</Tag>}
-                  {entry.expired && <Tag tone="warning">expired</Tag>}
-                </span>
-              }
+              className={ROW_HEIGHT}
+              title={<Cidr cidr={entry.address} />}
               subtitle={note || undefined}
               trailing={
                 <>
-                  <Tag>{ORIGIN_WORD[entry.origin]}</Tag>
-                  {can("system.admin") && entry.removable ? (
-                    <DimActions>
-                      <IconAction
-                        label={`Confirm ${entry.address} is still needed`}
-                        onClick={() => void confirmStill(entry)}
-                      >
-                        <Check aria-hidden />
-                      </IconAction>
-                      <IconAction
-                        label={`Edit why ${entry.address} is kept`}
-                        onClick={() => setEditing(entry)}
-                      >
-                        <Pencil aria-hidden />
-                      </IconAction>
-                      {can("destructive") && (
-                        <IconAction
-                          label={`Stop trusting ${entry.address}`}
-                          onClick={() => remove(entry.address, entry.origin === "you")}
-                        >
-                          <Trash aria-hidden />
-                        </IconAction>
-                      )}
-                    </DimActions>
-                  ) : (
-                    // The width of the action it does not have, so the origin
-                    // words of a column of rows line up.
-                    <span aria-hidden className="size-8 shrink-0" />
-                  )}
+                  {state && <Status tone={state.tone} label={state.label} />}
+                  <span className="w-24 text-right text-hint text-muted-foreground">
+                    {ORIGIN_WORD[entry.origin]}
+                  </span>
+                  {admin &&
+                    (entry.removable ? (
+                      <DimActions>
+                        <VerbMenu verbs={verbs(entry)} label={`${entry.address} actions`} />
+                      </DimActions>
+                    ) : (
+                      // The width of the menu it does not have, so the origin
+                      // words of a column of rows line up.
+                      <span aria-hidden className="size-7 shrink-0" />
+                    ))}
                 </>
               }
             />
@@ -186,7 +199,9 @@ function TrustedNoteModal({
 }) {
   const { can } = useAuth()
   const [reason, setReason] = useState(entry.reason ?? "")
-  const [expiry, setExpiry] = useState("never")
+  // An address that already ends opens on its own end, so a note saved
+  // without touching it leaves the end where it was.
+  const [expiry, setExpiry] = useState(() => trustedExpiryChoice(entry))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const submit = async () => {
@@ -196,7 +211,7 @@ function TrustedNoteModal({
       await put("/network/protection/trusted", {
         address: entry.address,
         reason: reason.trim(),
-        expiresAt: expiryFrom(expiry),
+        expiresAt: trustedExpiry(entry, expiry),
         confirm: true,
       })
       notify.success(`${entry.address} is saved`)
@@ -259,6 +274,11 @@ function TrustedNoteModal({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                {entry.expiresAt && !entry.expired && (
+                  <SelectItem value={KEEP_EXPIRY}>
+                    As it is: {relativeTime(entry.expiresAt)}
+                  </SelectItem>
+                )}
                 {EXPIRY_CHOICES.map((c) => (
                   <SelectItem key={c.value || "never"} value={c.value || "never"}>
                     {c.label}

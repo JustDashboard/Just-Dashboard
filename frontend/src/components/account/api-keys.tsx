@@ -21,19 +21,23 @@ import type { ApiToken, DashboardUser, DbConnection, Role } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Field, FormNote } from "@/components/form"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Field, FormNote, InfoTip } from "@/components/form"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { SearchInput, Section } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
-import { Row, RowList } from "@/components/row-list"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Skeleton } from "@/components/ui/skeleton"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Select,
@@ -57,8 +61,8 @@ import { ShellWords } from "@/components/deploy/run-evidence"
 import { useNow } from "@/components/deploy/vocabulary"
 import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
-import { ROLE_HUE } from "@/components/account/capabilities"
-import { expired, expiringSoon, usableKeys } from "@/components/account/access"
+import { ROLE_HUE, ROLE_LADDER, ROLE_NAME } from "@/components/account/capabilities"
+import { DAY, expired, expiringSoon, usableKeys } from "@/components/account/access"
 import { KeyMap } from "@/components/account/key-map"
 import {
   clientConfig,
@@ -168,6 +172,13 @@ function keyStatus(token: ApiToken, now: number) {
  * reads the name the key was given, and guesses nothing). The prefix is the
  * part of the secret a log line shows, so it is the second line's literal;
  * an administrator reading everyone's keys also sees whose each one is.
+ *
+ * A card, as the Users page draws an account: the mark, the name over its
+ * literal line, and the three readings a reader compares down the list in
+ * columns of one width — when it was last used, what it may do, when it
+ * stops. A key opens nothing, so the card carries no arrow and takes no
+ * press; what is done to one is behind its `⋯`. From `lg` the readings sit
+ * beside the name; below it they go beneath it, on every card alike.
  */
 function KeyRow({
   token,
@@ -180,63 +191,67 @@ function KeyRow({
   owner?: DashboardUser
   verbs: Verb[]
 }) {
+  const wide = useMediaQuery("(min-width: 1024px)")
   const usage = token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used"
   // A key narrowed to one job says the job, where the role beneath it would
   // read as the key being able to do everything that role can.
   const can = scopeWords(token) ?? token.role
+  const spent = token.revoked || expired(token, now)
+  const readings = (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1">
+      <span
+        className="w-32 truncate text-xs text-muted-foreground"
+        title={token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleString() : undefined}
+      >
+        {usage}
+      </span>
+      <span className="flex w-24">
+        <Tag style={{ color: ROLE_HUE[token.role] }}>{can}</Tag>
+      </span>
+      <span
+        className="flex w-44"
+        title={token.expiresAt ? new Date(token.expiresAt).toLocaleString() : undefined}
+      >
+        {keyStatus(token, now)}
+      </span>
+    </span>
+  )
   return (
-    <Row
-      className="group"
+    <ChoiceRow
+      disabled
+      verb={token.name}
+      className={spent ? "opacity-60" : undefined}
       leading={
         <ProductLogo
           id={keyProduct(token.name)}
           size="sm"
           fallback={Key}
-          className={token.revoked || expired(token, now) ? "opacity-50 grayscale" : undefined}
+          className={spent ? "grayscale" : undefined}
         />
       }
       title={token.name}
-      subtitle={
-        <>
-          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-            <span className="shrink-0 font-mono">{token.prefix}…</span>
-            {owner && (
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <UserAvatar user={owner} scope="admin" size="xs" />
-                <span className="truncate">{displayNameOf(owner)}</span>
-              </span>
-            )}
-            <span className="hidden shrink-0 sm:inline">made {calendarDate(token.createdAt)}</span>
-            {/* Which deployments is the first thing asked of a deploy key that
-                leaked, so the row answers it without opening anything. */}
-            {token.scope === "deploy" && (
-              <span className="hidden shrink-0 sm:inline">· {deployReach(token)}</span>
-            )}
-          </span>
-          <span className="block md:hidden">
-            <span style={{ color: ROLE_HUE[token.role] }}>{can}</span> · {usage}
-          </span>
-        </>
+      description={
+        <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+          <span className="shrink-0 font-mono">{token.prefix}…</span>
+          {owner && (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <UserAvatar user={owner} scope="admin" size="xs" />
+              <span className="truncate">{displayNameOf(owner)}</span>
+            </span>
+          )}
+          <span className="hidden shrink-0 sm:inline">made {calendarDate(token.createdAt)}</span>
+          {/* Which deployments is the first thing asked of a deploy key that
+              leaked, so the row answers it without opening anything. */}
+          {token.scope === "deploy" && (
+            <span className="hidden shrink-0 sm:inline">· {deployReach(token)}</span>
+          )}
+        </span>
       }
-      trailing={
-        <>
-          <span
-            className="hidden text-xs text-muted-foreground md:inline"
-            title={token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleString() : undefined}
-          >
-            {usage}
-          </span>
-          <Tag className="hidden md:inline-flex" style={{ color: ROLE_HUE[token.role] }}>
-            {can}
-          </Tag>
-          <span title={token.expiresAt ? new Date(token.expiresAt).toLocaleString() : undefined}>
-            {keyStatus(token, now)}
-          </span>
-        </>
-      }
+      trailing={wide ? readings : undefined}
+      actions={<VerbActions dim verbs={verbs} menuLabel={`More actions for ${token.name}`} />}
     >
-      <VerbActions dim verbs={verbs} menuLabel={`More actions for ${token.name}`} />
-    </Row>
+      {!wide && <div className="pl-10">{readings}</div>}
+    </ChoiceRow>
   )
 }
 
@@ -253,19 +268,22 @@ function CallExample() {
       <PanelHeader
         title="Call the API"
         actions={
-          <Button size="xs" variant="outline" onClick={() => void copy(curlExample(origin))}>
-            {copied ? <Check /> : <Copy />}
-            {copied ? "Copied" : "Copy"}
-          </Button>
+          <span className="flex items-center gap-2">
+            <InfoTip label="How a key is sent">
+              Send the key as a bearer token on any request; this one answers what the Overview
+              shows.
+            </InfoTip>
+            <Button size="xs" variant="outline" onClick={() => void copy(curlExample(origin))}>
+              {copied ? <Check /> : <Copy />}
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </span>
         }
       />
-      <PanelBody className="space-y-2">
+      <PanelBody>
         <Well className="break-all">
           <ShellWords command={curlExample(origin)} />
         </Well>
-        <p className="text-hint text-muted-foreground">
-          Send the key as a bearer token on any request; this one answers what the Overview shows.
-        </p>
       </PanelBody>
     </Panel>
   )
@@ -286,6 +304,86 @@ const ORDERS: { key: KeyOrder; label: string }[] = [
   { key: "name", label: "Name" },
 ]
 
+/**
+ * The keys as one identity line, the shape Users gives the accounts: how many
+ * can still be used as its name, how many carry each role in the role's own
+ * hue and how soon the first of them stops among its facts, and New key as its
+ * one command. The page opened on a section title over the picture, and New
+ * key sat on the list's head, a screen down.
+ */
+function KeysIdentity({
+  usable,
+  spent,
+  now,
+  command,
+}: {
+  /** Undefined while the first read is on its way. */
+  usable?: ApiToken[]
+  spent?: number
+  now: number
+  command?: React.ReactNode
+}) {
+  if (!usable) {
+    return (
+      <HostIdentity
+        fallback={Key}
+        title="API keys"
+        state={<Status tone="unknown" label={<TextShimmer>reading</TextShimmer>} />}
+        facts={<span>keys that call this dashboard without a browser</span>}
+      />
+    )
+  }
+  const roles = [...ROLE_LADDER]
+    .reverse()
+    .map((role) => ({ role, count: usable.filter((token) => token.role === role).length }))
+    .filter(({ count }) => count > 0)
+  const expiring = usable
+    .filter((token) => expiringSoon(token, now))
+    .sort((a, b) => (a.expiresAt ?? "").localeCompare(b.expiresAt ?? ""))
+  const days = expiring[0]?.expiresAt
+    ? Math.max(0, Math.floor((Date.parse(expiring[0].expiresAt) - now) / DAY))
+    : 0
+  return (
+    <HostIdentity
+      fallback={Key}
+      title={usable.length > 0 ? plural(usable.length, "key") : "API keys"}
+      state={usable.length === 0 ? <Status tone="unknown" label="none in use" /> : undefined}
+      facts={
+        <>
+          {roles.map(({ role, count }, index) => (
+            <span key={role} className="contents">
+              {index > 0 && <FactDot />}
+              <span className="numeric">
+                {count}{" "}
+                <span style={{ color: ROLE_HUE[role] }}>{ROLE_NAME[role].toLowerCase()}</span>
+              </span>
+            </span>
+          ))}
+          {expiring.length > 0 && (
+            <>
+              <FactDot />
+              <Status
+                tone="warning"
+                label={`${expiring.length} expiring ${days === 0 ? "today" : `in ${plural(days, "day")}`}`}
+              />
+            </>
+          )}
+          {Boolean(spent) && (
+            <>
+              {usable.length > 0 && <FactDot />}
+              <span className="numeric">{spent} revoked or expired</span>
+            </>
+          )}
+          {usable.length === 0 && !spent && (
+            <span>keys that call this dashboard without a browser</span>
+          )}
+        </>
+      }
+      command={command}
+    />
+  )
+}
+
 /** Reading register: counts stay on filters and the existing map, as on the other account pages. */
 export function ApiKeysView({
   keys,
@@ -305,8 +403,24 @@ export function ApiKeysView({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [editor, setEditor] = useState<ApiToken | "new" | null>(null)
   const { data, error, loading, refresh } = keys
-  if (loading && !data) return <LoadingRows rows={3} />
-  if (error && !data) return <ErrorState error={error} onRetry={refresh} />
+  // The line, the picture and the list stand where they will, so the page does
+  // not jump when the keys land.
+  if (loading && !data)
+    return (
+      <>
+        <KeysIdentity now={now} />
+        <Skeleton className="h-80 rounded-xl" />
+        <LoadingRows rows={3} />
+      </>
+    )
+  if (error && !data)
+    return (
+      <>
+        <KeysIdentity now={now} />
+        {/* A read: another try is always safe to offer. */}
+        <ErrorState error={error} onRetry={refresh} retryable />
+      </>
+    )
   if (!data) return null
 
   const me = status?.user?.id
@@ -427,6 +541,13 @@ export function ApiKeysView({
 
   return (
     <>
+      {/* With no key at all the empty state under the line holds the one New key. */}
+      <KeysIdentity
+        usable={usable}
+        spent={spent.length}
+        now={now}
+        command={data.length > 0 ? createButton : undefined}
+      />
       {error && (
         <Notice tone="warning" title="Could not refresh keys">
           These are the last keys received.{" "}
@@ -453,13 +574,10 @@ export function ApiKeysView({
             <PanelHeader
               title="In use"
               actions={
-                <span className="flex items-center gap-3">
-                  <span className="numeric text-hint text-muted-foreground" aria-live="polite">
-                    {filtered
-                      ? `${shown.length} of ${plural(usable.length, "key")}`
-                      : plural(usable.length, "key")}
-                  </span>
-                  {createButton}
+                <span className="numeric text-hint text-muted-foreground" aria-live="polite">
+                  {filtered
+                    ? `${shown.length} of ${plural(usable.length, "key")}`
+                    : plural(usable.length, "key")}
                 </span>
               }
             />
@@ -528,7 +646,7 @@ export function ApiKeysView({
               ) : shown.length === 0 ? (
                 <EmptyNote className="py-4">No active key matches these filters.</EmptyNote>
               ) : (
-                <RowList className="animate-rise">{shown.map(row)}</RowList>
+                <ChoiceList className="animate-rise pt-3">{shown.map(row)}</ChoiceList>
               )}
             </PanelBody>
           </Panel>
@@ -539,6 +657,12 @@ export function ApiKeysView({
                   title="Revoked or expired"
                   actions={
                     <span className="flex items-center gap-3">
+                      <InfoTip label="What these keys are">
+                        These keys cannot authenticate.{" "}
+                        {can("system.admin")
+                          ? "Delete record removes an entry here; its audit trail is kept."
+                          : "An administrator can delete inactive records; their audit trail is kept."}
+                      </InfoTip>
                       <span className="numeric text-hint text-muted-foreground">
                         {query.trim() || mine
                           ? `${inactive.length} of ${plural(spent.length, "key")}`
@@ -564,14 +688,8 @@ export function ApiKeysView({
                 />
                 <CollapsibleContent>
                   <PanelBody flush>
-                    <p className="py-3 text-hint text-muted-foreground">
-                      These keys cannot authenticate.{" "}
-                      {can("system.admin")
-                        ? "Delete record removes an entry here; its audit trail is kept."
-                        : "An administrator can delete inactive records; their audit trail is kept."}
-                    </p>
                     {inactive.length > 0 ? (
-                      <RowList className="text-muted-foreground">{inactive.map(row)}</RowList>
+                      <ChoiceList className="pt-3">{inactive.map(row)}</ChoiceList>
                     ) : (
                       <EmptyNote className="py-4">No inactive key matches this search.</EmptyNote>
                     )}

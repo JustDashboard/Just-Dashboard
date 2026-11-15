@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Database, Play } from "@/components/icons"
+import { Play } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DbConnection, DbDriverInfo, Job, JobLine } from "@/lib/types"
@@ -13,8 +13,7 @@ import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/compon
 import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { JobConsole } from "@/components/job-console"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ProductLogos } from "@/components/product-logo"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -46,6 +45,7 @@ import { EngineMark } from "@/components/database/kit"
 import { supportWords } from "@/components/database/support"
 import { MIB, coresWord, defaultLimitsFor, sizeOf } from "@/components/database/kit/limits"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { EnginePicture } from "@/components/database/connect/picture"
 
 /** How long a started engine is asked for before the page says it has not answered. */
 const READY_WITHIN_MS = 3 * 60_000
@@ -716,15 +716,7 @@ export function DatabaseCreation({
           )}
         </FlowPanel>
       ) : (
-        // Only at the width that draws the two columns: stacked, a promise
-        // above the catalogue is a block of nothing between the reader and it.
-        <EmptyState
-          className="hidden xl:flex xl:self-start"
-          icon={Database}
-          mark={featured.length > 0 ? <ProductLogos ids={featured} size="md" /> : undefined}
-          title="Pick an engine"
-          description="Its settings open here. Nothing is started until you create it."
-        />
+        <EnginePicture way="start" engines={featured} />
       )}
     </div>
   )

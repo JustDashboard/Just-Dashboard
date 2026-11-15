@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
+  Archive,
   ArrowLeft,
   CloudDownload,
   Database,
@@ -15,7 +16,7 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { downloadUrl, get, post } from "@/lib/api"
-import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
+import { bytes, plural, timestamp } from "@/lib/format"
 import type {
   BackupArchiveEntry,
   BackupJob,
@@ -33,8 +34,10 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { TileTrend } from "@/components/metrics/sparkline"
+import { HUE } from "@/components/overview/readings"
+import { ReadingLine } from "@/components/reading-line"
+import { WireMark } from "@/components/deploy/wire"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Status } from "@/components/status-dot"
@@ -51,12 +54,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  contentsLabel,
-  retentionLabel,
-  scheduleLabel,
-  targetLabel,
-} from "@/components/backups/shared"
+import { contentsLabel, targetLabel } from "@/components/backups/shared"
+import { holdingReading } from "@/components/backups/readings"
 import { LastRun, importedFrom } from "@/components/backups/job-card"
 import { RunContents, RunEncryption, RunLog, RunRail } from "@/components/backups/job-runs"
 import { JobMark, destinationProduct, jobProducts, jobProject } from "@/components/backups/marks"
@@ -85,12 +84,16 @@ type Confirm = ReturnType<typeof useConfirm>["confirm"]
  * It opens the way the dashboard's other things open: an identity line — the
  * products it covers as its mark, its name, what it takes and where it writes
  * as facts, its last outcome at the far end — then its own picture, the list
- * page's narrowed to one job (`JobMap`), then four readings, the archive's
- * size over the runs as the Holding figure's trend.
+ * page's narrowed to one job (`JobMap`), then one reading as a sentence: what
+ * it holds and how much of it is kept, with the archive's size over the runs
+ * as its trend. Four tiles stood there until 0.8.7, and three of them were a
+ * bare figure said elsewhere on the page: how the last run went is the
+ * identity line's end and the rail's first row, and when it runs next is the
+ * picture's middle.
  *
  * Its runs are a rail beside the run they show, the deployment run page's
- * Details shape: each run its outcome, its archive's size as a bar, and the
- * inspector of the picked one — its log with the failing line washed, what
+ * Details shape: each run its outcome, what started it, how long it took and
+ * its archive's size as a figure, and the inspector of the picked one — its log with the failing line washed, what
  * the archive holds by its manifest, its recovery check and its files. With
  * none picked it shows the newest, because a page about a job is opened to
  * see how last night went. A table of runs with the chosen one's log in a
@@ -238,6 +241,8 @@ export function JobPage() {
     .map((run) => run.sizeBytes)
   const failed = runList.filter((run) => run.status === "failed").length
   const products = job ? jobProducts(job, resourceList, containers) : []
+  const holding = job && holdingReading(job, sizes.at(-1))
+  const pauses = job?.pauseContainers ?? []
 
   return (
     <Workspace
@@ -277,7 +282,7 @@ export function JobPage() {
         {jobPoll.error && !job && <ErrorState error={jobPoll.error} />}
         {jobPoll.loading && !job && <LoadingRows />}
 
-        {job && (
+        {job && holding && (
           <>
             <HostIdentity
               className="animate-rise"
@@ -287,13 +292,24 @@ export function JobPage() {
               title={job.name}
               facts={
                 <>
-                  <span>{contentsLabel(job)}</span>
+                  {/* What it takes, without the count of containers it pauses:
+                      they are named after where it writes. */}
+                  <span>{contentsLabel({ ...job, pauseContainers: undefined })}</span>
                   <FactDot />
                   <HostFact product={destinationProduct(job)}>
                     <span className={cn(job.targetKind === "local" && "font-mono")}>
                       {targetLabel(job)}
                     </span>
                   </HostFact>
+                  {pauses.length > 0 && (
+                    <>
+                      <FactDot />
+                      <span>
+                        pauses <span className="mx-0.5 font-mono">{pauses.join(", ")}</span> while
+                        it archives
+                      </span>
+                    </>
+                  )}
                   {job.encrypt && (
                     <>
                       <FactDot />
@@ -328,43 +344,28 @@ export function JobPage() {
               </div>
             )}
 
-            <StatGrid className="animate-rise">
-              <StatTile
-                label="Archives"
-                value={String(job.stored.runs)}
-                hint={retentionLabel(job)}
-              />
-              <StatTile
-                label="Holding"
-                value={bytes(job.stored.bytes)}
-                trend={<TileTrend values={sizes} label="Archive size, oldest run to newest" />}
-                hint={sizes.length > 0 ? `last archive ${bytes(sizes.at(-1))}` : undefined}
-              />
-              <StatTile
-                label="Last run"
-                value={job.lastRun ? relativeTime(job.lastRun.startedAt) : "never"}
-                tone={job.lastRun?.status === "failed" ? "danger" : undefined}
-                hint={
-                  job.lastRun
-                    ? `${job.lastRun.status}${job.lastRun.duration ? ` · took ${job.lastRun.duration}` : ""}`
-                    : "no run yet"
+            {/* Out by the line's own inset, as a run of them stands, so its
+                mark is on the page's edge. */}
+            <div className="-mx-2 animate-rise">
+              <ReadingLine
+                mark={
+                  <WireMark size="md" hue={HUE.disk}>
+                    <Archive aria-hidden />
+                  </WireMark>
                 }
-              />
-              <StatTile
-                label="Next run"
-                value={job.enabled && job.nextRun ? relativeTime(job.nextRun) : "—"}
-                tone={!job.enabled && job.schedule && !job.imported ? "warning" : undefined}
-                hint={
-                  job.imported
-                    ? "imported; it never runs or prunes here"
-                    : !job.schedule
-                      ? "runs by hand"
-                      : job.enabled
-                        ? scheduleLabel(job.schedule)
-                        : "schedule paused"
+                name="Holding"
+                hint={holding.hint}
+                trend={
+                  <TileTrend
+                    values={sizes}
+                    label="Archive size, oldest run to newest"
+                    color={HUE.disk}
+                  />
                 }
-              />
-            </StatGrid>
+              >
+                {holding.words}
+              </ReadingLine>
+            </div>
 
             {job.excludes.length > 0 && (
               <DetailList className="text-body">

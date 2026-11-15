@@ -2,47 +2,59 @@
 
 import { useState } from "react"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Field } from "@/components/form"
-import { ErrorState } from "@/components/state"
+import { Field, FieldRow } from "@/components/form"
+import { Modal } from "@/components/modal"
+import { ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { usePoll } from "@/hooks/use-poll"
-import { get, put } from "@/lib/api"
+import { put } from "@/lib/api"
+import { plural } from "@/lib/format"
 import { diagnosticRetentionProblem, type DiagnosticRetention } from "@/lib/network-diagnostics"
-import { NetworkReadWarning } from "./read-warning"
 
-export function RunRetention({ onChanged }: { onChanged: () => void }) {
-  const poll = usePoll(
-    (signal) => get<DiagnosticRetention>("/network/diagnostics/policy", undefined, signal),
-    60_000,
-  )
+/** The policy as the identity line says it: "keeps 100 for 7 days". */
+export function retentionWords(policy: DiagnosticRetention) {
+  const hours = policy.maxAgeHours
+  const span = hours % 24 === 0 ? plural(hours / 24, "day") : plural(hours, "hour")
+  return `keeps ${policy.maxRuns} finished for ${span}`
+}
+
+/**
+ * How many finished runs are kept and for how long: a small form, so a
+ * dialog (it was a disclosure under the list). Shrinking either erases
+ * records at once, so saving asks first; running records are never erased.
+ */
+export function RetentionDialog({
+  open,
+  onOpenChange,
+  policy,
+  error,
+  onRetry,
+  onChanged,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  policy?: DiagnosticRetention
+  error?: Error
+  onRetry: () => void
+  onChanged: () => void
+}) {
   return (
-    <details className="text-body">
-      <summary className="cursor-pointer focus-ring">Retention policy</summary>
-      <div className="mt-4 space-y-3">
-        {poll.data ? (
-          <>
-            <NetworkReadWarning
-              error={poll.error}
-              refresh={poll.refresh}
-              lastSuccess={poll.lastSuccess}
-              reading="retention policy"
-            />
-            <RetentionEditor
-              policy={poll.data}
-              onChanged={() => {
-                poll.refresh()
-                onChanged()
-              }}
-            />
-          </>
-        ) : poll.error ? (
-          <ErrorState error={poll.error} onRetry={poll.refresh} />
-        ) : (
-          <p className="text-muted-foreground">Reading retention policy…</p>
-        )}
-      </div>
-    </details>
+    <Modal open={open} onOpenChange={onOpenChange} title="Retention policy">
+      {policy ? (
+        <RetentionEditor
+          key={`${policy.maxRuns}:${policy.maxAgeHours}`}
+          policy={policy}
+          onChanged={() => {
+            onChanged()
+            onOpenChange(false)
+          }}
+        />
+      ) : error ? (
+        <ErrorState error={error} onRetry={onRetry} />
+      ) : (
+        <LoadingRows rows={2} />
+      )}
+    </Modal>
   )
 }
 
@@ -59,16 +71,14 @@ function RetentionEditor({
   const problem = diagnosticRetentionProblem(runs, hours)
   const changed = Number(runs) !== policy.maxRuns || Number(hours) !== policy.maxAgeHours
   return (
-    <>
-      <p className="text-hint text-muted-foreground">
-        Currently {policy.maxRuns} finished runs for {policy.maxAgeHours} hours. Running records are
-        preserved. Reads, writes and startup remove expired records.
+    <div className="space-y-4">
+      <p className="text-body text-muted-foreground">
+        Now {retentionWords(policy)}. Running records are kept whatever the limits.
       </p>
-      <div className="flex flex-wrap items-end gap-3">
+      <FieldRow>
         <Field label="Finished runs to retain" htmlFor="retain-runs">
           <Input
             id="retain-runs"
-            className="w-32"
             inputMode="numeric"
             value={runs}
             onChange={(event) => setRuns(event.target.value)}
@@ -77,14 +87,19 @@ function RetentionEditor({
         <Field label="Retention hours" htmlFor="retain-hours">
           <Input
             id="retain-hours"
-            className="w-32"
             inputMode="numeric"
             value={hours}
             onChange={(event) => setHours(event.target.value)}
           />
         </Field>
+      </FieldRow>
+      {problem && (
+        <p role="alert" className="text-hint text-destructive">
+          {problem}
+        </p>
+      )}
+      <div className="flex justify-end">
         <Button
-          variant="outline"
           disabled={!changed || Boolean(problem)}
           onClick={() =>
             confirm({
@@ -105,12 +120,7 @@ function RetentionEditor({
           Save retention
         </Button>
       </div>
-      {problem && (
-        <p role="alert" className="text-hint text-destructive">
-          {problem}
-        </p>
-      )}
       {dialog}
-    </>
+    </div>
   )
 }

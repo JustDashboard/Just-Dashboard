@@ -138,17 +138,19 @@ export function reachRefusal(
   return "No container of this dashboard publishes it: the server listens by its own configuration (its bind address), which is changed there."
 }
 
-/** What the firewall says about the server's port, in one line. */
-export function firewallWords(access: Pick<DbAccess, "firewall" | "port">): string {
+/**
+ * What the firewall does about the server's port, as the caption under
+ * whoever it lets in or keeps out in the reach picture.
+ */
+export function wallWords(access: Pick<DbAccess, "firewall" | "port">): string {
   const { firewall, port } = access
-  const name = firewall.backend ?? "The firewall"
-  if (!firewall.backend && !firewall.active)
-    return "No firewall is active on this machine: the binding alone decides."
-  if (!firewall.active) return `${name} is installed and switched off: the binding alone decides.`
-  if (firewall.open) return `${name} is on, and port ${port ?? "?"} is open to anywhere.`
+  const name = firewall.backend ?? "the firewall"
+  if (!firewall.backend && !firewall.active) return "no firewall: the binding alone decides"
+  if (!firewall.active) return `${name} is switched off: the binding alone decides`
+  if (firewall.open) return `${name} lets port ${port ?? "?"} in from anywhere`
   if (firewall.allowed.length > 0)
-    return `${name} is on, and lets port ${port ?? "?"} in from ${joinWords(firewall.allowed)}.`
-  return `${name} is on, and port ${port ?? "?"} is closed.`
+    return `${name} lets port ${port ?? "?"} in from ${joinWords(firewall.allowed)}`
+  return `${name} keeps port ${port ?? "?"} closed`
 }
 
 /** What changing the reach did to the firewall, from the route's one word. */
@@ -250,4 +252,47 @@ export function addressWords(address: DbHostAddress): { label: string; hint: str
     default:
       return { label: "A local network", hint: `The machines on ${network} reach it.` }
   }
+}
+
+/** One of the four answers the Network page can give for a container the dashboard owns. */
+export type ReachChoice = "local" | "private" | "allowlist" | "public"
+
+/** The four answers as the page's segments name them, narrowest first. */
+export const REACH_CHOICES: { value: ReachChoice; label: string }[] = [
+  { value: "local", label: "This server" },
+  { value: "private", label: "One address" },
+  { value: "allowlist", label: "Allowed" },
+  { value: "public", label: "Anywhere" },
+]
+
+/** What the reader has chosen that differs from what is saved. An absent key follows the server. */
+export type ReachEdit = { choice?: ReachChoice; address?: string; allow?: string[] }
+
+/**
+ * The answer the page holds against the one in force: which of the four is
+ * chosen, the value it takes, whether that differs from the server's, and why
+ * it cannot be saved yet. The address starts on the one in force, or on the
+ * first this machine has; the list starts as the list in force.
+ */
+export function reachDraft(
+  access: Pick<DbAccess, "exposure" | "address" | "allow" | "addresses">,
+  edit: ReachEdit,
+): { choice: ReachChoice; address?: string; allow: string[]; dirty: boolean; problem?: string } {
+  // A server on another machine has no answer here: the page offers none.
+  const saved: ReachChoice = access.exposure === "remote" ? "local" : access.exposure
+  const choice = edit.choice ?? saved
+  const current = access.exposure === "private" ? access.address : undefined
+  const address = edit.address ?? current ?? access.addresses[0]?.address
+  const allow = edit.allow ?? access.allow
+  const dirty =
+    choice !== saved ||
+    (choice === "private" && address !== current) ||
+    (choice === "allowlist" && !sameList(allow, access.allow))
+  const problem =
+    choice === "allowlist" && allow.length === 0
+      ? "A list needs an address."
+      : choice === "private" && !address
+        ? "Pick an address."
+        : undefined
+  return { choice, address, allow, dirty, problem }
 }

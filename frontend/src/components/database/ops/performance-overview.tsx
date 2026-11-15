@@ -8,6 +8,7 @@ import { gauge, heldSeconds, type Sample } from "@/components/database/home/samp
 import { SAMPLE_EVERY_MS, keptFor } from "@/components/database/home/use-samples"
 import { overviewCharts, quietChart } from "@/components/database/ops/performance-figures"
 import { Notes } from "@/components/database/ops/performance-parts"
+import { Fig, TitleFact } from "@/components/database/ops/performance-words"
 import { NowPicture } from "@/components/database/ops/performance-picture"
 import type { DbActivityResponse, DbServerStats } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
@@ -90,6 +91,19 @@ export function OverviewView({
         bodyClassName="space-y-4"
         actions={
           <>
+            {/* What was two sentences under the charts: how much is recorded
+                and how long it is kept, on the line that picks the window. */}
+            <TitleFact
+              title={`Collected every ${every} seconds, including while this page is closed.`}
+            >
+              {held > 0 ? (
+                <>
+                  <Fig>{duration(held)}</Fig> recorded, kept for {keptFor(retentionHours)}
+                </>
+              ) : (
+                <>kept for {keptFor(retentionHours)}</>
+              )}
+            </TitleFact>
             {error && samples.length > 0 && <NotUpdating error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
@@ -110,20 +124,12 @@ export function OverviewView({
           </div>
         )}
         {quiet.length > 0 && (
-          <p className="text-body leading-relaxed text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {drawn.length > 0 ? "Nothing else has moved." : "Nothing has moved."}
-            </span>{" "}
-            {sentence(quiet.map((chart) => chart.label.toLowerCase()))}{" "}
-            {quiet.length === 1 ? "has" : "have"} been at zero throughout the recorded window. Each
-            is drawn when it moves.
+          // A chart that would be a flat line at nought is not drawn, and is
+          // named, so the page does not read as if it left a measure out.
+          <p className="text-hint text-muted-foreground" data-slot="quiet-charts">
+            {sentence(quiet.map((chart) => chart.label.toLowerCase()))} stayed at zero.
           </p>
         )}
-        <p className="text-hint text-muted-foreground">
-          {held > 0
-            ? `Recorded activity over ${duration(held)}, collected every ${every} seconds and kept for ${keptFor(retentionHours)}.`
-            : `Activity is recorded in the background and kept for ${keptFor(retentionHours)}.`}
-        </p>
       </Block>
       <Notes notes={stats?.notes} />
     </div>

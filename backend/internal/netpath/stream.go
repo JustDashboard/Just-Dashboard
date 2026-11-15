@@ -3,6 +3,7 @@ package netpath
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 // holds open now and what its log recorded over the last hour. None of it is
 // this tuple's own traversal; the measured leg is streamTraversal's.
 func streamEvidence(ctx context.Context, name string, p Providers) Evidence {
-	item := evidence("stream", "Stream proxy", "native nginx stream "+name, "nginx stream", "/proxy/streams?stream="+name)
+	item := evidence("stream", "Stream proxy", "native nginx stream "+name, "nginx stream", "/proxy/streams/"+url.PathEscape(name))
 	path, err := p.Stream(ctx, name)
 	if err != nil {
 		item.failure(err)
@@ -96,7 +97,7 @@ func plural(n int) string {
 // stream's log: where nginx forwarded it and how it ended. Correlated by
 // client address and time, since nginx logs no client port.
 func streamTraversal(ctx context.Context, name, client string, sent time.Time, p Providers) Evidence {
-	item := evidence("stream_traversal", "Stream backend leg", "the measured connection through "+name, "nginx stream", "/proxy/streams?stream="+name)
+	item := evidence("stream_traversal", "Stream backend leg", "the measured connection through "+name, "nginx stream", "/proxy/streams/"+url.PathEscape(name))
 	session, err := p.StreamSession(ctx, name, client, sent)
 	switch {
 	case err != nil:

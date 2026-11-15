@@ -4,7 +4,6 @@ import { bytes, duration, relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { Meter } from "@/components/meter"
-import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -21,6 +20,7 @@ import { mongoReplication } from "@/components/database/mongo/api"
 import { uptimeWords } from "@/components/database/mongo/performance/samples"
 import type { MongoMember } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
+import { Fig, FigureLine } from "@/components/database/ops/performance-words"
 import { ReadError } from "@/components/database/redis/read-error"
 
 /** How far behind the primary a member is before the figure is a reading worth a hue. */
@@ -217,19 +217,16 @@ export function ReplicationView({ mongo }: { mongo: Mongo }) {
             </p>
           ) : (
             <div className="max-w-2xl space-y-3">
-              <MetricStrip>
-                <Metric
-                  label="Reaches back"
-                  value={duration(oplog.windowSeconds)}
-                  hint={oplog.first ? `to ${relativeTime(oplog.first)}` : undefined}
-                />
-                <Metric
-                  label="Holds"
-                  value={bytes(oplog.usedBytes)}
-                  hint={`of ${bytes(oplog.sizeBytes)}`}
-                />
-                <Metric label="Newest entry" value={oplog.last ? relativeTime(oplog.last) : "—"} />
-              </MetricStrip>
+              <FigureLine>
+                <span>
+                  reaches back <Fig>{duration(oplog.windowSeconds)}</Fig>
+                  {oplog.first && `, to ${relativeTime(oplog.first)}`}
+                </span>
+                <span>
+                  holds <Fig>{bytes(oplog.usedBytes)}</Fig> of {bytes(oplog.sizeBytes)}
+                </span>
+                {oplog.last && <span>its newest entry is from {relativeTime(oplog.last)}</span>}
+              </FigureLine>
               {used !== undefined && <Meter value={used} label="How full the replication log is" />}
             </div>
           )}

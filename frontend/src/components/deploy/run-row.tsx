@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils"
 import type { DeploymentEngineRun, DeploymentRelease, DeploymentSummary } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceRow } from "@/components/flow"
-import { Meter } from "@/components/meter"
 import { FactDot } from "@/components/metrics/host-identity"
 import { Status } from "@/components/status-dot"
 import { ProductGlyph, imageProduct } from "@/components/product-logo"
@@ -62,9 +61,9 @@ type RunSource = Pick<
  * `release` is the release the run made, whose commit names a run that did
  * not record its own; `live` says that release is the one serving now, which
  * the state column reads in place of "Ready" — one state, not two dots.
- * `meter` draws the run's time against the others in the list under its
- * duration, so a column of runs is also a picture of how long they take and
- * the one that took twice as long is seen, not read.
+ * `slow` draws the run's time in amber: the one that took twice as long as
+ * most is the one worth a second look. The time is said once, in words; a bar
+ * of it against the longest under every row was a bar per row.
  */
 export function RunRow({
   run,
@@ -73,7 +72,7 @@ export function RunRow({
   index,
   tags,
   actions,
-  meter,
+  slow,
   live,
 }: {
   run: DeploymentEngineRun
@@ -84,8 +83,8 @@ export function RunRow({
   index?: number
   tags?: React.ReactNode
   actions?: React.ReactNode
-  /** 0–100 of the list's longest run; `slow` when it took far longer than most. */
-  meter?: { share: number; slow?: boolean }
+  /** It took far longer than most of the runs listed with it. */
+  slow?: boolean
   /** The release this run made is the live one. */
   live?: boolean
 }) {
@@ -142,24 +141,14 @@ export function RunRow({
               {state}
               {failure && <span className="truncate text-hint text-destructive">{failure}</span>}
             </span>
-            <span className="flex w-16 flex-col items-end gap-1">
-              <span
-                className={cn(
-                  "numeric text-hint text-muted-foreground",
-                  meter?.slow && "text-warning",
-                )}
-              >
-                {duration}
-              </span>
-              {meter && (
-                <Meter
-                  value={meter.share}
-                  tone={meter.slow ? "warning" : "default"}
-                  size="thin"
-                  className="w-12"
-                  label="Time against the longest run listed"
-                />
+            <span
+              title={slow ? SLOW : undefined}
+              className={cn(
+                "numeric w-16 text-right text-hint",
+                slow ? "text-warning" : "text-muted-foreground",
               )}
+            >
+              {duration}
             </span>
             <span className="numeric w-20 truncate text-right text-hint text-muted-foreground">
               {when}
@@ -174,7 +163,9 @@ export function RunRow({
           {state}
           {failure && <span className="text-destructive">{failure}</span>}
           <FactDot />
-          <span className="numeric">{duration}</span>
+          <span title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
+            {duration}
+          </span>
           <FactDot />
           <span className="numeric">{when}</span>
           {stage}
@@ -184,6 +175,8 @@ export function RunRow({
     </ChoiceRow>
   )
 }
+
+const SLOW = "More than twice as long as most of the runs listed"
 
 /**
  * Where the run's source came from, in the order a forge writes a commit

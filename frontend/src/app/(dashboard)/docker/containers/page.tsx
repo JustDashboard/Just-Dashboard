@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { Workspace } from "@/components/workspace/workspace"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Box, Cross, Warning } from "@/components/icons"
@@ -23,26 +23,31 @@ import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { FactDot, platformName } from "@/components/metrics/host-identity"
 import { StreamState } from "@/components/overview/readings"
 import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { platformProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState } from "@/components/state"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
+import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
 import { ExplainIcon } from "@/components/docker/explain"
 import { ContainerBand } from "@/components/docker/containers-band"
 import { ContainerRows } from "@/components/docker/containers-table"
 import { useContainerControl } from "@/components/docker/container-actions"
 import {
+  CONTAINER_FILTER_KEYS,
   containerBucket,
+  DEFAULT_CONTAINER_SORT,
   FIRST_DIR,
+  matchingContainers,
   networkRates,
   oomKilledIds,
   recentEntries,
+  SORT_WORDS,
   sortContainers,
+  STANDALONE,
   type ContainerBucket,
   type ContainerSort,
   type NetRate,
@@ -55,11 +60,11 @@ import { Button } from "@/components/ui/button"
  * What is running on this server, what it is using, and what just happened
  * to it.
  *
- * The engine first, as the identity line Services and Live open on — Docker
- * as its mark and version, the host it runs on, the storage driver, how many
- * containers are running and how many of those a health check vouches for —
- * with the verdict at its right end: how many are failing, which narrows the
- * table to them, or that nothing is.
+ * The engine first, as the line every Docker page opens on (`DockerIdentity`):
+ * Docker as its mark and version, the verdict beside its name (how many are
+ * failing, which narrows the table to them, or that nothing is), the host it
+ * runs on, the storage driver, how many containers are running and how many
+ * of those a health check vouches for.
  *
  * Then `ContainerBand`: the containers using the most processor and memory as
  * spans of one bar the size of the machine, and Docker's own record of what
@@ -105,18 +110,6 @@ const DOT: Record<StateFilter, string> = {
   stopped: "bg-muted-foreground/50",
 }
 
-/** The stack chip for the containers no compose project owns; brackets are not a project name. */
-const STANDALONE = "(standalone)"
-
-const DEFAULT_SORT: ContainerSort = { key: "state", dir: "asc" }
-
-const SORT_WORDS: Record<SortKey, string> = {
-  state: "failing first, then by name",
-  name: "by name",
-  cpu: "by processor",
-  memory: "by memory",
-}
-
 /** How much of Docker's event log the page holds for Recent. */
 const EVENTS_KEPT = 200
 
@@ -131,15 +124,14 @@ export default function ContainersPage() {
   const [rates, setRates] = useState<Record<string, NetRate>>({})
   const [events, setEvents] = useState<DockerEvent[]>([])
   const [socketError, setSocketError] = useState<string>()
-  const [query, setQuery] = useSessionState("docker.containers.query", "")
-  const [remembered, setFilter] = useSessionState<string>("docker.containers.state.075", "")
+  const [query, setQuery] = useSessionState(CONTAINER_FILTER_KEYS.query, "")
+  const [remembered, setFilter] = useSessionState<string>(CONTAINER_FILTER_KEYS.state, "")
   // A remembered "all" from before the chips were toggles is no filter.
   const filter = (FILTERS.has(remembered) ? remembered : "") as StateFilter | ""
-  const [stack, setStack] = useSessionState<string>("docker.containers.stack", "")
-  const [sort, setSort] = useSessionState<ContainerSort>("docker.containers.sort", DEFAULT_SORT)
-  const [, rememberNavigation] = useSessionState<{ id: string; name: string }[]>(
-    "docker.containers.navigation",
-    [],
+  const [stack, setStack] = useSessionState<string>(CONTAINER_FILTER_KEYS.stack, "")
+  const [sort, setSort] = useSessionState<ContainerSort>(
+    CONTAINER_FILTER_KEYS.sort,
+    DEFAULT_CONTAINER_SORT,
   )
 
   /**
@@ -205,25 +197,17 @@ export default function ContainersPage() {
   // `refresh` is stable, so the verbs a row memoises stay stable with it.
   const { pending, act } = useContainerControl(trends.refresh)
 
-  /** Goes to one container, optionally straight at a tab. */
+  /**
+   * Goes to one container, optionally straight at a tab. Its page walks the
+   * table's order by reading these same filters for its rail, so nothing is
+   * handed over here.
+   */
   const open = useCallback(
     (id: string, tab?: string) => {
-      rememberNavigation(
-        Array.from(
-          document.querySelectorAll<HTMLElement>(
-            "[data-native-workspace='Docker'] [data-workspace-item]",
-          ),
-        )
-          .slice(0, 500)
-          .map((item) => ({
-            id: item.dataset.workspaceItem!,
-            name: item.dataset.workspaceName ?? "",
-          })),
-      )
       const suffix = tab ? `?tab=${encodeURIComponent(tab)}` : ""
       router.push(`/docker/containers/${encodeURIComponent(id)}${suffix}`)
     },
-    [router, rememberNavigation],
+    [router],
   )
 
   /*
@@ -270,20 +254,16 @@ export default function ContainersPage() {
   }, [containers])
   const stackFilter = stacks.some(([name]) => name === stack) ? stack : ""
 
-  const matching = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    const rows = containers.filter((c) => {
-      if (filter && bucketOf(c) !== filter) return false
-      if (stackFilter && (c.composeStack || STANDALONE) !== stackFilter) return false
-      if (!needle) return true
-      return (
-        c.name.toLowerCase().includes(needle) ||
-        c.image.toLowerCase().includes(needle) ||
-        c.composeStack?.toLowerCase().includes(needle) === true
-      )
-    })
-    return sortContainers(rows, sort, stats, bucketOf)
-  }, [containers, query, filter, stackFilter, bucketOf, sort, stats])
+  const matching = useMemo(
+    () =>
+      sortContainers(
+        matchingContainers(containers, { query, state: filter, stack: stackFilter }, bucketOf),
+        sort,
+        stats,
+        bucketOf,
+      ),
+    [containers, query, filter, stackFilter, bucketOf, sort, stats],
+  )
 
   const inspection = useInspectionOrder(
     matching,
@@ -354,25 +334,28 @@ export default function ContainersPage() {
             standalone create flow here. */}
         <PageContext eyebrow="Docker" title="Containers" />
 
-        <HostIdentity
-          mark="docker"
-          title={version ? `Docker Engine ${version}` : "Docker Engine"}
+        <DockerIdentity
+          version={version}
+          host={host ?? undefined}
+          hostDetail={host?.platform ? platformName(host) : undefined}
+          state={
+            counts.failing > 0 ? (
+              <VerdictButton pressed={filter === "failing"} onPress={() => toggleFilter("failing")}>
+                <Status tone="danger" label={`${plural(counts.failing, "container")} failing`} />
+              </VerdictButton>
+            ) : counts.starting > 0 ? (
+              <Status tone="warning" label={`${plural(counts.starting, "container")} starting`} />
+            ) : containers.length > 0 ? (
+              <Status tone="running" label="Nothing failing" />
+            ) : undefined
+          }
           facts={
             <>
-              {host && (
-                <>
-                  <HostFact product={platformProduct(host.platform)}>
-                    {host.hostname}
-                    {host.platform && ` · ${platformName(host)}`}
-                  </HostFact>
-                  <FactDot />
-                </>
-              )}
               {info.data?.Driver && (
-                <>
+                <span className="contents max-sm:hidden">
                   <span>{info.data.Driver}</span>
                   <FactDot />
-                </>
+                </span>
               )}
               <span className="numeric">
                 {running.length} of {plural(containers.length, "container")} running
@@ -384,13 +367,13 @@ export default function ContainersPage() {
                 </>
               )}
               {info.data && (
-                <>
+                <span className="contents max-sm:hidden">
                   <FactDot />
                   <span className="numeric">{plural(info.data.Images, "image")}</span>
-                </>
+                </span>
               )}
               {running.length > 0 && (
-                <>
+                <span className="contents max-sm:hidden">
                   <FactDot />
                   <span
                     className="numeric"
@@ -398,28 +381,9 @@ export default function ContainersPage() {
                   >
                     {checked} of {running.length} pass a health check
                   </span>
-                </>
+                </span>
               )}
             </>
-          }
-          aside={
-            <div className="flex flex-wrap items-center gap-3">
-              {counts.failing > 0 ? (
-                <button
-                  type="button"
-                  aria-pressed={filter === "failing"}
-                  onClick={() => toggleFilter("failing")}
-                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
-                >
-                  <Status tone="danger" label={`${plural(counts.failing, "container")} failing`} />
-                </button>
-              ) : counts.starting > 0 ? (
-                <Status tone="warning" label={`${plural(counts.starting, "container")} starting`} />
-              ) : containers.length > 0 ? (
-                <Status tone="running" label="Nothing failing" />
-              ) : null}
-              <WorkspaceHelp compact />
-            </div>
           }
         />
 

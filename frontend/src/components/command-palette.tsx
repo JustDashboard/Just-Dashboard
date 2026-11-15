@@ -62,6 +62,7 @@ import {
   searchItems,
   searchScopes,
   SEARCH_SCOPES,
+  TOOL_ALIASES,
   type RecentDestination,
   type SearchKind,
   type SearchScope,
@@ -365,6 +366,21 @@ function Palette({
         ]
       : []),
   ]
+  // A workbench's tool under its own name, beside the page it is on and only
+  // once it is asked for: the empty list is the rail's pages.
+  for (const tool of TOOL_ALIASES) {
+    const owner = pages.find((page) => page.href === tool.page)
+    if (!owner) continue
+    pages.push({
+      ...owner,
+      id: `page:${tool.href}`,
+      title: tool.title,
+      detail: [owner.detail, owner.title].filter(Boolean).join(" · "),
+      href: tool.href,
+      keywords: [...(owner.keywords ?? []), owner.title, ...tool.keywords],
+      explicit: true,
+    })
+  }
   const allPages = [
     ...NAV.flatMap((group) => group.items.flatMap((entry) => pagesUnder(entry, () => true))),
     ...PERSONAL_NAV.map((page) => ({ page, trail: [] })),

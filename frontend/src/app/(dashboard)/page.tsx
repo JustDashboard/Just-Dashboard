@@ -2,9 +2,10 @@
 
 import { Children, useMemo } from "react"
 import Link from "next/link"
-import { Plus } from "@/components/icons"
+import { useRouter } from "next/navigation"
+import { ArrowCircleUp, Plus, Puzzle, RotateClockwise, Terminal } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, duration, percent, rate } from "@/lib/format"
+import { duration } from "@/lib/format"
 import type { BoardSummary } from "@/lib/boards"
 import type { RdOverview } from "@/lib/remote-desktop"
 import type {
@@ -27,14 +28,14 @@ import type { SectionKey } from "@/lib/sidebar-sections"
 import { type PollState, usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
+import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
-import { Page, PageContext, PageState, Section } from "@/components/page"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { utilisationTone } from "@/components/meter"
-import { EmptyState } from "@/components/state"
+import type { ConnectionState } from "@/lib/metrics-store"
+import { Page, PageContext, Section } from "@/components/page"
+import { EmptyState, ErrorState } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { TopProcesses } from "@/components/metrics/top-processes"
-import { TileTrend } from "@/components/metrics/sparkline"
 import { lastFleet, readFleet } from "@/components/database/fleet/read"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { ProjectCard } from "@/components/deploy/fleet-card"
@@ -43,34 +44,30 @@ import { DashboardHealthNotice } from "@/components/overview/health-notice"
 import { UsagePingQuestion } from "@/components/overview/usage-ping-question"
 import { ActivityPanel } from "@/components/overview/activity"
 import { BackupsPanel, DatabasesPanel } from "@/components/overview/data"
-import {
-  CoreBars,
-  HUE,
-  LiveBytes,
-  LiveFigure,
-  SeriesKey,
-  StreamState,
-} from "@/components/overview/readings"
+import { ResourceReadings, ResourceReadingsSkeleton } from "@/components/overview/resources"
 import { SectionLink } from "@/components/overview/section-link"
 import {
-  DockerTile,
-  GitTile,
-  PackagesTile,
-  ProxyTile,
-  RemoteDesktopTile,
-  SecurityTile,
-  SettingsTile,
-  UnitsTile,
+  DockerRow,
+  GitRow,
+  PackagesRow,
+  ProxyRow,
+  RemoteDesktopRow,
+  SecurityRow,
+  ServiceList,
+  SettingsRow,
+  UnitsRow,
 } from "@/components/overview/services"
 import { SHORTCUT_GLYPH, Shortcuts, counted, type Shortcut } from "@/components/overview/shortcuts"
-import { StorageBand } from "@/components/overview/storage"
 import { RecentWorkPanel, ShellsPanel, newShellHref } from "@/components/overview/workspace"
+import { useUpdateDialog } from "@/components/update/update-dialog"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import {
   ProductLogos,
   cpuProduct,
   platformProduct,
   virtualizationProduct,
 } from "@/components/product-logo"
+import { Bone } from "@/components/bone"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -91,21 +88,19 @@ const DAY: MetricsWindow = { key: "24h" }
 const SHOWN_PROJECTS = 6
 const SHOWN_PROJECTS_NARROW = 3
 
-/** Each reading's line, and the key before its name that says which line is whose. */
-const SERIES = HUE
-
 export default function OverviewPage() {
   const { host, snapshot, error, connection } = useMetrics()
   const recorded = useMetricsHistory(HOUR)
   const events = useMetricEvents(DAY)
   // A section the account keeps out of its sidebar is kept off its Overview
-  // too, and so is the read behind its tile: the page asks the server only
+  // too, and so is the read behind its row: the page asks the server only
   // about what it is going to draw.
   const { hidden } = useHiddenSections()
   const shows = (key: SectionKey) => !hidden.has(key)
   const { can } = useAuth()
   const reads = useModuleReads(shows, can)
   const { confirm, dialog } = useConfirm()
+  const verbs = useServerVerbs(reads, shows)
 
   const trends = useMemo(() => {
     const points = recorded.history?.points ?? []
@@ -119,192 +114,117 @@ export default function OverviewPage() {
   }, [recorded.history])
 
   // The hostname is the page's title once it is known and "Overview" until
-  // then, so the heading does not change under the reader — see `PageState`.
-  if (!snapshot || !host || (error && !snapshot)) {
+  // then, so the heading does not change under the reader.
+  if (error && !snapshot) {
     return (
-      <PageState
-        eyebrow="Server"
-        title={host?.hostname ?? "Overview"}
-        error={error && !snapshot ? new Error(error) : undefined}
-        skeleton={
-          <>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-30 rounded-xl" />
-              ))}
-            </div>
-            <Skeleton className="h-48 rounded-xl" />
-          </>
-        }
-      />
+      <Page>
+        <PageContext title={host?.hostname ?? "Overview"} />
+        <ErrorState error={new Error(error)} />
+      </Page>
     )
   }
 
-  const modes = snapshot.cpu.modes
-  const throughput = {
-    rx: snapshot.net.reduce((sum, n) => sum + n.recvRate, 0),
-    tx: snapshot.net.reduce((sum, n) => sum + n.sendRate, 0),
-  }
-  const availPercent =
-    snapshot.memory.total > 0 ? (snapshot.memory.available / snapshot.memory.total) * 100 : 0
-  const cores = snapshot.cpu.cores || 1
-
-  // `TileTrend` leaves out a line that never moves on a scale of its own, which
-  // would otherwise fill the band and read as a full meter.
-  const trend = (values: number[], label: string, color: string, max?: number) =>
-    recorded.disabled ? undefined : (
-      <TileTrend values={values} max={max} color={color} label={`${label} over the last hour`} />
-    )
+  // Until the socket's first frame the page stands in its own shape: the
+  // machine's line and its readings as bones at their heights, and every
+  // block under them already drawn and reading for itself, so nothing on the
+  // page moves when the frame lands.
+  const ready = snapshot && host ? { snapshot, host } : undefined
+  const cores = ready ? ready.snapshot.cpu.cores || 1 : 0
 
   return (
     <Page className="animate-rise">
-      <PageContext title={host.hostname} />
+      <PageContext title={host?.hostname ?? "Overview"} />
 
       <DashboardHealthNotice />
       <UsagePingQuestion />
 
-      {/* What this machine is, in one line: the distribution drawn as
-          itself, then what it runs on. The uptime, process count and cores
-          that stood in the header's corner are facts about the machine and
-          sit with the rest of them; the cores were said again on the CPU
-          tile. */}
-      <HostIdentity
-        mark={platformProduct(host.platform)}
-        title={
-          <>
-            {platformName(host)}{" "}
-            <span className="font-mono text-body font-normal text-muted-foreground">
-              {host.kernelVersion}
-            </span>
-          </>
-        }
-        facts={
-          <>
-            <span className="font-medium text-foreground">{host.hostname}</span>
-            <FactDot />
-            <HostFact product={cpuProduct(host.cpuModel, host.kernelArch)}>
-              {host.cpuModel || host.kernelArch}
-            </HostFact>
-            <FactDot />
-            <span className="numeric">{cores} cores</span>
-            {host.virtualization && (
-              <>
-                <FactDot />
-                <HostFact product={virtualizationProduct(host.virtualization)}>
-                  {host.virtualization}
-                </HostFact>
-              </>
-            )}
-            <FactDot />
-            <span className="numeric">up {duration(snapshot.uptimeSeconds)}</span>
-            <FactDot />
-            <span className="numeric">{snapshot.procs?.total || host.processes} processes</span>
-          </>
-        }
-      />
+      {/* What this machine is, laid out as a project's header: the
+          distribution drawn as itself, whether it is answering, then what it
+          runs on. Its command is the one thing done to a server from
+          anywhere, a shell on it; what the dashboard can do to itself is
+          behind the menu. */}
+      {ready ? (
+        <HostIdentity
+          mark={platformProduct(ready.host.platform)}
+          title={<span className="min-w-0 truncate">{platformName(ready.host)}</span>}
+          state={
+            <>
+              <ServerState connection={connection} />
+              {reads.packages.data?.rebootRequired && (
+                <Status tone="warning" label="Restart needed" />
+              )}
+            </>
+          }
+          command={
+            reads.terminal.enabled && (
+              <Button size="sm" asChild>
+                <Link href={newShellHref(reads.terminal.data)}>
+                  <Terminal className="size-3.5" />
+                  Open terminal
+                </Link>
+              </Button>
+            )
+          }
+          menu={verbs.menu.length > 0 && <VerbMenu verbs={verbs.menu} label="Server actions" />}
+          facts={
+            <>
+              <span className="font-medium text-foreground">{ready.host.hostname}</span>
+              <FactDot />
+              <span className="font-mono">{ready.host.kernelVersion}</span>
+              <FactDot />
+              <HostFact product={cpuProduct(ready.host.cpuModel, ready.host.kernelArch)}>
+                {ready.host.cpuModel || ready.host.kernelArch}
+              </HostFact>
+              <FactDot />
+              <span className="numeric">{cores} cores</span>
+              {ready.host.virtualization && (
+                <>
+                  <FactDot />
+                  <HostFact product={virtualizationProduct(ready.host.virtualization)}>
+                    {ready.host.virtualization}
+                  </HostFact>
+                </>
+              )}
+              <FactDot />
+              <span className="numeric">up {duration(ready.snapshot.uptimeSeconds)}</span>
+              <FactDot />
+              <span className="numeric">
+                {ready.snapshot.procs?.total || ready.host.processes} processes
+              </span>
+            </>
+          }
+        />
+      ) : (
+        <HostIdentity
+          logo={<Skeleton className="size-10 rounded-lg" />}
+          title={<Bone className="w-56" />}
+          state={<Bone className="w-14 text-xs" />}
+          // Two lines of facts on a phone, where the machine's own wrap.
+          facts={
+            <>
+              <Bone className="w-64" />
+              <Bone className="w-56 sm:w-32" />
+            </>
+          }
+        />
+      )}
 
-      <Shortcuts shortcuts={shortcutsFor(reads, shows, can, host.hostname)} />
+      <Shortcuts shortcuts={shortcutsFor(reads, shows, can, host?.hostname)} />
 
-      {/* The machine's readings, under a head that says they are arriving
-          and leads to the page that records them. The way to Metrics stood
-          at the identity line's end as a button, a second control beside the
-          verdict on a line that otherwise only describes; it is a section's
-          way onward now, worded and drawn as Deployments' is. */}
-      <Section
-        title="Resources"
-        actions={
-          <div className="flex items-center gap-4">
-            <StreamState connection={connection} />
-            <SectionLink href="/metrics">All metrics</SectionLink>
-          </div>
-        }
-      >
-        <div>
-          {/* Each reading carries its last hour where a meter would be, keyed
-              by the colour of its line, and its figure glides to each frame
-              of the socket rather than jumping. The fullest filesystem was a
-              fifth tile here that filled rather than moved; the disks are a
-              band of their own under the four now. */}
-          <StatGrid columns={4} dense>
-            <StatTile
-              label={
-                <>
-                  <SeriesKey color={SERIES.cpu} />
-                  CPU
-                </>
-              }
-              meterLabel="CPU"
-              value={<LiveFigure value={snapshot.cpu.totalPercent} decimals={1} unit="%" />}
-              tone={utilisationTone(snapshot.cpu.totalPercent)}
-              trend={trend(trends.cpu, "CPU", SERIES.cpu, 100)}
-              meter={recorded.disabled ? snapshot.cpu.totalPercent : undefined}
-              hint={
-                modes
-                  ? `${modes.user.toFixed(0)}% user · ${modes.system.toFixed(0)}% sys · ${modes.iowait.toFixed(0)}% wait`
-                  : `load ${snapshot.cpu.loadAvg1.toFixed(2)}`
-              }
-              trailing={
-                <span className="inline-flex items-center gap-2">
-                  <CoreBars cores={snapshot.cpu.perCore} color={SERIES.cpu} />
-                  {modes && modes.steal >= 1 && (
-                    <span className="numeric font-medium text-destructive">
-                      {percent(modes.steal, 0)} steal
-                    </span>
-                  )}
-                </span>
-              }
-            />
-            <StatTile
-              label={
-                <>
-                  <SeriesKey color={SERIES.mem} />
-                  Memory
-                </>
-              }
-              meterLabel="Memory"
-              value={<LiveBytes value={snapshot.memory.available} />}
-              tone={availPercent <= 5 ? "danger" : availPercent <= 10 ? "warning" : "default"}
-              trend={trend(trends.mem, "Memory", SERIES.mem, 100)}
-              meter={recorded.disabled ? 100 - availPercent : undefined}
-              hint={`${percent(snapshot.memory.usedPercent, 0)} used · ${bytes(snapshot.memory.cached)} cached`}
-              trailing="free"
-            />
-            <StatTile
-              label={
-                <>
-                  <SeriesKey color={SERIES.load} />
-                  Load
-                </>
-              }
-              meterLabel="Load"
-              value={<LiveFigure value={snapshot.cpu.loadAvg1} decimals={2} />}
-              tone={utilisationTone((snapshot.cpu.loadAvg5 / cores) * 100)}
-              trend={trend(trends.load, "Load", SERIES.load, cores)}
-              meter={recorded.disabled ? (snapshot.cpu.loadAvg1 / cores) * 100 : undefined}
-              hint={`${snapshot.cpu.loadAvg5.toFixed(2)} · ${snapshot.cpu.loadAvg15.toFixed(2)} over 5 and 15 min`}
-              trailing={
-                <span className="numeric">{(snapshot.cpu.loadAvg1 / cores).toFixed(2)}/core</span>
-              }
-            />
-            <StatTile
-              label={
-                <>
-                  <SeriesKey color={SERIES.net} />
-                  Network
-                </>
-              }
-              value={<LiveBytes value={throughput.rx} suffix="/s" />}
-              trend={trend(trends.net, "Network", SERIES.net)}
-              hint={`${rate(throughput.tx)} out · ${snapshot.sockets?.tcpInUse ?? 0} TCP sockets`}
-              trailing="in"
-            />
-          </StatGrid>
-          <StorageBand
-            mounts={snapshot.mounts}
-            trend={trend(trends.disk, "Disk I/O", SERIES.disk)}
-            color={SERIES.disk}
+      {/* The machine's readings, each a sentence with its last hour, under a
+          head that leads to the page that records them. They were tiles; the
+          operator asked for none on this page. Whether they are arriving is
+          the state on the machine's own line. */}
+      <Section title="Resources" actions={<SectionLink href="/metrics">All metrics</SectionLink>}>
+        {ready ? (
+          <ResourceReadings
+            snapshot={ready.snapshot}
+            trends={trends}
+            recorded={!recorded.disabled}
           />
-        </div>
+        ) : (
+          <ResourceReadingsSkeleton />
+        )}
       </Section>
 
       {shows("deploy") && (
@@ -326,39 +246,96 @@ export default function OverviewPage() {
       </Pair>
 
       {/* Who is spending the machine and what changed on it — the two
-          questions the tiles raise — side by side, as /metrics pairs its
+          questions the readings raise — side by side, as /metrics pairs its
           process list with its notable moments. */}
       <Pair>
         <TopProcesses />
         <ActivityPanel events={events} />
       </Pair>
 
-      {/* The same run of readings as the tiles at the top, one per module,
-          because a module's headline figure *is* a reading. Each says what
-          it counts with the products themselves — the images running, the
-          forges pushed to — after its words. Deployments, Databases and
-          Backups have blocks of their own above, so their tiles went to the
-          services systemd runs and the remote computers. Two to a row on a
-          phone, where eight full-width tiles were a screen of their own. */}
+      {/* A row per module, each a sentence about it and the way in.
+          Deployments, Databases and Backups have blocks of their own above,
+          so the rows are the rest: what Docker and systemd run, the proxy's
+          certificates, how the panel is reached, what waits to be updated,
+          the checkouts, the remote computers and the dashboard itself. */}
       <Section title="Services">
-        <StatGrid columns={4} dense>
-          {shows("docker") && <DockerTile read={reads.docker} />}
-          {shows("proxy") && <ProxyTile read={reads.certificates} />}
-          {shows("security") && <SecurityTile read={reads.exposure} />}
-          {shows("packages") && <PackagesTile read={reads.packages} platform={host.platform} />}
-          <UnitsTile read={reads.units} />
-          {shows("git") && <GitTile read={reads.git} />}
-          {reads.remote.enabled && <RemoteDesktopTile read={reads.remote} />}
-          <SettingsTile />
-        </StatGrid>
+        <ServiceList>
+          {shows("docker") && <DockerRow read={reads.docker} />}
+          {shows("proxy") && <ProxyRow read={reads.certificates} />}
+          {shows("security") && <SecurityRow read={reads.exposure} />}
+          {shows("packages") && (
+            <PackagesRow read={reads.packages} platform={host?.platform ?? ""} />
+          )}
+          <UnitsRow read={reads.units} />
+          {shows("git") && <GitRow read={reads.git} />}
+          {reads.remote.enabled && <RemoteDesktopRow read={reads.remote} />}
+          <SettingsRow />
+        </ServiceList>
       </Section>
       {dialog}
+      {verbs.dialog}
     </Page>
   )
 }
 
 /**
- * Every module's own read, once, at the page: the blocks and tiles draw them,
+ * Whether the machine is answering, as the state on its own line: the facts
+ * beside it and the readings under it arrive on the socket this names, so the
+ * dot breathes only while it is open and says so when it is not.
+ */
+function ServerState({ connection }: { connection: ConnectionState }) {
+  if (connection === "open") return <Status live tone="running" label="Online" />
+  if (connection === "connecting") return <Status tone="notice" label="Connecting…" />
+  return <Status tone="warning" label="Reconnecting…" />
+}
+
+/**
+ * What can be done to the server from its own line, behind the menu. There is
+ * no route that restarts the machine, so Restart is the dashboard's own, and
+ * goes to the page that asks before it and follows it after: the same press
+ * here would start a restart with nowhere to watch it. Update is the dialog
+ * the sidebar's notice opens, offered while there is a version to take.
+ */
+function useServerVerbs(
+  reads: ReturnType<typeof useModuleReads>,
+  shows: (key: SectionKey) => boolean,
+) {
+  const router = useRouter()
+  const { can } = useAuth()
+  const { report } = useSelfUpdate()
+  const { openUpdate, dialog } = useUpdateDialog()
+  const admin = can("system.admin")
+  const running = report?.run?.status === "running" || report?.run?.status === "pending"
+  const waiting = reads.packages.data?.packages.length ?? 0
+  const menu: (Verb | false | undefined)[] = [
+    admin &&
+      report?.available &&
+      report.install.supported &&
+      !running && {
+        key: "update",
+        label: `Update to ${report.latest}`,
+        icon: ArrowCircleUp,
+        run: openUpdate,
+      },
+    shows("packages") &&
+      waiting > 0 && {
+        key: "packages",
+        label: `Update ${waiting === 1 ? "1 package" : `${waiting} packages`}`,
+        icon: Puzzle,
+        run: () => router.push("/packages"),
+      },
+    admin && {
+      key: "restart",
+      label: "Restart the dashboard",
+      icon: RotateClockwise,
+      run: () => router.push("/dashboard/configuration"),
+    },
+  ]
+  return { menu: menu.filter((verb): verb is Verb => Boolean(verb)), dialog }
+}
+
+/**
+ * Every module's own read, once, at the page: the blocks and rows draw them,
  * and the shortcuts count what each would add to. A read whose section is
  * hidden is never made, and neither is one the account may not make — the
  * terminal's listing needs the terminal, and the remote computers an
@@ -473,7 +450,7 @@ function shortcutsFor(
   reads: ReturnType<typeof useModuleReads>,
   shows: (key: SectionKey) => boolean,
   can: ReturnType<typeof useAuth>["can"],
-  hostname: string,
+  hostname: string | undefined,
 ): Shortcut[] {
   const list: (Shortcut | false)[] = [
     shows("deploy") &&

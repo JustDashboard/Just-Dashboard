@@ -380,7 +380,11 @@ test("linking switched off explains the switch and offers nothing", async ({ pag
 test("linked: the link's state, what is shared as it was sent, the policy and the keys", async ({
   page,
 }) => {
-  await mock(page, linked("operate"))
+  // The heartbeat is a second old when this test begins, not twenty seconds
+  // old when the file was loaded: on a loaded machine a worker reached this
+  // test with the fixture's heartbeat past a minute, and "just now" had
+  // become "1m ago" (it failed once so for two lanes, and never alone).
+  await mock(page, linked("operate", { lastHeartbeatAt: iso(Date.now() - 1_000) }))
   await page.goto("/dashboard/link")
 
   await expect(page.getByText("Linked", { exact: true }).first()).toBeVisible()

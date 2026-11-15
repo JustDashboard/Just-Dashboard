@@ -525,8 +525,9 @@ function RegistryShare({
           key: g.state,
           value: g.images.length,
           color: FRESHNESS_COLOR[g.state],
-          // Its count: one product's logo cannot stand for a whole answer.
-          mark: <span className="numeric text-hint font-medium">{g.images.length}</span>,
+          // Its state's dot and its count: one product's logo cannot stand
+          // for a whole answer, and a count alone did not say which answer.
+          mark: <AnswerMark state={g.state} count={g.images.length} />,
           name: <span className={cn(g.state === "outdated" && "text-warning")}>{label}</span>,
           detail: <ProductGlyphs ids={products} />,
           figure: g.images.length,
@@ -540,5 +541,24 @@ function RegistryShare({
         }
       })}
     />
+  )
+}
+
+/**
+ * An answer's mark in the strip: its dot in the span's own colour, then how
+ * many images gave it. The three muted answers are tints too faint to read
+ * at a dot's size, so theirs is ringed.
+ */
+function AnswerMark({ state, count }: { state: Freshness; count: number }) {
+  const faint = state === "unknown" || state === "unused" || state === "untagged"
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden
+        className={cn("size-1.5 shrink-0 rounded-full", faint && "ring-1 ring-muted-foreground/50")}
+        style={{ background: FRESHNESS_COLOR[state] }}
+      />
+      <span className="numeric text-hint font-medium">{count}</span>
+    </span>
   )
 }

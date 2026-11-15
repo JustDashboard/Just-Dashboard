@@ -278,3 +278,55 @@ test("the rail, emulator and companion strips end on one rule, and only the emul
   await hideTools.click()
   await expect(page.getByRole("button", { name: "Show files & git" })).toBeVisible()
 })
+
+// On a phone the bar's last two stops are the column's two halves, and the
+// column's own strip is not drawn. The column is drawn from the first look at
+// either: a phone that never opens it reads no folder and asks git nothing.
+test("on a phone Files and Git are stops on the bar, with the changed files counted on Git", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const asked: string[] = []
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname
+    // The column's own reads: the repository and the folder under the shell.
+    if (path.includes("/api/v1/git/") || path.endsWith("/api/v1/files/list")) asked.push(path)
+  })
+  await mockWorkbench(page, "files")
+  await page.goto("/terminal")
+  const bar = page.getByRole("navigation", { name: "Terminal" })
+  const git = bar.getByRole("tab", { name: "Git" })
+  await expect(bar.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
+  await page.waitForTimeout(500)
+  expect(asked).toEqual([])
+  await expect(git).not.toHaveAttribute("aria-description")
+
+  await git.click()
+  await expect(page.getByRole("list", { name: "Changed files" }).getByRole("listitem")).toHaveCount(
+    4,
+  )
+  await expect(git).toHaveAttribute("aria-description", "4")
+  await expect(page.getByRole("link", { name: "Open in Git" })).toBeVisible()
+  // The bar says which half is up; the column's own strip would say it twice.
+  await expect(page.getByRole("button", { name: "Files", exact: true })).toBeHidden()
+
+  await bar.getByRole("tab", { name: "Files" }).click()
+  await expect(bar.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true")
+  await page
+    .getByRole("button", { name: /README\.md/ })
+    .first()
+    .click()
+  const editor = page.locator(".monaco-editor")
+  await expect(editor.last()).toBeVisible({ timeout: 15_000 })
+  // The other half is leaving the file, from the bar as from the strip.
+  await git.click()
+  await expect(editor).toHaveCount(0)
+  await expect(page.getByRole("group", { name: "Git view" })).toBeVisible()
+
+  // Back at the shell the count stays on the bar.
+  await bar.getByRole("tab", { name: "Terminal" }).click()
+  await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
+  await expect(git).toHaveAttribute("aria-description", "4")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})

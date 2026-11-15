@@ -2,23 +2,14 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import {
-  Code,
-  Copy,
-  Pencil,
-  Plus,
-  SidebarLeftClose,
-  SidebarLeftOpen,
-  Trash,
-} from "@/components/icons"
+import { Code, Copy, Pencil, Plus, Trash } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { IconAction } from "@/components/icon-action"
 import { FormFact } from "@/components/form"
-import { Metric } from "@/components/page"
+import type { Verb } from "@/components/verbs"
 import { EmptyNote, EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -33,7 +24,8 @@ import {
   type Selected,
 } from "@/components/database/schema/address"
 import { qualified } from "@/components/database/schema/changes"
-import { Facts } from "@/components/database/schema/facts"
+import { HeadVerbs, useHeadMenu } from "@/components/database/workbench/chrome"
+import { FactsLine } from "@/components/database/workbench/facts-line"
 import { GroupGlyph, groupOfKind, kindWord } from "@/components/database/schema/kinds"
 import { EnumValueDialog } from "@/components/database/schema/object-forms"
 import { RoutineDialog, TriggerDialog } from "@/components/database/schema/program-forms"
@@ -49,6 +41,8 @@ import type { DbCatalog, DbObjectDefinition } from "@/components/database/schema
 import { useDestroy } from "@/components/database/schema/use-destroy"
 
 type ObjectSelection = Extract<NonNullable<Selected>, { type: "object" }>
+
+const NO_VERBS: Verb[] = []
 
 /**
  * One object that holds no rows — a function, a trigger, a sequence, a type —
@@ -69,8 +63,6 @@ type ObjectSelection = Extract<NonNullable<Selected>, { type: "object" }>
 export function ObjectView({
   selected,
   asked,
-  railOpen,
-  onToggleRail,
   onChanged,
   catalog,
   onDropped,
@@ -78,8 +70,6 @@ export function ObjectView({
   selected: ObjectSelection
   /** Counts the times the reader asked for the schema to be read again. */
   asked: number
-  railOpen: boolean
-  onToggleRail: () => void
   /** A label was added: the catalogue's copy of the type is stale. */
   onChanged: () => void
   /** The schema's catalogue, for the tables and trigger functions a trigger's form offers. */
@@ -176,21 +166,59 @@ export function ObjectView({
     })
   }
 
+  useHeadMenu(
+    missing
+      ? NO_VERBS
+      : [
+          {
+            key: "copy",
+            label: "Copy name",
+            icon: Copy,
+            run: () => void copyText(full, "Name copied"),
+          },
+        ],
+  )
+
   const facts = data
     ? [...(data.owner ? [{ name: "Owner", value: data.owner }] : []), ...data.details]
     : []
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-header px-1.5">
-        <IconAction
-          label={railOpen ? "Hide the objects" : "Show the objects"}
-          aria-pressed={railOpen}
-          className="size-7 shrink-0 max-sm:size-8"
-          onClick={onToggleRail}
-        >
-          {railOpen ? <SidebarLeftClose /> : <SidebarLeftOpen />}
-        </IconAction>
+      {!missing && (
+        <HeadVerbs>
+          {mayAddLabel && data && (
+            <Button size="sm" onClick={() => setAdding(true)}>
+              <Plus />
+              Add label
+            </Button>
+          )}
+          {mayAuthor && data && editable.data && (
+            <Button size="sm" disabled={!editable.data.editable} onClick={() => setEditing(true)}>
+              <Pencil />
+              Edit
+            </Button>
+          )}
+          {mayAuthor && data && (
+            <Button size="sm" variant="outline" onClick={drop}>
+              <Trash />
+              Drop
+            </Button>
+          )}
+          {engine.has("query") && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!data?.definition}
+              onClick={() => data && goto("query", { sql: data.definition })}
+            >
+              <Code />
+              Open in Query
+            </Button>
+          )}
+        </HeadVerbs>
+      )}
+      <div className="flex min-h-10 shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-header pr-1.5 pl-3">
         <GroupGlyph group={group} />
         <h2
           aria-label={routine ? `${full}(${selected.signature})` : full}
@@ -208,52 +236,6 @@ export function ObjectView({
           )}
         </h2>
         <Tag className="shrink-0">{kindWord(selected.kind)}</Tag>
-        {!missing && (
-          <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
-            {mayAddLabel && data && (
-              <Button size="xs" className="max-sm:h-8" onClick={() => setAdding(true)}>
-                <Plus />
-                Add label
-              </Button>
-            )}
-            {mayAuthor && data && editable.data && (
-              <Button
-                size="xs"
-                className="max-sm:h-8"
-                disabled={!editable.data.editable}
-                onClick={() => setEditing(true)}
-              >
-                <Pencil />
-                Edit
-              </Button>
-            )}
-            {mayAuthor && data && (
-              <Button size="xs" variant="outline" className="max-sm:h-8" onClick={drop}>
-                <Trash />
-                <span className="max-sm:sr-only">Drop</span>
-              </Button>
-            )}
-            {engine.has("query") && (
-              <Button
-                size="xs"
-                variant="outline"
-                className="max-sm:h-8"
-                disabled={!data?.definition}
-                onClick={() => data && goto("query", { sql: data.definition })}
-              >
-                <Code />
-                <span className="max-sm:sr-only">Open in Query</span>
-              </Button>
-            )}
-            <IconAction
-              label="Copy name"
-              className="size-7 max-sm:size-8"
-              onClick={() => void copyText(full, "Name copied")}
-            >
-              <Copy />
-            </IconAction>
-          </div>
-        )}
       </div>
 
       {missing ? (
@@ -308,11 +290,13 @@ export function ObjectView({
               {data.comment && (
                 <p className="max-w-3xl text-body text-muted-foreground">{data.comment}</p>
               )}
-              <Facts>
-                {facts.map((fact) => (
-                  <Metric key={fact.name} label={fact.name} value={fact.value} />
-                ))}
-              </Facts>
+              <FactsLine
+                facts={facts.map((fact) =>
+                  fact.name === "Owner"
+                    ? { key: "owner", lead: "owned by", text: fact.value, mono: true }
+                    : { key: fact.name, lead: fact.name.toLowerCase(), text: fact.value },
+                )}
+              />
               {selected.kind === "trigger" && data.table && (
                 <p className="text-xs text-muted-foreground">
                   Fires on{" "}

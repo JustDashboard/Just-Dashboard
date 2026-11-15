@@ -71,7 +71,10 @@ export function tableColumns(tables: readonly DbTableStat[]): Set<TableColumn> {
 const TABLE_WIDTHS = {
   name: 190,
   rows: 64,
-  size: 152,
+  // The size and its share stand where the size and its bar stood: the two
+  // take what the one took, so which columns fit a width is what it was.
+  size: 88,
+  share: 64,
   actions: 48,
   dead: 100,
   bloat: 104,
@@ -104,6 +107,7 @@ export function fittedColumns(
     TABLE_WIDTHS.name +
     TABLE_WIDTHS.rows +
     TABLE_WIDTHS.size +
+    TABLE_WIDTHS.share +
     TABLE_WIDTHS.actions +
     [...kept].reduce((sum, column) => sum + (column === "engine" ? 0 : TABLE_WIDTHS[column]), 0)
   for (const column of DROPPED_FIRST) {

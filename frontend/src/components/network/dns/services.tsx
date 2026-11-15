@@ -1,13 +1,13 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { del, errorMessage, get } from "@/lib/api"
+import { errorMessage, get } from "@/lib/api"
 import {
   DNS_SERVICE_BASE,
   dnsAttemptKey,
-  dnsChangeName,
   dnsChangeOwnerProblem,
   dnsEngineName,
   dnsRetainedReview,
@@ -17,40 +17,57 @@ import {
   readDNSCurrentChange,
   readDNSList,
   readDNSProvision,
-  readDNSView,
   type DNSConnection,
   type DNSServiceChange,
   type DNSServiceProvision,
 } from "@/lib/network-dns-services"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { useConfirm } from "@/components/confirm-dialog"
-import { Section } from "@/components/page"
+import { IconAction } from "@/components/icon-action"
+import { Globe, RefreshClockwise } from "@/components/icons"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { useHubSession } from "@/components/network/hub-session"
+import { engineHref } from "./engine-views"
+import { GhostRows } from "./ghost"
 import { DNSServiceConnectionForm } from "./service-connection"
 import type { DNSConnectionSeed } from "./service-form"
-import { DNSServiceInventory } from "./service-inventory"
 import { DNSServiceProvisionForm } from "./service-provision"
 import { DNSReviewStatus, DNSServiceReview } from "./service-review"
 
+/** The product an engine is drawn as; Technitium has no mark in the tree and takes the globe. */
+export const ENGINE_PRODUCT: Record<DNSConnection["engine"], string | undefined> = {
+  adguard: "adguard",
+  pihole: "pihole",
+  technitium: undefined,
+}
+
 type Screen =
   | { kind: "connect"; seed?: DNSConnectionSeed }
-  | { kind: "edit"; connection: DNSConnection }
   | { kind: "provision" }
-  | { kind: "connection"; id: string; name: string }
+  | { kind: "setup"; id: string; initial?: DNSServiceProvision }
+
+/** A retained review to read: a native change of a connection, or an owned setup. */
+export type RetainedScreen =
   | { kind: "change"; id: string; initial?: DNSServiceChange }
   | { kind: "setup"; id: string; initial?: DNSServiceProvision }
 
 /**
- * A request from elsewhere on the page — the detected-server handoff — to open
- * a new connection's form for a server, or an existing connection. The nonce
- * makes pressing the same button twice open it twice.
+ * A request from elsewhere on the page to open one of the manager's sheets:
+ * the detected-server handoff asks for a new connection's form seeded for a
+ * server; the page's menu asks for a blank connection form or an owned
+ * setup's review. The nonce makes pressing the same button twice open it
+ * twice. A connection that exists is not a sheet: it has a page
+ * (`engine-page.tsx`), and whoever asks for it is sent there.
  */
 export type DNSServiceAsk =
-  { kind: "connect"; seed: DNSConnectionSeed } | { kind: "connection"; id: string; name: string }
-export type DNSServiceRequest = { nonce: number } & DNSServiceAsk
+  | { kind: "connect"; seed?: DNSConnectionSeed }
+  | { kind: "connection"; id: string; name: string }
+  | { kind: "provision" }
+export type DNSServiceRequest = { nonce: number } & Exclude<DNSServiceAsk, { kind: "connection" }>
 
 export function DNSServiceManager({ request }: { request?: DNSServiceRequest }) {
   const { can, status } = useAuth()
@@ -59,6 +76,10 @@ export function DNSServiceManager({ request }: { request?: DNSServiceRequest }) 
 }
 
 function DNSServiceAdmin({ account, request }: { account: number; request?: DNSServiceRequest }) {
+  const router = useRouter()
+  // Connecting an engine stores a credential, which the server refuses a
+  // session opened through Just Hub: such a session is not offered it.
+  const hub = useHubSession()
   const [screen, setScreen] = useState<Screen>()
   // Derived while rendering from the last request handled, so a handoff opens
   // its panel without an effect.
@@ -66,9 +87,7 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
   if (request && request.nonce !== handled) {
     setHandled(request.nonce)
     setScreen(
-      request.kind === "connect"
-        ? { kind: "connect", seed: request.seed }
-        : { kind: "connection", id: request.id, name: request.name },
+      request.kind === "connect" ? { kind: "connect", seed: request.seed } : { kind: "provision" },
     )
   }
   const connections = usePoll(
@@ -89,95 +108,146 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
     provisions.refresh()
   }
   const close = () => setScreen(undefined)
-  const onReview = (initial: DNSServiceChange) =>
-    setScreen({ kind: "change", id: initial.id, initial })
   const title =
     screen?.kind === "connect"
       ? "Connect native DNS engine"
-      : screen?.kind === "edit"
-        ? `Update ${screen.connection.name}`
-        : screen?.kind === "provision"
-          ? "Review owned DNS setup"
-          : screen?.kind === "connection"
-            ? screen.name
-            : screen?.kind === "change"
-              ? "Retained native DNS change"
-              : "Retained owned DNS setup"
+      : screen?.kind === "provision"
+        ? "Review owned DNS setup"
+        : "Retained owned DNS setup"
 
+  const setups = provisions.data ?? []
   return (
     <>
-      <Section
-        title={
-          connections.data
-            ? `Native DNS engines · ${connections.data.length}`
-            : "Native DNS engines"
-        }
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={refresh}>
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={() => setScreen({ kind: "provision" })}>
-              Review owned setup
-            </Button>
-            <Button onClick={() => setScreen({ kind: "connect" })}>Connect engine</Button>
-          </div>
-        }
-      >
-        {connections.error && (
-          <ErrorState error={connections.error} onRetry={connections.refresh} />
-        )}
-        {!connections.data ? (
-          !connections.error && <LoadingPanel plain rows={2} />
-        ) : connections.data.length === 0 ? (
-          <EmptyNote>No native DNS engine is connected.</EmptyNote>
-        ) : (
-          <ChoiceList>
-            {connections.data.map((connection) => (
-              <ChoiceRow
-                key={connection.id}
-                title={connection.name}
-                verb={`Inspect ${connection.name}`}
-                description={`${dnsEngineName(connection.engine)} · ${connection.endpoint}`}
-                trailing={
-                  <Status
-                    tone={connection.management ? "notice" : "stopped"}
-                    label={connection.management ? "Reviewed changes enabled" : "Read-only"}
-                  />
-                }
-                onSelect={() =>
-                  setScreen({ kind: "connection", id: connection.id, name: connection.name })
-                }
-              />
-            ))}
-          </ChoiceList>
-        )}
-      </Section>
-      <Section
-        title={
-          provisions.data ? `Owned DNS setups · ${provisions.data.length}` : "Owned DNS setups"
-        }
-      >
-        {provisions.error && <ErrorState error={provisions.error} onRetry={provisions.refresh} />}
-        {!provisions.data ? (
-          !provisions.error && <LoadingPanel plain rows={1} />
-        ) : provisions.data.length === 0 ? (
-          <EmptyNote>No owned DNS setup has been reviewed.</EmptyNote>
-        ) : (
-          <ChoiceList>
-            {provisions.data.map((setup) => (
-              <ChoiceRow
-                key={setup.id}
-                title={setup.request.name}
-                verb={`Review owned DNS setup ${setup.request.name}`}
-                description={`${dnsEngineName(setup.request.engine)} · 127.0.0.1:${setup.request.dnsPort}`}
-                trailing={<DNSReviewStatus state={setup.state} />}
-                onSelect={() => setScreen({ kind: "setup", id: setup.id })}
-              />
-            ))}
-          </ChoiceList>
-        )}
-      </Section>
+      <Panel plain>
+        <PanelHeader
+          title="Connected engines"
+          actions={
+            <>
+              {connections.data && connections.data.length > 0 && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {connections.data.length}
+                </span>
+              )}
+              <IconAction label="Refresh" onClick={refresh}>
+                <RefreshClockwise />
+              </IconAction>
+              {/* With no engine the list's place holds the one Connect. */}
+              {!hub && connections.data && connections.data.length > 0 && (
+                <Button size="xs" variant="outline" onClick={() => setScreen({ kind: "connect" })}>
+                  Connect engine
+                </Button>
+              )}
+            </>
+          }
+        />
+        <PanelBody className="flex min-w-0 flex-col gap-3">
+          {connections.error && (
+            <ErrorState error={connections.error} onRetry={connections.refresh} />
+          )}
+          {!connections.data ? (
+            !connections.error && <GhostRows rows={1} />
+          ) : connections.data.length === 0 ? (
+            <EmptyState
+              mark={<ProductLogos ids={["adguard", "pihole"]} size="md" />}
+              title="No DNS engine is connected"
+              description="AdGuard Home, Pi-hole or Technitium, read through its own API: queries, filters, clients, DHCP and records."
+              action={
+                !hub && (
+                  <Button onClick={() => setScreen({ kind: "connect" })}>Connect engine</Button>
+                )
+              }
+            />
+          ) : (
+            <ChoiceList>
+              {connections.data.map((connection) => (
+                <ChoiceRow
+                  key={connection.id}
+                  leading={
+                    <ProductLogo
+                      id={ENGINE_PRODUCT[connection.engine]}
+                      size="sm"
+                      fallback={Globe}
+                    />
+                  }
+                  title={connection.name}
+                  // An engine's inventory is a page of its own, not a sheet over this one.
+                  href={engineHref(connection.id)}
+                  verb={`Inspect ${connection.name}`}
+                  description={
+                    <>
+                      {dnsEngineName(connection.engine)} ·{" "}
+                      <span className="align-top font-mono">{connection.endpoint}</span>
+                    </>
+                  }
+                  trailing={
+                    <span className="w-44 max-sm:hidden">
+                      <Status
+                        tone={connection.management ? "notice" : "stopped"}
+                        label={connection.management ? "Reviewed changes enabled" : "Read-only"}
+                      />
+                    </span>
+                  }
+                />
+              ))}
+            </ChoiceList>
+          )}
+        </PanelBody>
+      </Panel>
+      {/* A setup the dashboard owns is rare: its section is drawn once there
+          is one (or its read failed), and reviewing a first one is in the
+          page's menu rather than a second empty list under the first. */}
+      {(setups.length > 0 || provisions.error) && (
+        <Panel plain>
+          <PanelHeader
+            title="Owned setups"
+            actions={
+              <>
+                <span className="numeric text-hint text-muted-foreground">{setups.length}</span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setScreen({ kind: "provision" })}
+                >
+                  Review owned setup
+                </Button>
+              </>
+            }
+          />
+          <PanelBody className="flex min-w-0 flex-col gap-3">
+            {provisions.error && (
+              <ErrorState error={provisions.error} onRetry={provisions.refresh} />
+            )}
+            <ChoiceList>
+              {setups.map((setup) => (
+                <ChoiceRow
+                  key={setup.id}
+                  leading={
+                    <ProductLogo
+                      id={ENGINE_PRODUCT[setup.request.engine]}
+                      size="sm"
+                      fallback={Globe}
+                    />
+                  }
+                  title={setup.request.name}
+                  verb={`Review owned DNS setup ${setup.request.name}`}
+                  description={
+                    <>
+                      {dnsEngineName(setup.request.engine)} ·{" "}
+                      <span className="align-top font-mono">127.0.0.1:{setup.request.dnsPort}</span>
+                    </>
+                  }
+                  trailing={
+                    <span className="w-44 max-sm:hidden">
+                      <DNSReviewStatus state={setup.state} />
+                    </span>
+                  }
+                  onSelect={() => setScreen({ kind: "setup", id: setup.id })}
+                />
+              ))}
+            </ChoiceList>
+          </PanelBody>
+        </Panel>
+      )}
       <SidePanel
         open={Boolean(screen)}
         onOpenChange={(open) => !open && close()}
@@ -186,19 +256,14 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
         width="xl"
         initialFocus="body"
       >
-        {screen?.kind === "connect" || screen?.kind === "edit" ? (
+        {screen?.kind === "connect" ? (
           <DNSServiceConnectionForm
-            key={
-              screen.kind === "edit"
-                ? screen.connection.id
-                : `new:${screen.seed?.engine ?? ""}:${screen.seed?.endpoint ?? ""}`
-            }
-            connection={screen.kind === "edit" ? screen.connection : undefined}
-            seed={screen.kind === "connect" ? screen.seed : undefined}
+            key={`new:${screen.seed?.engine ?? ""}:${screen.seed?.endpoint ?? ""}`}
+            seed={screen.seed}
             onCancel={close}
             onConnected={(view) => {
               refresh()
-              setScreen({ kind: "connection", id: view.connection.id, name: view.connection.name })
+              router.push(engineHref(view.connection.id))
             }}
           />
         ) : screen?.kind === "provision" ? (
@@ -208,18 +273,7 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
               setScreen({ kind: "setup", id: initial.id, initial })
             }}
           />
-        ) : screen?.kind === "connection" ? (
-          <ConnectionDetail
-            key={screen.id}
-            id={screen.id}
-            onReview={onReview}
-            onEdit={(connection) => setScreen({ kind: "edit", connection })}
-            onDisconnected={() => {
-              refresh()
-              close()
-            }}
-          />
-        ) : screen?.kind === "change" || screen?.kind === "setup" ? (
+        ) : screen?.kind === "setup" ? (
           <RetainedReview
             key={`${screen.kind}:${screen.id}`}
             screen={screen}
@@ -232,174 +286,15 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
   )
 }
 
-function ConnectionDetail({
-  id,
-  onReview,
-  onEdit,
-  onDisconnected,
-}: {
-  id: string
-  onReview: (value: DNSServiceChange) => void
-  onEdit: (value: DNSConnection) => void
-  onDisconnected: () => void
-}) {
-  const view = usePoll(
-    async (signal) => readDNSView(await get(`${DNS_SERVICE_BASE}/${id}`, undefined, signal), id),
-    15000,
-    [id],
-  )
-  const history = usePoll(
-    async (signal) => {
-      const rows = readDNSList(
-        await get(`${DNS_SERVICE_BASE}/${id}/changes`, undefined, signal),
-        readDNSChange,
-      )
-      if (rows.some((row) => row.connectionId !== id))
-        throw new Error("Retained DNS history belongs to another connection.")
-      return rows
-    },
-    15000,
-    [id],
-  )
-  const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
-  const [error, setError] = useState<string>()
-  const [busy, setBusy] = useState(false)
-  const fresh = Boolean(view.data && !view.error && can("system.admin"))
-  const live = useRef({ fresh, connection: view.data?.connection, destructive: can("destructive") })
-  useLayoutEffect(() => {
-    live.current = { fresh, connection: view.data?.connection, destructive: can("destructive") }
-  })
-  const refresh = () => {
-    view.refresh()
-    history.refresh()
-  }
-  const disconnect = () => {
-    const connection = view.data?.connection
-    if (
-      !fresh ||
-      !connection ||
-      connection.ownership !== "connected" ||
-      !can("destructive") ||
-      busy
-    )
-      return
-    confirm({
-      title: `Disconnect ${connection.name}`,
-      description:
-        "Remove this dashboard connection and its sealed credential. The native engine and its policy keep running.",
-      confirmLabel: "Disconnect engine",
-      action: async (): Promise<"reported"> => {
-        const current = live.current
-        if (
-          !current.fresh ||
-          !current.destructive ||
-          current.connection?.id !== connection.id ||
-          current.connection.generation !== connection.generation ||
-          current.connection.ownership !== "connected"
-        ) {
-          setError("The connection changed. Refresh its current ownership before disconnecting.")
-          return "reported"
-        }
-        setBusy(true)
-        setError(undefined)
-        try {
-          await del(`${DNS_SERVICE_BASE}/${id}`)
-          onDisconnected()
-        } catch (err) {
-          setError(errorMessage(err))
-          refresh()
-        } finally {
-          setBusy(false)
-        }
-        return "reported"
-      },
-    })
-  }
-  return (
-    <div className="space-y-6">
-      {view.error && <ErrorState error={view.error} onRetry={view.refresh} />}
-      {error && (
-        <div role="alert">
-          <Notice tone="warning" title="Connection needs review">
-            {error}
-          </Notice>
-        </div>
-      )}
-      {!view.data ? (
-        !view.error && <LoadingPanel plain />
-      ) : (
-        <>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={refresh}>
-              Read native engine
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!fresh || busy}
-              onClick={() => onEdit(view.data!.connection)}
-            >
-              Update connection
-            </Button>
-            {view.data.connection.ownership === "connected" && (
-              <Button
-                variant="outline"
-                disabled={!fresh || !can("destructive") || busy}
-                onClick={disconnect}
-                pending={busy}
-              >
-                Disconnect engine
-              </Button>
-            )}
-          </div>
-          <DNSServiceInventory
-            view={view.data}
-            stale={!fresh}
-            onReview={onReview}
-            onRefresh={refresh}
-          />
-        </>
-      )}
-      <Section
-        title={
-          history.data
-            ? `Retained native changes · ${history.data.length}`
-            : "Retained native changes"
-        }
-      >
-        {history.error && <ErrorState error={history.error} onRetry={history.refresh} />}
-        {!history.data ? (
-          !history.error && <LoadingPanel plain rows={2} />
-        ) : history.data.length === 0 ? (
-          <EmptyNote>No native change has been reviewed for this connection.</EmptyNote>
-        ) : (
-          <ChoiceList>
-            {history.data.map((change) => (
-              <ChoiceRow
-                key={change.id}
-                title={dnsChangeName(change.request)}
-                verb={`Read DNS change ${change.id}`}
-                description={new Date(change.createdAt).toLocaleString()}
-                trailing={<DNSReviewStatus state={change.state} />}
-                onSelect={() => onReview(change)}
-              />
-            ))}
-          </ChoiceList>
-        )}
-      </Section>
-      {dialog}
-    </div>
-  )
-}
-
-type AttemptState = {
+export type AttemptState = {
   ready: boolean
   values: ReadonlySet<string>
   error?: string
   mark: (kind: "change" | "provision", id: string) => boolean
 }
 
-function useDNSAttempts(account: number): AttemptState {
+/** The applies this account has tried in this tab: a retained review is applied once. */
+export function useDNSAttempts(account: number): AttemptState {
   const key = `jd.dns-service-attempts.${account}`
   const [state, setState] = useState<{ key: string; values: Set<string>; error?: string }>()
   useEffect(() => {
@@ -439,12 +334,12 @@ function useDNSAttempts(account: number): AttemptState {
   }
 }
 
-function RetainedReview({
+export function RetainedReview({
   screen,
   attempts,
   onListsRefresh,
 }: {
-  screen: Extract<Screen, { kind: "change" | "setup" }>
+  screen: RetainedScreen
   attempts: AttemptState
   onListsRefresh: () => void
 }) {

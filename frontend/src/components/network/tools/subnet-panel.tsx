@@ -3,10 +3,9 @@
 import Link from "next/link"
 import { useState } from "react"
 import { Field } from "@/components/form"
+import { Play } from "@/components/icons"
 import { Detail, DetailList } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
-
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/hooks/use-auth"
@@ -14,6 +13,11 @@ import { post } from "@/lib/api"
 import { previewReading, type IPAMPreview } from "@/lib/network-ipam"
 
 import { calcSubnet, prefixRelation, type SubnetInfo } from "./subnet-math"
+import { ToolEmpty, ToolHead } from "./tool-frame"
+
+/** What the rail and the empty pane say the calculator does. */
+export const SUBNET_HINT =
+  "Work out a prefix's network, mask, range and hosts in this browser, then compare it with another"
 
 export function SubnetTool() {
   const { can } = useAuth()
@@ -73,9 +77,9 @@ export function SubnetTool() {
   const reading = preview ? previewReading(preview) : undefined
 
   return (
-    <Panel plain>
-      <PanelHeader title="Subnet calc" />
-      <PanelBody className="space-y-2.5">
+    <div className="min-w-0 space-y-5">
+      <ToolHead tool="subnet" label="Subnet calculator" hint={SUBNET_HINT} />
+      <div className="min-w-0 space-y-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Input
             id="tool-subnet-input"
@@ -87,6 +91,7 @@ export function SubnetTool() {
             className="h-8 min-w-0 flex-1 font-mono text-xs"
           />
           <Button size="sm" onClick={run} disabled={busy || !input.trim()} pending={busy}>
+            <Play />
             Run
           </Button>
           {info && (
@@ -197,7 +202,22 @@ export function SubnetTool() {
             )}
           </section>
         )}
-      </PanelBody>
-    </Panel>
+
+        {!info && (
+          <div className="pt-3">
+            <ToolEmpty
+              tool="subnet"
+              sentence={`${SUBNET_HINT}.`}
+              busy={false}
+              example="192.168.1.20/24"
+              onExample={() => {
+                setInput("192.168.1.20/24")
+                document.getElementById("tool-subnet-input")?.focus()
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
   )
 }

@@ -12,7 +12,7 @@ import { useApiOrigin } from "@/components/account/api-keys"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Field, FormSection } from "@/components/form"
-import { Check, Copy, LineChart } from "@/components/icons"
+import { Check, Copy } from "@/components/icons"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { ErrorState } from "@/components/state"
@@ -25,7 +25,7 @@ import { get, post, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { ApiToken, DbMetricsExport } from "@/lib/types"
-import { useRef, useState } from "react"
+import { useState } from "react"
 
 const PATH = "/databases/metrics-export"
 
@@ -34,29 +34,28 @@ const PATH = "/databases/metrics-export"
  * it stays. The recorder keeps a reading of every server on a timer whether or
  * not a page is open; this is the one place that says how to scrape those
  * readings with Prometheus and how long they are kept, so it opens from the
- * control center, which is where all the databases are.
+ * control center, which is where all the databases are: a word in the menu at
+ * the end of its identity line, which is where the keyboard goes back to.
  */
-export function MetricsExport({ admin }: { admin: boolean }) {
-  const [open, setOpen] = useState(false)
-  const opener = useRef<HTMLButtonElement>(null)
+export function MetricsExport({
+  admin,
+  onClose,
+  opener,
+}: {
+  admin: boolean
+  onClose: () => void
+  /** What opened it: the dialog is opened by state, so Radix has no trigger to return to. */
+  opener: React.RefObject<HTMLElement | null>
+}) {
   return (
-    <>
-      <Button ref={opener} size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <LineChart className="size-4" />
-        Metrics export
-      </Button>
-      {open && (
-        <MetricsExportDialog
-          admin={admin}
-          onClose={() => setOpen(false)}
-          // The dialog is opened by state, so there is no trigger for Radix to return to.
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            opener.current?.focus()
-          }}
-        />
-      )}
-    </>
+    <MetricsExportDialog
+      admin={admin}
+      onClose={onClose}
+      onCloseAutoFocus={(event) => {
+        event.preventDefault()
+        opener.current?.focus()
+      }}
+    />
   )
 }
 

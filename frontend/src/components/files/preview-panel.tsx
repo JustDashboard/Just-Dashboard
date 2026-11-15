@@ -13,9 +13,7 @@ import {
   Crop,
   Download,
   Eye,
-  File,
   Fingerprint,
-  FolderClosed,
   FolderOpen,
   Linked,
   ListOrdered,
@@ -45,6 +43,7 @@ import { FolderColourSwatches } from "@/components/files/folder-colour"
 import { copyText } from "@/lib/clipboard"
 import { baseOf, parentOf, rawUrl } from "@/components/files/media"
 import { accessRows, accessSummary, type Access } from "@/components/files/access"
+import { folderSentence } from "@/components/files/counts"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
 
 export { rawUrl } from "@/components/files/media"
@@ -515,17 +514,15 @@ function DirectoryContents({
         )
       }
     >
-      <div className="grid grid-cols-2 gap-2">
-        <Count icon={FolderClosed} value={preview.dirCount ?? 0} label="folder" />
-        <Count icon={File} value={preview.fileCount ?? 0} label="file" />
-      </div>
+      {/* What it holds, said rather than tiled: two boxed figures made the
+          reader add them up, and had nowhere to put the size once measured. */}
+      <p data-slot="folder-counts" className="numeric text-body">
+        {folderSentence(preview.dirCount ?? 0, preview.fileCount ?? 0, usage?.bytes) ?? "Empty"}
+      </p>
       {usage && (
         <div className="space-y-2">
-          <p className="text-xs">
-            <b className="numeric text-body">{bytes(usage.bytes)}</b>{" "}
-            <span className="text-muted-foreground">
-              in {plural(usage.files, "file")} and {plural(usage.dirs, "folder")}
-            </span>
+          <p className="text-hint text-muted-foreground">
+            {plural(usage.files, "file")} and {plural(usage.dirs, "folder")} all the way down
           </p>
           {usage.truncated && (
             <p className="text-hint text-warning">
@@ -551,22 +548,6 @@ function DirectoryContents({
         </div>
       )}
     </Section>
-  )
-}
-
-function Count({ icon: Glyph, value, label }: { icon: Icon; value: number; label: string }) {
-  return (
-    <div className="flex items-center gap-2.5 rounded-md bg-background px-2.5 py-2">
-      <Glyph aria-hidden className="size-4 text-muted-foreground" />
-      <span className="min-w-0">
-        <span className="numeric block text-body leading-tight font-semibold">
-          {value.toLocaleString()}
-        </span>
-        <span className="block text-hint text-muted-foreground">
-          {value === 1 ? label : label + "s"}
-        </span>
-      </span>
-    </div>
   )
 }
 

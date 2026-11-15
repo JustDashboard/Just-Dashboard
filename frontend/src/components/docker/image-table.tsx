@@ -1,20 +1,20 @@
 "use client"
 
 import Link from "next/link"
-import { CheckCircle, Layers, Question } from "@/components/icons"
-import { RowLink } from "@/components/page"
-import { ProductLogo, imageProduct } from "@/components/product-logo"
+import { useRouter } from "next/navigation"
+import { CheckCircle, Question } from "@/components/icons"
+import { ImageLogo, ReferenceWords } from "@/components/docker/image-marks"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
 import {
   FRESHNESS_COLOR,
   FRESHNESS_LABEL,
+  imageHref,
   imageVersion,
   primaryTag,
   registryName,
   shortId,
-  splitReference,
   type Freshness,
 } from "@/components/docker/images"
 import {
@@ -31,23 +31,22 @@ import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { Container, DockerImage, ImageUpdateStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-/** The Images line's hue on the disk bar, so a row's size reads as its share of that span. */
-const SIZE_HUE = "var(--chart-1)"
-
 /** How many containers a row names before it counts the rest. */
 const NAMED = 3
 
 /**
  * The images as a table: each row a reading of one image — what it is, who
  * runs it, what its registry says, how old and how large — that opens the
- * image's sheet.
+ * image's page.
  *
  * It was a column of cards, on §12's argument that a row you open is a place
  * to go. The operator asked for the table back, and the Processes, Packages and
  * Services tables are the precedent for it: a row of readings that also opens
- * a sheet is still read down its columns, and "which of these is largest,
+ * a page is still read down its columns, and "which of these is largest,
  * oldest, unused or behind" is a question asked of a column. Fixed columns,
  * so a long registry path ellipses rather than pushing Size off the panel.
+ * Size is a figure at the column's right edge: a bar under each one made the
+ * column a chart of rows, and the order already says which is largest.
  *
  * Wide, every reading has its column. Below `xl` the containers and the
  * registry's answer go to the name's second line and the row keeps its size
@@ -62,7 +61,6 @@ export function ImageTable({
   arrived,
   pulling,
   verbs,
-  onOpen,
 }: {
   images: DockerImage[]
   users: Map<string, Container[]>
@@ -73,9 +71,8 @@ export function ImageTable({
   /** The reference a pull is moving right now, so its row can say so. */
   pulling?: string
   verbs: (image: DockerImage) => Verb[]
-  onOpen: (id: string) => void
 }) {
-  const largest = Math.max(...images.map((i) => i.size), 1)
+  const router = useRouter()
   return (
     <Table className="table-fixed">
       <TableHeader>
@@ -100,11 +97,11 @@ export function ImageTable({
               key={image.id}
               data-workspace-item={image.id}
               data-workspace-name={tag ?? shortId(image.id)}
-              onActivate={() => onOpen(image.id)}
+              onActivate={() => router.push(imageHref(image.id))}
               className={cn("group", arrived.has(image.id) && "animate-rise")}
             >
               <TableCell>
-                <ImageName image={image} onOpen={() => onOpen(image.id)} />
+                <ImageName image={image} />
                 <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate pl-11 text-hint text-muted-foreground">
                   {wide ? (
                     <ImageFacts image={image} />
@@ -160,21 +157,10 @@ export function ImageTable({
                   {relativeTime(image.created)}
                 </TableCell>
               )}
-              <TableCell className="numeric text-right">
-                <span className="inline-flex w-full flex-col items-end gap-1.5">
-                  <span className={cn(image.dangling && "text-muted-foreground")}>
-                    {bytes(image.size)}
-                  </span>
-                  <span
-                    aria-hidden
-                    className="h-0.5 w-14 overflow-hidden rounded-full bg-meter-track"
-                  >
-                    <span
-                      className="block h-full"
-                      style={{ width: `${(image.size / largest) * 100}%`, background: SIZE_HUE }}
-                    />
-                  </span>
-                </span>
+              <TableCell
+                className={cn("numeric text-right", image.dangling && "text-muted-foreground")}
+              >
+                {bytes(image.size)}
               </TableCell>
               <TableCell className="px-2">
                 <VerbActions
@@ -197,28 +183,40 @@ export function ImageTable({
  * tag a step back from the repository, because a column of paths that all
  * begin `ghcr.io/` is read by the part that differs.
  */
-function ImageName({ image, onOpen }: { image: DockerImage; onOpen: () => void }) {
+function ImageName({ image }: { image: DockerImage }) {
   const tag = primaryTag(image)
+  // The name is the way to the image's page: a link, so it opens in a tab
+  // of its own as any other place does. Not fetched ahead: a table of a
+  // hundred images is not a hundred pages to load.
+  const link =
+    "max-w-full min-w-0 truncate rounded-sm text-left text-body font-medium focus-ring hover:underline"
   if (!tag) {
     return (
       <div className="flex min-w-0 items-center gap-3">
-        <ProductLogo fallback={Layers} size="sm" />
-        <RowLink onClick={onOpen} className="truncate font-normal text-muted-foreground italic">
+        <ImageLogo image={image} />
+        <Link
+          href={imageHref(image.id)}
+          prefetch={false}
+          aria-label={`untagged ${shortId(image.id)}`}
+          className={cn(link, "font-normal text-muted-foreground italic")}
+        >
           untagged
-        </RowLink>
+        </Link>
         <Tag className="shrink-0">dangling</Tag>
       </div>
     )
   }
-  const { registry, repository, tag: version } = splitReference(tag)
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <ProductLogo id={imageProduct(tag)} fallback={Layers} size="sm" />
-      <RowLink mono onClick={onOpen} title={image.repoTags.join(", ")} className="text-body">
-        {registry && <span className="text-muted-foreground">{registry}/</span>}
-        {repository}
-        {version && <span className="text-muted-foreground">:{version}</span>}
-      </RowLink>
+      <ImageLogo image={image} />
+      <Link
+        href={imageHref(image.id)}
+        prefetch={false}
+        title={image.repoTags.join(", ")}
+        className={cn(link, "font-mono")}
+      >
+        <ReferenceWords reference={tag} />
+      </Link>
     </div>
   )
 }

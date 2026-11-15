@@ -21,6 +21,7 @@ import {
 import { projectProduct } from "@/components/deploy/vocabulary"
 import { plural, relativeTime } from "@/lib/format"
 import { addressIdentity, type SearchItem, type SearchKind } from "./model"
+import { pm2AppHref } from "@/components/procs/pm2-facts"
 
 export type InventorySource = {
   kind: SearchKind
@@ -310,12 +311,17 @@ export const INVENTORY_SOURCES: InventorySource[] = [
     label: "PM2 apps",
     read: async (signal) => {
       const inventory = await get<PM2Inventory>("/pm2/", undefined, signal)
-      return (inventory.processes ?? []).map((app) => ({
+      const processes = inventory.processes ?? []
+      return processes.map((app) => ({
         ...resource(
           "app",
           `${app.daemonId}:${app.id}`,
           app.name,
-          `/processes/pm2?app=${encodeURIComponent(`${app.daemonId}:${app.id}`)}`,
+          // The application's own page, with its account only where another
+          // account runs one of the same name.
+          pm2AppHref(app, {
+            account: processes.some((p) => p.name === app.name && p.daemonId !== app.daemonId),
+          }),
           `${app.user} · ${app.namespace}`,
           [app.daemonId, String(app.id), app.status],
         ),

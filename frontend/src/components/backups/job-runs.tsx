@@ -10,22 +10,17 @@ import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { engineProduct } from "@/components/backups/marks"
 
-/** A run's archive size bar, in how the run went — the run page's step bars' colours. */
-const FILL: Record<BackupRun["status"], string> = {
-  success: "bg-success",
-  failed: "bg-destructive",
-  running: "bg-brand",
-}
-
 /**
  * A job's runs as a rail beside the run it shows, the shape the deployment run
  * page draws a release's steps in: each run its outcome, when it started, what
- * started it, how long it took, and its archive as a bar the length of its
- * size against the largest here — so a run of empty archives, or the night
- * one doubled, is seen down the column before a figure is read.
+ * started it and how long it took, with its archive's size as a figure in a
+ * column of its own, so a night of empty archives, or the night one doubled,
+ * is read down the column.
  *
- * A failed run took no archive, so its bar is the narrowest red mark rather
- * than nothing: the column still says something happened that night.
+ * The size was a bar the length of the archive against the largest here. A bar
+ * to a row is the shape the standard retired: it made every row a second line
+ * tall to say what the figure beside it already said. A failed run took no
+ * archive, so its figure is a dash.
  */
 export function RunRail({
   runs,
@@ -36,7 +31,6 @@ export function RunRail({
   selectedId: number | undefined
   onSelect: (run: BackupRun) => void
 }) {
-  const largest = Math.max(1, ...runs.map((run) => run.sizeBytes))
   return (
     <ol aria-label="Runs" className="min-w-0 space-y-0.5">
       {runs.map((run) => {
@@ -52,50 +46,39 @@ export function RunRail({
               aria-label={`Run ${run.id}, ${run.status}, ${calendarDate(run.startedAt)} ${clockMinute(run.startedAt)}${encrypted ? ", encrypted" : ""}`}
               onClick={() => onSelect(run)}
               className={cn(
-                "flex w-full min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2 text-left focus-ring-inset transition-colors",
+                "flex w-full min-w-0 items-center gap-2.5 rounded-lg px-3 py-2 text-left focus-ring-inset transition-colors",
                 selected ? "bg-accent" : "hover:bg-row-hover",
               )}
             >
-              <span className="flex w-full min-w-0 items-center gap-2.5">
-                <StatusDot
-                  state={run.status}
-                  tone={run.status === "failed" ? "danger" : undefined}
-                />
-                <span className="min-w-0 flex-1 truncate text-body">
+              <StatusDot state={run.status} tone={run.status === "failed" ? "danger" : undefined} />
+              <span className="block min-w-0 flex-1">
+                <span className="block truncate text-body">
                   {calendarDate(run.startedAt)}{" "}
                   <span className="numeric text-muted-foreground">
                     {clockMinute(run.startedAt)}
                   </span>
                 </span>
-                {/* A lock where the archive needs the key to be opened anywhere
-                    but here: what a copy of it is worth is decided by that. */}
-                {encrypted && (
-                  <LockClosed aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-                )}
-                <span className="numeric shrink-0 text-hint text-muted-foreground">
-                  {run.sizeBytes ? bytes(run.sizeBytes) : "—"}
-                </span>
-              </span>
-              <span className="flex w-full min-w-0 items-center gap-2.5 pl-4.5">
-                <span
-                  aria-hidden
-                  className="relative block h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-meter-track"
-                >
-                  <span
-                    className={cn(
-                      "absolute inset-y-0 left-0 min-w-1 rounded-full",
-                      FILL[run.status],
-                    )}
-                    style={{ width: `${(run.sizeBytes / largest) * 100}%` }}
-                  />
-                </span>
-                <span className="numeric w-24 shrink-0 truncate text-right text-hint text-muted-foreground">
+                <span className="numeric block truncate text-hint text-muted-foreground">
                   {/* An imported run was taken elsewhere; how long it took is that
                       server's to have recorded, and it is not still running. */}
                   {run.imported
                     ? "imported"
                     : `${run.trigger.replaceAll("_", " ")} · ${run.duration ?? "running"}`}
                 </span>
+              </span>
+              {/* A lock where the archive needs the key to be opened anywhere
+                  but here: what a copy of it is worth is decided by that. */}
+              {encrypted && (
+                <LockClosed aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+              )}
+              <span
+                data-slot="run-size"
+                className={cn(
+                  "numeric w-16 shrink-0 text-right text-xs",
+                  run.sizeBytes ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {run.sizeBytes ? bytes(run.sizeBytes) : "—"}
               </span>
             </button>
           </li>

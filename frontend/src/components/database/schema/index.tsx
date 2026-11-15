@@ -6,9 +6,11 @@ import {
   Code,
   Eye,
   FolderPlus,
+  Layers,
   Lightning,
   ListOrdered,
   Puzzle,
+  SidebarLeftClose,
   SidebarLeftOpen,
   Table,
   Trash,
@@ -20,7 +22,7 @@ import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { FormFact } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
+import { PaneBar } from "@/components/phone-panes"
 import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -29,6 +31,7 @@ import type { Verb } from "@/components/verbs"
 import { useCatalog, useTableDetail } from "@/components/database/data/use-table"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { SectionFrame } from "@/components/database/kit"
+import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
   objectParams,
@@ -107,8 +110,6 @@ export function SqlSchema() {
   const listed = data?.schema ?? selection.schema
   const info = data?.schemas.find((schema) => schema.name === listed)
   const unknown = data !== undefined && data.schemas.length > 0 && !info
-  // There is a schema to show beside the tree: it has been read, and it exists.
-  const known = data !== undefined && !unknown
   const operations = engine.capabilities.ddlOperations
   // Changes are made in a schema of the reader's own: not in the engine's
   // namespaces, and — on an engine with one schema to choose from — only in
@@ -229,22 +230,46 @@ export function SqlSchema() {
       ? `A ${engine.label} ${engine.nouns.object} is made in Query: it needs choices this form cannot make for you.`
       : undefined
 
-  const toggle = (
-    <div className="flex h-10 shrink-0 items-center border-b border-hairline bg-surface-header px-1.5">
-      <IconAction label="Show the objects" className="size-7 max-sm:size-8" onClick={toggleRail}>
-        <SidebarLeftOpen />
-      </IconAction>
-    </div>
-  )
-
   return (
-    <SectionFrame section="schema">
-      {/* One frame around the whole workbench (§7.2): the tree and the object
-          are two columns of one surface, with a hairline between them. */}
-      <div
-        data-slot="schema-browser"
+    <SectionFrame section="schema" className={WORKBENCH_PAGE}>
+      {/* One frame around the whole workbench (§7.2): the head that says
+          which database, then the tree and the object as two columns of one
+          surface, with a hairline between them. */}
+      <WorkbenchFrame
+        section="schema"
+        slot="schema-browser"
         style={{ "--jd-schema-rail": `${railColumn}px` } as React.CSSProperties}
-        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card"
+        menu={
+          beside
+            ? [
+                {
+                  key: "rail",
+                  label: railShown ? "Hide the objects" : "Show the objects",
+                  icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
+                  run: toggleRail,
+                },
+              ]
+            : NO_VERBS
+        }
+        bar={
+          !beside && (
+            <PaneBar<"objects" | "open">
+              label="Schema"
+              active={railShown ? "objects" : "open"}
+              onPick={(pane) => setRailOver(pane === "objects")}
+              stops={[
+                { key: "objects", label: "Objects", icon: <Layers /> },
+                {
+                  key: "open",
+                  // Named for what is beside the tree: the table, the object,
+                  // or the schema itself.
+                  label: table ? "Table" : selected ? "Object" : "Schema",
+                  icon: <Table />,
+                },
+              ]}
+            />
+          )
+        }
       >
         {railShown && (
           <div
@@ -274,26 +299,7 @@ export function SqlSchema() {
                 onReset={resetRailWidth}
                 className="absolute inset-y-0 -right-1 z-20"
               />
-            ) : (
-              // Over the object, the rail needs a way off it whatever is
-              // open: back to the object chosen, or on to the schema itself.
-              known && (
-                <div className="shrink-0 border-t border-hairline bg-surface-header p-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => setRailOver(false)}
-                  >
-                    <span className="min-w-0 truncate">
-                      {selected
-                        ? `Back to ${selected.name}`
-                        : `Show ${listed || `this ${engine.nouns.container}`}`}
-                    </span>
-                  </Button>
-                </div>
-              )
-            )}
+            ) : null}
           </div>
         )}
 
@@ -310,8 +316,6 @@ export function SqlSchema() {
               detail={detail}
               catalog={data}
               asked={asked}
-              railOpen={railShown}
-              onToggleRail={toggleRail}
               onChanged={() => {
                 refreshDetail()
                 refreshCatalog()
@@ -330,8 +334,6 @@ export function SqlSchema() {
               key={`${selected.kind}:${selected.schema}:${selected.name}:${selected.signature}:${selected.table}`}
               selected={selected}
               asked={asked}
-              railOpen={railShown}
-              onToggleRail={toggleRail}
               onChanged={refreshCatalog}
               catalog={data}
               onDropped={() => {
@@ -342,8 +344,6 @@ export function SqlSchema() {
           ) : data && !unknown ? (
             <SchemaLanding
               catalog={data}
-              railShown={railShown}
-              onShowRail={toggleRail}
               creations={creations}
               verbs={schemaVerbs}
               note={limit}
@@ -351,7 +351,6 @@ export function SqlSchema() {
             />
           ) : (
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {!railShown && toggle}
               <div
                 className={cn(
                   "flex min-h-0 flex-1 justify-center p-5",
@@ -418,7 +417,7 @@ export function SqlSchema() {
             </div>
           )}
         </div>
-      </div>
+      </WorkbenchFrame>
 
       {may("table") && (
         <NewTablePanel

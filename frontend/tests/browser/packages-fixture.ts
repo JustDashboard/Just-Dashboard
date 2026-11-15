@@ -231,7 +231,14 @@ const search = [
   },
 ]
 
-const detail = (name: string) => {
+/** What each package needs. An installed one needs things the host has; htop's are not here yet. */
+const needs: Record<string, string[]> = {
+  nginx: ["libc6 (>= 2.34)", "openssl (>= 3.0.0)", "libpcre2-8-0 (>= 10.22) | libpcre3"],
+  libc6: [],
+  "g++-13": ["gcc-13 (= 13.2.0-23ubuntu4)", "libc6 (>= 2.38)"],
+}
+
+export const detail = (name: string) => {
   const row = installed.find((p) => p.name === name)
   return {
     name,
@@ -249,15 +256,15 @@ const detail = (name: string) => {
     maintainer: "Ubuntu Developers",
     arch: "amd64",
     size: row?.size ?? 400_000,
-    dependencies: ["libc6", "libncursesw6", "libtinfo6"],
+    dependencies: needs[name] ?? ["libc6", "libncursesw6", "libtinfo6"],
     essential: row?.essential,
     upgradable: row?.upgradable,
   }
 }
 
-const usage = (name: string) => ({
+export const usage = (name: string) => ({
   package: name,
-  commands: [name],
+  commands: name === "nginx" ? ["nginx", "nginx-debug"] : [name],
   services: name === "nginx" ? ["nginx.service"] : undefined,
   configFiles: name === "nginx" ? ["/etc/nginx/nginx.conf"] : undefined,
   manPages: [{ name, section: "8", path: `/usr/share/man/man8/${name}.8.gz` }],

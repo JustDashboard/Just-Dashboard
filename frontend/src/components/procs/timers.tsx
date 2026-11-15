@@ -15,7 +15,7 @@ import { useSessionState } from "@/lib/view-state"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, unitProduct } from "@/components/product-logo"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, LoadingRows } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { VerbActions, type Verb } from "@/components/verbs"
@@ -33,6 +33,7 @@ import { useUnitControl } from "@/components/procs/unit-actions"
 import { useNow } from "@/components/deploy/vocabulary"
 import { Countdown } from "@/components/procs/schedule-band"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
+import { NoSystemd, NoSystemdOrError } from "@/components/procs/no-systemd"
 
 type ConfirmFn = (request: ConfirmRequest) => void
 
@@ -130,9 +131,19 @@ export function TimersPanel({
       </PanelHeader>
       <PanelBody flush>
         {timers.loading && !timers.data && <LoadingRows rows={3} className="pt-3" />}
-        {timers.error && !timers.data && <ErrorState error={timers.error} className="mt-3" />}
+        {timers.error && !timers.data && (
+          <NoSystemdOrError
+            error={timers.error}
+            reader="timers"
+            size="block"
+            className="px-5"
+            errorClassName="mt-3"
+          />
+        )}
         {timers.data && !timers.data.available && (
-          <EmptyNote>systemd is not available on this host.</EmptyNote>
+          // The panel's body is flush for its table; the block takes the
+          // gutter the header has.
+          <NoSystemd reader="timers" size="block" className="px-5" />
         )}
         {timers.data?.available && list.length === 0 && <EmptyNote>No timers.</EmptyNote>}
         {list.length > 0 && shown.length === 0 && <EmptyNote>No timer is {state}.</EmptyNote>}

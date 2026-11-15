@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import Link from "next/link"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
 import { parseAgent } from "@/lib/clients"
@@ -11,9 +10,11 @@ import { LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingsColumn } from "@/components/settings-column"
 import { ROLE_MARK } from "@/components/account/capabilities"
 import { AccessPicture } from "@/components/account/access-picture"
-import { ProfilePanel } from "@/components/account/profile-panel"
+import { ProfileSection } from "@/components/account/profile-panel"
 import { RoleLadder } from "@/components/account/role-ladder"
 import { AvatarRun, UserAvatar, displayNameOf } from "@/components/account/user-avatar"
 import { NetworkFact } from "@/components/client-mark"
@@ -26,8 +27,9 @@ import { useDashboardUsers } from "@/components/account/dashboard-users"
  * identity line — the picture where the Overview draws the distribution, the
  * role and when this account joined among its facts, the client and network
  * this session came in through drawn as themselves, and the second factor's
- * verdict at the right end — then everything signed in as this account wired
- * into it, the profile, and what the role allows.
+ * verdict beside its name — then everything signed in as this account wired
+ * into it, and under the picture one centred column, as a project's settings
+ * are: the profile, saved from the floating bar, and what the role allows.
  *
  * It opened on four tiles — two-factor, sessions, keys, users — and the
  * operator asked for them to go. Each is said better elsewhere: two-factor is
@@ -52,7 +54,6 @@ function Profile() {
   const sessions = useSessions()
   const keys = useApiKeys()
   const users = useDashboardUsers(admin)
-  const [edited, setEdited] = useState(false)
 
   if (!user) return <PageState eyebrow="Account" title="Profile" />
 
@@ -105,9 +106,8 @@ function Profile() {
             )}
           </>
         }
-        aside={
+        state={
           <Status
-            className="text-body"
             verdict={twoFactor ? "ok" : status?.require2fa ? "warning" : "notice"}
             label={twoFactor ? "two-factor on" : "two-factor off"}
           />
@@ -128,18 +128,14 @@ function Profile() {
         )}
       </Section>
 
-      <Section
-        title="Profile"
-        actions={edited && <Tag style={{ color: "var(--git-modified)" }}>Edited</Tag>}
-      >
-        <ProfilePanel user={user} onDirty={setEdited} />
-      </Section>
-
-      {/* Why a page is missing from the sidebar, answered where the reader
-          looks first: the roles as a ladder, lit up to this account's. */}
-      <Section title="What this account can do">
-        <RoleLadder role={user.role} can={can} />
-      </Section>
+      <SettingsColumn>
+        <ProfileSection user={user} />
+        {/* Why a page is missing from the sidebar, answered where the reader
+            looks first: the roles as a ladder, lit up to this account's. */}
+        <SettingSection title="What this account can do">
+          <RoleLadder role={user.role} can={can} />
+        </SettingSection>
+      </SettingsColumn>
     </Page>
   )
 }

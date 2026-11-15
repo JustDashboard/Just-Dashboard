@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Check, Copy, Key, ShieldCheck, ShieldOff } from "@/components/icons"
+import { ArrowRight, Check, Copy, Key } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -11,7 +11,9 @@ import { passwordChecks } from "@/lib/password"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
-import { Field, FieldCheck, FieldRow, FormSection } from "@/components/form"
+import { Field, FieldCheck, FieldRow, InfoTip } from "@/components/form"
+import { useSaveBarEntry } from "@/components/deploy/settings/save-bar"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
 import { Well } from "@/components/panel"
 import { ClientMark, NetworkFact } from "@/components/client-mark"
 import { Row, RowList } from "@/components/row-list"
@@ -24,7 +26,19 @@ import type { useSessions } from "@/components/account/sessions"
 import { sessionGuard } from "@/components/account/access"
 import { GUARD_WORDS } from "@/components/account/session-map"
 
-export function PasswordSection({ className }: { className?: string }) {
+/**
+ * The password, as a section of the account's settings column.
+ *
+ * Changing it is the page's one write that is typed rather than pressed, so it
+ * is the floating bar's: the bar comes up once a new password is being typed,
+ * its command is *Change password*, and its line says what is still missing or
+ * that every session is signed out. The current password alone does not raise
+ * it — a password manager fills that field in on its own, and a bar on every
+ * visit would be about nothing the reader did. Nothing here is prefilled or
+ * shown: the three fields start empty, are `type="password"`, and what is
+ * typed leaves in the one request the button always sent.
+ */
+export function PasswordSection() {
   const { logout } = useAuth()
   const [current, setCurrent] = useState("")
   const [next, setNext] = useState("")
@@ -33,12 +47,16 @@ export function PasswordSection({ className }: { className?: string }) {
 
   const mismatch = confirmPw.length > 0 && next !== confirmPw
   const checks = passwordChecks(next)
+  const dirty = next.length > 0 || confirmPw.length > 0
+  const missing = !current
+    ? "Type your current password"
+    : !checks.ok
+      ? "The new password does not meet the rule yet"
+      : next !== confirmPw
+        ? "The new passwords do not match yet"
+        : undefined
 
   const change = async () => {
-    if (next !== confirmPw) {
-      notify.error("The new passwords do not match")
-      return
-    }
     setBusy(true)
     try {
       await post("/account/password", { currentPassword: current, newPassword: next })
@@ -46,71 +64,95 @@ export function PasswordSection({ className }: { className?: string }) {
       // The server drops every session on a password change, so the only
       // correct next step is back to the login screen.
       await logout()
+      return true
     } catch (err) {
       notify.error("Could not change password", err)
+      return false
     } finally {
       setBusy(false)
     }
   }
 
+  const saveAll = useSaveBarEntry(
+    true,
+    {
+      name: "Password",
+      dirty,
+      changes: 1,
+      saving: busy,
+      invalid: Boolean(missing),
+      applies: "immediately",
+      verb: "Change password",
+      note: missing ?? "Signs out every session, this one included",
+    },
+    {
+      save: change,
+      discard: () => {
+        setCurrent("")
+        setNext("")
+        setConfirmPw("")
+      },
+    },
+  )
+
   return (
-    <FormSection
-      aside
-      className={className}
-      title="Password"
-      hint="Changing it signs out every session, this one included."
-    >
-      <Field label="Current password" htmlFor="cur-pw" className="max-w-sm">
-        <Input
-          id="cur-pw"
-          type="password"
-          autoComplete="current-password"
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-        />
-      </Field>
-      <div className="space-y-2">
-        <FieldRow>
-          <Field label="New password" htmlFor="new-pw">
-            <Input
-              id="new-pw"
-              type="password"
-              autoComplete="new-password"
-              value={next}
-              onChange={(e) => setNext(e.target.value)}
-            />
-          </Field>
-          <Field
-            label="Confirm new password"
-            htmlFor="conf-pw"
-            error={mismatch ? "These do not match yet." : undefined}
-          >
-            <Input
-              id="conf-pw"
-              type="password"
-              autoComplete="new-password"
-              value={confirmPw}
-              onChange={(e) => setConfirmPw(e.target.value)}
-            />
-          </Field>
-        </FieldRow>
-        <p className="flex flex-wrap gap-x-4 gap-y-1" aria-live="polite">
-          <FieldCheck met={checks.long}>12 characters or more</FieldCheck>
-          <FieldCheck met={checks.mixed}>
-            three of upper case, lower case, digits, symbols
-            {next && !checks.mixed && ` · ${checks.classes} so far`}
-          </FieldCheck>
-        </p>
-      </div>
-      <Button
-        size="sm"
-        onClick={change}
-        disabled={busy || !current || !checks.ok || next !== confirmPw}
-        pending={busy}
+    <SettingSection title="Password" state="changing it signs out every session, this one included">
+      {/* A form, so Enter in a field is the bar's command. */}
+      <form
+        aria-label="Password"
+        className="space-y-5"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void saveAll?.()
+        }}
       >
-        Change password
-      </Button>
-    </FormSection>
+        <Field label="Current password" htmlFor="cur-pw" className="max-w-sm">
+          <Input
+            id="cur-pw"
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+          />
+        </Field>
+        <div className="space-y-2">
+          <FieldRow>
+            <Field label="New password" htmlFor="new-pw">
+              <Input
+                id="new-pw"
+                type="password"
+                autoComplete="new-password"
+                value={next}
+                onChange={(e) => setNext(e.target.value)}
+              />
+            </Field>
+            <Field
+              label="Confirm new password"
+              htmlFor="conf-pw"
+              error={mismatch ? "These do not match yet." : undefined}
+            >
+              <Input
+                id="conf-pw"
+                type="password"
+                autoComplete="new-password"
+                value={confirmPw}
+                onChange={(e) => setConfirmPw(e.target.value)}
+              />
+            </Field>
+          </FieldRow>
+          <p className="flex flex-wrap gap-x-4 gap-y-1" aria-live="polite">
+            <FieldCheck met={checks.long}>12 characters or more</FieldCheck>
+            <FieldCheck met={checks.mixed}>
+              three of upper case, lower case, digits, symbols
+              {next && !checks.mixed && ` · ${checks.classes} so far`}
+            </FieldCheck>
+          </p>
+        </div>
+        {/* Enter submits a form only where it has a submit control. This
+            one is never drawn or reached: the floating bar is the control. */}
+        <button type="submit" hidden tabIndex={-1} aria-label="Save" />
+      </form>
+    </SettingSection>
   )
 }
 
@@ -144,31 +186,6 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
 }
 
 /**
- * The state two-factor is in, as a mark and a sentence at the head of the
- * section: the one thing on this page a reader should find without reading.
- */
-function Verdict({
-  on,
-  title,
-  children,
-}: {
-  on: boolean
-  title: string
-  children: React.ReactNode
-}) {
-  const Mark = on ? ShieldCheck : ShieldOff
-  return (
-    <div className="flex min-w-0 items-start gap-3">
-      <Mark aria-hidden className={cn("size-5 shrink-0", on ? "text-success" : "text-warning")} />
-      <div className="min-w-0 space-y-1">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="max-w-prose text-hint leading-relaxed text-muted-foreground">{children}</p>
-      </div>
-    </div>
-  )
-}
-
-/**
  * Two-factor, as something you turn on rather than something you are handed.
  *
  * It used to be neither: enrolment happened once, during a sign-in nobody
@@ -180,10 +197,13 @@ function Verdict({
  * The three states are: not enrolled, enrolled, and enrolled on an install
  * that requires it — where the off switch is absent rather than disabled,
  * since a control that cannot be used is a question the operator has to answer
- * for themselves. The state is under the section's head, and its verdict opens
- * the section in the colour of what it means.
+ * for themselves. The state is the head's one line of facts, in the colour of
+ * what it means — on and asked at every sign-in, or off with the password the
+ * only factor, and whether this install requires it — and under it are the
+ * verbs, with why behind the ⓘ beside them. A verb opens its own short form in
+ * the section; each still asks for what it asked for.
  */
-export function TwoFactorSection({ className }: { className?: string }) {
+export function TwoFactorSection() {
   const { status, refresh } = useAuth()
   const [enrollment, setEnrollment] = useState<{ secret: string; otpauthUrl: string } | null>(null)
   const [code, setCode] = useState("")
@@ -261,17 +281,19 @@ export function TwoFactorSection({ className }: { className?: string }) {
   }
 
   return (
-    <FormSection
-      aside
-      className={className}
+    <SettingSection
       title="Two-factor"
-      hint={
-        <span className="flex flex-col items-start gap-1.5">
+      state={
+        <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <Status
             verdict={enrolled ? "ok" : required ? "warning" : "notice"}
             label={enrolled ? "on" : required ? "required — not yet enrolled" : "off"}
           />
-          <span>{required ? "Required on this install." : "Optional on this install."}</span>
+          <span>
+            {enrolled ? "asked at every sign-in" : "your password is the only factor"}
+            {" · "}
+            {required ? "required on this install" : "optional on this install"}
+          </span>
         </span>
       }
     >
@@ -283,7 +305,7 @@ export function TwoFactorSection({ className }: { className?: string }) {
           <Field
             label="Code from your app"
             htmlFor="enrol-code"
-            hint="The seed is sealed with the dashboard's master key and shown only here."
+            info="The seed is sealed with the dashboard's master key and shown only here."
           >
             <Input
               id="enrol-code"
@@ -380,58 +402,43 @@ export function TwoFactorSection({ className }: { className?: string }) {
           </div>
         </>
       ) : enrolled ? (
-        <>
-          <Verdict on title="A code is asked for at every sign-in">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => setRegenerating(true)}>
+            Regenerate recovery codes
+          </Button>
+          {!required && (
+            <Button size="sm" variant="ghost" onClick={() => setDisabling(true)}>
+              Turn off
+            </Button>
+          )}
+          <InfoTip label="What recovery codes are for">
             Recovery codes are the way back in if you lose the authenticator; regenerating issues a
             fresh set and ends the old one at once.
-          </Verdict>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => setRegenerating(true)}
-            >
-              Regenerate recovery codes
-            </Button>
-            {!required && (
-              <Button size="sm" variant="ghost" onClick={() => setDisabling(true)}>
-                Turn off
-              </Button>
-            )}
-          </div>
-        </>
+          </InfoTip>
+        </div>
       ) : (
-        <>
-          <Verdict on={false} title="Your password is the only factor">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={begin} pending={busy}>
+            Enable two-factor
+          </Button>
+          <InfoTip label="Why enable two-factor">
             {required
               ? "This install requires an authenticator. Enrol one now — until you do, your session can reach nothing but this page."
               : "Not required on this install, and worth having anyway: a password alone is one stolen credential away from root on this server."}
-          </Verdict>
-          <div>
-            <Button size="sm" onClick={begin} pending={busy}>
-              Enable two-factor
-            </Button>
-          </div>
-        </>
+          </InfoTip>
+        </div>
       )}
-    </FormSection>
+    </SettingSection>
   )
 }
 
 /**
  * Where this account is signed in, each session drawn as the client it is
- * with the network it came in on and what let it in, beside the password
+ * with the network it came in on and what let it in, under the password
  * that would sign every one of them out. The sessions page is where they are
- * read in full and signed out one by one.
+ * read in full and signed out one by one, and the way there is the head's.
  */
-export function SessionsSection({
-  sessions,
-  className,
-}: {
-  sessions: ReturnType<typeof useSessions>
-  className?: string
-}) {
+export function SessionsSection({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
   // The sessions page says why they could not be read; here the section is
   // only a way there, and one stuck on "loading" would be a reading that lies.
   if (sessions.error && !sessions.data) return null
@@ -443,14 +450,20 @@ export function SessionsSection({
   const unknown = list.filter((s) => !s.authMethod || s.authMethod === "unknown").length
   const shown = list.slice(0, 4)
   return (
-    <FormSection
-      aside
-      className={className}
+    <SettingSection
       title="Sessions"
-      hint={
+      state={
         sessions.data
           ? `${plural(list.length, "session")} signed in${bare > 0 ? ` · ${bare} on a password alone` : ""}${pending > 0 ? ` · ${pending} awaiting a second factor` : ""}${unknown > 0 ? ` · ${unknown} authentication method not recorded` : ""}`
           : "loading"
+      }
+      actions={
+        <Button size="sm" variant="outline" asChild>
+          <Link href="/account/sessions" aria-label="Review where you are signed in">
+            Review
+            <ArrowRight className="size-3.5" />
+          </Link>
+        </Button>
       }
     >
       {shown.length > 0 && (
@@ -481,14 +494,6 @@ export function SessionsSection({
           })}
         </RowList>
       )}
-      <div>
-        <Button size="sm" variant="outline" asChild>
-          <Link href="/account/sessions">
-            Review where you are signed in
-            <ArrowRight className="size-3.5" />
-          </Link>
-        </Button>
-      </div>
-    </FormSection>
+    </SettingSection>
   )
 }

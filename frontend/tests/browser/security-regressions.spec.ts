@@ -52,12 +52,14 @@ for (const admin of [false, true]) {
       return route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
     })
     await page.goto("/docker/stacks")
-    await expect(page.getByRole("button", { name: "permission-test", exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("link", { name: "Open permission-test", exact: true }),
+    ).toBeVisible()
     await expect(page.getByRole("button", { name: "Create stack", exact: true })).toHaveCount(
       admin ? 1 : 0,
     )
     // A stack is a page of its own, so its controls are checked there.
-    await page.getByRole("button", { name: "permission-test", exact: true }).click()
+    await page.getByRole("link", { name: "Open permission-test", exact: true }).click()
     await page.waitForURL(/\/docker\/stacks\/permission-test$/)
     const panel = page.getByRole("main")
     await expect(panel.locator("[data-workspace-item='worker']")).toBeVisible()
@@ -247,7 +249,12 @@ test("the row editor submits exact BIGINT digits", async ({ page }) => {
   const field = (name: string) =>
     page.locator("[data-slot=row-field]").filter({ has: page.locator(`label:text-is("${name}")`) })
   await page.getByRole("button", { name: "Insert row" }).click()
-  await page.getByRole("button", { name: "Show the row" }).click()
+  // The row panel is a word in the menu of the workbench's head.
+  await page
+    .locator("[data-slot=database-strip]")
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  await page.getByRole("menuitem", { name: "Show the row" }).click()
   await field("id").getByRole("textbox").fill("9007199254740993")
   await page.keyboard.press("Enter")
   await field("name").getByRole("textbox").fill("precision")
@@ -265,6 +272,9 @@ test("the row editor submits exact BIGINT digits", async ({ page }) => {
     },
   ])
 })
+
+/** The audit log is an administrator's: the page asks the server for nothing as anyone else. */
+const auditor = { ...signedIn, capabilities: [...signedIn.capabilities, "system.admin"] }
 
 test("slow polling has only one request in flight", async ({ page }) => {
   await page.clock.install()
@@ -299,7 +309,7 @@ test("slow polling has only one request in flight", async ({ page }) => {
       pending.push(route)
       return
     }
-    await fulfill(route, path === "/auth/session" ? signedIn : [])
+    await fulfill(route, path === "/auth/session" ? auditor : [])
   })
   await page.goto("/audit")
   await expect(page.getByRole("table").getByText("INITIAL_RESULT", { exact: true })).toBeVisible()
@@ -377,7 +387,7 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
     sockets: URL[] = [],
     legacy: URL[] = [],
     reads: URL[] = []
-  // The sheet reads a process's logs as one of the host's log sources; the
+  // The page reads a process's logs as one of the host's log sources; the
   // id it asks for is built from the daemon's account and the process id the
   // list keyed the row on, never from the name alone.
   await page.routeWebSocket("**/api/v1/logs/stream**", (ws) => {
@@ -450,16 +460,19 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
   await expect.poll(() => actions.length).toBe(1)
   expect(actions[0].searchParams.get("user")).toBe("bob")
   expect(actions[0].searchParams.get("id")).toBe("0")
+  // The row opens the application's own page, and the account is in the
+  // address because the name alone would not say whose it is.
   await row.getByRole("button", { name: "same-name", exact: true }).click()
-  await expect(page.getByRole("dialog")).toContainText("bob #0")
+  await expect(page).toHaveURL(/\/processes\/pm2\/same-name\?account=bob$/)
+  await expect(page.locator("[data-slot='pm2-app-identity']")).toContainText("bob")
   await page.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect.poll(() => sockets.length).toBe(1)
   expect(sockets[0].searchParams.get("source")).toBe("pm2:bob/0/same-name")
-  await page.keyboard.press("Escape")
-  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.goto("/processes/pm2")
   const alice = page.getByRole("row").filter({ hasText: "alice" })
   await alice.getByRole("button", { name: "same-name", exact: true }).click()
-  await expect(page.getByRole("dialog")).toContainText("alice #0")
+  await expect(page).toHaveURL(/\/processes\/pm2\/same-name\?account=alice/)
+  await expect(page.locator("[data-slot='pm2-app-identity']")).toContainText("alice")
   await page.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect(
     page.getByText("Add this daemon's log directory to JD_LOG_ROOTS.", { exact: true }),
@@ -540,7 +553,7 @@ test("resource filters keep focus while stale responses are discarded", async ({
       }
       return fulfill(route, entries("INITIAL_FILTER_RESULT"))
     }
-    await fulfill(route, path === "/auth/session" ? signedIn : [])
+    await fulfill(route, path === "/auth/session" ? auditor : [])
   })
   await page.goto("/audit")
   await expect(

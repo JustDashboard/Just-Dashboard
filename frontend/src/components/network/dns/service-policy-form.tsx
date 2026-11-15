@@ -396,7 +396,7 @@ function RecordForm({
                 {inventory.data.evidence.state} · {inventory.data.evidence.basis} ·{" "}
                 {inventory.data.evidence.summary}
               </p>
-              <ul className="divide-panel-border min-w-0 divide-y">
+              <ul className="min-w-0 divide-y divide-hairline">
                 {inventory.data.records.map((record, index) => (
                   <li
                     key={`${index}-${record.fingerprint}`}

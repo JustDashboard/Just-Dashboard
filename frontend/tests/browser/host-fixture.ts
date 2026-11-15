@@ -294,6 +294,21 @@ export function storage(from: number, to: number) {
   }
 }
 
+/** What every process row carries beyond what tells one from another. */
+const processRow = <T extends { rss: number }>(p: T) => ({
+  ...p,
+  ppid: 1,
+  status: "S",
+  memPercent: (p.rss / (16 * 1024 ** 3)) * 100,
+  vms: p.rss * 2,
+  threads: 4,
+  nice: 0,
+  createTime: iso(now - 3_600_000),
+  state: "sleeping",
+  ioReadRate: 1024,
+  ioWriteRate: 2048,
+})
+
 export const processes = [
   {
     pid: 1204,
@@ -325,19 +340,35 @@ export const processes = [
     manager: "systemd",
     managerName: "caddy.service",
   },
-].map((p) => ({
-  ...p,
-  ppid: 1,
-  status: "S",
-  memPercent: (p.rss / (16 * 1024 ** 3)) * 100,
-  vms: p.rss * 2,
-  threads: 4,
-  nice: 0,
-  createTime: iso(now - 3_600_000),
-  state: "sleeping",
-  ioReadRate: 1024,
-  ioWriteRate: 2048,
-}))
+].map(processRow)
+
+/**
+ * The quiet processes any server also runs, each below the three above on
+ * every order the pages sort by. The host answered its process table with
+ * those three alone, which no server does: Metrics holds eight rows for its
+ * Top processes, and with three listed the picture of the page had an empty
+ * band under them that a real one never has.
+ */
+const quietProcesses = (
+  [
+    ["dockerd", "dockerd -H fd://", "root", 0.9, 58, "docker.service"],
+    ["containerd", "containerd", "root", 0.6, 44, "containerd.service"],
+    ["systemd-journald", "systemd-journald", "root", 0.4, 36, "systemd-journald.service"],
+    ["sshd", "sshd: /usr/sbin/sshd -D", "root", 0.2, 9, "ssh.service"],
+    ["cron", "cron -f", "root", 0.1, 3, "cron.service"],
+  ] as const
+).map(([name, cmdline, username, cpuPercent, rssMb, managerName], i) =>
+  processRow({
+    pid: 700 + i * 37,
+    name,
+    cmdline,
+    username,
+    cpuPercent,
+    rss: rssMb * 1024 ** 2,
+    manager: "systemd",
+    managerName,
+  }),
+)
 
 export async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
@@ -385,7 +416,7 @@ export async function mockHost(page: Page) {
         },
       ])
     }
-    if (path === "/processes/") return json(route, processes)
+    if (path === "/processes/") return json(route, [...processes, ...quietProcesses])
     return json(route, [])
   })
 }

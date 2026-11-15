@@ -293,7 +293,7 @@ func storageSummary(snapshot runtimeReleaseSnapshot, observed dependencyObservat
 		}
 		if kind == "docker_volume" {
 			row.Kind = "volume"
-			row.DeepLink = "/docker/volumes?" + url.Values{"volume": {mount.Source}}.Encode()
+			row.DeepLink = "/docker/volumes/" + url.PathEscape(mount.Source)
 		} else {
 			row.Kind = "bind"
 			row.DeepLink = "/files?" + url.Values{"path": {mount.Source}}.Encode()
@@ -467,7 +467,8 @@ func observeDomainRoutes(
 			row.Route, row.ServedBy = "foreign", foreign
 		}
 		if row.ServedBy != "" {
-			row.DeepLink = "/proxy/sites?" + url.Values{"site": {row.ServedBy}}.Encode()
+			// The site's own page; `?site=` on the list opened the sheet it replaced.
+			row.DeepLink = "/proxy/sites/" + url.PathEscape(row.ServedBy)
 		}
 		switch {
 		case !domain.HTTPS:
@@ -490,7 +491,10 @@ func observeDomainRoutes(
 					break
 				}
 				row.CertificateDaysLeft = certificate.DaysLeft
-				row.CertificateLink = "/proxy/certificates"
+				// The certificate's own page, by the address the Certificates
+				// page turns into it: the file, which names one certificate
+				// where two can share a name.
+				row.CertificateLink = "/proxy/certificates?" + url.Values{"cert": {certificate.Path}}.Encode()
 				switch {
 				case certificate.Expired:
 					row.Certificate = "expired"

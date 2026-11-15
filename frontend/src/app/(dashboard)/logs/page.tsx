@@ -26,6 +26,7 @@ import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { Page, PageContext } from "@/components/page"
 import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
+import { unitProduct } from "@/components/product-logo"
 import { EmptyState } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { ResizeHandle } from "@/components/resize-handle"
@@ -305,9 +306,19 @@ function LogsScreen() {
       // What the whole journal holds is not what one unit's does.
       detail: oneUnit ? undefined : selected.detail,
       lens: detectedLens,
-      product: sourceProduct(selected, host?.platform),
+      // A unit's journal is the product the unit runs, where it names one.
+      product: (oneUnit ? unitProduct(unit) : undefined) ?? sourceProduct(selected, host?.platform),
     }
   }, [selected, sourceId, unit, units, detectedLens, host?.platform])
+  // The whole journal says what it is: asked once it is the source on
+  // screen, and again only every few minutes, since it grows slowly.
+  const wholeJournal = selected?.kind === "journal" && unit === "" && !record
+  const journal = usePoll(
+    (signal) => get<LogSource>("/logs/source", { source: "journal:" }, signal),
+    5 * 60_000,
+    [],
+    { enabled: wholeJournal },
+  )
   const finds = useServiceFinds(record ? undefined : viewSource, readLens, requests.sites)
 
   // The lens's readings are the counts on the lens row's chips, as a
@@ -448,6 +459,16 @@ function LogsScreen() {
         <SourceIdentity
           key={sourceId}
           source={viewSource}
+          journal={
+            wholeJournal
+              ? {
+                  units: units?.length,
+                  size: journal.data?.size,
+                  oldest: journal.data?.oldest,
+                  loading: journal.loading && !journal.data,
+                }
+              : undefined
+          }
           aside={
             <div className="flex items-center gap-2">
               {/* A page view with its own export — a site's requests — is not

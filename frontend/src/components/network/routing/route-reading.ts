@@ -177,3 +177,124 @@ export function routeVia(route: NetworkRoute) {
       .join(", ")
   return undefined
 }
+
+export type RouteRow = {
+  /** Stable within one reading: a kernel route has no id of its own. */
+  key: string
+  route: NetworkRoute
+  table: { id: number; name: string }
+}
+
+/** Every route with the table it is in, in the tables' order: main first. */
+export function routeRows(tables: NetworkRouting["tables"]): RouteRow[] {
+  return tables.flatMap((table) =>
+    table.routes.map((route, index) => ({
+      key: `${table.id}:${route.family}:${route.destination}:${route.device ?? ""}:${index}`,
+      route,
+      table: { id: table.id, name: table.name },
+    })),
+  )
+}
+
+/**
+ * The default route the page names itself by: the main table's, IPv4 before
+ * IPv6 and the lowest metric between two, because that is the one "how does
+ * this server reach the internet" is asking about.
+ */
+export function defaultRoute(routing: NetworkRouting) {
+  const main = routing.tables.find((table) => table.id === 254) ?? routing.tables[0]
+  const defaults = (main?.routes ?? []).filter(
+    (route) => route.destination === "default" && route.type === "unicast",
+  )
+  const of = (family: RouteFamily) =>
+    defaults.filter((route) => route.family === family).sort((a, b) => a.metric - b.metric)[0]
+  return of("inet") ?? of("inet6")
+}
+
+/** Whether the server routes for others, as the one state the page opens on. */
+export function forwardingState(forwarding: NetworkRouting["forwarding"]) {
+  const v4 = forwarding.ipv4.enabled
+  const v6 = forwarding.ipv6.enabled
+  if (v4 && v6) return { on: true, label: "Forwarding IPv4 and IPv6" }
+  if (v4) return { on: true, label: "Forwarding IPv4 only" }
+  if (v6) return { on: true, label: "Forwarding IPv6 only" }
+  return { on: false, label: "Not forwarding" }
+}
+
+type Forwarding = NetworkRouting["forwarding"]["ipv4"]
+
+const HEALTH_WORD: Record<NonNullable<Forwarding["health"]>["status"], string> = {
+  forwarding: "Forwarding traffic",
+  idle: "On · idle",
+  measuring: "On · measuring",
+  partial: "Some devices do not forward",
+  off: "On",
+  unknown: "On · not measured",
+}
+
+/**
+ * One family's forwarding in a dot and a few words: the kernel's own count
+ * where it was measured, the switch's state where it was not. A rate says
+ * forwarding happens; it does not say a particular flow was meant to pass.
+ */
+export function forwardingReading(state: Forwarding): {
+  tone: "running" | "stopped" | "warning" | "unknown"
+  /** The state alone: "Forwarding traffic". */
+  word: string
+  /** How much, where the kernel's counter was read twice: "43 datagrams/s over 15s". */
+  rate?: string
+  /** Both, for a line that has room for one string. */
+  label: string
+} {
+  if (!state.available)
+    return { tone: "unknown", word: "Not on this kernel", label: "Not on this kernel" }
+  if (!state.enabled) return { tone: "stopped", word: "Off", label: "Off" }
+  const health = state.health
+  if (!health) return { tone: "running", word: "On", label: "On" }
+  const rate =
+    health.ratePerSecond !== undefined
+      ? `${health.ratePerSecond < 10 ? health.ratePerSecond.toFixed(1) : Math.round(health.ratePerSecond)} datagrams/s over ${Math.round(health.windowSeconds ?? 0)}s`
+      : undefined
+  const word = HEALTH_WORD[health.status]
+  return {
+    tone: health.status === "partial" ? "warning" : "running",
+    word,
+    rate,
+    label: rate ? `${word} · ${rate}` : word,
+  }
+}
+
+/**
+ * What depends on forwarding, each thing once with the families it needs:
+ * the server lists them per family, and Tailscale's exit node is one thing
+ * whichever family is asked about.
+ */
+export function forwardingNeeds(forwarding: NetworkRouting["forwarding"]) {
+  const needs: { need: string; ipv4: boolean; ipv6: boolean }[] = []
+  for (const family of ["ipv4", "ipv6"] as const)
+    for (const need of forwarding[family].neededBy) {
+      const held = needs.find((n) => n.need === need)
+      if (held) held[family] = true
+      else needs.push({ need, ipv4: family === "ipv4", ipv6: family === "ipv6" })
+    }
+  return needs
+}
+
+/** The product a dependency names, for the mark before it: "5 Docker networks" is Docker's. */
+export function needProduct(need: string) {
+  const text = need.toLowerCase()
+  if (text.includes("docker")) return "docker"
+  if (text.includes("wireguard")) return "wireguard"
+  if (text.includes("tailscale")) return "tailscale"
+  return undefined
+}
+
+/**
+ * Whether the kernel can be asked about what was typed: one literal address,
+ * and a source, when given, that is one too. A network narrows the tables and
+ * is not a packet's destination.
+ */
+export function askable(target: string, source: string) {
+  const one = (text: string) => !text.includes("/") && parseTarget(text) !== null
+  return one(target.trim()) && (!source.trim() || one(source.trim()))
+}

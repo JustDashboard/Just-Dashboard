@@ -23,7 +23,7 @@ The server as a router: its links, tunnels and firewall drawn live, with the too
 <p align="center"><b>Firewall</b><br><sub>What gets in, and what stops it</sub></p>
 </td>
 <td width="50%" valign="top">
-<a href="../readme/network-vpn.png"><img src="../readme/network-vpn.png" alt="A WireGuard tunnel with its peers, and Tailscale"></a>
+<a href="../readme/network-vpn.png"><img src="../readme/network-vpn.png" alt="A WireGuard tunnel with its peers and its internet exit, with Tailscale as the view beside it"></a>
 <p align="center"><b>VPN</b><br><sub>WireGuard and Tailscale, peer by peer</sub></p>
 </td>
 </tr>

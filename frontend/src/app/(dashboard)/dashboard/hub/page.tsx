@@ -51,7 +51,8 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * section of a page that reads the link before and after it, as on Connect, so the page is not a
  * flow page and the connect form is not a `FlowPanel`. Its passes are §15's with Connect as the
  * reference: an identity line whose far end is the link's state and the two things done to a link
- * that exists; the link drawn as what it is (`hub-picture.tsx`, Connect's picture with the hub at
+ * that exists (laid out as a project's header: the state beside the hub's name, the facts under
+ * it); the link drawn as what it is (`hub-picture.tsx`, Connect's picture with the hub at
  * its end); then one section at a time under hairlines. §15 pass 2 is dropped as Connect drops it.
  *
  * Nothing connects by itself. `?connect=` only fills the address in and says so, no scope is
@@ -137,9 +138,9 @@ export default function HubLinkPage() {
         logo={
           <span
             aria-hidden
-            className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-hairline bg-surface-sunken"
+            className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-sunken"
           >
-            <LogoGlyph className="h-6 w-auto text-brand" />
+            <LogoGlyph className="h-5 w-auto text-brand" />
           </span>
         }
         title={
@@ -163,23 +164,25 @@ export default function HubLinkPage() {
             "Just Hub"
           )
         }
+        // The link's state stands beside the hub's name, as a project's does, and the two
+        // things done to a link that exists are the line's far end.
+        state={
+          <Status
+            tone={reading.tone}
+            label={pending ? <TextShimmer>{reading.label}</TextShimmer> : reading.label}
+          />
+        }
         facts={<Facts status={status} />}
-        aside={
-          <span className="flex flex-wrap items-center gap-3">
-            <Status
-              tone={reading.tone}
-              label={pending ? <TextShimmer>{reading.label}</TextShimmer> : reading.label}
+        command={
+          linked && admin ? (
+            <HubLinkActions
+              host={host}
+              name={status.hubName ? hubLabel(status.hubName) : host}
+              idle={stopped}
+              onSync={hub.sync}
+              onDisconnect={hub.disconnect}
             />
-            {linked && admin && (
-              <HubLinkActions
-                host={host}
-                name={status.hubName ? hubLabel(status.hubName) : host}
-                idle={stopped}
-                onSync={hub.sync}
-                onDisconnect={hub.disconnect}
-              />
-            )}
-          </span>
+          ) : undefined
         }
       />
 

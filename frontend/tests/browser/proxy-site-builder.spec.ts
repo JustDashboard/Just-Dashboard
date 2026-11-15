@@ -16,6 +16,10 @@ import { json, mockProxy, ports, user, vhosts } from "./proxy-fixtures"
  * true: a site typed as app.example.com saved as "a", a disabled site
  * switched back on by an edit, a site nginx ignores reported as live, and a
  * saved site whose reload failed reported as not applied.
+ *
+ * A new site is made in the sheet over the Sites list. An existing one is
+ * edited on its own page, as its Settings view: the same fields, split
+ * across parts, with the saves on one floating bar.
  */
 
 /** Every body the form posts to one endpoint, answered by `answer`. */
@@ -42,6 +46,24 @@ async function discard(page: Page) {
     .click()
   await expect(page.getByRole("dialog")).toHaveCount(0)
 }
+
+/**
+ * A site's Settings, as everything a check reads or presses: the column of
+ * fields and the floating bar that saves it, which is drawn in the same
+ * content area rather than inside the column.
+ */
+const settings = (page: Page) => page.locator('[data-slot="sidebar-inset"]')
+
+/** Opens one part of a site's Settings by its name in the strip. */
+async function part(page: Page, name: string) {
+  await page
+    .getByRole("navigation", { name: "Parts of the settings" })
+    .getByRole("link", { name: new RegExp(`^${name}`) })
+    .click()
+}
+
+/** The strip at the head of Settings that says what is unsaved. */
+const unsaved = (page: Page) => page.getByRole("region", { name: "Unsaved changes" })
 
 async function openNewSite(page: Page) {
   await page.goto("/proxy/sites")
@@ -161,9 +183,8 @@ async function disableLegacy(
 }
 
 async function openLegacy(page: Page) {
-  await page.goto("/proxy/sites/legacy.example.com")
-  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
-  const sheet = page.getByRole("dialog", { name: "Edit legacy.example.com" })
+  await page.goto("/proxy/sites/legacy.example.com?tab=settings")
+  const sheet = settings(page)
   await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("legacy.example.com")
   return sheet
 }
@@ -194,6 +215,7 @@ test("a disabled site is saved as it is, or enabled on purpose", async ({ page }
   )
   const sheet = await openLegacy(page)
   // A path written with root says where its files really come from.
+  await part(page, "Paths")
   await expect(sheet.getByText("/srv/legacy/static", { exact: true })).toBeVisible()
   await expect(
     sheet.getByText(
@@ -210,7 +232,8 @@ test("a disabled site is saved as it is, or enabled on purpose", async ({ page }
   await expect(
     page.getByText("nginx tested it as if enabled. It stays disabled until it is enabled."),
   ).toBeVisible()
-  await expect(sheet).toBeHidden()
+  // Settings stay where they are after a save, on the part that was open.
+  await expect(page).toHaveURL(/tab=settings&view=paths$/)
   expect(saved[0]).toMatchObject({ enable: "keep", overwrite: true, reload: false })
   expect((saved[0].spec as { locations: unknown[] }).locations).toEqual([
     { path: "/static", root: "/srv/legacy", rootMode: "root", spa: false, webSockets: false },
@@ -262,7 +285,6 @@ test("a disabled site nginx would refuse enabled is saved, and says where", asyn
     ),
   ).toBeVisible()
   await expect(page.getByText("Not applied")).toHaveCount(0)
-  await expect(sheet).toBeHidden()
 })
 
 test("a disabled site's name conflict is what enabling it would meet", async ({ page }) => {
@@ -418,7 +440,7 @@ test("a conf.d site that is off can only stay off, and says how it is turned on"
   expect(saved[0]).toMatchObject({ enable: "keep", overwrite: true, reload: false })
 })
 
-test("a disabled site's footer fits a phone", async ({ page }) => {
+test("a disabled site's save bar fits a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })
   await disableLegacy(page)
@@ -537,10 +559,7 @@ test("a save nginx warns about says how many warnings and where", async ({ page 
       }),
     ),
   )
-  await page.goto("/proxy/sites/app.example.com")
-  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
-  const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
-  await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("app.example.com")
+  const sheet = await openApp(page)
   await sheet.getByRole("button", { name: "Save and reload" }).click()
   await expect(page.getByText("app.example.com is live with 2 warnings")).toBeVisible()
   await expect(
@@ -558,10 +577,7 @@ test("a reload that fails after a clean test is reported as saved", async ({ pag
   await capture(page, "**/api/v1/proxy/sites/", (route) =>
     json(route, siteResult({ reloaded: false, reloadError })),
   )
-  await page.goto("/proxy/sites/app.example.com")
-  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
-  const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
-  await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("app.example.com")
+  const sheet = await openApp(page)
   await sheet.getByRole("button", { name: "Save and reload" }).click()
   await expect(page.getByText("app.example.com saved and tested; reload failed")).toBeVisible()
   await expect(
@@ -569,7 +585,6 @@ test("a reload that fails after a clean test is reported as saved", async ({ pag
   ).toBeVisible()
   await expect(page.getByText(/still serving/)).toHaveCount(0)
   await expect(page.getByText("Not applied")).toHaveCount(0)
-  await expect(sheet).toBeHidden()
 })
 
 test("a name another site serves is refused until the operator saves anyway", async ({ page }) => {
@@ -858,9 +873,7 @@ test("a kind picked by hand after a preset lets the preset go", async ({ page })
 
 test("an existing site shows its file read-only and offers no presets", async ({ page }) => {
   await mockProxy(page, { included: true })
-  await page.goto("/proxy/sites/app.example.com")
-  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
-  const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
+  const sheet = await openApp(page)
   const name = sheet.getByLabel("File name")
   await expect(name).toHaveValue("app.example.com")
   await expect(name).toHaveAttribute("readonly", "")
@@ -1092,9 +1105,8 @@ async function appOnDisk(
 }
 
 async function openApp(page: Page) {
-  await page.goto("/proxy/sites/app.example.com")
-  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
-  const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
+  await page.goto("/proxy/sites/app.example.com?tab=settings")
+  const sheet = settings(page)
   await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("app.example.com")
   return sheet
 }
@@ -1124,12 +1136,20 @@ test("lines a save would drop are listed first, and the movable ones move into t
   await expect(sheet.getByText("Saving drops 2 lines of this file")).toBeVisible()
   await expect(sheet.getByText("-client_body_buffer_size 1m;")).toBeVisible()
   await expect(sheet.getByText("-proxy_set_header X-Tenant acme;")).toBeVisible()
-  await expect(sheet.getByText("Saving drops 2 lines of the file, listed above.")).toBeVisible()
+  await expect(
+    sheet.getByText("Saving drops 2 lines of the file, listed under General."),
+  ).toBeVisible()
   // Only the one directly in the server block can move as it is.
   await expect(sheet.getByText(/Only lines directly in the server block can move/)).toBeVisible()
+  // Where it went is another part of Settings, which the move opens.
   await sheet.getByRole("button", { name: "Move 1 line into Extra configuration" }).click()
+  await expect(page).toHaveURL(/tab=settings&view=paths$/)
   await expect(sheet.getByLabel("Extra configuration")).toHaveValue("client_body_buffer_size 1m;")
   await expect(sheet.getByLabel("Extra configuration")).toBeInViewport()
+  await expect(
+    sheet.getByText("Saving drops 1 line of the file, listed under General."),
+  ).toBeVisible()
+  await part(page, "General")
   await expect(sheet.getByText("Saving drops 1 line of this file")).toBeVisible()
   await expect(sheet.getByRole("button", { name: /^Move / })).toHaveCount(0)
 
@@ -1187,50 +1207,93 @@ test("the Changes tab shows what a save writes over the file on disk", async ({ 
     dropped: [],
   }))
   const sheet = await openApp(page)
+  await part(page, "File")
   await sheet.getByRole("tab", { name: "Changes" }).click()
   await expect(sheet.getByText("Saving writes the file exactly as it is on disk.")).toBeVisible()
+  // A file as the form writes it has nothing to save, and no bar.
+  await expect(page.getByRole("region", { name: "Save changes" })).toHaveCount(0)
+
+  await part(page, "HTTPS")
   await sheet.getByRole("switch", { name: "HTTP/2" }).click()
+  // The strip names the part the edit is in and how much of the file it changes.
+  await expect(unsaved(page)).toContainText("1 unsaved change")
+  await expect(unsaved(page)).toContainText("1 line of the file would change")
+  await unsaved(page).getByRole("link", { name: "1 line of the file" }).click()
+  await sheet.getByRole("tab", { name: /^Changes\s*1$/ }).click()
   await expect(sheet.getByText("-    http2 on;")).toBeVisible()
-  await expect(sheet.getByRole("tab", { name: /^Changes\s*1$/ })).toBeVisible()
 })
 
-test("closing with unsaved changes asks first, and only then", async ({ page }) => {
+test("leaving a site's Settings with unsaved changes asks first, and only then", async ({
+  page,
+}) => {
   await mockProxy(page, { included: true })
   await appOnDisk(page, { digest: "d1" })
-  let sheet = await openApp(page)
-  // Nothing changed: Escape just closes.
-  await page.keyboard.press("Escape")
-  await expect(sheet).toBeHidden()
-  await expect(page.getByRole("dialog")).toHaveCount(0)
-
-  sheet = await openApp(page)
-  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
-  await expect(sheet.getByText("unsaved", { exact: true })).toBeVisible()
-  await page.keyboard.press("Escape")
+  const sheet = await openApp(page)
   const ask = page.getByRole("dialog", { name: "Discard changes?" })
-  await expect(ask).toBeVisible()
+  // Nothing changed: another view of the site just opens.
+  await page.getByRole("tab", { name: "Overview" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
+  await expect(ask).toHaveCount(0)
+
+  await page.getByRole("tab", { name: "Settings" }).click()
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
+  await expect(unsaved(page)).toContainText("1 unsaved change")
+  // Another part of Settings is still the form, and does not ask.
+  await part(page, "HTTPS")
+  await expect(ask).toHaveCount(0)
+  await part(page, "General")
+
+  await page.getByRole("tab", { name: "Overview" }).click()
   await expect(ask).toContainText("What you changed in app.example.com is not saved.")
   await ask.getByRole("button", { name: "Keep editing" }).click()
   await expect(ask).toBeHidden()
   await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4000")
 
-  // The close button asks the same.
-  await sheet.getByRole("button", { name: "Close", exact: true }).click()
+  // A link off the page asks the same, and Discard goes where it led.
+  await page.getByRole("link", { name: "Certificates", exact: true }).click()
   await ask.getByRole("button", { name: "Discard" }).click()
-  await expect(sheet).toBeHidden()
-  sheet = await openApp(page)
-  await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:3000")
-  await page.keyboard.press("Escape")
-  await expect(sheet).toBeHidden()
+  await expect(page).toHaveURL(/\/proxy\/certificates$/)
+  const again = await openApp(page)
+  await expect(again.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:3000")
+  await expect(unsaved(page)).toHaveCount(0)
+})
 
-  // A new site asks once something is filled in, and not before.
+test("Discard on the bar puts the fields back as the file has them", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await appOnDisk(page, { digest: "d1" })
+  const sheet = await openApp(page)
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
+  await part(page, "HTTPS")
+  await sheet.getByRole("switch", { name: "HTTP/2" }).click()
+  await expect(unsaved(page)).toContainText("2 unsaved changes")
+  await expect(unsaved(page).getByRole("link", { name: "General" })).toBeVisible()
+  await page
+    .getByRole("region", { name: "Save changes" })
+    .getByRole("button", { name: "Discard" })
+    .click()
+  await expect(unsaved(page)).toHaveCount(0)
+  await expect(sheet.getByRole("switch", { name: "HTTP/2" })).toBeChecked()
+  await part(page, "General")
+  await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:3000")
+})
+
+test("a new site asks before it is closed once something is filled in, and not before", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const ask = page.getByRole("dialog", { name: "Discard changes?" })
   const fresh = await openNewSite(page)
   await page.keyboard.press("Escape")
   await expect(fresh).toBeHidden()
   const typed = await openNewSite(page)
   await typed.getByRole("textbox", { name: "Domains" }).fill("new.example.com")
+  await expect(typed.getByText("unsaved", { exact: true })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(ask).toContainText("This new site is not saved.")
+  await ask.getByRole("button", { name: "Keep editing" }).click()
+  await expect(typed.getByRole("textbox", { name: "Domains" })).toHaveValue("new.example.com")
+  // The close button asks the same.
+  await typed.getByRole("button", { name: "Close", exact: true }).click()
   await ask.getByRole("button", { name: "Discard" }).click()
   await expect(typed).toBeHidden()
 })
@@ -1255,21 +1318,23 @@ test("a draft survives a trip to Certificates, and a change on disk under it is 
   await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
 
   await page.goto("/proxy/certificates")
-  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await expect(page.getByRole("list", { name: "Installed certificates" })).toBeVisible()
   sheet = await openApp(page)
   await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4000")
-  await expect(sheet.getByText("unsaved", { exact: true })).toBeVisible()
+  await expect(unsaved(page)).toContainText("1 unsaved change")
   await expect(sheet.getByRole("alert")).toHaveCount(0)
 
   // Somebody saves the file meanwhile: the draft is kept, and the operator
   // asked which of the two wins before anything can be saved.
   version = "d2"
   await page.goto("/proxy/certificates")
-  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await expect(page.getByRole("list", { name: "Installed certificates" })).toBeVisible()
   sheet = await openApp(page)
+  // Announced as an alert. The keyboard is put back in the field the reader
+  // left, as on any page they come back to, rather than on the banner.
   const banner = sheet.getByRole("alert")
   await expect(banner).toContainText("app.example.com changed on disk")
-  await expect(banner).toBeFocused()
+  await expect(banner).toBeInViewport()
   await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4000")
   await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
 
@@ -1321,10 +1386,11 @@ test("reloading from disk takes the other change and drops the draft", async ({ 
 
   await banner.getByRole("button", { name: "Reload from disk" }).click()
   await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:5000")
-  await expect(sheet.getByText("unsaved", { exact: true })).toHaveCount(0)
-  // Nothing left to lose, so Escape closes without asking.
-  await page.keyboard.press("Escape")
-  await expect(sheet).toBeHidden()
+  await expect(unsaved(page)).toHaveCount(0)
+  // Nothing left to lose, so leaving does not ask.
+  await page.getByRole("tab", { name: "Overview" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
 test("a site without an upload limit or a timeout is saved without them", async ({ page }) => {
@@ -1344,15 +1410,15 @@ test("a site without an upload limit or a timeout is saved without them", async 
   const saved = await capture(page, "**/api/v1/proxy/sites/", (route) => json(route, siteResult()))
   const sheet = await openApp(page)
   await expect(sheet.getByLabel("Upload limit")).toHaveValue("")
-  // Nothing was changed, so closing would not ask; the save sends the site as read.
-  await expect(sheet.getByText("unsaved", { exact: true })).toHaveCount(0)
+  // Nothing was changed; the save sends the site as read.
+  await expect(unsaved(page)).toHaveCount(0)
   await sheet.getByRole("button", { name: "Save and reload" }).click()
   await expect(page.getByText("app.example.com is live")).toBeVisible()
   expect(saved[0].spec).not.toHaveProperty("clientMaxBody")
   expect(saved[0].spec).not.toHaveProperty("proxyTimeout")
 })
 
-test("Ctrl+S saves the way the footer's own command does", async ({ page }) => {
+test("Ctrl+S saves the way the bar's own command does", async ({ page }) => {
   await mockProxy(page, { included: true })
   await appOnDisk(page, { digest: "d1" })
   const saved = await capture(page, "**/api/v1/proxy/sites/", (route, body) =>
@@ -1378,7 +1444,7 @@ test("Ctrl+S saves the way the footer's own command does", async ({ page }) => {
     legacy.getByText("Saved as /etc/nginx/sites-available/legacy.example.com"),
   ).toBeVisible()
   await page.keyboard.press("Meta+s")
-  await expect(legacy).toBeHidden()
+  await expect.poll(() => saved.length).toBe(2)
   expect(saved[1]).toMatchObject({ reload: false, enable: "keep" })
 })
 

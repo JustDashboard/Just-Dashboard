@@ -48,7 +48,9 @@ import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
 import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { HostIdentity } from "@/components/metrics/host-identity"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   AllClear,
   ChannelTests,
@@ -79,7 +81,9 @@ import { engineProduct } from "@/components/proxy/marks"
  *
  * It was a sheet over the overview, grey rows under five headings, and the
  * operator asked for a page of its own drawn the way Notifications is. It
- * opens on the same kind of picture: what the rules watch — certificates as
+ * opens on a line saying what it is — how many rules are on, what is firing
+ * and who is told — with Add rule as its command, then on the same kind of
+ * picture: what the rules watch — certificates as
  * Let's Encrypt, the engine as itself, upstreams, sites and watched endpoints
  * — wired into this server and out to each channel as its own service, each
  * wire in the colour of what it carries. Under it what is firing now, because
@@ -90,7 +94,10 @@ import { engineProduct } from "@/components/proxy/marks"
 
 type KindWords = {
   label: string
+  /** A few words, on a card. */
   hint: string
+  /** The sentence behind them, as the card's tooltip. */
+  detail: string
   icon: Icon
   describe: (params: ProxyAlertParams) => string
 }
@@ -100,61 +107,71 @@ const EXPIRY_DAYS = [21, 7, 3, 1]
 const KINDS: Record<ProxyAlertKind, KindWords> = {
   cert_expiring: {
     label: "Certificate expiring",
-    hint: "Told once at each threshold a certificate crosses.",
+    hint: "21, 7, 3 and 1 days left",
+    detail: "Told once at each threshold a certificate crosses.",
     icon: Clock,
     describe: (p) => `at ${(p.days ?? EXPIRY_DAYS).join(", ")} days left`,
   },
   cert_expired: {
     label: "Certificate expired",
-    hint: "A certificate on this host has run out.",
+    hint: "one has run out",
+    detail: "A certificate on this host has run out.",
     icon: CrossCircle,
     describe: () => "once a certificate runs out",
   },
   renewal_failed: {
     label: "Renewal failed",
-    hint: "Certbot's last renewal or reload hook failed.",
+    hint: "certbot or its hook failed",
+    detail: "Certbot's last renewal or reload hook failed.",
     icon: RefreshClockwise,
     describe: () => "after a failed certbot renewal or reload hook",
   },
   served_drift: {
     label: "Served certificate differs",
-    hint: "An nginx site serves a different certificate from the one in its file.",
+    hint: "not the one in its file",
+    detail: "An nginx site serves a different certificate from the one in its file.",
     icon: ShieldOff,
     describe: () => "when a site serves a different certificate",
   },
   engine_down: {
     label: "Engine not running",
-    hint: "The engine's unit stopped or failed, on two checks in a row.",
+    hint: "stopped or failed",
+    detail: "The engine's unit stopped or failed, on two checks in a row.",
     icon: Servers,
     describe: () => "stopped or failed on two checks in a row",
   },
   upstream_down: {
     label: "Upstream down",
-    hint: "An address nginx forwards to stops answering.",
+    hint: "stops answering",
+    detail: "An address nginx forwards to stops answering.",
     icon: NetworkDevice,
     describe: (p) => `down for ${p.minutes ?? 5} min`,
   },
   watch_unreachable: {
     label: "Watched endpoint unreachable",
-    hint: "No TLS handshake on two checks in a row.",
+    hint: "no TLS handshake",
+    detail: "No TLS handshake on two checks in a row.",
     icon: Globe,
     describe: () => "no TLS handshake on two checks in a row",
   },
   watch_untrusted: {
     label: "Watched endpoint untrusted",
-    hint: "It serves a certificate the system does not trust.",
+    hint: "certificate not trusted",
+    detail: "It serves a certificate the system does not trust.",
     icon: ShieldOff,
     describe: () => "serves a certificate that is not trusted",
   },
   watch_grade_below: {
     label: "Watched TLS grade below minimum",
-    hint: "A full TLS scan is below your chosen grade on two checks in a row.",
+    hint: "a scan under your grade",
+    detail: "A full TLS scan is below your chosen grade on two checks in a row.",
     icon: Globe,
     describe: (p) => `below grade ${p.grade ?? "A"} on two checks in a row`,
   },
   site_errors: {
     label: "Site failing",
-    hint: "A site's share of 5xx answers over a window.",
+    hint: "too many 5xx answers",
+    detail: "A site's share of 5xx answers over a window.",
     icon: Slash,
     describe: (p) =>
       `more than ${p.threshold ?? 5}% answered 5xx over ${p.minutes ?? 15} min, from ${p.minRequests ?? 20} requests`,
@@ -288,10 +305,20 @@ export function AlertsPage() {
   const engine = status ? engineProduct(status) : undefined
   const { can } = useAuth()
   const admin = can("system.admin")
-  const alerts = usePoll((signal) => get<ProxyAlerts>("/proxy/alerts", undefined, signal), 30_000)
+  // Every route under /proxy/alerts is an administrator's. An account that
+  // only reads is not sent to ask and be refused: it got the server's 403 as
+  // a failure to retry.
+  const alerts = usePoll(
+    (signal) => get<ProxyAlerts>("/proxy/alerts", undefined, signal),
+    30_000,
+    [],
+    { enabled: admin },
+  )
   const channels = usePoll(
     (signal) => get<NotificationChannel[]>("/deploy/notifications", undefined, signal),
     60_000,
+    [],
+    { enabled: admin },
   )
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<{ rule?: ProxyAlertRule; kind?: ProxyAlertKind }>()
@@ -430,18 +457,67 @@ export function AlertsPage() {
   const paused = rules.filter((rule) => !rule.enabled).length
   const every = Math.round((data?.intervalSeconds ?? 300) / 60)
 
+  const on = rules.length - paused
+  const told = channelList.filter((channel) => reaches(rules, channel)).length
+
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/proxy" className="rounded-sm focus-ring hover:underline">
-            Proxy & TLS
-          </Link>
-        }
+      <PageContext title="Alerts" />
+      <HostIdentity
+        fallback={Bell}
         title="Alerts"
+        state={
+          !admin ? (
+            <Status tone="unknown" label="Administrators only" />
+          ) : !data ? (
+            alerts.error ? (
+              <Status tone="danger" label="Not read" />
+            ) : (
+              <Status tone="unknown" label="Reading" />
+            )
+          ) : (
+            <>
+              <Status
+                tone={on === 0 ? "stopped" : "running"}
+                label={on === 0 ? "No rules on" : `${plural(on, "rule")} on`}
+              />
+              {firing > 0 && <Status tone="danger" label={`${firing} firing`} />}
+              {holding > 0 && <Status tone="warning" label={`${holding} holding`} />}
+            </>
+          )
+        }
+        facts={
+          !admin ? (
+            <span>rules over the proxy&apos;s readings, told to the notification channels</span>
+          ) : !data ? (
+            alerts.error ? (
+              <span>the rules could not be read</span>
+            ) : (
+              <TextShimmer>Reading the rules…</TextShimmer>
+            )
+          ) : (
+            <>
+              <span className="numeric">
+                {told === 0 ? "telling nobody yet" : `telling ${plural(told, "channel")}`}
+              </span>
+            </>
+          )
+        }
+        command={
+          admin && (
+            <Button size="sm" onClick={() => edit({})} disabled={!data}>
+              <Plus className="size-3.5" />
+              Add rule
+            </Button>
+          )
+        }
       />
 
-      {alerts.error && !data ? (
+      {!admin ? (
+        <Notice title="Only an administrator reads and sets the alert rules">
+          They name who is told, and what a rule says is what the proxy serves.
+        </Notice>
+      ) : alerts.error && !data ? (
         <ErrorState error={alerts.error} onRetry={alerts.refresh} />
       ) : alerts.loading && !data ? (
         <LoadingPanel plain rows={4} />
@@ -453,6 +529,7 @@ export function AlertsPage() {
               rules={rules}
               subjects={subjects}
               channels={channelList}
+              every={every}
               engine={engine}
               onAdd={admin ? (kind) => edit({ kind }) : undefined}
             />
@@ -468,20 +545,6 @@ export function AlertsPage() {
                       {data?.lastPass && (
                         <span className="numeric text-hint text-muted-foreground">
                           checked {relativeTime(data.lastPass)}
-                        </span>
-                      )}
-                      {(firing > 0 || holding > 0) && (
-                        <span className="numeric text-hint text-muted-foreground">
-                          <span className={cn("font-medium", firing > 0 && "text-destructive")}>
-                            {firing}
-                          </span>{" "}
-                          firing
-                          {holding > 0 && (
-                            <>
-                              {" · "}
-                              <span className="font-medium text-warning">{holding}</span> holding
-                            </>
-                          )}
                         </span>
                       )}
                       {admin && (
@@ -520,41 +583,28 @@ export function AlertsPage() {
                 <PanelHeader
                   title="Rules"
                   actions={
-                    <span className="flex flex-wrap items-center gap-3">
-                      {rules.length > 0 && (
-                        <span className="numeric text-hint text-muted-foreground">
-                          {plural(rules.length, "rule")}
-                          {paused > 0 && ` · ${paused} paused`}
-                        </span>
-                      )}
-                      {admin && (
-                        <Button size="sm" onClick={() => edit({})}>
-                          <Plus className="size-3.5" />
-                          Add rule
-                        </Button>
-                      )}
+                    <span className="numeric text-hint text-muted-foreground">
+                      {rules.length > 0
+                        ? `${plural(rules.length, "rule")}${paused > 0 ? ` · ${paused} paused` : ""}`
+                        : `${KIND_ORDER.length} to choose from`}
                     </span>
                   }
                 />
                 <PanelBody>
                   {rules.length === 0 ? (
-                    <div className="space-y-4">
-                      <p className="max-w-prose text-body text-pretty text-muted-foreground">
-                        Nobody is told when a certificate runs low, the engine stops or a site
-                        starts failing. A rule is checked every {every} minutes and tells your
-                        channels once on the way over and once on the way back.
-                      </p>
-                      <ChoiceGrid columns={2} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-                        {KIND_ORDER.map((kind) => (
-                          <KindCard
-                            key={kind}
-                            kind={kind}
-                            engine={engine}
-                            onClick={admin ? () => edit({ kind }) : undefined}
-                          />
-                        ))}
-                      </ChoiceGrid>
-                    </div>
+                    // What can be watched, each a press away from its rule. A
+                    // paragraph stood over it saying what a rule is; the
+                    // picture and the line above say it.
+                    <ChoiceGrid columns={2} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
+                      {KIND_ORDER.map((kind) => (
+                        <KindCard
+                          key={kind}
+                          kind={kind}
+                          engine={engine}
+                          onClick={admin ? () => edit({ kind }) : undefined}
+                        />
+                      ))}
+                    </ChoiceGrid>
                   ) : (
                     <ChoiceList aria-label="Alert rules" className="animate-rise">
                       {rules.map((rule) => {
@@ -741,13 +791,34 @@ function KindCard({
   onClick?: () => void
 }) {
   return (
-    <ChoiceCard onClick={onClick} disabled={!onClick} className="min-h-0 flex-row gap-3 p-3">
+    <ChoiceCard
+      onClick={onClick}
+      disabled={!onClick}
+      className="min-h-0 flex-row items-center gap-3 p-3"
+    >
       <KindTile kind={kind} engine={engine} size="sm" />
-      <span className="min-w-0 space-y-0.5">
-        <ChoiceCardTitle className="truncate">{KINDS[kind].label}</ChoiceCardTitle>
-        <ChoiceCardHint className="line-clamp-2">{KINDS[kind].hint}</ChoiceCardHint>
-      </span>
+      <KindWords kind={kind} />
     </ChoiceCard>
+  )
+}
+
+/** A kind of rule on a card: its name over a few words, the sentence behind them a hover away. */
+function KindWords({ kind }: { kind: ProxyAlertKind }) {
+  return (
+    <span className="min-w-0 space-y-0.5" title={KINDS[kind].detail}>
+      <ChoiceCardTitle className="block truncate">{KINDS[kind].label}</ChoiceCardTitle>
+      <ChoiceCardHint className="block truncate">{KINDS[kind].hint}</ChoiceCardHint>
+    </span>
+  )
+}
+
+/** Whether an enabled rule tells this channel: one with no channels named tells every enabled one. */
+function reaches(rules: ProxyAlertRule[], channel: NotificationChannel) {
+  return (
+    channel.enabled &&
+    rules.some(
+      (rule) => rule.enabled && (rule.channels.length === 0 || rule.channels.includes(channel.id)),
+    )
   )
 }
 
@@ -763,12 +834,15 @@ function AlertsPicture({
   rules,
   subjects,
   channels,
+  every,
   engine,
   onAdd,
 }: {
   rules: ProxyAlertRule[]
   subjects: ProxyAlertSubject[]
   channels: NotificationChannel[]
+  /** How often the rules are checked, in minutes. */
+  every: number
   engine?: string
   onAdd?: (kind: ProxyAlertKind) => void
 }) {
@@ -777,14 +851,12 @@ function AlertsPicture({
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const enabled = rules.filter((rule) => rule.enabled)
-  // A rule with no channels named tells every enabled one.
-  const reaches = (channel: NotificationChannel) =>
-    channel.enabled &&
-    enabled.some((rule) => rule.channels.length === 0 || rule.channels.includes(channel.id))
   const targets = pictureTargets(channels)
-  const told = channels.filter(reaches).length
-  const title = enabled.length === 0 ? "No rules on" : plural(enabled.length, "rule")
-  const reach = channels.length === 0 ? "telling nobody yet" : `telling ${plural(told, "channel")}`
+  // The line over the picture says how many rules are on and who is told;
+  // the server in the middle says what it does with them, which a paragraph
+  // under Rules used to.
+  const title = `checks every ${every} min`
+  const reach = "tells each change once"
 
   const areas = AREAS.map((area) => (
     <PictureArea
@@ -804,7 +876,7 @@ function AlertsPicture({
       key={target.key}
       channel={target.channel}
       kind={target.kind}
-      live={target.channel ? reaches(target.channel) : false}
+      live={target.channel ? reaches(rules, target.channel) : false}
       containerRef={container}
       hubRef={hub}
       compact={!wide}
@@ -1053,13 +1125,10 @@ function RuleForm({
                 key={option}
                 selected={kind === option}
                 onClick={() => choose(option)}
-                className="min-h-0 flex-row gap-3 p-3"
+                className="min-h-0 flex-row items-center gap-3 p-3"
               >
                 <KindTile kind={option} engine={engine} size="sm" />
-                <span className="min-w-0 space-y-0.5">
-                  <ChoiceCardTitle className="truncate">{KINDS[option].label}</ChoiceCardTitle>
-                  <ChoiceCardHint className="line-clamp-2">{KINDS[option].hint}</ChoiceCardHint>
-                </span>
+                <KindWords kind={option} />
               </ChoiceCard>
             ))}
           </ChoiceGrid>
@@ -1067,7 +1136,7 @@ function RuleForm({
       </Field>
 
       {kind === "cert_expiring" && (
-        <Field label="Tell at" hint="Days left; each is told once." error={error}>
+        <Field label="Tell at" info="Days left; each is told once." error={error}>
           <ToggleGroup
             type="multiple"
             value={days}
@@ -1090,7 +1159,7 @@ function RuleForm({
         <Field
           label="Down for"
           htmlFor="proxy-alert-minutes"
-          hint="From 5 minutes to a day; checked every 5 minutes."
+          info="From 5 minutes to a day; checked every 5 minutes."
           error={error}
         >
           <InputGroup>
@@ -1109,7 +1178,7 @@ function RuleForm({
       )}
 
       {kind === "watch_grade_below" && (
-        <Field label="Minimum grade" hint="Full scans run in batches while this rule is on.">
+        <Field label="Minimum grade" info="Full scans run in batches while this rule is on.">
           <ToggleGroup
             type="single"
             value={grade}
@@ -1133,7 +1202,7 @@ function RuleForm({
           <Field
             label="5xx share above"
             htmlFor="proxy-alert-threshold"
-            hint="Of the site's requests."
+            info="Of the site's requests."
             error={error}
           >
             <InputGroup>
@@ -1149,7 +1218,7 @@ function RuleForm({
               </InputGroupAddon>
             </InputGroup>
           </Field>
-          <Field label="Over" htmlFor="proxy-alert-window" hint="At least 5 minutes.">
+          <Field label="Over" htmlFor="proxy-alert-window" info="At least 5 minutes.">
             <InputGroup>
               <InputGroupInput
                 id="proxy-alert-window"
@@ -1163,7 +1232,7 @@ function RuleForm({
               </InputGroupAddon>
             </InputGroup>
           </Field>
-          <Field label="From at least" htmlFor="proxy-alert-requests" hint="Fewer is not judged.">
+          <Field label="From at least" htmlFor="proxy-alert-requests" info="Fewer is not judged.">
             <InputGroup>
               <InputGroupInput
                 id="proxy-alert-requests"

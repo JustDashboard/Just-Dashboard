@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useId, useMemo, useRef, useState } from "react"
-import { Pencil } from "@/components/icons"
+import { RotateCounterClockwise } from "@/components/icons"
 import { errorMessage, put } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -9,18 +9,14 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Segments } from "@/components/deploy/settings/segments"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { GroupRule } from "@/components/flow"
 import {
-  Disclosure,
-  Field,
-  FormFact,
-  FormNote,
-  OptionList,
-  OptionRow,
-  Statement,
-} from "@/components/form"
-import { ROW_DIM } from "@/components/icon-action"
+  SettingForm,
+  SettingSection,
+  settingStatus,
+} from "@/components/deploy/settings/setting-card"
+import { GroupRule } from "@/components/flow"
+import { Disclosure, FormNote, InfoTip, OptionList, OptionRow, Statement } from "@/components/form"
+import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
 import { LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -28,11 +24,28 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineGlyph } from "@/components/database/kit"
 import { isDown } from "@/components/database/ops/performance-parts"
-import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
+import {
+  configBody,
+  parameterChanges,
+  rangeWords,
+  settingBody,
+  shownValue,
+  startValue,
+  valueFacts,
+  type ParameterEdit,
+  type ParameterEdits,
+} from "@/components/database/ops/settings-parameters-edit"
 import {
   boolWords,
   changeWords,
@@ -42,7 +55,6 @@ import {
   groupParameters,
   isOn,
   parameterProblem,
-  readableValue,
   type DbSettingChange,
   type DbSettings,
   type Parameter,
@@ -50,6 +62,7 @@ import {
   type RedisConfig,
   type RedisConfigChange,
 } from "@/components/database/ops/settings-parameters-model"
+import { usePendingReport } from "@/components/database/ops/settings-pending"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** Where the list came from, which decides how one of its parameters is set. */
@@ -67,7 +80,7 @@ type Listed = {
   configFile?: string
 }
 
-/** What the last change did, kept on the page beside the statements that ran. */
+/** What one change did, kept on the page beside the statements that ran. */
 type Done = {
   name: string
   statements: string[]
@@ -82,6 +95,9 @@ type Done = {
   rewrite?: boolean
 }
 
+/** Values the server has just taken, shown until the list that carries them is read. */
+type Held = { against: Listed | undefined; values: Record<string, string> }
+
 /** How many rows a filtered list draws before the rest wait behind a press. */
 const SHOWN = 120
 
@@ -90,16 +106,25 @@ const SHOWN = 120
  * own headings, searchable, with the ones that differ from their default and
  * the ones waiting for a restart a press away.
  *
- * A parameter is changed in a dialog that says what it is, what it may be and
- * when a change takes effect; what the server ran is shown afterwards, as the
- * route reports it. Editing is drawn for an administrator, on a connection
- * that is not protected, and only on a parameter the server says it would
- * accept.
+ * A parameter is changed where it is listed. Its value is the control its
+ * type asks for (a yes/no as two words, a closed set as its words, a number
+ * or a string as a field) and the page's one Save sends every row that
+ * differs, one request each, so several are changed together and the server
+ * restarted once. Each was a dialog with a Save of its own. What the server
+ * ran is shown afterwards, as the route reports it, and a value outside what
+ * the server publishes is said under its control before it is sent. Editing
+ * is drawn for an administrator, on a connection that is not protected, and
+ * only on a parameter the server says it would accept.
+ *
+ * What is stored and waiting for a restart is the strip at the head of the
+ * page (`settings-pending.tsx`), which carries Restart. It was a status in
+ * this section's head and a notice under it, and neither could restart
+ * anything.
  *
  * A SQL engine's list is `GET /settings`; a key–value server's is its own
  * `GET /redis/config`, whose values it sets without types or defaults. A
  * document database answers `/settings` with the counters of its status
- * command — readings, which belong to Performance — so the page does not draw
+ * command (readings, which belong to Performance) so the page does not draw
  * this section for one.
  *
  * Where the server publishes no default (its configuration, or an engine
@@ -115,9 +140,13 @@ export function ParametersSection() {
   const only = (param("only") || "") as ParameterFilter
   const [all, setAll] = useState(false)
   const [opened, setOpened] = useState<string[]>([])
-  const [editing, setEditing] = useState<Parameter>()
-  const [done, setDone] = useState<Done>()
-  const [undoing, setUndoing] = useState(false)
+  const [edits, setEdits] = useState<ParameterEdits>({})
+  const [refusals, setRefusals] = useState<Record<string, string>>({})
+  const [held, setHeld] = useState<Held>({ against: undefined, values: {} })
+  const [done, setDone] = useState<Done[]>([])
+  const [rewrite, setRewrite] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [undoing, setUndoing] = useState<string>()
 
   const list = usePoll<Listed>(
     async (signal) => {
@@ -184,7 +213,7 @@ export function ParametersSection() {
   const data = list.data
   const parameters = useMemo(() => data?.parameters ?? [], [data])
   const changed = parameters.filter((one) => one.changed).length
-  const pending = parameters.filter((one) => one.pending).length
+  const pending = parameters.filter((one) => one.pending)
   const filtering = search.trim() !== "" || only !== ""
   const matches = useMemo(
     () => filterParameters(parameters, search, only),
@@ -207,22 +236,111 @@ export function ParametersSection() {
   const resets =
     data?.source === "settings" &&
     parameters.some((one) => one.changed || one.default !== undefined)
+  const rewrites = data?.source === "config" && Boolean(data.rewritable) && rewrite
+
+  // What was just saved is what a row shows until the list that carries it is read.
+  const kept = held.against === data ? held.values : {}
+  const changes = parameterChanges(parameters, edits, kept)
+  const invalid = changes.some((change) => change.problem)
+  const dirty = changes.length > 0
 
   // A file has no server: its parameters are the file's own.
   const title = engine.can("fileBased") ? "Parameters" : "Server parameters"
   const noun = "parameter"
 
+  const edit = (name: string, next: ParameterEdit | undefined) => {
+    setEdits((all) => {
+      const rest = { ...all }
+      if (next) rest[name] = next
+      else delete rest[name]
+      return rest
+    })
+    setRefusals((all) => {
+      if (!(name in all)) return all
+      const rest = { ...all }
+      delete rest[name]
+      return rest
+    })
+  }
+
+  /** The bar's Save: one request a row, in the list's order; a refused one keeps its draft. */
+  const save = async () => {
+    if (!data || changes.length === 0) return true
+    if (invalid) return false
+    setSaving(true)
+    const report: Done[] = []
+    const left = { ...edits }
+    const refused: Record<string, string> = {}
+    const taken: Record<string, string> = {}
+    for (const change of changes) {
+      const { parameter } = change
+      try {
+        if (data.source === "config") {
+          const body = configBody(change, rewrites)
+          const answer = await put<RedisConfigChange>(`/databases/${id}/redis/config`, body)
+          const said = answer.rewritten
+            ? "In effect now, and written to the configuration file."
+            : answer.rewriteError
+              ? `In effect now. It was not written to the configuration file: ${answer.rewriteError}`
+              : "In effect now. It lasts until the server restarts."
+          report.push({
+            name: parameter.name,
+            statements: [
+              `CONFIG SET ${parameter.name} ${answer.secret ? "••••••" : body.value}`,
+              ...(answer.rewritten ? ["CONFIG REWRITE"] : []),
+            ],
+            words: [said, answer.notice].filter(Boolean).join(" "),
+            tone: answer.notice || answer.rewriteError ? "warning" : "default",
+            previous: parameter.secret ? undefined : parameter.value,
+            rewrite: answer.rewritten,
+          })
+          if (!parameter.secret) taken[parameter.name] = body.value
+        } else {
+          const reset = "reset" in change.edit
+          const answer = await put<DbSettingChange>(
+            `/databases/${id}/settings`,
+            settingBody(change),
+          )
+          report.push({
+            name: parameter.name,
+            statements: answer.statements,
+            words: `${reset ? "Reset to" : "Set to"} ${answer.value || "empty"}${parameter.unit ? ` ${parameter.unit}` : ""}. ${changeWords(answer)}`,
+            tone: answer.restartRequired || !answer.persisted ? "warning" : "default",
+            previous: reset || parameter.redacted ? undefined : parameter.value,
+          })
+          // A value that waits for a restart is not the one in force: the row keeps the old one.
+          if (!answer.restartRequired) taken[parameter.name] = answer.value
+        }
+        delete left[parameter.name]
+      } catch (err) {
+        refused[parameter.name] = errorMessage(err)
+      }
+    }
+    setEdits(left)
+    setRefusals(refused)
+    setHeld({ against: data, values: { ...kept, ...taken } })
+    if (report.length > 0) {
+      setDone(report)
+      // PostgreSQL applies a change after its reload signal, a moment after
+      // the route answers: the list is read again then, not now.
+      window.setTimeout(list.refresh, 1200)
+    }
+    setSaving(false)
+    return Object.keys(refused).length === 0
+  }
+
   const putBack = async (change: Done) => {
     if (change.previous === undefined || !data) return
-    setUndoing(true)
+    setUndoing(change.name)
     try {
+      let next: Done
       if (data.source === "config") {
         const answer = await put<RedisConfigChange>(`/databases/${id}/redis/config`, {
           name: change.name,
           value: change.previous,
           ...(change.rewrite ? { rewrite: true } : {}),
         })
-        setDone({
+        next = {
           name: change.name,
           statements: [
             `CONFIG SET ${change.name} ${change.previous}`,
@@ -230,312 +348,489 @@ export function ParametersSection() {
           ],
           words: `Put back to ${change.previous}.`,
           tone: "default",
-        })
+        }
       } else {
         const answer = await put<DbSettingChange>(`/databases/${id}/settings`, {
           name: change.name,
           value: change.previous,
         })
-        setDone({
+        next = {
           name: change.name,
           statements: answer.statements,
           words: `Put back to ${answer.value}. ${changeWords(answer)}`,
           tone: answer.restartRequired ? "warning" : "default",
-        })
+        }
       }
+      setDone((all) => all.map((one) => (one.name === change.name ? next : one)))
+      setHeld({ against: data, values: { ...kept, [change.name]: change.previous } })
       notify.success(`Put ${change.name} back`)
       window.setTimeout(list.refresh, 1200)
     } catch (err) {
       notify.error(`Could not put ${change.name} back`, err)
     } finally {
-      setUndoing(false)
+      setUndoing(undefined)
     }
   }
 
+  usePendingReport("parameters", {
+    waiting: pending.map((one) => ({ name: one.name, mono: true, state: "restart" })),
+    edits: changes.map((change) => ({
+      name: change.parameter.name,
+      mono: true,
+      state: "reset" in change.edit ? "reset" : "changed",
+    })),
+    refresh: list.refresh,
+    ready: data !== undefined || down || list.error !== undefined,
+  })
+
+  const rows = (parameters: Parameter[]) => (
+    <ul className="divide-y divide-hairline">
+      {parameters.map((parameter) => (
+        <ParameterRow
+          key={parameter.name}
+          parameter={parameter}
+          editable={editable(parameter)}
+          aligned={mayEdit}
+          resets={Boolean(resets)}
+          edit={edits[parameter.name]}
+          held={kept[parameter.name]}
+          refusal={refusals[parameter.name]}
+          busy={saving}
+          onEdit={(next) => edit(parameter.name, next)}
+        />
+      ))}
+    </ul>
+  )
+
   return (
-    <SettingSection
-      id="parameters"
-      title={title}
-      state={
-        data?.supported ? (
-          <span className="numeric flex flex-wrap items-center gap-x-1.5">
-            <EngineGlyph engine={engine} className="size-3.5" />
-            {plural(parameters.length, noun)}
-            {changed > 0 ? ` · ${changed} changed from the default` : " · every one at its default"}
-          </span>
-        ) : undefined
-      }
-      status={
-        pending > 0 && <Status verdict="warning" label={`${pending} waiting for a restart`} />
-      }
+    <SettingForm
+      name={title}
+      onSave={save}
+      dirty={dirty}
+      changes={changes.length}
+      saving={saving}
+      invalid={invalid}
+      canEdit={mayEdit}
+      applies="immediately"
+      onDiscard={() => {
+        setEdits({})
+        setRefusals({})
+      }}
     >
-      {down ? (
-        <FormNote>
-          {title} are read from the running server; they are listed once {conn.name} answers again.
-        </FormNote>
-      ) : !data ? (
-        list.error ? (
-          <CouldNotRead what={`the ${noun}s`} error={list.error} onRetry={list.refresh} />
+      <SettingSection
+        id="parameters"
+        title={title}
+        state={
+          data?.supported ? (
+            <span className="numeric flex flex-wrap items-center gap-x-1.5">
+              <EngineGlyph engine={engine} className="size-3.5" />
+              {plural(parameters.length, noun)}
+              {changed > 0
+                ? ` · ${changed} changed from the default`
+                : " · every one at its default"}
+            </span>
+          ) : undefined
+        }
+        status={settingStatus({ dirty, refused: Object.keys(refusals).length > 0 })}
+      >
+        {down ? (
+          <FormNote>
+            {title} are read from the running server; they are listed once {conn.name} answers
+            again.
+          </FormNote>
+        ) : !data ? (
+          list.error ? (
+            <CouldNotRead what={`the ${noun}s`} error={list.error} onRetry={list.refresh} />
+          ) : (
+            <LoadingRows rows={6} />
+          )
+        ) : !data.supported ? (
+          <Notice title={`The ${noun}s cannot be read`}>
+            {data.reason ?? `This server does not list its ${noun}s to this connection.`}
+          </Notice>
         ) : (
-          <LoadingRows rows={6} />
-        )
-      ) : !data.supported ? (
-        <Notice title={`The ${noun}s cannot be read`}>
-          {data.reason ?? `This server does not list its ${noun}s to this connection.`}
-        </Notice>
-      ) : (
-        <div className="animate-rise space-y-4">
-          {pending > 0 && (
-            <Notice
-              tone="warning"
-              title={`${plural(pending, "parameter")} ${pending === 1 ? "is" : "are"} stored and not yet in effect`}
-            >
-              {pending === 1 ? "It takes" : "They take"} effect when the server is restarted.
-            </Notice>
-          )}
-          {done && (
-            <div className="space-y-1.5" data-slot="parameter-change" role="status">
-              {done.statements.length > 0 && (
-                <Statement label="What ran" sql={done.statements.join(";\n")} placeholder="" />
-              )}
-              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                <FormNote tone={done.tone} className="min-w-0 flex-1">
-                  <span className="font-mono text-foreground">{done.name}</span> — {done.words}
-                </FormNote>
-                {mayEdit && !resets && done.previous !== undefined && (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    pending={undoing}
-                    onClick={() => void putBack(done)}
-                  >
-                    Put back <span className="font-mono">{done.previous || "empty"}</span>
-                  </Button>
+          <div className="animate-rise space-y-4">
+            {done.length > 0 && (
+              <div className="space-y-1.5" data-slot="parameter-change" role="status">
+                {done.some((one) => one.statements.length > 0) && (
+                  <Statement
+                    label="What ran"
+                    sql={done.flatMap((one) => one.statements).join(";\n")}
+                    placeholder=""
+                  />
                 )}
-              </div>
-            </div>
-          )}
-
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <SearchInput
-              aria-label={`Filter the ${noun}s`}
-              placeholder={`Filter ${parameters.length} ${noun}s`}
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value)
-                setAll(false)
-              }}
-            />
-            {(changed > 0 || pending > 0 || only !== "") && (
-              <ChipStrip role="group" aria-label={`Which ${noun}s are listed`}>
-                <FilterChip selected={only === ""} onClick={() => narrow("")}>
-                  All
-                  <ChipCount>{parameters.length}</ChipCount>
-                </FilterChip>
-                {(changed > 0 || only === "changed") && (
-                  <FilterChip
-                    selected={only === "changed"}
-                    onClick={() => narrow(only === "changed" ? "" : "changed")}
+                {done.map((one) => (
+                  <div
+                    key={one.name}
+                    className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
                   >
-                    Changed
-                    <ChipCount>{changed}</ChipCount>
-                  </FilterChip>
-                )}
-                {(pending > 0 || only === "pending") && (
-                  <FilterChip
-                    selected={only === "pending"}
-                    onClick={() => narrow(only === "pending" ? "" : "pending")}
-                  >
-                    Waiting for a restart
-                    <ChipCount>{pending}</ChipCount>
-                  </FilterChip>
-                )}
-              </ChipStrip>
-            )}
-          </div>
-
-          {!data.writable && (
-            <FormNote>
-              {engine.label} lists its parameters here and takes changes to them in its own
-              configuration.
-            </FormNote>
-          )}
-          {data.source === "config" && mayEdit && !data.rewritable && (
-            <FormNote>
-              The server was started without a configuration file, so a change made here lasts until
-              it restarts.
-            </FormNote>
-          )}
-
-          {filtering ? (
-            matches.length === 0 ? (
-              <p className="py-4 text-body text-muted-foreground">
-                No {noun} matches{search.trim() ? ` “${search.trim()}”` : ""}.
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {groups.map((group) => (
-                  <div key={group.name}>
-                    <GroupRule label={group.name} count={group.parameters.length} />
-                    <ParameterRows
-                      parameters={group.parameters}
-                      editing={mayEdit}
-                      editable={editable}
-                      onEdit={setEditing}
-                    />
+                    <FormNote tone={one.tone} className="min-w-0 flex-1">
+                      <span className="font-mono text-foreground">{one.name}</span>: {one.words}
+                    </FormNote>
+                    {mayEdit && !resets && one.previous !== undefined && (
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        pending={undoing === one.name}
+                        disabled={Boolean(undoing)}
+                        onClick={() => void putBack(one)}
+                      >
+                        Put back <span className="font-mono">{one.previous || "empty"}</span>
+                      </Button>
+                    )}
                   </div>
                 ))}
-                {!all && matches.length > SHOWN && (
-                  <Button size="xs" variant="ghost" className="-ml-2" onClick={() => setAll(true)}>
-                    Show all {matches.length}
-                  </Button>
-                )}
               </div>
-            )
-          ) : (
-            <div className="space-y-0.5">
-              {groups.map((group) => (
-                <Disclosure
-                  key={group.name}
-                  quiet
-                  open={opened.includes(group.name)}
-                  onOpenChange={(open) =>
-                    setOpened((held) =>
-                      open
-                        ? held.includes(group.name)
-                          ? held
-                          : [...held, group.name]
-                        : held.filter((name) => name !== group.name),
-                    )
-                  }
-                  summary={group.name}
-                  facts={
-                    <span className="numeric">
-                      {group.parameters.length}
-                      {group.changed > 0 ? ` · ${group.changed} changed` : ""}
-                      {group.pending > 0 ? ` · ${group.pending} waiting` : ""}
-                    </span>
-                  }
-                >
-                  {/* Drawn once it is open: a closed heading holds no rows, and
-                      a server has several hundred parameters. */}
-                  {opened.includes(group.name) && (
-                    <ParameterRows
-                      parameters={group.parameters}
-                      editing={mayEdit}
-                      editable={editable}
-                      onEdit={setEditing}
-                    />
-                  )}
-                </Disclosure>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+            )}
 
-      {editing && data && (
-        <EditParameter
-          parameter={editing}
-          source={data.source}
-          resets={Boolean(resets)}
-          rewritable={Boolean(data.rewritable)}
-          onClose={() => setEditing(undefined)}
-          onDone={(result) => {
-            setEditing(undefined)
-            setDone(result)
-            // PostgreSQL applies a change after its reload signal, a moment
-            // after the route answers: the list is read again then, not now.
-            window.setTimeout(list.refresh, 1200)
-          }}
-        />
-      )}
-    </SettingSection>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+              <SearchInput
+                aria-label={`Filter the ${noun}s`}
+                placeholder={`Filter ${parameters.length} ${noun}s`}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value)
+                  setAll(false)
+                }}
+                // The page's form is around it: Enter here filters, it does not save.
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.preventDefault()
+                }}
+              />
+              {(changed > 0 || pending.length > 0 || only !== "") && (
+                <ChipStrip role="group" aria-label={`Which ${noun}s are listed`}>
+                  <FilterChip selected={only === ""} onClick={() => narrow("")}>
+                    All
+                    <ChipCount>{parameters.length}</ChipCount>
+                  </FilterChip>
+                  {(changed > 0 || only === "changed") && (
+                    <FilterChip
+                      selected={only === "changed"}
+                      onClick={() => narrow(only === "changed" ? "" : "changed")}
+                    >
+                      Changed
+                      <ChipCount>{changed}</ChipCount>
+                    </FilterChip>
+                  )}
+                  {(pending.length > 0 || only === "pending") && (
+                    <FilterChip
+                      selected={only === "pending"}
+                      onClick={() => narrow(only === "pending" ? "" : "pending")}
+                    >
+                      Waiting for a restart
+                      <ChipCount>{pending.length}</ChipCount>
+                    </FilterChip>
+                  )}
+                </ChipStrip>
+              )}
+            </div>
+
+            {!data.writable && (
+              <FormNote>
+                {engine.label} lists its parameters here and takes changes to them in its own
+                configuration.
+              </FormNote>
+            )}
+            {data.source === "config" && mayEdit && data.rewritable && (
+              <OptionList>
+                <OptionRow
+                  title="Write changes to the configuration file too, so they survive a restart"
+                  checked={rewrite}
+                  onCheckedChange={setRewrite}
+                />
+              </OptionList>
+            )}
+            {data.source === "config" && mayEdit && !data.rewritable && (
+              <FormNote>
+                The server was started without a configuration file, so a change made here lasts
+                until it restarts.
+              </FormNote>
+            )}
+            {mayEdit && !resets && (
+              <FormNote>
+                {engine.label} publishes no default, so nothing resets: a change is put back from
+                the line it leaves here.
+              </FormNote>
+            )}
+
+            {filtering ? (
+              matches.length === 0 ? (
+                <p className="py-4 text-body text-muted-foreground">
+                  No {noun} matches{search.trim() ? ` “${search.trim()}”` : ""}.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {groups.map((group) => (
+                    <div key={group.name}>
+                      <GroupRule label={group.name} count={group.parameters.length} />
+                      {rows(group.parameters)}
+                    </div>
+                  ))}
+                  {!all && matches.length > SHOWN && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      className="-ml-2"
+                      onClick={() => setAll(true)}
+                    >
+                      Show all {matches.length}
+                    </Button>
+                  )}
+                </div>
+              )
+            ) : (
+              <div className="space-y-0.5">
+                {groups.map((group) => {
+                  const unsaved = changes.filter(
+                    (change) => change.parameter.group === group.name,
+                  ).length
+                  return (
+                    <Disclosure
+                      key={group.name}
+                      quiet
+                      open={opened.includes(group.name)}
+                      onOpenChange={(open) =>
+                        setOpened((held) =>
+                          open
+                            ? held.includes(group.name)
+                              ? held
+                              : [...held, group.name]
+                            : held.filter((name) => name !== group.name),
+                        )
+                      }
+                      summary={group.name}
+                      facts={
+                        <span className="numeric">
+                          {group.parameters.length}
+                          {group.changed > 0 ? ` · ${group.changed} changed` : ""}
+                          {group.pending > 0 ? ` · ${group.pending} waiting` : ""}
+                          {unsaved > 0 ? ` · ${unsaved} unsaved` : ""}
+                        </span>
+                      }
+                    >
+                      {/* Drawn once it is open: a closed heading holds no rows, and
+                          a server has several hundred parameters. */}
+                      {opened.includes(group.name) && rows(group.parameters)}
+                    </Disclosure>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </SettingSection>
+    </SettingForm>
   )
 }
 
 /**
- * One heading's parameters: name and what it means on the left, its value at
- * the right. Where a parameter can be changed its value is the control — the
- * whole of it is pressed, and a pencil appears beside it under the pointer —
- * so a list of forty rows is forty values, not forty glyphs.
+ * One parameter, in one height whatever it has to say: its name with what is
+ * true of it (waiting, changed, unsaved) over one line of what it means, and
+ * at the row's end its value over one line of what that value comes to. Where
+ * it can be changed the value is the control.
+ *
+ * What a dialog's head listed (the heading it is under, its default, its
+ * range, where it may be set) and the whole of a description the row has cut
+ * short are behind the ⓘ beside its name.
  */
-function ParameterRows({
-  parameters,
-  editing,
+/** The room a row's unit and reset take at its end, left on the lines that have neither. */
+const SLOTS = "sm:pr-[4.5rem]"
+
+function ParameterRow({
+  parameter,
   editable,
+  aligned,
+  resets,
+  edit,
+  held,
+  refusal,
+  busy,
   onEdit,
 }: {
-  parameters: Parameter[]
-  /** The reader may change parameters here: every row keeps the pencil's place, so values line up. */
-  editing: boolean
-  editable: (parameter: Parameter) => boolean
-  onEdit: (parameter: Parameter) => void
+  parameter: Parameter
+  editable: boolean
+  /** The reader may change parameters here: every row keeps the controls' edge, so values line up. */
+  aligned: boolean
+  /** The server can put a parameter back to a default it publishes. */
+  resets: boolean
+  edit: ParameterEdit | undefined
+  held: string | undefined
+  refusal: string | undefined
+  busy: boolean
+  onEdit: (next: ParameterEdit | undefined) => void
 }) {
+  const field = useId()
+  const shown = shownValue(parameter, edit, held)
+  const resetting = Boolean(edit && "reset" in edit)
+  const unsaved = edit !== undefined && (resetting || shown !== (held ?? startValue(parameter)))
+  const problem =
+    unsaved && edit && !("reset" in edit)
+      ? (refusal ?? parameterProblem(parameter, edit.value))
+      : refusal
+  const facts = valueFacts(parameter, shown)
+  const range = rangeWords(parameter)
+  const set = (value: string) => onEdit({ value })
+
   return (
-    <ul className="divide-y divide-hairline">
-      {parameters.map((parameter) => {
-        const readable = readableValue(parameter)
-        const value = (
-          <>
-            <ParameterValue parameter={parameter} />
-            {readable && (
-              <span className="numeric block truncate text-hint text-muted-foreground">
-                {readable}
+    <li
+      data-parameter={parameter.name}
+      className="grid min-w-0 items-center gap-x-4 gap-y-1.5 py-2.5 sm:grid-cols-[minmax(0,1fr)_18rem]"
+    >
+      <div className="min-w-0 space-y-0.5">
+        {/* A fixed line: a tag is a pixel taller than the name beside it. */}
+        <p className="flex h-5 min-w-0 items-center gap-x-2">
+          <span className="min-w-0 truncate font-mono text-body font-medium" title={parameter.name}>
+            {parameter.name}
+          </span>
+          {parameter.pending && (
+            <Tag tone="warning" className="shrink-0">
+              waiting for a restart
+            </Tag>
+          )}
+          {parameter.changed && !parameter.pending && <Tag className="shrink-0">changed</Tag>}
+          {parameter.restart && <Tag className="shrink-0">restart to apply</Tag>}
+          {unsaved && (
+            <Tag tone="warning" className="shrink-0">
+              {resetting ? "resets" : "unsaved"}
+            </Tag>
+          )}
+          <InfoTip label={`About ${parameter.name}`}>
+            <span className="block space-y-1">
+              {parameter.description && <span className="block">{parameter.description}</span>}
+              <span className="block">
+                Under{" "}
+                {parameter.subgroup
+                  ? `${parameter.group} / ${parameter.subgroup}`
+                  : parameter.group}
+                {parameter.default !== undefined && ` · default ${parameter.default || "empty"}`}
+                {range && ` · ${range}${parameter.unit ? ` ${parameter.unit}` : ""}`}
+                {parameter.context && ` · set by ${parameter.context}`}
               </span>
-            )}
-            {parameter.changed && parameter.default !== undefined && !parameter.secret && (
-              <span className="block truncate text-hint text-muted-foreground">
-                default <span className="font-mono">{parameter.default || "empty"}</span>
-              </span>
-            )}
-          </>
-        )
-        return (
-          <li
-            key={parameter.name}
-            data-parameter={parameter.name}
-            className="group flex min-w-0 items-center gap-3 py-2.5"
-          >
-            <div className="min-w-0 flex-1 space-y-0.5">
-              <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-                <span className="min-w-0 font-mono text-body font-medium wrap-anywhere">
-                  {parameter.name}
+              {parameter.restart && (
+                <span className="block">
+                  A change is stored at once and takes effect when the server is restarted.
                 </span>
-                {parameter.pending && <Tag tone="warning">waiting for a restart</Tag>}
-                {parameter.changed && !parameter.pending && <Tag>changed</Tag>}
-                {parameter.restart && <Tag>restart to apply</Tag>}
-              </p>
-              {parameter.description && (
-                <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                  {parameter.description}
-                </p>
               )}
-            </div>
-            {editable(parameter) ? (
-              <button
-                type="button"
-                aria-label={`Change ${parameter.name}`}
-                onClick={() => onEdit(parameter)}
-                className="flex max-w-[48%] min-w-0 shrink-0 items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5 text-right focus-ring transition-colors hover:bg-row-hover"
-              >
-                <span className="flex min-w-0 flex-col items-end">{value}</span>
-                <Pencil className={cn("size-3.5 shrink-0 text-muted-foreground", ROW_DIM)} />
-              </button>
+              {parameter.secret && (
+                <span className="block">Write-only: the server never sends it back.</span>
+              )}
+            </span>
+          </InfoTip>
+        </p>
+        <p
+          className="truncate text-xs leading-relaxed text-muted-foreground"
+          title={parameter.description}
+        >
+          {parameter.description || " "}
+        </p>
+      </div>
+      <div className="flex min-w-0 flex-col gap-0.5 sm:items-end">
+        {editable ? (
+          <div className="flex h-11 w-full min-w-0 items-center gap-1.5 sm:h-8 sm:justify-end">
+            {parameter.type === "bool" ? (
+              <Segments
+                label={`Change ${parameter.name}`}
+                value={isOn(shown) ? boolWords(parameter.value).on : boolWords(parameter.value).off}
+                disabled={busy}
+                onChange={set}
+                options={[
+                  { value: boolWords(parameter.value).on, label: boolWords(parameter.value).on },
+                  { value: boolWords(parameter.value).off, label: boolWords(parameter.value).off },
+                ].map((option) => ({ ...option, mono: true }))}
+              />
+            ) : parameter.type === "enum" && parameter.options && parameter.options.length <= 3 ? (
+              <Segments
+                label={`Change ${parameter.name}`}
+                value={shown}
+                disabled={busy}
+                onChange={set}
+                options={parameter.options.map((option) => ({
+                  value: option,
+                  label: option,
+                  mono: true,
+                }))}
+              />
+            ) : parameter.type === "enum" && parameter.options?.length ? (
+              <Select value={shown} onValueChange={set} disabled={busy}>
+                <SelectTrigger
+                  size="sm"
+                  aria-label={`Change ${parameter.name}`}
+                  className="w-full font-mono text-xs sm:w-44"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {parameter.options.map((option) => (
+                    <SelectItem key={option} value={option} className="font-mono text-xs">
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : (
-              <div
-                className={cn(
-                  "flex max-w-[45%] min-w-0 shrink-0 flex-col items-end text-right",
-                  editing && "pr-[33px]",
-                )}
-              >
-                {value}
-              </div>
+              <>
+                <Input
+                  id={field}
+                  aria-label={`Change ${parameter.name}`}
+                  aria-invalid={Boolean(problem) || undefined}
+                  type={parameter.secret ? "password" : "text"}
+                  value={shown}
+                  disabled={busy}
+                  placeholder={
+                    parameter.secret ? (parameter.secret.set ? "set" : "not set") : "empty"
+                  }
+                  onChange={(event) => set(event.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="min-w-0 flex-1 font-mono sm:h-8 sm:text-right sm:text-xs"
+                />
+              </>
             )}
-          </li>
-        )
-      })}
-    </ul>
+            {/* The unit's place and the reset's, kept on every row so the values end on one edge. */}
+            <span className="w-8 shrink-0 truncate text-hint text-muted-foreground">
+              {parameter.type !== "bool" && parameter.type !== "enum" ? parameter.unit : ""}
+            </span>
+            <span className="flex w-7 shrink-0 justify-center">
+              {resets && parameter.changed && !resetting && (
+                <IconAction
+                  label={`Reset ${parameter.name} to its default`}
+                  disabled={busy}
+                  onClick={() => onEdit({ reset: true })}
+                >
+                  <RotateCounterClockwise />
+                </IconAction>
+              )}
+            </span>
+          </div>
+        ) : (
+          <div
+            className={cn(
+              "flex min-w-0 items-center sm:h-8 sm:justify-end",
+              // Beside rows that hold a control it is the control's height; a list
+              // nobody may edit is set closer.
+              aligned ? cn("h-11", SLOTS) : "h-8",
+            )}
+          >
+            <ParameterValue parameter={parameter} />
+          </div>
+        )}
+        {/* One line in every state: the refusal takes the place of what the value comes to. */}
+        <p
+          role={problem ? "alert" : undefined}
+          title={problem ?? facts}
+          className={cn(
+            "numeric w-full truncate text-hint sm:text-right",
+            aligned && SLOTS,
+            problem ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {problem ?? (resetting ? "back to the default" : facts) ?? ""}
+          {" "}
+        </p>
+      </div>
+    </li>
   )
 }
 
@@ -568,238 +863,5 @@ function ParameterValue({ parameter }: { parameter: Parameter }) {
       {parameter.value}
       {parameter.unit && <span className="text-muted-foreground"> {parameter.unit}</span>}
     </span>
-  )
-}
-
-/**
- * Change one parameter. The dialog opens on the parameter: what it means,
- * what it is now, what it may be. The control is the one its type asks for —
- * a yes/no as two words, a closed set as its words, a number or a string as a
- * field — and a value outside what the server publishes is said before it is
- * sent. A parameter that is not the default can be put back to it.
- */
-function EditParameter({
-  parameter,
-  source,
-  resets,
-  rewritable,
-  onClose,
-  onDone,
-}: {
-  parameter: Parameter
-  source: Source
-  /** The server can put a parameter back to a default it publishes. */
-  resets: boolean
-  rewritable: boolean
-  onClose: () => void
-  onDone: (done: Done) => void
-}) {
-  const { id, conn, engine } = useDatabase()
-  const field = useId()
-  const words = boolWords(parameter.value)
-  const start = parameter.secret
-    ? ""
-    : parameter.type === "bool"
-      ? isOn(parameter.value)
-        ? words.on
-        : words.off
-      : parameter.value
-  const [value, setValue] = useState(start)
-  const [rewrite, setRewrite] = useState(rewritable)
-  const [busy, setBusy] = useState<"save" | "reset">()
-  const [refusal, setRefusal] = useState<string>()
-  const problem = parameterProblem(parameter, value)
-  const dirty = value !== start
-
-  const send = async (reset: boolean) => {
-    setBusy(reset ? "reset" : "save")
-    setRefusal(undefined)
-    try {
-      if (source === "config") {
-        const answer = await put<RedisConfigChange>(`/databases/${id}/redis/config`, {
-          name: parameter.name,
-          value: value.trim(),
-          ...(rewrite ? { rewrite: true } : {}),
-        })
-        const kept = answer.rewritten
-          ? "In effect now, and written to the configuration file."
-          : answer.rewriteError
-            ? `In effect now. It was not written to the configuration file: ${answer.rewriteError}`
-            : "In effect now. It lasts until the server restarts."
-        notify.success(`Set ${parameter.name}`, { description: answer.notice })
-        onDone({
-          name: parameter.name,
-          statements: [
-            `CONFIG SET ${parameter.name} ${answer.secret ? "••••••" : value.trim()}`,
-            ...(answer.rewritten ? ["CONFIG REWRITE"] : []),
-          ],
-          words: [kept, answer.notice].filter(Boolean).join(" "),
-          tone: answer.notice || answer.rewriteError ? "warning" : "default",
-          previous: parameter.secret ? undefined : parameter.value,
-          rewrite: answer.rewritten,
-        })
-        return
-      }
-      const answer = await put<DbSettingChange>(
-        `/databases/${id}/settings`,
-        reset
-          ? { name: parameter.name, reset: true }
-          : { name: parameter.name, value: value.trim() },
-      )
-      notify.success(reset ? `Reset ${parameter.name}` : `Set ${parameter.name}`, {
-        description: `Now ${answer.value}${parameter.unit ? ` ${parameter.unit}` : ""}.`,
-      })
-      onDone({
-        name: parameter.name,
-        statements: answer.statements,
-        words: changeWords(answer),
-        tone: answer.restartRequired || !answer.persisted ? "warning" : "default",
-        previous: reset || parameter.redacted ? undefined : parameter.value,
-      })
-    } catch (err) {
-      setRefusal(errorMessage(err))
-      setBusy(undefined)
-    }
-  }
-
-  const range =
-    parameter.min !== undefined || parameter.max !== undefined
-      ? `${parameter.min ?? "…"} to ${parameter.max ?? "…"}`
-      : undefined
-
-  return (
-    <TaskDialog
-      title="Change a parameter"
-      description={`Change ${parameter.name} on the server ${conn.name} connects to`}
-      subject={{
-        ...databaseSubject(conn, engine),
-        name: <span className="font-mono">{parameter.name}</span>,
-        facts: (
-          <>
-            <FormFact label="Under">
-              {parameter.subgroup ? `${parameter.group} / ${parameter.subgroup}` : parameter.group}
-            </FormFact>
-            {parameter.default !== undefined && (
-              <FormFact label="Default" mono>
-                {parameter.default === "" ? "empty" : parameter.default}
-              </FormFact>
-            )}
-            {range && <FormFact label="Range">{range}</FormFact>}
-            {parameter.context && <FormFact label="Set">{parameter.context}</FormFact>}
-          </>
-        ),
-      }}
-      dirty={dirty}
-      busy={busy !== undefined}
-      refusal={refusal}
-      note="It changes the server for every database on it."
-      secondary={
-        source === "settings" &&
-        parameter.changed && (
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy !== undefined}
-            pending={busy === "reset"}
-            onClick={() => void send(true)}
-          >
-            Reset to default
-          </Button>
-        )
-      }
-      command="Save"
-      disabled={!dirty || Boolean(problem)}
-      onRun={() => void send(false)}
-      onClose={onClose}
-    >
-      {parameter.description && (
-        <p className="text-body leading-relaxed text-muted-foreground">{parameter.description}</p>
-      )}
-
-      {parameter.type === "bool" ? (
-        <Field label="Value">
-          <Segments
-            label={parameter.name}
-            value={isOn(value) ? words.on : words.off}
-            onChange={setValue}
-            options={[
-              { value: words.on, label: words.on, mono: true },
-              { value: words.off, label: words.off, mono: true },
-            ]}
-          />
-        </Field>
-      ) : parameter.type === "enum" && parameter.options && parameter.options.length <= 6 ? (
-        <Field label="Value">
-          <Segments
-            label={parameter.name}
-            value={value}
-            onChange={setValue}
-            className="flex-wrap"
-            options={parameter.options.map((option) => ({
-              value: option,
-              label: option,
-              mono: true,
-            }))}
-          />
-        </Field>
-      ) : (
-        <Field
-          label={parameter.secret ? "New value" : "Value"}
-          htmlFor={field}
-          hint={
-            parameter.options?.length
-              ? `One of ${parameter.options.join(", ")}.`
-              : parameter.unit
-                ? `In ${parameter.unit}${range ? `, ${range}` : ""}.`
-                : range
-                  ? `${range}.`
-                  : parameter.secret
-                    ? "It is write-only: the server never sends it back."
-                    : undefined
-          }
-          error={dirty ? problem : undefined}
-        >
-          <Input
-            id={field}
-            type={parameter.secret ? "password" : "text"}
-            value={value}
-            onChange={(event) => {
-              setValue(event.target.value)
-              setRefusal(undefined)
-            }}
-            autoComplete="off"
-            spellCheck={false}
-            className="font-mono"
-          />
-        </Field>
-      )}
-
-      {parameter.restart && (
-        <FormNote tone="warning">
-          A change to this one is stored now and takes effect only when the server is restarted.
-        </FormNote>
-      )}
-      {source === "config" && rewritable && (
-        <OptionList>
-          <OptionRow
-            title="Write it to the configuration file too, so it survives a restart"
-            checked={rewrite}
-            onCheckedChange={setRewrite}
-          />
-        </OptionList>
-      )}
-      {source === "config" && !rewritable && (
-        <FormNote>
-          There is no configuration file to write it to: it lasts until the server restarts.
-        </FormNote>
-      )}
-      {!resets && (
-        <FormNote>
-          {engine.label} publishes no default for {source === "config" ? "its configuration" : "it"}
-          , so there is no reset. A change made here can be put back to what it was from the line it
-          leaves on the page.
-        </FormNote>
-      )}
-    </TaskDialog>
   )
 }

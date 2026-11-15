@@ -1,13 +1,12 @@
 "use client"
 
-import { Fragment, useState } from "react"
+import { useState } from "react"
 import Link from "next/link"
-import { Copy, Pencil, Plus, Shield, Trash, Warning } from "@/components/icons"
+import { Copy, Key, Pencil, Plus, Shield, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, del, get, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
-import { cn } from "@/lib/utils"
 import type { AuthFile } from "@/lib/types"
 import type {
   AccessList,
@@ -20,15 +19,18 @@ import type {
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/deploy/settings/segments"
-import { Disclosure, Field, FormNote, FormSection, FormSections } from "@/components/form"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Disclosure, Field, FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
-import { Well } from "@/components/panel"
-import { ROW_BLEED } from "@/components/row-list"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
+import { SidePanel } from "@/components/side-panel"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { VerbActions } from "@/components/verbs"
+import { VerbMenu } from "@/components/verbs"
+import { siteSettingsHref } from "@/components/proxy/site-tabs"
 import {
   accessFor,
   accessForRun,
@@ -57,6 +59,12 @@ import {
  * in. Here the list is edited once, tested with every site that includes it,
  * and reloaded once. A list that would refuse the person editing it says so
  * before it is saved, since it would lock them out of all of those sites.
+ *
+ * A list is one line: its name over where it is, what it allows and denies
+ * as counts, its password file, how many sites include it, and the one thing
+ * wrong with it. What it holds — every address, the sites, its include line —
+ * is in the sheet the row opens, which is also where it is edited. Each list
+ * was a block of five to eight lines until 0.8.7.
  */
 export function AccessListsPanel() {
   const { confirm, dialog } = useConfirm()
@@ -103,27 +111,28 @@ export function AccessListsPanel() {
   }
 
   const lists = data?.lists ?? []
-  const sites = new Set(lists.flatMap((list) => list.usedBy.map((use) => use.site))).size
 
   return (
     <>
       {/* An access explanation names a shared list as its owner and links here. */}
-      <FormSections id="access-lists" className="scroll-mt-6">
-        <FormSection
-          aside
+      <Panel plain id="access-lists" aria-label="Access lists" className="scroll-mt-6">
+        <PanelHeader
           title="Access lists"
-          hint={
-            data
-              ? `${plural(lists.length, "list")}${sites > 0 ? `, included by ${plural(sites, "site")}` : ""}`
-              : "Addresses and passwords sites share"
-          }
           actions={
-            <Button size="sm" variant="outline" onClick={() => openForm(null)} disabled={!data}>
-              <Plus className="size-4" />
-              New list
-            </Button>
+            <>
+              {lists.length > 0 && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {plural(lists.length, "list")}
+                </span>
+              )}
+              <Button size="xs" variant="outline" onClick={() => openForm(null)} disabled={!data}>
+                <Plus className="size-3.5" />
+                New list
+              </Button>
+            </>
           }
-        >
+        />
+        <PanelBody flush className="pt-3">
           {loading && !data ? (
             <LoadingRows rows={2} />
           ) : error && !data ? (
@@ -132,32 +141,31 @@ export function AccessListsPanel() {
             <EmptyState
               icon={Shield}
               title="No access lists yet"
-              description="A list holds allowed and denied addresses and a password file. Sites take it in with one include line, so an edit changes every site that uses it."
-              className="mt-2"
+              description="A list holds addresses and a password file that sites share with one include line."
             />
           ) : (
-            <>
+            <div className="space-y-2">
               {error && (
                 <FormNote tone="warning" role="status">
                   Could not read the lists again; these are from the last read.
                 </FormNote>
               )}
-              <ul aria-label="Access lists" className="animate-rise divide-y divide-hairline">
+              <ChoiceList aria-label="Access lists" className="animate-rise">
                 {lists.map((list) => (
                   <AccessListRow
                     key={list.name}
                     list={list}
                     clientAddress={data?.clientAddress ?? ""}
-                    onEdit={() => openForm(list)}
+                    onOpen={() => openForm(list)}
                     onDelete={() => remove(list)}
                   />
                 ))}
-              </ul>
-            </>
+              </ChoiceList>
+            </div>
           )}
-        </FormSection>
-      </FormSections>
-      <AccessListDialog
+        </PanelBody>
+      </Panel>
+      <AccessListSheet
         key={form.session}
         open={form.open}
         onOpenChange={(open) => setForm((f) => ({ ...f, open }))}
@@ -243,171 +251,107 @@ function sitesRefusing(uses: AccessListUse[], address: string) {
   )
 }
 
-const SHOWN_ENTRIES = 12
+/**
+ * The one thing most wrong with a list, for the end of its row: a password
+ * file that is gone refuses every login; a list that refuses the reader locks
+ * them out of the sites that include it; rules another list ends before they
+ * are read do nothing. A list written by hand, or kept elsewhere, says so.
+ */
+function listState(list: AccessList, clientAddress: string) {
+  if (list.authFileMissing) return <Status tone="danger" label="Password file gone" />
+  if (
+    accessFor(list, clientAddress) === "refused" ||
+    sitesRefusing(list.usedBy, clientAddress).length > 0
+  ) {
+    return <Status tone="warning" label="Refuses you" />
+  }
+  if (runClashes(list.name, list.usedBy).length > 0) {
+    return <Status tone="warning" label="Rules never read" />
+  }
+  if (list.link) return <Status tone="stopped" label="Kept elsewhere" />
+  if (list.handWritten) return <Status tone="stopped" label="Written by hand" />
+  return null
+}
 
-function Entries({ entries }: { entries: string[] }) {
-  const more = entries.length - SHOWN_ENTRIES
-  return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
-      {entries.slice(0, SHOWN_ENTRIES).map((entry) => (
-        <Tag key={entry} mono className="max-w-full break-all whitespace-normal">
-          {entry}
-        </Tag>
-      ))}
-      {more > 0 && <span className="text-muted-foreground">and {more} more</span>}
-    </span>
-  )
+/** What a list lets in and keeps out, as counts: the addresses are in its sheet. */
+function ruleWords(list: AccessListSpec) {
+  const parts = [
+    list.allow.length > 0 && `${list.allow.length} allowed`,
+    list.deny.length > 0 && `${list.deny.length} denied`,
+  ].filter(Boolean)
+  return parts.join(" · ") || "no addresses"
 }
 
 function AccessListRow({
   list,
   clientAddress,
-  onEdit,
+  onOpen,
   onDelete,
 }: {
   list: AccessList
   clientAddress: string
-  onEdit: () => void
+  onOpen: () => void
   onDelete: () => void
 }) {
-  const facts: { label: string; value: React.ReactNode }[] = []
-  if (list.allow.length > 0) {
-    facts.push({ label: "Allows", value: <Entries entries={list.allow} /> })
-  }
-  if (list.deny.length > 0) {
-    facts.push({ label: "Denies", value: <Entries entries={list.deny} /> })
-  }
-  if (list.authFile) {
-    facts.push({
-      label: "Password",
-      value: (
-        <span className="flex flex-wrap items-baseline gap-x-1.5">
-          <Tag mono>{list.authFile}</Tag>
-          <span className="text-muted-foreground">{loginRule(list)}</span>
-        </span>
-      ),
-    })
-  }
-  facts.push({
-    label: "Used by",
-    value:
-      list.usedBy.length === 0 ? (
-        <span className="text-muted-foreground">No site yet</span>
-      ) : (
-        <span className="flex flex-wrap gap-x-3 gap-y-0.5">
-          {list.usedBy.map((use) => (
-            <span key={`${use.site}:${use.path}`} className="min-w-0 break-all">
-              <Link
-                href={`/proxy/sites?site=${encodeURIComponent(use.site)}`}
-                className="rounded-sm font-medium underline-offset-2 focus-ring hover:underline"
-              >
-                {use.site}
-              </Link>
-              {!use.enabled && <span className="text-muted-foreground"> · disabled</span>}
-            </span>
-          ))}
-        </span>
-      ),
-  })
-  const refusesAlone = accessFor(list, clientAddress) === "refused"
-  const refusingSites = sitesRefusing(list.usedBy, clientAddress)
-  const clashes = runClashes(list.name, list.usedBy)
-
+  const sites = new Set(list.usedBy.map((use) => use.site)).size
   return (
-    <li
-      className={cn(
-        "flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
-        ROW_BLEED,
-      )}
-    >
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <span className="text-body font-medium">{list.name}</span>
-          <span className="truncate font-mono text-hint text-muted-foreground">{list.path}</span>
-        </div>
-        <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-hint">
-          {facts.map((fact) => (
-            <Fragment key={fact.label}>
-              <dt className="text-muted-foreground">{fact.label}</dt>
-              <dd className="min-w-0">{fact.value}</dd>
-            </Fragment>
-          ))}
-        </dl>
-        {(refusesAlone || refusingSites.length > 0) && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <Status tone="warning" label="Refuses you" />
-            <span className="text-hint break-all text-muted-foreground">
-              The dashboard sees you at {clientAddress}
-              {!refusesAlone &&
-                `, which ${siteNames(refusingSites)} ${refusingSites.length === 1 ? "refuses" : "refuse"} with the rules read beside the list`}
-              .
-            </span>
-          </div>
-        )}
-        {clashes.length > 0 && (
-          <FormNote tone="warning">
-            {clashes.map((clash) => (
-              <span key={clash} className="block">
-                {clash}
-              </span>
-            ))}
-          </FormNote>
-        )}
-        {list.authFileMissing && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <Status tone="danger" label="Password file gone" />
-            <span className="text-hint text-muted-foreground">
-              Every login is refused until the list names another.
-            </span>
-          </div>
-        )}
-        {list.link ? (
-          <FormNote>Not changed here: {list.handWritten}. Change it on the server.</FormNote>
-        ) : (
-          list.handWritten && (
-            <FormNote>
-              Written by hand: {list.handWritten}. Saving it from the form rewrites it.
-            </FormNote>
-          )
-        )}
-        <div className="flex min-w-0 items-center gap-1">
-          <code className="min-w-0 truncate font-mono text-hint text-muted-foreground">
-            {list.include}
-          </code>
-          <IconAction
-            label={`Copy the include line for ${list.name}`}
-            size="icon-xs"
-            className="text-muted-foreground"
-            onClick={() => void copyText(list.include, "Include line copied")}
+    <ChoiceRow
+      onSelect={onOpen}
+      verb={`Open ${list.name}`}
+      leading={<ProductLogo id={undefined} size="sm" fallback={Shield} />}
+      title={list.name}
+      description={<span className="font-mono">{list.path}</span>}
+      trailing={
+        <>
+          <span className="numeric w-36 truncate text-hint text-muted-foreground max-lg:hidden">
+            {ruleWords(list)}
+          </span>
+          <span
+            className="flex w-28 min-w-0 items-center gap-1.5 text-hint text-muted-foreground max-md:hidden"
+            title={list.authFile ? `${list.authFile} ${loginRule(list)}` : undefined}
           >
-            <Copy />
-          </IconAction>
-        </div>
-      </div>
-      <VerbActions
-        dim
-        className="shrink-0"
-        menuLabel={`More actions for ${list.name}`}
-        verbs={[
-          {
-            key: "edit",
-            label: `Edit ${list.name}`,
-            icon: Pencil,
-            inline: true,
-            run: onEdit,
-            disabled: Boolean(list.link),
-          },
-          {
-            key: "delete",
-            label: "Delete",
-            icon: Trash,
-            danger: true,
-            run: onDelete,
-            disabled: Boolean(list.link),
-          },
-        ]}
-      />
-    </li>
+            {list.authFile && (
+              <>
+                <Key aria-hidden className="size-3 shrink-0" />
+                <span className="truncate font-mono">{list.authFile}</span>
+              </>
+            )}
+          </span>
+          <span className="numeric w-16 text-hint text-muted-foreground max-sm:hidden">
+            {sites === 0 ? "unused" : plural(sites, "site")}
+          </span>
+          <span className="flex justify-end sm:w-40">{listState(list, clientAddress)}</span>
+        </>
+      }
+      actions={
+        <VerbMenu
+          label={`More actions for ${list.name}`}
+          verbs={[
+            {
+              key: "edit",
+              label: "Edit",
+              icon: Pencil,
+              run: onOpen,
+              disabled: Boolean(list.link),
+            },
+            {
+              key: "include",
+              label: "Copy include line",
+              icon: Copy,
+              run: () => void copyText(list.include, "Include line copied"),
+            },
+            {
+              key: "delete",
+              label: "Delete",
+              icon: Trash,
+              danger: true,
+              run: onDelete,
+              disabled: Boolean(list.link),
+            },
+          ]}
+        />
+      }
+    />
   )
 }
 
@@ -434,7 +378,13 @@ function entriesOf(values: string[], draft: string): { entries: string[] } | { e
   return { entries }
 }
 
-function AccessListDialog({
+/**
+ * A list, in the sheet its row opens: for one that exists, where it is, its
+ * include line, the sites that include it and what is wrong with it, over
+ * the fields that change it; for a new one, the fields alone. A list kept as
+ * a link to a file elsewhere is shown as it is and changed on the server.
+ */
+function AccessListSheet({
   open,
   onOpenChange,
   editing,
@@ -526,6 +476,11 @@ function AccessListDialog({
   const clashes = editing ? runClashes(editing.name, editing.usedBy) : []
   const enabledUses = editing?.usedBy.filter((use) => use.enabled) ?? []
   const target = editing?.name ?? trimmed
+  // A list that is a link to a file elsewhere is read here and changed there.
+  const locked = Boolean(editing?.link)
+  // The sites that refuse the reader with the rules read beside the list,
+  // which the list judged on its own does not say.
+  const refusing = editing ? sitesRefusing(editing.usedBy, clientAddress) : []
 
   const save = async () => {
     const allowed = entriesOf(lists.allow, drafts.allow)
@@ -588,40 +543,119 @@ function AccessListDialog({
   }
 
   return (
-    <Modal
+    <SidePanel
       open={open}
       onOpenChange={(next) => !busy && onOpenChange(next)}
-      size="md"
-      title={editing ? `Edit ${editing.name}` : "New access list"}
+      width="sm"
+      // A list that exists opens on what it is; a new one on its name.
+      initialFocus={editing ? "body" : "first"}
+      title={
+        <>
+          <ProductLogo id={undefined} size="sm" fallback={Shield} />
+          {editing ? `Edit ${editing.name}` : "New access list"}
+        </>
+      }
       description="Addresses to allow and deny, and a password file, for every site that includes the list."
       footer={
         <>
-          <span className="mr-auto text-hint text-muted-foreground">
-            {empty
-              ? "Add an address or a password file."
-              : enabledUses.length > 0
-                ? `Saving reloads nginx for ${siteNames(enabledUses)}.`
-                : editing
-                  ? "No enabled site includes it."
-                  : "No site uses it until one includes it."}
+          <span className="mr-auto min-w-0 flex-1 basis-40 text-hint text-muted-foreground">
+            {locked
+              ? "Changed on the server, where the file is."
+              : empty
+                ? "Add an address or a password file."
+                : enabledUses.length > 0
+                  ? `Saving reloads nginx for ${siteNames(enabledUses)}.`
+                  : editing
+                    ? "No enabled site includes it."
+                    : "No site uses it until one includes it."}
           </span>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
+            {locked ? "Close" : "Cancel"}
           </Button>
-          <Button onClick={save} disabled={!ready} pending={busy}>
-            Save
-          </Button>
+          {!locked && (
+            <Button onClick={save} disabled={!ready} pending={busy}>
+              Save
+            </Button>
+          )}
         </>
       }
     >
-      <div className="grid gap-5">
-        {editing?.handWritten && (
-          <Notice tone="warning" icon={Warning} title="Written by hand">
+      <fieldset disabled={locked} className="grid min-w-0 gap-5">
+        {editing && (
+          <div className="space-y-3">
+            <FormFacts>
+              <FormFact label="File" mono>
+                {editing.path}
+              </FormFact>
+            </FormFacts>
+            <div className="flex min-w-0 items-center gap-1">
+              <code className="min-w-0 truncate font-mono text-hint text-muted-foreground">
+                {editing.include}
+              </code>
+              <IconAction
+                label={`Copy the include line for ${editing.name}`}
+                size="icon-xs"
+                className="text-muted-foreground"
+                onClick={() => void copyText(editing.include, "Include line copied")}
+              >
+                <Copy />
+              </IconAction>
+            </div>
+          </div>
+        )}
+        {editing && (
+          <FormSection title="Used by">
+            {editing.usedBy.length === 0 ? (
+              <p className="text-body text-muted-foreground">No site yet</p>
+            ) : (
+              <ul aria-label={`Sites using ${editing.name}`} className="divide-y divide-hairline">
+                {editing.usedBy.map((use) => (
+                  <li
+                    key={`${use.site}:${use.path}`}
+                    className="flex min-h-9 min-w-0 items-center gap-2 text-body"
+                  >
+                    <Link
+                      href={siteSettingsHref(use.site, "access")}
+                      className="min-w-0 truncate rounded-sm font-mono focus-ring hover:underline"
+                    >
+                      {use.site}
+                    </Link>
+                    {!use.enabled && (
+                      <span className="text-hint text-muted-foreground">disabled</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </FormSection>
+        )}
+        {editing?.authFileMissing && (
+          <Notice tone="danger" icon={Warning} title="Password file gone">
+            <p>Every login is refused until the list names another.</p>
+          </Notice>
+        )}
+        {refusing.length > 0 && verdict !== "refused" && (
+          <Notice tone="warning" icon={Warning} title="Refuses you">
             <p>
-              {editing.handWritten[0].toUpperCase() + editing.handWritten.slice(1)}. Saving replaces
-              the file with what this form shows.
+              The dashboard sees you at <span className="font-mono break-all">{clientAddress}</span>
+              , which {siteNames(refusing)} {refusing.length === 1 ? "refuses" : "refuse"} with the
+              rules read beside the list.
             </p>
           </Notice>
+        )}
+        {editing?.link ? (
+          <Notice icon={Warning} title="Kept elsewhere">
+            <p>Not changed here: {editing.handWritten}. Change it on the server.</p>
+          </Notice>
+        ) : (
+          editing?.handWritten && (
+            <Notice tone="warning" icon={Warning} title="Written by hand">
+              <p>
+                {editing.handWritten[0].toUpperCase() + editing.handWritten.slice(1)}. Saving
+                replaces the file with what this form shows.
+              </p>
+            </Notice>
+          )
         )}
         {!editing && (
           <Field
@@ -777,8 +811,8 @@ function AccessListDialog({
             </Notice>
           </div>
         )}
-      </div>
-    </Modal>
+      </fieldset>
+    </SidePanel>
   )
 }
 

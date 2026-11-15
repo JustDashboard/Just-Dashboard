@@ -1,8 +1,19 @@
 # Bounded packet captures
 
 `internal/netcapture` owns explicitly launched private PCAP jobs. `/network/captures` is a reading
-page: retained captures, their dated progress and results, original artifact access and an explicit
-setup dialog. The existing quick packet summary remains in Tools and does not retain a PCAP; its
+page (`components/network/captures.tsx`): an identity line saying what is capturing, how many
+captures are kept of the limit, their packet data in bytes and the retention, with **New capture**
+as its command; then one `ChoiceRow` per retained capture, drawn as the interface it listens on
+(`interfaceMark`: Docker's bridge, a WireGuard or Tailscale tunnel as its product, anything else as
+its kind), with its filter in mono, what it kept, when it was asked for and its state. A capture is
+a page of its own, `/network/captures/[id]` (`capture-page.tsx`, on the process page's shape, with
+the list as a rail from `xl`): its identity line carries **Download PCAP** once there is an
+artifact, **Stop capture** while it runs, and Export redacted support and Delete behind the menu;
+**Overview** draws the interface, the filter and the file as one picture (`capture-picture.tsx`, on
+`WireFlow`), its lines carrying while it captures, with the related saved run under it; **Facts**
+holds the whole record, its limitations and the native summary. The old `?capture=<id>` address is
+replaced with the capture's page. The existing quick packet summary remains in Tools and does not
+retain a PCAP; its
 result links to `/network/captures?interface=…&protocol=…`, which opens the setup dialog with that
 interface, protocol (family `inet6` for `icmp6`) and a follow-up name. Arriving never starts a
 capture; the operator still presses start.
@@ -78,6 +89,7 @@ claimed to be redacted. The separate support JSON omits packet bytes, filter tup
 interface, names and actor. It retains bounded lifecycle/cap/result facts and genuine unknowns.
 The create dialog explicitly describes original packet retention; refused launches preserve every
 input. Failed later polls retain dated readings with retry. Read accounts request no capture data.
+Delete is offered only to an account that holds `destructive`.
 
 ## Verification
 

@@ -2,9 +2,9 @@
 
 import { useMemo } from "react"
 import { useSessionState } from "@/lib/view-state"
-import { ArrowCircleUp, ClockRewind, External, RefreshClockwise, Warning } from "@/components/icons"
+import { ArrowCircleUp, ClockRewind, External, RefreshClockwise } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { Release, SelfUpdateReport } from "@/lib/types"
 import { offerTagNote, pendingNote } from "@/lib/update-offer"
@@ -12,15 +12,18 @@ import { useAuth } from "@/hooks/use-auth"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import { useUpdateHistory } from "@/hooks/use-update-history"
 import { LogoGlyph } from "@/components/logo"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ProductGlyph } from "@/components/product-logo"
+import { NoticeLine, NoticeLines } from "@/components/settings-column"
 import { ReleaseTimeline } from "@/components/update/release-timeline"
 import { useUpdateDialog } from "@/components/update/update-dialog"
 import { UpdateProgress } from "@/components/update/update-progress"
 import { Page, PageContext, PageState, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -45,14 +48,21 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * Installed, Latest and Checked — and §15 pass 2 is dropped here the way
  * `/git` drops it, by naming where each went. *Installed* is the figure in the
  * identity line, beside the mark it is the version of, and the filled mark on
- * the timeline. *Latest* is the identity line's status ("0.7.0 available",
- * with how many releases ahead) and the first entry of the history, tagged.
- * *Checked* is the hint under that status, and a failed check turns the
- * status itself amber. The same hint says whether what is offered is a tagged
- * release, and names a version the branch carries that has no tag yet, which
- * is never offered. What the tiles did beyond saying those numbers — put
- * "there is an update" first — the brand-faced button in the page controls does, and
- * did already.
+ * the timeline. *Latest* is the line's state beside the version ("0.7.0
+ * available", with how many releases ahead as the last of its facts) and the
+ * first entry of the history, tagged. *Checked* is those same last words, and
+ * a failed check turns the state itself amber. The same words say whether what is
+ * offered is a tagged release, and name a version the branch carries that has
+ * no tag yet, which is never offered. What the tiles did beyond saying those
+ * numbers — put "there is an update" first — the brand-faced command at the
+ * line's far end does, and did already.
+ *
+ * **What an update needs said before it is installed is a line each**, under
+ * the identity line: that it wants something done by hand, with the way to
+ * the release's own note, and that the checkout carries edits, with the files
+ * a press away. They were two framed notices with a paragraph in each, which
+ * stood between the header and the history on every visit until the update
+ * was installed.
  */
 export default function DashboardVersionPage() {
   const { can } = useAuth()
@@ -105,8 +115,10 @@ export default function DashboardVersionPage() {
   const canInstall = can("system.admin") && report.install.supported && !running
   const dirty = report.install.dirty ?? []
 
-  const notices =
-    (report.breaking && !running) || (report.available && !running && dirty.length > 0)
+  const breaking = report.breaking && !running
+  const edited = report.available && !running && dirty.length > 0
+  // The release whose note says what has to be done by hand.
+  const noted = report.releases.find((release) => release.breaking)?.version ?? target
 
   return (
     <Page className="animate-rise">
@@ -115,9 +127,10 @@ export default function DashboardVersionPage() {
 
       <Identity
         report={report}
-        actions={
+        command={
           <>
             <Button
+              size="sm"
               variant="outline"
               pending={checking}
               disabled={!report.check.enabled}
@@ -126,17 +139,90 @@ export default function DashboardVersionPage() {
               }
             >
               {!checking && <RefreshClockwise />}
-              Check now
+              {/* A glyph on a phone, where the line's first row also holds the name. */}
+              <span className="max-sm:sr-only">Check now</span>
             </Button>
             {report.available && canInstall && (
-              <Button onClick={openUpdate}>
+              <Button size="sm" onClick={openUpdate}>
                 <ArrowCircleUp />
-                Update to {target}
+                <span>
+                  Update<span className="max-sm:sr-only"> to {target}</span>
+                </span>
               </Button>
             )}
           </>
         }
       />
+
+      {(breaking || edited) && (
+        <NoticeLines>
+          {breaking && (
+            <NoticeLine
+              tone="warning"
+              title={`${noted ?? "This update"} needs something done by hand`}
+            >
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  // A search may have filtered the release out of the history.
+                  setFilter("")
+                  window.requestAnimationFrame(() =>
+                    document
+                      .getElementById(`release-${noted}`)
+                      ?.scrollIntoView({ block: "start", behavior: "smooth" }),
+                  )
+                }}
+              >
+                Read the notes
+              </Button>
+            </NoticeLine>
+          )}
+
+          {/* A local edit is a line rather than a bar: the upgrade
+              fast-forwards, so an edited compose file or Caddyfile survives
+              unless it genuinely collides — and when it does, git says so and
+              nothing is lost. Saying it up front is the difference between an
+              upgrade that stops with an explanation and one that surprises. */}
+          {edited && (
+            <NoticeLine
+              tone="notice"
+              title={plural(dirty.length, "uncommitted change")}
+              detail={
+                <>
+                  in <span className="font-mono">{report.install.dir}</span> · kept by the update
+                </>
+              }
+            >
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button size="xs" variant="outline">
+                    Show
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-80 space-y-2 text-xs">
+                  <ul className="space-y-0.5 font-mono text-hint">
+                    {dirty.slice(0, 6).map((line) => (
+                      <li key={line} className="truncate">
+                        {line}
+                      </li>
+                    ))}
+                    {dirty.length > 6 && (
+                      <li className="font-sans text-muted-foreground">
+                        and {dirty.length - 6} more
+                      </li>
+                    )}
+                  </ul>
+                  <p className="leading-relaxed text-muted-foreground">
+                    The update fast-forwards rather than resetting, so these survive unless the new
+                    version changes the same lines. Then it stops and says so, and discards nothing.
+                  </p>
+                </PopoverContent>
+              </Popover>
+            </NoticeLine>
+          )}
+        </NoticeLines>
+      )}
 
       {error && <ErrorState error={error} />}
 
@@ -147,36 +233,6 @@ export default function DashboardVersionPage() {
             <UpdateProgress run={run} log={report.log} restarting={restarting} />
           </PanelBody>
         </Panel>
-      )}
-
-      {notices && (
-        <div className="space-y-3">
-          {report.breaking && !running && (
-            <Notice title="This update needs something done by hand" tone="warning">
-              Read the release notes before installing it.
-            </Notice>
-          )}
-
-          {/* A local edit is a warning rather than a bar: the upgrade
-              fast-forwards, so an edited compose file or Caddyfile survives
-              unless it genuinely collides — and when it does, git says so and
-              nothing is lost. Saying it up front is the difference between an
-              upgrade that stops with an explanation and one that surprises. */}
-          {report.available && !running && dirty.length > 0 && (
-            <Notice title="The install directory has uncommitted changes" icon={Warning}>
-              <p>
-                {report.install.dir} carries edits that are not in git. The update fast-forwards
-                rather than resetting, so they survive unless the new version changes the same lines
-                — in which case it stops and tells you, rather than discarding them.
-              </p>
-              <ul className="mt-1 space-y-0.5 font-mono text-hint">
-                {dirty.slice(0, 6).map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </Notice>
-          )}
-        </div>
       )}
 
       <Panel plain>
@@ -226,7 +282,7 @@ export default function DashboardVersionPage() {
  * because it is the one place outside this machine the dashboard reaches, and
  * a reader deciding whether to trust an update wants to know where from.
  */
-function Identity({ report, actions }: { report: SelfUpdateReport; actions: React.ReactNode }) {
+function Identity({ report, command }: { report: SelfUpdateReport; command: React.ReactNode }) {
   const behind = report.releases.length
   const status = report.available
     ? { tone: "notice" as const, label: `${report.latest} available` }
@@ -255,75 +311,39 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
       : "turn them on in Configuration"
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-10 gap-y-4 border-b border-hairline pb-6">
-      <div className="flex min-w-0 items-center gap-4">
+    <HostIdentity
+      logo={
         <span
           aria-hidden
-          className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-hairline bg-surface-sunken"
+          className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-sunken"
         >
-          <LogoGlyph className="h-6 w-auto text-brand" />
+          <LogoGlyph className="h-5 w-auto text-brand" />
         </span>
-        <div className="min-w-0 space-y-1">
-          <p className="flex min-w-0 items-baseline gap-2">
-            <span className="text-title font-semibold tracking-tight">Just Dashboard</span>
-            <span className="numeric text-2xl leading-none font-semibold tracking-tight">
-              {report.version}
-            </span>
-            {report.commit && (
-              <span
-                className="font-mono text-xs text-muted-foreground"
-                title={`Built from commit ${report.commit}, which is not the ${report.version} release`}
-              >
-                +{report.commit}
-              </span>
-            )}
-          </p>
-          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <a
-              href={`https://github.com/${report.check.repo}/tree/${report.check.ref}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground"
+      }
+      title={
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate">Just Dashboard</span>
+          <span className="numeric shrink-0">{report.version}</span>
+          {report.commit && (
+            <span
+              className="shrink-0 font-mono text-xs font-normal text-muted-foreground"
+              title={`Built from commit ${report.commit}, which is not the ${report.version} release`}
             >
-              <ProductGlyph id="github" />
-              <span className="truncate font-mono text-foreground">{report.check.repo}</span>
-              <External aria-hidden className="size-3 shrink-0" />
-            </a>
-            <span className="text-muted-foreground/40">·</span>
-            <span>
-              tracking <span className="font-mono text-foreground">{report.check.ref}</span>
+              +{report.commit}
             </span>
-            <span className="text-muted-foreground/40">·</span>
-            {report.install.supported ? (
-              <span>updates in place</span>
-            ) : (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer
-                    tabIndex={0}
-                    className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-ring"
-                  >
-                    updated by hand
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs">
-                  {report.install.reason}. Everything else on this page still works; only the
-                  one-click update does not.
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </p>
-        </div>
-      </div>
-
-      <div className="min-w-0 space-y-2 sm:text-right">
-        {report.check.error ? (
+          )}
+        </span>
+      }
+      // What the last check found stands beside the version, as a project's
+      // state stands beside its name, and its words are the last of the facts:
+      // stacked over the commands they made the line three rows tall.
+      state={
+        report.check.error ? (
           <Tooltip>
             <TooltipTrigger asChild>
               {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
               <span tabIndex={0} className="inline-flex cursor-help rounded-sm focus-ring">
-                <Status tone={status.tone} label={status.label} className="text-body font-medium" />
+                <Status tone={status.tone} label={status.label} />
               </span>
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
@@ -332,11 +352,54 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
             </TooltipContent>
           </Tooltip>
         ) : (
-          <Status tone={status.tone} label={status.label} className="text-body font-medium" />
-        )}
-        {hint && <p className="text-hint text-muted-foreground">{hint}</p>}
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div>
-      </div>
-    </div>
+          <Status tone={status.tone} label={status.label} />
+        )
+      }
+      facts={
+        <>
+          <a
+            href={`https://github.com/${report.check.repo}/tree/${report.check.ref}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground"
+          >
+            <ProductGlyph id="github" />
+            <span className="truncate font-mono text-foreground">{report.check.repo}</span>
+            <External aria-hidden className="size-3 shrink-0" />
+          </a>
+          <FactDot />
+          <span>
+            tracking <span className="font-mono text-foreground">{report.check.ref}</span>
+          </span>
+          <FactDot />
+          {report.install.supported ? (
+            <span>updates in place</span>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer
+                  tabIndex={0}
+                  className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-ring"
+                >
+                  updated by hand
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                {report.install.reason}. Everything else on this page still works; only the
+                one-click update does not.
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {hint && (
+            <>
+              <FactDot />
+              <span>{hint}</span>
+            </>
+          )}
+        </>
+      }
+      command={command}
+    />
   )
 }

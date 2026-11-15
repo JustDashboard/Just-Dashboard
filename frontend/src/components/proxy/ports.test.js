@@ -532,7 +532,7 @@ describe("who a socket answers for", () => {
     expect(hrefs(sshdActivated)).toEqual([["Open unit", "/processes/services/ssh.service"]])
     expect(hrefs(sshdIdle)).toEqual([["Open unit", "/processes/services/ssh.service"]])
     expect(hrefs(nginxUnit)).toEqual([["Open unit", "/processes/services/nginx.service"]])
-    expect(hrefs(pm2App)).toEqual([["Open app", "/processes/pm2?app=api"]])
+    expect(hrefs(pm2App)).toEqual([["Open app", "/processes/pm2/api"]])
     expect(hrefs(dashboardProxy)).toEqual([
       ["Open container", "/docker/containers/just-dashboard-proxy-1"],
     ])

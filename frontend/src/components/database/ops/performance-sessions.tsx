@@ -1,24 +1,22 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { CodeBracket, Copy, Cross, StopCircle } from "@/components/icons"
+import { useMemo } from "react"
+import { useRouter } from "next/navigation"
+import { Cross, StopCircle } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { copyText } from "@/lib/clipboard"
-import { bytes, duration, timestamp } from "@/lib/format"
-import { useViewState } from "@/lib/view-state"
+import { bytes, duration } from "@/lib/format"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { Disclosure, FormFact } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Meter } from "@/components/meter"
-import { Detail, DetailList, SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, LoadingPanel, Notice } from "@/components/state"
+import { EmptyNote, LoadingPanel } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -29,8 +27,7 @@ import {
 } from "@/components/ui/table"
 import { compact } from "@/components/database/home/readings"
 import { EngineMark } from "@/components/database/kit"
-import { DbClientMark } from "@/components/database/client-mark"
-import { clientOf, type KnownClient } from "@/components/database/clients"
+import type { KnownClient } from "@/components/database/clients"
 import { useKnownClients } from "@/components/database/use-known-clients"
 import {
   SESSION_STATES,
@@ -43,10 +40,10 @@ import {
   longestRunning,
   matchesSession,
   orderSessions,
-  stateSeconds,
   statusOf,
   stopsFor,
 } from "@/components/database/ops/performance-activity"
+import { sessionHref } from "@/components/database/ops/performance-address"
 import { endSession, readChQueries } from "@/components/database/ops/performance-api"
 import {
   Named,
@@ -57,9 +54,10 @@ import {
   StatementLine,
   ViewRead,
   useAsk,
-  useReturnFocus,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
+import { sessionsFilterKey, sessionsIdleKey } from "@/components/database/ops/performance-lists"
+import { ClientTile, StateFigure, Who } from "@/components/database/ops/performance-session-parts"
 import { useStops } from "@/components/database/ops/performance-stops"
 import type {
   ChQuery,
@@ -93,7 +91,8 @@ const isState = (value: string): value is DbSessionStatus =>
  * The idle sessions are most of any pooled server and none of what the reader
  * came for, so they are folded under the list. A session held up names the
  * one it is behind, and that one says how many it holds; pressing either
- * opens the other.
+ * opens the other. A session opens as a page of its own
+ * (`performance-session`), with this list beside it.
  *
  * Stopping a statement and ending a session change no data, so they are
  * offered on a protected connection too — to a role that may remove things.
@@ -107,24 +106,13 @@ export function SessionsView({ activity }: { activity: PollState<DbActivityRespo
 
 function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
   const { id, param, select } = useDatabase()
+  const router = useRouter()
   const [frame, width] = useColumnWidth<HTMLDivElement>()
   const wide = width >= TABLE_FROM
-  const [filter, setFilter] = useState("")
-  const [idleOpen, setIdleOpen] = useViewState(`databases.${id}.performance.idle`, false)
-  // The session whose panel is open is in the address, so a link to one
-  // session opens on it.
-  const openPid = param("session") || null
-  const focus = useReturnFocus()
-  const setOpenPid = (pid: string | null) => {
-    // The press that opens the panel is where the keyboard goes back to; a
-    // press inside it, from one session to the one it waits on, is not.
-    if (pid && !openPid) focus.remember()
-    select({ session: pid })
-    if (!pid) focus.restore()
-  }
-  // The session whose panel is open is kept as it was last seen, so a session
-  // that ends while it is being read does not take the panel with it.
-  const [kept, setKept] = useState<DbActivity | null>(null)
+  // The filter and the fold are kept under the keys a session's page reads:
+  // the rail beside a session is this list as it was left.
+  const [filter, setFilter] = useSessionState(sessionsFilterKey(id), "")
+  const [idleOpen, setIdleOpen] = useViewState(sessionsIdleKey(id), false)
 
   const asked = param("state")
   const state = isState(asked) ? asked : null
@@ -135,10 +123,9 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
   const counts = useMemo(() => countByState(sessions ?? []), [sessions])
   const ordered = useMemo(() => orderSessions(sessions ?? []), [sessions])
   const longest = useMemo(() => longestRunning(sessions ?? []), [sessions])
-
-  const live = openPid ? sessions?.find((session) => session.pid === openPid) : undefined
-  if (live && live !== kept) setKept(live)
-  const shown = openPid ? (live ?? (kept?.pid === openPid ? kept : undefined)) : undefined
+  // The state the list is narrowed to goes with the reader: the rail beside
+  // a session is the same list.
+  const openSession = (pid: string) => router.push(sessionHref(id, pid, { state }))
 
   const stopping = useStops(activity.refresh)
   const stops = stopping.can
@@ -150,7 +137,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
     queued,
     stops,
     wide,
-    onOpen: setOpenPid,
+    onOpen: openSession,
     onCancel: stopping.cancel,
     onTerminate: stopping.terminate,
   }
@@ -215,7 +202,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
                     Longest statement{" "}
                     <button
                       type="button"
-                      onClick={() => setOpenPid(longest.pid)}
+                      onClick={() => openSession(longest.pid)}
                       aria-label={`${duration(longest.seconds)}: open session ${longest.pid}`}
                       className={cn(
                         "numeric rounded-sm font-medium focus-ring hover:underline",
@@ -273,18 +260,6 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
           )
         }}
       </ViewRead>
-
-      <SessionPanel
-        pid={openPid}
-        session={shown}
-        ended={Boolean(shown) && !live && Boolean(sessions)}
-        held={held}
-        stops={stops}
-        onOpen={setOpenPid}
-        onClose={() => setOpenPid(null)}
-        onCancel={stopping.cancel}
-        onTerminate={stopping.terminate}
-      />
     </Panel>
   )
 }
@@ -300,72 +275,6 @@ type RowTools = {
   onOpen: (pid: string) => void
   onCancel: (session: DbActivity) => void
   onTerminate: (session: DbActivity) => void
-}
-
-/** What a session's figure measures, said for the pointer and for a reader who cannot see the state beside it. */
-function figureWords(session: DbActivity): string {
-  switch (statusOf(session)) {
-    case "active":
-      return "Its statement has been running for"
-    case "blocked":
-      return "It has been waiting for"
-    case "idle_in_transaction":
-      return "Its transaction has been open for"
-    case "idle":
-      return "It has been idle for"
-    case "background":
-      return ""
-  }
-}
-
-function StateFigure({ session }: { session: DbActivity }) {
-  const seconds = stateSeconds(session)
-  if (seconds === undefined) return <NoFigure />
-  const concern = concernOf(session)
-  return (
-    <span
-      title={`${figureWords(session)} ${duration(seconds)}`}
-      className={cn(
-        "numeric",
-        concern === "long-blocked"
-          ? "font-medium text-destructive"
-          : concern
-            ? "font-medium text-warning"
-            : statusOf(session) === "idle" && "text-muted-foreground",
-      )}
-    >
-      {seconds < 1 && seconds > 0 ? "<1s" : duration(seconds)}
-    </span>
-  )
-}
-
-/** The program a session is, as its logo: the deployment it names, or what its name says. */
-function ClientTile({
-  session,
-  known,
-}: {
-  session: DbActivity
-  known: ReadonlyMap<string, KnownClient>
-}) {
-  const client = clientOf(session.application, known)
-  return <DbClientMark product={client.product} projectId={client.projectId} self={session.self} />
-}
-
-/** Who a session is: the account and the application, each in its own hue. */
-function Who({ session }: { session: DbActivity }) {
-  return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      {session.user ? <Named name={session.user} className="font-medium" /> : <NoFigure />}
-      {session.application && (
-        <>
-          <span aria-hidden className="text-muted-foreground/60">
-            ·
-          </span>
-          <Named name={session.application} />
-        </>
-      )}
-    </span>
-  )
 }
 
 /**
@@ -392,7 +301,13 @@ function Waiting({
   const lock = statusOf(session) === "blocked" && behind.length === 0 ? session.wait : undefined
   if (behind.length === 0 && holding === 0 && !lock) return quiet ? null : <NoFigure />
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+    <span
+      className={cn(
+        "flex min-w-0 items-center gap-x-2 gap-y-0.5",
+        // On a row's first line it is one line, cut where it runs out.
+        quiet ? "overflow-hidden whitespace-nowrap" : "flex-wrap",
+      )}
+    >
       {holding > 0 && (
         <Tag tone={holding > THRESHOLDS.blocking ? "danger" : "warning"}>
           blocking {holding.toLocaleString()}
@@ -473,11 +388,14 @@ function SessionRows({
     return (
       <ul className="divide-y divide-hairline border-y border-hairline">
         {sessions.map((session) => (
-          <li key={session.pid} className="space-y-1.5 px-4 py-2.5">
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <span className="flex min-w-0 items-center gap-2">
+          // Three lines in every state: what a session waits on stands
+          // beside its state, and one with no statement keeps the line.
+          <li key={session.pid} data-list-row="session" className="space-y-1.5 px-4 py-2.5">
+            <div className="flex h-6 min-w-0 items-center justify-between gap-3">
+              <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                 <SessionState status={statusOf(session)} late={Boolean(concernOf(session))} />
                 {session.self && <Tag>this dashboard</Tag>}
+                <Waiting session={session} queued={queued} onOpen={onOpen} quiet />
               </span>
               <span className="flex shrink-0 items-center gap-2 text-xs">
                 <StateFigure session={session} />
@@ -495,11 +413,12 @@ function SessionRows({
                 <span className="font-mono text-muted-foreground">{session.pid}</span>
                 <Who session={session} />
               </span>
-              {session.query && (
+              {session.query ? (
                 <StatementLine text={session.query} className="text-hint text-foreground/80" />
+              ) : (
+                <span className="text-hint text-muted-foreground">no statement</span>
               )}
             </button>
-            <Waiting session={session} queued={queued} onOpen={onOpen} quiet />
           </li>
         ))}
       </ul>
@@ -531,6 +450,7 @@ function SessionRows({
         {sessions.map((session) => (
           <TableRow
             key={session.pid}
+            data-list-row="session"
             onActivate={() => onOpen(session.pid)}
             aria-label={`Session ${session.pid}`}
           >
@@ -568,218 +488,6 @@ function SessionRows({
         ))}
       </TableBody>
     </Table>
-  )
-}
-
-/**
- * One session, opened: everything the server says about it, the whole of its
- * statement, and the two ways of stopping it. A glance beside the list, which
- * goes on being read behind it.
- */
-function SessionPanel({
-  pid,
-  session,
-  ended,
-  held,
-  stops,
-  onOpen,
-  onClose,
-  onCancel,
-  onTerminate,
-}: {
-  /** The session asked for, or none. */
-  pid: string | null
-  /** It, as the list has it or last had it; nothing where the list never did. */
-  session: DbActivity | undefined
-  /** It is no longer in the list: what is shown is how it was last seen. */
-  ended: boolean
-} & Pick<RowTools, "held" | "stops" | "onOpen" | "onCancel" | "onTerminate"> & {
-    onClose: () => void
-  }) {
-  const { engine, goto } = useDatabase()
-  const { can } = useAuth()
-  if (!pid) return null
-  if (!session) {
-    // A session can wait on something the list does not hold: a prepared
-    // transaction, another account's session this one may not see. The press
-    // that asked for it is answered with that, not with nothing.
-    return (
-      <SidePanel
-        open
-        onOpenChange={(open) => !open && onClose()}
-        width="md"
-        initialFocus="body"
-        title={
-          <>
-            Session <span className="font-mono">{pid}</span>
-          </>
-        }
-        description="A session the list does not hold."
-      >
-        <Notice title="Not in the session list">
-          <p>
-            The server lists no session by this id to this account. It may be a prepared
-            transaction, a session of the server&apos;s own, or one that has just ended.
-          </p>
-        </Notice>
-      </SidePanel>
-    )
-  }
-  const status = statusOf(session)
-  const offered = ended ? { cancel: false, terminate: false } : stopsFor(session, stops)
-  const behind = blockersOf(session)
-  const holding = held.get(session.pid) ?? []
-  const query = session.query
-  const pids = (list: string[]) => (
-    <span className="flex flex-wrap gap-x-2">
-      {list.map((pid) => (
-        <button
-          key={pid}
-          type="button"
-          onClick={() => onOpen(pid)}
-          className="rounded-sm font-mono focus-ring hover:underline"
-        >
-          {pid}
-        </button>
-      ))}
-    </span>
-  )
-  return (
-    <SidePanel
-      open
-      onOpenChange={(open) => !open && onClose()}
-      width="md"
-      initialFocus="body"
-      title={
-        <>
-          Session <span className="font-mono">{session.pid}</span>
-        </>
-      }
-      description="What this session is doing, and the ways to stop it."
-      footer={
-        (offered.cancel || offered.terminate) && (
-          <>
-            {offered.cancel && (
-              <Button variant="outline" onClick={() => onCancel(session)}>
-                <StopCircle />
-                Cancel statement
-              </Button>
-            )}
-            {offered.terminate && (
-              <Button variant="destructive" onClick={() => onTerminate(session)}>
-                <Cross />
-                Terminate session
-              </Button>
-            )}
-          </>
-        )
-      }
-    >
-      <div className="space-y-4">
-        {ended && (
-          <Notice title="This session has ended">
-            <p>It is no longer on the server. This is how it was last seen.</p>
-          </Notice>
-        )}
-        <DetailList>
-          <Detail label="State">
-            <span className="flex flex-wrap items-center gap-2">
-              <SessionState status={status} late={Boolean(concernOf(session))} />
-              {/* The engine's own word, where the shared one does not already say it. */}
-              {status === "background" && session.state && (
-                <span className="font-mono text-muted-foreground">{session.state}</span>
-              )}
-              {session.self && <Tag>this dashboard</Tag>}
-            </span>
-          </Detail>
-          {session.user && (
-            <Detail label="Account">
-              <Named name={session.user} />
-            </Detail>
-          )}
-          {session.application && (
-            <Detail label="Application">
-              <Named name={session.application} />
-            </Detail>
-          )}
-          {session.client && (
-            <Detail label="Client" className="font-mono">
-              {session.client}
-            </Detail>
-          )}
-          {session.database && (
-            <Detail label="Database" className="font-mono">
-              {session.database}
-            </Detail>
-          )}
-          {(status === "active" || status === "blocked") && (
-            <Detail label={status === "blocked" ? "Waiting for" : "Statement running for"}>
-              <StateFigure session={session} />
-            </Detail>
-          )}
-          {session.transactionSeconds !== undefined && (
-            <Detail label="Transaction open for">
-              <span className="numeric" title={timestamp(session.transactionStart)}>
-                {duration(session.transactionSeconds)}
-              </span>
-            </Detail>
-          )}
-          {session.idleSeconds !== undefined && (
-            <Detail label="Idle for">
-              <span className="numeric">{duration(session.idleSeconds)}</span>
-            </Detail>
-          )}
-          {session.wait && (
-            // The engine's own word for what the thread is doing: a lock it
-            // waits on, or only a client that has not sent its next statement.
-            <Detail
-              label={status === "blocked" ? "Waiting on" : "Doing"}
-              className="font-mono wrap-anywhere"
-            >
-              {session.wait}
-            </Detail>
-          )}
-          {behind.length > 0 && <Detail label="Blocked by">{pids(behind)}</Detail>}
-          {holding.length > 0 && <Detail label="Blocking">{pids(holding)}</Detail>}
-          {session.connectedAt && (
-            <Detail label="Connected">{timestamp(session.connectedAt)}</Detail>
-          )}
-        </DetailList>
-
-        <div className="space-y-1.5">
-          <div className="flex min-h-6 items-center justify-between gap-3">
-            <p className="eyebrow">
-              {status === "active" || status === "blocked" ? "Statement" : "Last statement"}
-            </p>
-            {query && (
-              <span className="flex items-center gap-1">
-                {engine.has("query") && can("service.control") && (
-                  <Button size="xs" variant="ghost" onClick={() => goto("query", { sql: query })}>
-                    <CodeBracket />
-                    Open in Query
-                  </Button>
-                )}
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => void copyText(query, "Statement copied")}
-                >
-                  <Copy />
-                  Copy
-                </Button>
-              </span>
-            )}
-          </div>
-          {query ? (
-            <Well className="max-h-80 overflow-auto text-hint leading-relaxed whitespace-pre-wrap">
-              {query}
-            </Well>
-          ) : (
-            <p className="text-hint text-muted-foreground">The server reports no statement.</p>
-          )}
-        </div>
-      </div>
-    </SidePanel>
   )
 }
 

@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Database, Linked, Router } from "@/components/icons"
+import { Linked, Router } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
@@ -13,8 +13,7 @@ import { Segments } from "@/components/deploy/settings/segments"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ProductLogos } from "@/components/product-logo"
-import { EmptyState, LoadingRows, Notice } from "@/components/state"
+import { LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,6 +39,7 @@ import { CONNECTION_NAME, suggestedName } from "@/components/database/connect/ru
 import type { DbCreateRequest, DbTestResponse } from "@/components/database/fleet/types"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { EnginePicture } from "@/components/database/connect/picture"
 
 const DRAFT = "databases.new.connect"
 
@@ -520,13 +520,7 @@ export function ConnectExisting({
           </FlowActions>
         </FlowPanel>
       ) : (
-        <EmptyState
-          className="hidden xl:flex xl:self-start"
-          icon={Database}
-          mark={<ProductLogos ids={["postgres", "mysql", "mongodb"]} size="md" />}
-          title="Pick an engine"
-          description="Its address opens here. Nothing is saved until it connects."
-        />
+        <EnginePicture way="connect" engines={["postgres", "mysql", "mongodb"]} />
       )}
     </div>
   )

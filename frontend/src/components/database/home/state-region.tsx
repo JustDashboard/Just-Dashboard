@@ -10,9 +10,10 @@ import { usePowerChange } from "@/components/database/home/verbs"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /**
- * The place under a home's identity line where the server's state is said
- * when it has to be: that it is being started, stopped or restarted, or — on
- * a home that is not answering — why not, and what to do about it.
+ * The place under the database's header, on its home, where the server's
+ * state is said when it has to be: that it is being started, stopped or
+ * restarted, or — on a home that is not answering — why not, and what to do
+ * about it.
  *
  * It is one live region, always in the page, so what appears in it is
  * announced: pressing Start used to swap one notice for another in silence.

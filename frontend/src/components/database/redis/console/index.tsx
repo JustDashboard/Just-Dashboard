@@ -1,17 +1,18 @@
 "use client"
 
 import { useState } from "react"
-import { SidebarRightOpen, Trash } from "@/components/icons"
+import { BookOpen, SidebarRightClose, SidebarRightOpen, Terminal, Trash } from "@/components/icons"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { usePanelSize } from "@/lib/panel-size"
 import { forgetMemoryState, useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
 import { PaneHeader } from "@/components/panel"
+import { PaneBar } from "@/components/phone-panes"
 import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, Notice } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
+import type { Verb } from "@/components/verbs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { redisCommands } from "@/components/database/redis/api"
@@ -23,8 +24,10 @@ import { PubSubView } from "@/components/database/redis/console/pubsub"
 import { DbPicker } from "@/components/database/redis/db-picker"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
+import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
 
 const HELPER = { base: 320, min: 260, max: 520 }
+const NO_VERBS: Verb[] = []
 
 type View = "console" | "pubsub" | "monitor"
 
@@ -71,16 +74,54 @@ export function RedisConsole() {
   const helperPx = Math.min(Math.max(helperWidth, HELPER.min), HELPER.max)
 
   return (
-    <SectionFrame section="query">
+    <SectionFrame section="query" className={WORKBENCH_PAGE}>
       {dialog}
       {server.data?.notice && (
         <Notice title="This is not a single standalone server" className="shrink-0">
           {server.data.notice}
         </Notice>
       )}
-      <div
+      <WorkbenchFrame
+        section="query"
+        slot="redis-console"
         style={{ "--jd-redis-helper": `${helperPx}px` } as React.CSSProperties}
-        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card"
+        menu={
+          view === "console"
+            ? [
+                {
+                  key: "clear",
+                  label: "Clear the transcript",
+                  icon: Trash,
+                  run: () => forgetMemoryState(`databases.${id}.redis.console.log`),
+                },
+                ...(wide
+                  ? [
+                      {
+                        key: "helper",
+                        label: helperVisible ? "Hide the commands" : "Show the commands",
+                        icon: helperVisible ? SidebarRightClose : SidebarRightOpen,
+                        run: () => setHelperShown(!helperVisible),
+                      },
+                    ]
+                  : []),
+              ]
+            : NO_VERBS
+        }
+        bar={
+          // The reference is the console's: the two feeds have no second pane.
+          !wide &&
+          view === "console" && (
+            <PaneBar<"console" | "commands">
+              label="Console"
+              active={helperVisible ? "commands" : "console"}
+              onPick={(pane) => setHelperOver(pane === "commands")}
+              stops={[
+                { key: "console", label: "Console", icon: <Terminal /> },
+                { key: "commands", label: "Commands", icon: <BookOpen /> },
+              ]}
+            />
+          )
+        }
       >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <PaneHeader className="gap-1 py-0 pl-0">
@@ -105,23 +146,6 @@ export function RedisConsole() {
                   <DbPicker server={server.data} db={db} onChange={redis.setDb} />
                 ) : (
                   !server.error && <Skeleton className="h-7 w-16" />
-                )}
-                <IconAction
-                  label="Clear the transcript"
-                  className="size-7"
-                  onClick={() => forgetMemoryState(`databases.${id}.redis.console.log`)}
-                >
-                  <Trash />
-                </IconAction>
-                {!helperVisible && (
-                  <IconAction
-                    label="Show the commands"
-                    aria-pressed={false}
-                    className="size-7"
-                    onClick={() => (wide ? setHelperShown(true) : setHelperOver(true))}
-                  >
-                    <SidebarRightOpen />
-                  </IconAction>
                 )}
               </>
             )}
@@ -173,7 +197,7 @@ export function RedisConsole() {
             />
           </div>
         )}
-      </div>
+      </WorkbenchFrame>
     </SectionFrame>
   )
 }

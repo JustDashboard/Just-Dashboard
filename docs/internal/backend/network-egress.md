@@ -4,8 +4,10 @@ An egress group is a policy-selected set of candidate next hops — gateways, or
 owns — measured continuously through each member's own path, with failover, failback and every hold
 decided by explicit hysteresis rules and recorded with the evidence behind them. It is project P15 of
 the [capability report](../../audits/2026-10-08-network-capability-report/implementation-status.md).
-Files: `internal/netx/egress*.go`; routes in `internal/api/handlers_network_egress.go`; the page is
-`/network/egress` (`components/network/egress/`, `lib/network-egress.ts`).
+Files: `internal/netx/egress*.go`; routes in `internal/api/handlers_network_egress.go`; the pages are
+`/network/egress` and a group's own `/network/egress/[name]` (`components/network/egress/`,
+`lib/network-egress.ts`). The group's page reads the same `GET /network/egress` the list does and
+finds its group by name, which the server keeps unique without regard to case.
 
 ## What a group owns
 
@@ -192,3 +194,5 @@ through an unproven member, boot restore of the decided member with the start ch
 journaled repair, recovery by a fresh process after the switching process dies, sticky connections
 surviving a failback and being flushed with their member, and a full simulation run. `bun test
 src/lib/network-egress.test.js` covers the page's pure logic and `network-egress.spec.ts` the page.
+The words and wires of the list's cards and a group's picture are in
+`components/network/egress/reading.test.js`.

@@ -13,7 +13,11 @@ manager that keeps them in agreement), `proxysvc/tunnel_origin.go` (where the co
 proxy, and the saved Cloudflare credentials), `deploy/tunnel.go` (the plan field's effects: preflight,
 the certificate step, routing at activation, the live releases' tunnel names),
 `api/handlers_proxy_tunnel.go` (the routes, the audit, the host alert's reading),
-`store/schema_cloudflare_tunnel.go`, and the Proxy › Tunnel page (`components/proxy/tunnel-page.tsx`).
+`store/schema_cloudflare_tunnel.go`, and the Proxy › Tunnel page (`components/proxy/tunnel-page.tsx`,
+its vocabulary and the picture's lines in `tunnel-model.ts`): the tunnel's identity line with Check now
+and Disconnect, a picture of hostname, edge, connector and this server whose lines move only where both
+ends are up, and the hostnames with their route and record; not connected, the same picture dashed and
+one form, a pasted token or a tunnel created with the API.
 
 ## Connecting a tunnel
 

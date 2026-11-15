@@ -1,10 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import { Question } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { EngineMark } from "@/components/database/kit/engine-mark"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /**
@@ -12,18 +12,19 @@ import { useDatabase } from "@/components/database/shell/database-context"
  * a page from a newer release, a path with something after it.
  *
  * Without this the framework answers with its own bare 404, outside the
- * dashboard altogether — no rail, no strip, nothing to press. The database
+ * dashboard altogether — no rail, no header, nothing to press. The database
  * itself was found, so the page says which part of the address was not and
  * stays inside it: the rail still lists its pages and the way to its home is
- * one press.
+ * one press. It is drawn as the engine the database is, so the statement
+ * names what it belongs to; it was a question mark on a plate.
  */
 export function MissingPage() {
-  const { conn, href } = useDatabase()
+  const { conn, engine, href } = useDatabase()
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Databases" title={`${conn.name} · Page not found`} />
       <EmptyState
-        icon={Question}
+        mark={<EngineMark engine={engine} />}
         title="Page not found"
         description={`${conn.name} has no page at this address. Its pages are in the rail.`}
         action={

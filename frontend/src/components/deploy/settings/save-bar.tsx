@@ -17,6 +17,11 @@ import { cn } from "@/lib/utils"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import {
+  appliesLine,
+  pendingLine,
+  type SettingApplies,
+} from "@/components/deploy/settings/save-bar-words"
 
 /**
  * One Save for a whole settings page, floating at the bottom of the window
@@ -30,15 +35,34 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * the parts they are in, and Save writes each dirty form in page order. It
  * floats — the one thing on a settings page that does — so it takes a
  * popover's surface and shadow (§2), and it is drawn over the content area
- * rather than the window, so it centres on the column it saves.
+ * rather than the window, so it centres on the column it saves. A column that
+ * shares the area with something beside it (a rail of siblings) asks for the
+ * bar `inline`, and it holds to the foot of that column instead.
  *
  * The forms still save one at a time and each still answers for itself: a
  * refused field says so under the field and its form stays dirty, and the bar
  * stays with what is left. When everything went through it says *Saved* and
  * when it applies, then leaves. ⌘S (Ctrl+S) is Save while the bar is up.
+ *
+ * What the bar says is one rule, in `save-bar-words.ts`. Its second line is
+ * the parts and when their saves take effect, from each form's `applies`
+ * (`SettingApplies`: at once, when nginx next reloads, when the server
+ * restarts, on the next deployment; a page holding several is told which is
+ * soonest and what the rest wait for). A form whose save does something no
+ * kind says gives the line in its own words (`note`: "Restarts the
+ * dashboard") and may name the command (`verb`: "Apply and restart"); those
+ * stand for the whole bar, so a page has one such form, and the note is
+ * where that form says why it cannot be saved (the password form's "The new
+ * passwords do not match yet"). A form without one gets the bar's own words
+ * for a value that cannot be saved.
+ *
+ * A proxy site's form keeps a bar of its own (`proxy/site-settings.tsx`): it
+ * is one draft with two saves whose difference matters (reload or not), where
+ * this bar is many forms and one command. The two share where they float and
+ * the shortcut's keycap (`useSaveBarHost`, `saveShortcut`).
  */
 
-export type SettingApplies = "next-deployment" | "immediately"
+export type { SettingApplies } from "@/components/deploy/settings/save-bar-words"
 
 type EntryState = {
   name: string
@@ -47,6 +71,16 @@ type EntryState = {
   saving: boolean
   invalid: boolean
   applies: SettingApplies
+  /**
+   * The bar's command where pressing it does more than save: "Apply and
+   * restart", "Change password". Left out, it is Save.
+   */
+  verb?: string
+  /**
+   * When and how the form applies, in the form's own words, where neither
+   * kind of `applies` says it: "Restarts the dashboard".
+   */
+  note?: string
 }
 
 type EntryActions = {
@@ -75,7 +109,9 @@ function sameEntry(a: EntryState | undefined, b: EntryState) {
     a.changes === b.changes &&
     a.saving === b.saving &&
     a.invalid === b.invalid &&
-    a.applies === b.applies
+    a.applies === b.applies &&
+    a.verb === b.verb &&
+    a.note === b.note
   )
 }
 
@@ -85,7 +121,27 @@ const subscribe = () => () => {}
 const contentArea = () => document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]')
 const noContentArea = () => null
 
-export function SaveBarProvider({ children }: { children: React.ReactNode }) {
+/** Where a floating save bar is drawn: the content area, once in the browser. */
+export function useSaveBarHost() {
+  return useSyncExternalStore(subscribe, contentArea, noContentArea)
+}
+
+/** The Save shortcut's keycap. Read once a bar is on screen, which is only ever in the browser. */
+export const saveShortcut = () => (/Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘S" : "Ctrl S")
+
+export function SaveBarProvider({
+  children,
+  inline,
+}: {
+  children: React.ReactNode
+  /**
+   * The bar holds to the foot of the column it is in rather than floating
+   * over the content area: for a settings column that shares the area with
+   * something beside it (a rail of siblings), where the area's centre is not
+   * the column's.
+   */
+  inline?: boolean
+}) {
   const [entries, setEntries] = useState<Record<string, EntryState>>({})
   const actions = useRef(new Map<string, { current: EntryActions }>())
   const latest = useRef(entries)
@@ -157,6 +213,7 @@ export function SaveBarProvider({ children }: { children: React.ReactNode }) {
         entries={entries}
         phase={phase}
         saved={saved}
+        inline={inline}
         onSave={() => void saveAll()}
         onDiscard={() => {
           for (const [id, entry] of Object.entries(entries))
@@ -183,11 +240,11 @@ export function useSaveBarEntry(
   useEffect(() => {
     ref.current = entryActions
   })
-  const { name, dirty, changes, saving, invalid, applies } = state
+  const { name, dirty, changes, saving, invalid, applies, verb, note } = state
   useEffect(() => {
     if (!bar || !enabled) return
-    bar.register(id, { name, dirty, changes, saving, invalid, applies }, ref)
-  }, [bar, enabled, id, name, dirty, changes, saving, invalid, applies])
+    bar.register(id, { name, dirty, changes, saving, invalid, applies, verb, note }, ref)
+  }, [bar, enabled, id, name, dirty, changes, saving, invalid, applies, verb, note])
   useEffect(() => {
     if (!bar || !enabled) return
     return () => bar.unregister(id)
@@ -195,35 +252,22 @@ export function useSaveBarEntry(
   return bar?.saveAll
 }
 
-function appliesLine(dirty: EntryState[]) {
-  const kinds = new Set(dirty.map((entry) => entry.applies))
-  if (kinds.size > 1) return "Some apply now, the rest on your next deployment"
-  return kinds.has("immediately") ? "Applies immediately" : "Applies on your next deployment"
-}
-
-function names(dirty: EntryState[]) {
-  const list = [...new Set(dirty.map((entry) => entry.name))]
-  if (list.length <= 1) return list[0] ?? ""
-  return `${list.slice(0, -1).join(", ")} and ${list.at(-1)}`
-}
-
-// Read once the bar is on screen, which is only ever in the browser.
-const shortcut = () => (/Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘S" : "Ctrl S")
-
 function SaveBar({
   entries,
   phase,
   saved,
+  inline,
   onSave,
   onDiscard,
 }: {
   entries: Record<string, EntryState>
   phase: Phase
   saved: EntryState[]
+  inline?: boolean
   onSave: () => void
   onDiscard: () => void
 }) {
-  const host = useSyncExternalStore(subscribe, contentArea, noContentArea)
+  const host = useSaveBarHost()
   const all = Object.values(entries)
   const dirty = all.filter((entry) => entry.dirty)
   const changes = dirty.reduce((sum, entry) => sum + Math.max(entry.changes, 1), 0)
@@ -243,15 +287,23 @@ function SaveBar({
     return () => window.removeEventListener("keydown", onKey)
   }, [dirty.length, onSave])
 
-  if (!host || !visible) return null
+  if ((!host && !inline) || !visible) return null
 
   // Every write went through. A form can look dirty for a moment longer —
   // until its saved value is read back — and that is not an edit left over.
   const done = phase === "saved"
   const shown = done || dirty.length === 0 ? saved : dirty
+  // A form that says these itself is the only one on its page that does.
+  const verb = shown.find((entry) => entry.verb)?.verb ?? "Save"
+  const note = shown.find((entry) => entry.note)?.note
 
-  return createPortal(
-    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-3 md:bottom-6">
+  const bar = (
+    <div
+      className={cn(
+        "pointer-events-none z-40 flex justify-center",
+        inline ? "sticky bottom-4" : "absolute inset-x-0 bottom-4 px-3 md:bottom-6",
+      )}
+    >
       <div
         role="region"
         aria-label="Save changes"
@@ -284,10 +336,8 @@ function SaveBar({
           </p>
           <p className="mt-0.5 pl-4 text-xs text-muted-foreground max-sm:line-clamp-2 sm:truncate">
             {done
-              ? appliesLine(shown)
-              : invalid
-                ? "A value is out of range — fix it to save"
-                : `${names(shown)} · ${appliesLine(shown)}`}
+              ? (note ?? appliesLine(shown.map((entry) => entry.applies)))
+              : pendingLine(shown, invalid)}
           </p>
         </div>
         {!done && (
@@ -310,7 +360,7 @@ function SaveBar({
               onClick={onSave}
               className="max-sm:h-10"
             >
-              Save
+              {verb}
               <kbd
                 aria-hidden
                 className={cn(
@@ -318,13 +368,13 @@ function SaveBar({
                   saving && "hidden",
                 )}
               >
-                {shortcut()}
+                {saveShortcut()}
               </kbd>
             </Button>
           </div>
         )}
       </div>
-    </div>,
-    host,
+    </div>
   )
+  return inline || !host ? bar : createPortal(bar, host)
 }

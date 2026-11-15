@@ -45,7 +45,7 @@ export function DNSServiceDHCP({
   const inventory = view?.inventory
   return (
     <section className="min-w-0 space-y-4" aria-label="Native DHCP server">
-      <div className="border-panel-border flex min-w-0 flex-wrap items-baseline justify-between gap-3 border-b pb-3">
+      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-3 border-b border-hairline pb-3">
         <h3 className="text-base font-semibold">Native DHCP</h3>
         <Button variant="outline" onClick={() => void read()} pending={busy} disabled={ownerStale}>
           Read native DHCP
@@ -108,7 +108,7 @@ export function DNSServiceDHCP({
             </p>
             <p className="text-hint text-muted-foreground">{inventory.leaseEvidence.summary}</p>
             {inventory.leases.length > 0 && (
-              <ul aria-label="DHCP leases" className="divide-panel-border min-w-0 divide-y">
+              <ul aria-label="DHCP leases" className="min-w-0 divide-y divide-hairline">
                 {inventory.leases.map((lease) => (
                   <li
                     key={`${lease.address}:${lease.hardware ?? ""}`}

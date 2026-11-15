@@ -244,9 +244,13 @@ test.describe("metric-gated rollback", () => {
     })
     await expect(toggle).not.toBeChecked()
     await toggle.click()
-    await expect(
-      section.getByText(/A visitor stays on the release that answered them for up to 10 minutes/),
-    ).toBeVisible()
+    // The head says it in a few words; the full account is behind its mark.
+    await expect(section.getByText(/visitors keep their release/)).toBeVisible()
+    await section.getByRole("button", { name: "What happens after a release goes live" }).hover()
+    await expect(page.getByRole("tooltip")).toContainText(
+      "A visitor stays on the release that answered them for up to 10 minutes",
+    )
+    await page.mouse.move(0, 0)
     const policies: string[] = []
     page.on("request", (request) => {
       if (request.method() === "PUT" && request.url().endsWith("/rollback-policy"))

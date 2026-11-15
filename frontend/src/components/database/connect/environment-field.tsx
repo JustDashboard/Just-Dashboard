@@ -27,17 +27,22 @@ export function EnvironmentField({
   id,
   value,
   onChange,
+  tip,
 }: {
   id: string
   value: string
   onChange: (value: string) => void
+  /** Say what the tag is for behind the label's ⓘ, as a settings column does, not under the field. */
+  tip?: boolean
 }) {
   const chosen = value.trim().toLowerCase()
+  const what = "Drawn as a coloured tag beside its name everywhere. Empty for none."
   return (
     <Field
       label="Environment"
       htmlFor={id}
-      hint="Drawn as a coloured tag beside its name everywhere. Empty for none."
+      hint={tip ? undefined : what}
+      info={tip ? what : undefined}
       error={environmentProblem(value)}
     >
       <Input

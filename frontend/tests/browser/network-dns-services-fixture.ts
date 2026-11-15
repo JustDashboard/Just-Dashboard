@@ -799,6 +799,7 @@ export async function mockDNSServicePage(
       400,
     )
   })
-  await page.goto("/network/dns")
+  // The engines and the detected filters are the page's Services view.
+  await page.goto("/network/dns?tab=services")
   return control
 }

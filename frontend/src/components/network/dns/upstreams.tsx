@@ -1,32 +1,32 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
-import { useState } from "react"
 import { del, post, ApiError } from "@/lib/api"
+import { plural } from "@/lib/format"
 import type { DNSApplied, DNSClearableList, DNSVerification, DNSView } from "@/lib/types"
-import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
-import { Field, FieldRow } from "@/components/form"
+import { ChoiceGrid, ProductCard } from "@/components/choice-card"
+import { ConfirmDialog, useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
+import { Field, OptionRow } from "@/components/form"
+import { Globe } from "@/components/icons"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Checkbox } from "@/components/ui/checkbox"
-import { useConfirm } from "@/components/confirm-dialog"
-import { Globe } from "@/components/icons"
+import { Segments } from "@/components/deploy/settings/segments"
+import {
+  SettingForm,
+  SettingSection,
+  settingStatus,
+} from "@/components/deploy/settings/setting-card"
 import {
   clearedLists,
   missingTLSNames,
   parseList,
   presetChosen,
   refusedVerification,
+  splitServer,
 } from "@/components/network/dns/resolvers"
 import { VerificationChecks } from "@/components/network/dns/verification"
 import { dnsServersProblem } from "@/components/network/draft-input"
@@ -42,47 +42,57 @@ type Draft = {
   clear: Partial<Record<DNSClearableList, boolean>>
 }
 
-/** What clearing each list does, said where the box is ticked. */
+/** What clearing each list does, said where the switch is. */
 const CLEAR: Record<DNSClearableList, string> = {
   servers: "Clear the global servers; each link's own servers still answer",
   fallback: "No fallback servers: turns off resolved's built-in fallback",
   domains: "Clear the global search and routing domains",
 }
 
-/** DNS over TLS, as the three answers it has. `no` is resolved's word for off. */
+/**
+ * DNS over TLS, as the three answers it has. `no` is resolved's word for off.
+ * What the chosen one promises is the line under the control, so the three
+ * are one row rather than three cards of prose.
+ */
 const DOT = [
   {
     value: "no",
-    title: "Off",
-    description: "Plain DNS on port 53, readable and changeable by anyone on the path",
+    label: "Off",
+    says: "Plain DNS on port 53, readable and changeable by anyone on the path.",
   },
   {
     value: "opportunistic",
-    title: "Opportunistic",
-    description: "Encrypted when the server offers it, plain when it does not",
+    label: "Opportunistic",
+    says: "Encrypted when the server offers it, plain when it does not.",
   },
   {
     value: "yes",
-    title: "Required",
-    description:
-      "Plain DNS is refused; every server needs its name, like 1.1.1.1#cloudflare-dns.com",
+    label: "Required",
+    says: "Plain DNS is refused; every server needs its name, like 1.1.1.1#cloudflare-dns.com.",
   },
 ]
 
-/** Radix's select has no empty value, so "leave it at resolved's default" is a word of its own. */
+/** A segmented control has no empty value, so "leave it at resolved's default" is a word of its own. */
 const DNSSEC = [
-  { value: "default", label: "Resolved's default" },
-  { value: "no", label: "Off" },
-  { value: "allow-downgrade", label: "Validate where the server supports it" },
-  { value: "yes", label: "Validate, refusing answers that fail" },
+  { value: "default", label: "Default", says: "Left to resolved's own default." },
+  { value: "no", label: "Off", says: "Answers are not validated." },
+  {
+    value: "allow-downgrade",
+    label: "When supported",
+    says: "Validated where the server supports it.",
+  },
+  { value: "yes", label: "Always", says: "Validated; an answer that fails is refused." },
 ]
 
 const CACHE = [
-  { value: "default", label: "Resolved's default" },
-  { value: "yes", label: "All answers" },
-  { value: "no-negative", label: "Positive answers only" },
-  { value: "no", label: "Disabled" },
+  { value: "default", label: "Default", says: "Left to the host's own policy." },
+  { value: "yes", label: "Everything", says: "Every answer is cached." },
+  { value: "no-negative", label: "Positive only", says: "A missing name is not cached." },
+  { value: "no", label: "Off", says: "Nothing is cached." },
 ]
+
+const said = (options: typeof CACHE, value: string) =>
+  options.find((option) => option.value === (value || "default"))
 
 /**
  * What the form starts from: the dashboard's own drop-in when it has written
@@ -117,44 +127,54 @@ function baseline(view: DNSView): Draft {
   }
 }
 
+/** What a resolver change came to: applied with its checks, or put back with the check that failed. */
+export type ResolverOutcome =
+  | { kind: "applied"; applied: DNSApplied }
+  | { kind: "put-back"; reason: string; verification: DNSVerification }
+
 /**
- * Who this server asks. Public resolvers are cards, because they are things
- * you pick: choosing one fills the servers with the `address#name` pairs DNS
- * over TLS validates against, and the text area under them is the same list
- * for anything else. The three answers DNS over TLS has are cards too, since
- * they differ in what they promise; DNSSEC and the domains are plain fields.
+ * Who this server asks, as one form in the settings column. Public resolvers
+ * are cards, because they are things you pick: choosing one fills the servers
+ * with the `address#name` pairs DNS over TLS validates against, and the text
+ * area under them is the same list for anything else. DNS over TLS, DNSSEC
+ * and the cache are each a closed choice of a few words, so each is one
+ * segmented row with what the chosen answer promises under it.
  *
- * A wrong upstream stops every lookup on this host, the dashboard's own among
- * them, so Apply asks first, and the server checks that a name resolves
- * afterwards and puts the previous settings back if it does not. What it
- * found is drawn under the buttons: the name that resolved and how long it
- * took, or the warning the change could not fix.
+ * The form draws no Save: it stands on the page's save bar beside the host
+ * records. A wrong upstream stops every lookup on this host, the dashboard's
+ * own among them, so Save asks the server for the checks the change will be
+ * held to and shows them in a confirmation first; the server puts the previous
+ * settings back if a required one fails, and what it found is handed to the
+ * page (`onOutcome`), which draws it at the head of the column.
  */
-export function UpstreamEditor({
+export function ResolverSettings({
   view,
   readOnly,
   onChanged,
+  onOutcome,
 }: {
   view: DNSView
   /** Why nothing here can change — systemd-resolved is not running — or undefined. */
   readOnly?: string
   onChanged: () => void
+  onOutcome: (outcome: ResolverOutcome | undefined) => void
 }) {
   const { can } = useAuth()
   const base = baseline(view)
   const [edits, setEdits] = useState<Partial<Draft>>({})
-  const [applied, setApplied] = useState<DNSApplied>()
-  const [rolledBack, setRolledBack] = useState<{ reason: string; verification: DNSVerification }>()
   const [refused, setRefused] = useState<string>()
   const [planError, setPlanError] = useState<string>()
   const [planning, setPlanning] = useState(false)
   const [verificationNames, setVerificationNames] = useState("")
+  // The save bar waits on the confirmation: resolved by Apply going through,
+  // by a put-back, or by the dialog being closed.
+  const [request, setRequest] = useState<ConfirmRequest | null>(null)
+  const settle = useRef<((saved: boolean) => void) | undefined>(undefined)
   const { confirm, dialog } = useConfirm()
   const draft: Draft = { ...base, ...edits }
   const edit = (patch: Partial<Draft>) => {
     setEdits((previous) => ({ ...previous, ...patch }))
-    setApplied(undefined)
-    setRolledBack(undefined)
+    onOutcome(undefined)
     setPlanError(undefined)
   }
 
@@ -185,22 +205,31 @@ export function UpstreamEditor({
     (unnamedFallback.length > 0
       ? `Required DNS over TLS needs a name on every fallback server: ${unnamedFallback[0]} has none.`
       : undefined)
-  const dirty =
-    servers.join(" ") !== parseList(base.servers).join(" ") ||
-    fallback.join(" ") !== parseList(base.fallback).join(" ") ||
-    domains.join(" ") !== parseList(base.domains).join(" ") ||
-    draft.dnssec !== base.dnssec ||
-    draft.dot !== base.dot ||
-    draft.cache !== base.cache ||
-    clear.join(" ") !== baseClear.join(" ")
+  // One count per setting that differs, for the bar's "3 unsaved changes".
+  const changed = {
+    upstreams:
+      servers.join(" ") !== parseList(base.servers).join(" ") ||
+      fallback.join(" ") !== parseList(base.fallback).join(" ") ||
+      domains.join(" ") !== parseList(base.domains).join(" ") ||
+      clear.join(" ") !== baseClear.join(" "),
+    dot: draft.dot !== base.dot,
+    dnssec: draft.dnssec !== base.dnssec,
+    cache: draft.cache !== base.cache,
+  }
+  const changes = Object.values(changed).filter(Boolean).length
+  const dirty = changes > 0
+  // Applying and resetting are destructive routes: an administrator's session
+  // narrowed to less was offered both and refused by the server.
   const blocked = !can("system.admin")
     ? "Changing the host resolver requires an administrator."
-    : (readOnly ?? refused)
+    : !can("destructive")
+      ? "An administrator with destructive permission can change the host resolver."
+      : (readOnly ?? refused)
+  const canEdit = !blocked
   const invalid = Boolean(serversError || fallbackError)
 
-  const finish = (result: DNSApplied) => {
-    setApplied(result)
-    setRolledBack(undefined)
+  const finish = (applied: DNSApplied) => {
+    onOutcome({ kind: "applied", applied })
     setEdits({})
     onChanged()
   }
@@ -221,7 +250,8 @@ export function UpstreamEditor({
 
   // The plan comes from the server before the dialog opens, so what the
   // dialog promises to check is exactly what the change will be held to.
-  const apply = async () => {
+  const save = async (): Promise<boolean> => {
+    if (!dirty || invalid || !canEdit || planning) return false
     setPlanning(true)
     setPlanError(undefined)
     let plan: DNSVerification
@@ -230,58 +260,66 @@ export function UpstreamEditor({
     } catch (err) {
       refuse(err)
       setPlanError(err instanceof Error ? err.message : String(err))
-      return
+      return false
     } finally {
       setPlanning(false)
     }
-    confirm({
-      title: "Change the upstream resolvers",
-      confirmLabel: "Apply",
-      description: (
-        <>
-          <p>
-            Every program on this server resolves names through these servers: package updates,
-            certificate renewals and this dashboard included. A wrong one breaks all of them at
-            once.
-          </p>
-          <p className="font-mono text-xs break-all text-muted-foreground">
-            {servers.length > 0
-              ? servers.join("  ")
-              : clear.includes("servers")
-                ? "no global servers: each link's own"
-                : "the servers the network hands out"}
-          </p>
-          <p className="text-body">
-            Fallback:{" "}
-            {fallback.length > 0
-              ? fallback.join("  ")
-              : clear.includes("fallback")
-                ? "none"
-                : "the host's defaults"}
-            . Cache: {CACHE.find((option) => option.value === (draft.cache || "default"))?.label}.
-          </p>
-          <p>
-            After the restart each check below runs; a required one that fails puts the previous
-            settings back.
-          </p>
-          <VerificationChecks verification={plan} label="Verification plan" />
-        </>
-      ),
-      action: async () => {
-        try {
-          finish(await post<DNSApplied>("/network/dns/", body))
-        } catch (err) {
-          refuse(err)
-          const verification =
-            err instanceof ApiError && err.code === "dns_upstream_unreachable"
-              ? refusedVerification(err.body)
-              : undefined
-          if (!verification || !(err instanceof ApiError)) throw err
-          setApplied(undefined)
-          setRolledBack({ reason: err.message, verification })
-        }
-        return "reported"
-      },
+    return new Promise<boolean>((resolve) => {
+      const done = (saved: boolean) => {
+        settle.current = undefined
+        resolve(saved)
+      }
+      settle.current = done
+      setRequest({
+        title: "Change the upstream resolvers",
+        confirmLabel: "Apply",
+        description: (
+          <>
+            <p>
+              Every program on this server resolves names through these servers: package updates,
+              certificate renewals and this dashboard included. A wrong one breaks all of them at
+              once.
+            </p>
+            <p className="font-mono text-xs break-all text-muted-foreground">
+              {servers.length > 0
+                ? servers.join("  ")
+                : clear.includes("servers")
+                  ? "no global servers: each link's own"
+                  : "the servers the network hands out"}
+            </p>
+            <p className="text-body">
+              Fallback:{" "}
+              {fallback.length > 0
+                ? fallback.join("  ")
+                : clear.includes("fallback")
+                  ? "none"
+                  : "the host's defaults"}
+              . Cache: {said(CACHE, draft.cache)?.label.toLowerCase()}.
+            </p>
+            <p>
+              After the restart each check below runs; a required one that fails puts the previous
+              settings back.
+            </p>
+            <VerificationChecks verification={plan} label="Verification plan" />
+          </>
+        ),
+        action: async () => {
+          try {
+            finish(await post<DNSApplied>("/network/dns/", body))
+            done(true)
+          } catch (err) {
+            refuse(err)
+            const verification =
+              err instanceof ApiError && err.code === "dns_upstream_unreachable"
+                ? refusedVerification(err.body)
+                : undefined
+            if (!verification || !(err instanceof ApiError)) throw err
+            onOutcome({ kind: "put-back", reason: err.message, verification })
+            done(false)
+          }
+          return "reported"
+        },
+      })
     })
   }
 
@@ -311,70 +349,80 @@ export function UpstreamEditor({
     if (preset) edit({ servers: preset.tlsServers.join("\n") })
   }
 
+  const running = view.resolved.global
+  const named = running.servers.filter((s) => splitServer(s).tlsName).length
+  const stats = view.resolved.statistics
+
   return (
-    <form
-      className="flex min-w-0 flex-col gap-6"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (dirty && !invalid && !blocked && !planning) void apply()
-      }}
-    >
-      {blocked && (
-        <Notice title="These settings are read here, not written" tone="warning">
-          {blocked}
-        </Notice>
-      )}
-
-      <div>
-        <p className="mb-2 text-body font-medium">Ask a public resolver</p>
-        <ChoiceGrid columns="compact">
-          {view.presets.map((preset) => (
-            <ProductCard
-              key={preset.id}
-              product={preset.product}
-              fallback={Globe}
-              label={preset.name.split(",")[0]}
-              detail={
-                preset.blocksAds
-                  ? "Blocks ads and trackers"
-                  : preset.blocksMalware
-                    ? "Blocks malware"
-                    : "No filtering"
-              }
-              selected={presetChosen(preset, servers)}
-              disabled={Boolean(blocked)}
-              onClick={() => choose(preset.id)}
-            />
-          ))}
-        </ChoiceGrid>
-      </div>
-
-      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-5">
-          <Field
-            label="Verification names"
-            htmlFor="dns-verification-names"
-            hint="Optional, up to eight: a name in each scope this change touches, such as nas.home.arpa or git.corp.example. Each must answer after applying. Leave empty to check public names."
-          >
-            <Textarea
-              id="dns-verification-names"
-              value={verificationNames}
-              rows={2}
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(event) => {
-                setVerificationNames(event.target.value)
-                setPlanError(undefined)
-              }}
-              disabled={Boolean(blocked)}
-              placeholder={"nas.home.arpa\ngit.corp.example"}
-              className="font-mono"
-            />
-          </Field>
+    <>
+      <SettingForm
+        name="Resolver"
+        onSave={save}
+        dirty={dirty}
+        changes={changes}
+        saving={planning}
+        invalid={invalid}
+        canEdit={canEdit}
+        onDiscard={() => {
+          setEdits({})
+          setPlanError(undefined)
+        }}
+        applies="immediately"
+        error={planError}
+        // The page says once, at the head of the column, that a reader's
+        // account changes nothing here; this is the narrower refusal.
+        note={blocked && !readOnly && can("system.admin") ? blocked : undefined}
+      >
+        <SettingSection
+          id="dns-upstreams"
+          title="Upstreams"
+          state={
+            view.managed.exists ? (
+              <>
+                set here in <span className="font-mono">{view.managed.path}</span>
+              </>
+            ) : (
+              "the host's own settings"
+            )
+          }
+          status={settingStatus({ dirty: changed.upstreams, refused: Boolean(planError) })}
+          actions={
+            view.managed.exists &&
+            canEdit && (
+              <Button type="button" size="xs" variant="outline" onClick={() => reset()}>
+                Reset to the system&rsquo;s
+              </Button>
+            )
+          }
+        >
+          {canEdit && (
+            <div>
+              <p className="mb-2 text-body font-medium">Ask a public resolver</p>
+              <ChoiceGrid columns="compact" className="xl:grid-cols-3">
+                {view.presets.map((preset) => (
+                  <ProductCard
+                    key={preset.id}
+                    product={preset.product}
+                    fallback={Globe}
+                    label={preset.name.split(",")[0]}
+                    detail={
+                      preset.blocksAds
+                        ? "Blocks ads and trackers"
+                        : preset.blocksMalware
+                          ? "Blocks malware"
+                          : "No filtering"
+                    }
+                    selected={presetChosen(preset, servers)}
+                    onClick={() => choose(preset.id)}
+                  />
+                ))}
+              </ChoiceGrid>
+            </div>
+          )}
           <Field
             label="Servers"
             htmlFor="dns-servers"
-            hint="One per line, as 9.9.9.9 or 9.9.9.9#dns.quad9.net. Up to eight; empty uses the servers the network hands out."
+            info="One per line, as 9.9.9.9 or 9.9.9.9#dns.quad9.net. Up to eight; empty uses the servers the network hands out."
             error={serversError}
           >
             <Textarea
@@ -383,7 +431,7 @@ export function UpstreamEditor({
               rows={Math.min(Math.max(servers.length + 1, 3), 9)}
               spellCheck={false}
               autoComplete="off"
-              disabled={Boolean(blocked)}
+              disabled={!canEdit}
               aria-invalid={Boolean(serversError)}
               onChange={(event) => edit({ servers: event.target.value })}
               className="font-mono"
@@ -394,13 +442,13 @@ export function UpstreamEditor({
             list="servers"
             empty={servers.length === 0}
             checked={Boolean(draft.clear.servers)}
-            disabled={Boolean(blocked)}
+            disabled={!canEdit}
             onChange={(checked) => edit({ clear: { ...draft.clear, servers: checked } })}
           />
           <Field
             label="Fallback servers"
             htmlFor="dns-fallback"
-            hint="Optional, up to eight. Used when no other server is known. Leave empty for the host's fallback defaults. Ports, %interface and #TLS names use the same format as Servers."
+            info="Optional, up to eight. Used when no other server is known. Leave empty for the host's fallback defaults. Ports, %interface and #TLS names use the same format as Servers."
             error={fallbackError}
           >
             <Textarea
@@ -409,7 +457,7 @@ export function UpstreamEditor({
               rows={Math.min(Math.max(fallback.length + 1, 2), 9)}
               spellCheck={false}
               autoComplete="off"
-              disabled={Boolean(blocked)}
+              disabled={!canEdit}
               aria-invalid={Boolean(fallbackError)}
               onChange={(event) => edit({ fallback: event.target.value })}
               className="font-mono"
@@ -420,131 +468,155 @@ export function UpstreamEditor({
             list="fallback"
             empty={fallback.length === 0}
             checked={Boolean(draft.clear.fallback)}
-            disabled={Boolean(blocked)}
+            disabled={!canEdit}
             onChange={(checked) => edit({ clear: { ...draft.clear, fallback: checked } })}
           />
           <Field
-            label="Cache mode"
-            htmlFor="dns-cache"
-            hint="Positive answers only avoids caching a missing name; the default leaves the host's policy in charge."
+            label="Domains"
+            htmlFor="dns-domains"
+            info="Search domains, or ~domain to send a domain's names only to these servers; ~. is every name."
           >
-            <Select
-              value={draft.cache || "default"}
-              onValueChange={(value) => edit({ cache: value === "default" ? "" : value })}
-              disabled={Boolean(blocked)}
-            >
-              <SelectTrigger id="dns-cache" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CACHE.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              id="dns-domains"
+              value={draft.domains}
+              onChange={(event) => edit({ domains: event.target.value })}
+              disabled={!canEdit}
+              spellCheck={false}
+              autoComplete="off"
+              className="font-mono"
+              placeholder="~. lan.example.net"
+            />
           </Field>
-          <FieldRow>
-            <Field label="DNSSEC" htmlFor="dns-dnssec">
-              <Select
-                value={draft.dnssec || "default"}
-                onValueChange={(value) => edit({ dnssec: value === "default" ? "" : value })}
-                disabled={Boolean(blocked)}
-              >
-                <SelectTrigger id="dns-dnssec" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DNSSEC.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field
-              label="Domains"
-              htmlFor="dns-domains"
-              hint="Search domains, or ~domain to send a domain's names only to these servers; ~. is every name."
-            >
-              <Input
-                id="dns-domains"
-                value={draft.domains}
-                onChange={(event) => edit({ domains: event.target.value })}
-                disabled={Boolean(blocked)}
-                spellCheck={false}
-                autoComplete="off"
-                className="font-mono"
-                placeholder="~. lan.example.net"
-              />
-            </Field>
-          </FieldRow>
           <ClearList
             list="domains"
             empty={domains.length === 0}
             checked={Boolean(draft.clear.domains)}
-            disabled={Boolean(blocked)}
+            disabled={!canEdit}
             onChange={(checked) => edit({ clear: { ...draft.clear, domains: checked } })}
           />
-        </div>
+        </SettingSection>
 
-        <fieldset className="min-w-0">
-          <legend className="mb-2 text-body font-medium">DNS over TLS</legend>
-          <ChoiceGrid columns={2} className="sm:grid-cols-3 xl:grid-cols-1">
-            {DOT.map((option, index) => (
-              <ChoiceCard
-                key={option.value}
-                verb={`DNS over TLS ${option.title.toLowerCase()}`}
-                title={option.title}
-                description={option.description}
-                selected={draft.dot === option.value}
-                disabled={Boolean(blocked)}
-                onClick={() => edit({ dot: option.value })}
-                index={index}
-              />
-            ))}
-          </ChoiceGrid>
-        </fieldset>
-      </div>
+        <SettingSection
+          title="DNS over TLS"
+          state={
+            running.servers.length > 0
+              ? `${named} of ${plural(running.servers.length, "global server")} named`
+              : "no global servers"
+          }
+          status={settingStatus({ dirty: changed.dot })}
+        >
+          <Choice
+            label="DNS over TLS"
+            options={DOT}
+            value={draft.dot}
+            disabled={!canEdit}
+            onChange={(dot) => edit({ dot })}
+          />
+        </SettingSection>
 
-      <div className="flex min-w-0 flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" disabled={!dirty || invalid || Boolean(blocked)} pending={planning}>
-            Apply
-          </Button>
-          {view.managed.exists && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={Boolean(blocked)}
-              onClick={() => reset()}
+        <SettingSection
+          title="DNSSEC"
+          state={
+            view.resolved.active
+              ? running.dnssecSupported
+                ? "the server in use supports it"
+                : "the server in use does not support it"
+              : undefined
+          }
+          status={settingStatus({ dirty: changed.dnssec })}
+        >
+          <Choice
+            label="DNSSEC"
+            options={DNSSEC}
+            value={draft.dnssec || "default"}
+            disabled={!canEdit}
+            onChange={(value) => edit({ dnssec: value === "default" ? "" : value })}
+          />
+        </SettingSection>
+
+        <SettingSection
+          title="Cache"
+          state={stats ? `${plural(stats.cacheSize, "answer")} held` : undefined}
+          status={settingStatus({ dirty: changed.cache })}
+        >
+          <Choice
+            label="Cache mode"
+            options={CACHE}
+            value={draft.cache || "default"}
+            disabled={!canEdit}
+            onChange={(value) => edit({ cache: value === "default" ? "" : value })}
+          />
+        </SettingSection>
+
+        {canEdit && (
+          <SettingSection title="Verification">
+            <Field
+              label="Names to check"
+              htmlFor="dns-verification-names"
+              info="Optional, up to eight: a name in each scope this change touches, such as nas.home.arpa or git.corp.example. Each must answer after saving, or the previous settings are put back. Leave empty to check public names."
             >
-              Reset to the system&rsquo;s
-            </Button>
-          )}
-        </div>
-        {planError && (
-          <p role="alert" className="text-body text-destructive">
-            {planError}
-          </p>
+              <Textarea
+                id="dns-verification-names"
+                aria-label="Verification names"
+                value={verificationNames}
+                rows={2}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(event) => {
+                  setVerificationNames(event.target.value)
+                  setPlanError(undefined)
+                }}
+                placeholder={"nas.home.arpa\ngit.corp.example"}
+                className="font-mono"
+              />
+            </Field>
+          </SettingSection>
         )}
-        {applied && <AppliedResult applied={applied} />}
-        {rolledBack && (
-          <div className="flex min-w-0 animate-rise flex-col gap-3" role="alert">
-            <Notice title="Put back: a required check failed" tone="danger">
-              {rolledBack.reason}
-            </Notice>
-            <VerificationChecks
-              verification={rolledBack.verification}
-              label="Verification results"
-            />
-          </div>
-        )}
-      </div>
+      </SettingForm>
+      <ConfirmDialog
+        request={request}
+        onOpenChange={(open) => {
+          if (open) return
+          setRequest(null)
+          // Closed without applying: the bar's Save is over, and nothing was saved.
+          settle.current?.(false)
+        }}
+      />
       {dialog}
-    </form>
+    </>
+  )
+}
+
+/** A closed choice as one segmented row, with what the chosen answer does under it. */
+function Choice({
+  label,
+  options,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string
+  options: { value: string; label: string; says: string }[]
+  value: string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="min-w-0 space-y-2">
+      <Segments
+        label={label}
+        value={value}
+        options={options}
+        onChange={onChange}
+        disabled={disabled}
+        fill
+        className="sm:max-w-md"
+      />
+      {/* The one line changes its words, never its height. */}
+      <p aria-live="polite" className="text-hint text-muted-foreground">
+        {options.find((option) => option.value === value)?.says}
+      </p>
+    </div>
   )
 }
 
@@ -565,24 +637,44 @@ function ClearList({
   disabled: boolean
   onChange: (checked: boolean) => void
 }) {
-  if (!empty) return null
+  // A switch nobody here may turn is drawn only when it is on: then it is a
+  // fact about the drop-in, and off it is one more dead control.
+  if (!empty || (disabled && !checked)) return null
   return (
-    <label className="flex min-h-11 items-center gap-3 text-body">
-      <Checkbox
-        aria-label={CLEAR[list]}
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={(value) => onChange(value === true)}
-      />
-      {CLEAR[list]}
-    </label>
+    <OptionRow
+      title={CLEAR[list]}
+      checked={checked}
+      disabled={disabled}
+      onCheckedChange={onChange}
+    />
   )
 }
 
-/** What the server found after the change: every check's result, and any warning. */
-function AppliedResult({ applied }: { applied: DNSApplied }) {
+/**
+ * What the last change came to, at the head of the settings column: every
+ * check's result and any warning, or the check that failed and the settings
+ * put back.
+ */
+export function ResolverOutcomeNote({ outcome }: { outcome: ResolverOutcome }) {
+  // Save is pressed at the foot of the window and this lands at the head of
+  // the column, so it is brought into view when it arrives.
+  const note = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    note.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [outcome])
+  if (outcome.kind === "put-back") {
+    return (
+      <div ref={note} className="flex min-w-0 animate-rise scroll-mt-6 flex-col gap-3" role="alert">
+        <Notice title="Put back: a required check failed" tone="danger">
+          {outcome.reason}
+        </Notice>
+        <VerificationChecks verification={outcome.verification} label="Verification results" />
+      </div>
+    )
+  }
+  const { applied } = outcome
   return (
-    <div className="flex min-w-0 animate-rise flex-col gap-3" role="status">
+    <div ref={note} className="flex min-w-0 animate-rise scroll-mt-6 flex-col gap-3" role="status">
       {applied.verified ? (
         <Status
           tone="running"

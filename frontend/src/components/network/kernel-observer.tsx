@@ -9,9 +9,10 @@ import {
   type ObserverQuality,
 } from "@/lib/network-flows"
 import { Panel, PanelHeader, PanelBody } from "@/components/panel"
-import { Disclosure } from "@/components/form"
+import { Disclosure, InfoTip } from "@/components/form"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { UTCTime } from "@/components/network/flows/marks"
 
 const qualityReadings: [keyof Omit<ObserverQuality, "shutdownTailUnknown">, string][] = [
   ["events", "Delivered events"],
@@ -52,6 +53,12 @@ export function ObserverQualityReading({ quality }: { quality?: ObserverQuality 
   )
 }
 
+/**
+ * The kernel packet observer: an opt-in second channel beside the sampled
+ * socket history, switched on and off only through a reviewed change. Its
+ * state and the reason for it lead; what it was bounded to and what it
+ * missed fold under them.
+ */
 export function KernelObserverPanel({
   observer,
   settings,
@@ -73,11 +80,16 @@ export function KernelObserverPanel({
   const retained = Boolean(settings.kernelObserverEnabled || observer.attachmentsRetained)
   const supported = settings.kernelObserverEnabled !== undefined
   return (
-    <Panel plain>
+    <Panel plain id="flow-observer" aria-label="Kernel packet observer" className="scroll-mt-6">
       <PanelHeader
         title="Kernel packet observer"
         actions={
           <div className="flex flex-wrap items-center gap-3">
+            <InfoTip label="What the observer does">
+              Explicit opt-in observes TCP and UDP transport payload at the declared cgroup hooks.
+              Observed byte subtotals remain separate from sampled TCP counters. Opening this page,
+              enabling ordinary history and restarting the dashboard do not attach the observer.
+            </InfoTip>
             <Status
               tone={stale ? "warning" : reading.tone}
               label={stale ? "Last known observer state" : reading.label}
@@ -99,29 +111,37 @@ export function KernelObserverPanel({
       <PanelBody>
         <div className="space-y-3 text-body">
           <p>{observer.reason}</p>
-          <p className="text-muted-foreground">
-            Explicit opt-in observes TCP and UDP transport payload at the declared cgroup hooks.
-            Observed byte subtotals remain separate from sampled TCP counters. Opening this page,
-            enabling ordinary history and restarting the dashboard do not attach the observer.
-          </p>
           {supported && !retained && !settings.enabled && (
-            <p>Start history recording before reviewing observer activation.</p>
+            <p className="text-muted-foreground">
+              Start history recording before reviewing observer activation.
+            </p>
+          )}
+          {settings.enabled && retained && (
+            <p className="text-muted-foreground">
+              Stop the kernel observer before stopping ordinary history recording.
+            </p>
           )}
           {observer.attachmentsRetained && observer.status !== "recording" && (
             <p role="status">
               Owned attachments remain. Review stop to retry draining and detaching.
             </p>
           )}
-          <p>
-            Checked <ObserverTime value={observer.checkedAt} /> · Started{" "}
-            <ObserverTime value={observer.startedAt} /> · Stopped{" "}
-            <ObserverTime value={observer.stoppedAt} />
-          </p>
-          <p>
-            Docker owner evidence: {observer.dockerStatus || "unknown"} · Read{" "}
-            <ObserverTime value={observer.dockerCheckedAt} /> · Sources{" "}
-            {observer.dockerSources ?? "unknown"} · Omitted sources{" "}
-            {observer.omittedDockerSources ?? "unknown"}
+          <p className="flex flex-wrap gap-x-3 gap-y-1 text-hint text-muted-foreground">
+            <span>
+              Checked <UTCTime value={observer.checkedAt} form="short" />
+            </span>
+            <span>
+              Started <UTCTime value={observer.startedAt} form="short" />
+            </span>
+            <span>
+              Stopped <UTCTime value={observer.stoppedAt} form="short" />
+            </span>
+            <span>Docker owner evidence {observer.dockerStatus || "unknown"}</span>
+            <span>
+              Read <UTCTime value={observer.dockerCheckedAt} form="short" />
+            </span>
+            <span>Sources {observer.dockerSources ?? "unknown"}</span>
+            <span>Omitted sources {observer.omittedDockerSources ?? "unknown"}</span>
           </p>
           {observer.dockerError && <p>{observer.dockerError}</p>}
           {observer.timestampReason && <p>{observer.timestampReason}</p>}
@@ -167,13 +187,5 @@ export function KernelObserverPanel({
         </div>
       </PanelBody>
     </Panel>
-  )
-}
-
-function ObserverTime({ value }: { value?: string | null }) {
-  return value ? (
-    <time dateTime={value}>{value.replace("T", " ").replace("Z", " UTC")}</time>
-  ) : (
-    <span>Unknown</span>
   )
 }

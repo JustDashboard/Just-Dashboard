@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { readTip } from "./read-tip"
+import { risen } from "./risen"
 
 /**
  * The account pages after their 0.7.5 pass, against a mocked API: no page
@@ -6,6 +8,12 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * its face, sessions are drawn as the path each takes to the server, keys as
  * what holds them wired through their role, users by their faces on cards
  * that chips narrow, and Security opens on what a sign-in passes.
+ *
+ * The 0.8.7 pass brought Profile, Security and API keys to the deployment
+ * pages' shape: the profile and the factors are sections of one centred
+ * column with the settings pages' floating bar, no sentence stands under a
+ * title or a field, the role ladder is names and glyphs, and the keys open on
+ * a line that counts them and are cards as the accounts are.
  */
 
 const now = Date.now()
@@ -197,6 +205,8 @@ test("the profile opens on the account's identity line and what is signed in as 
   await expect(page.locator("[data-slot=host-identity]")).toContainText("4 accounts")
   await expect(page.locator('img[src="/logos/tailscale.svg"]').first()).toBeVisible()
   await expect(page.getByText("two-factor on").first()).toBeVisible()
+  // The verdict stands beside the name, as a project's state does.
+  await expect(page.locator("[data-slot=host-identity]")).toHaveAttribute("data-layout", "project")
 
   // The four tiles went; what they counted is the picture's two sides.
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
@@ -222,14 +232,58 @@ test("the profile opens on the account's identity line and what is signed in as 
   await expect(ladder.getByText("Open a shell")).toBeVisible()
   await expect(ladder.locator('img[src="/logos/docker.svg"]')).toBeVisible()
   await expect(page.getByText("Granted.")).toHaveCount(6)
+  // Names and glyphs: what a power means is its name's tooltip, not a line under it.
+  await expect(ladder.getByText(/A root terminal on this server/)).toHaveCount(0)
+  await readTip(
+    page,
+    ladder.getByText("Open a shell").locator(".."),
+    /A root terminal on this server/,
+  )
+  await readTip(
+    page,
+    ladder.getByText("Administrator", { exact: true }).locator(".."),
+    /Everything: a root shell/,
+  )
 
-  // A rename raises the floating Save rather than a button under the fields.
-  await page.getByLabel("Name", { exact: true }).fill("Ion P.")
+  // The profile and the ladder are two sections of one centred column.
+  const column = page.locator("[data-slot=settings-column]")
+  const sections = column.locator("[data-slot=setting]")
+  await expect(sections).toHaveCount(2)
+  await risen(page)
+  const boxes = await sections.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect()
+      return { x: Math.round(box.x), width: Math.round(box.width) }
+    }),
+  )
+  expect(boxes[1]).toEqual(boxes[0])
+  expect(boxes[0].width).toBeLessThanOrEqual(768)
+  // No sentence under the picture or a field.
+  await expect(column.locator("p.text-hint")).toHaveCount(0)
+  await expect(page.getByText(/cropped to a square/)).toHaveCount(0)
+
+  // A rename raises the floating Save rather than a button under the fields,
+  // and moves nothing: the head's line is the rail's card, drawn from the draft.
+  const name = page.getByLabel("Name", { exact: true })
+  const placed = await name.boundingBox()
+  await name.fill("Ion P.")
   await expect(page.getByText("Edited", { exact: true })).toBeVisible()
   await expect(
     page.getByRole("img", { name: /The rail draws this account as Ion P\./ }),
   ).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Save/ })).toBeVisible()
+  expect((await name.boundingBox())!.y).toBe(placed!.y)
+  const bar = page.getByRole("region", { name: "Save changes" })
+  await expect(bar.getByText("1 unsaved change")).toBeVisible()
+  await expect(bar.getByRole("button", { name: /^Save/ })).toBeVisible()
+  // The bar's Save is the one write the profile had.
+  await page.route("**/api/v1/account/profile", (route) =>
+    json(route, { ...me, displayName: "Ion P." }),
+  )
+  const patched = page.waitForRequest(
+    (request) => request.method() === "PATCH" && request.url().endsWith("/api/v1/account/profile"),
+  )
+  await bar.getByRole("button", { name: /^Save/ }).click()
+  expect((await patched).postDataJSON()).toEqual({ displayName: "Ion P." })
 })
 
 test("sessions are the browser, the system and the network each came from", async ({ page }) => {
@@ -289,24 +343,34 @@ test("keys are drawn as what holds them, wired through their role", async ({ pag
   const chips = page.getByRole("group", { name: "Show" })
   await expect(chips.getByRole("button", { name: /Never used\s*1/ })).toBeVisible()
   await chips.getByRole("button", { name: /Expiring soon\s*1/ }).click()
-  const rows = page.locator("[data-slot=panel]", { hasText: "In use" }).locator("[data-slot=row]")
+  const rows = page
+    .locator("[data-slot=panel]", { hasText: "In use" })
+    .locator("[data-slot=choice-row]")
   await expect(rows).toHaveCount(1)
   await expect(rows.first()).toContainText("github-actions")
   await chips.getByRole("button", { name: /^All/ }).click()
   await expect(rows).toHaveCount(3)
 
-  const github = page.locator("[data-slot=row]", { hasText: "github-actions" })
+  const github = page.locator("[data-slot=choice-row]", { hasText: "github-actions" })
   await expect(github.locator('img[src="/logos/github.svg"]')).toBeVisible()
   await expect(github).toContainText("expires")
   // An administrator reads everyone's keys, each with its owner's face.
-  await expect(page.locator("[data-slot=row]", { hasText: "grafana" })).toContainText("Maria Rusu")
+  await expect(page.locator("[data-slot=choice-row]", { hasText: "grafana" })).toContainText(
+    "Maria Rusu",
+  )
   await expect(page.getByRole("heading", { name: "Revoked or expired" })).toBeVisible()
   await expect(page.getByText(/Authorization: Bearer vpsd_…/)).toBeVisible()
-  await expect(
-    page
-      .locator("[data-slot=panel]", { hasText: "In use" })
-      .getByRole("button", { name: "New key" }),
-  ).toBeVisible()
+  // The page opens on the line that counts the keys, with its one command.
+  const line = page.locator("[data-slot=host-identity]")
+  await expect(line).toHaveAttribute("data-layout", "project")
+  await expect(line).toContainText("3 keys")
+  await expect(line).toContainText("1 limited")
+  await expect(line).toContainText("2 read-only")
+  await expect(line).toContainText("1 expiring in 4 days")
+  await expect(line).toContainText("1 revoked or expired")
+  await expect(line.getByRole("button", { name: "New key" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "New key" })).toHaveCount(1)
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
 
   await page.getByRole("button", { name: "New key" }).click()
   await page.getByLabel("Name").fill("uptime-kuma")
@@ -367,13 +431,100 @@ test("security is a form with its state under each head", async ({ page }) => {
   await expect(path).toContainText("Not enrolled")
   await expect(path).toContainText("a password alone gets in")
   await expect(page.getByRole("heading", { name: "Two-factor" })).toBeVisible()
-  await expect(page.getByText("Your password is the only factor")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Enable two-factor" })).toBeVisible()
+  // The state is the head's one line of facts; the verb is under it and why behind its ⓘ.
+  const twoFactor = page.locator("[data-slot=setting]", { hasText: "Two-factor" })
+  await expect(
+    twoFactor.getByText("your password is the only factor · optional on this install"),
+  ).toBeVisible()
+  await expect(
+    twoFactor.getByRole("button", { name: "Enable two-factor", exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText(/one stolen credential away/)).toHaveCount(0)
+  await readTip(
+    page,
+    twoFactor.getByRole("button", { name: "Why enable two-factor" }),
+    /one stolen credential away/,
+  )
+
+  // Four sections, one under another on the column's edges.
+  const column = page.locator("[data-slot=settings-column]")
+  await expect(column.locator("[data-slot=setting]")).toHaveCount(4)
+  await risen(page)
+  const boxes = await column.locator("[data-slot=setting]").evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect()
+      return { x: Math.round(box.x), y: box.y, bottom: box.bottom, width: Math.round(box.width) }
+    }),
+  )
+  for (const [index, box] of boxes.entries()) {
+    expect(box.x).toBe(boxes[0].x)
+    expect(box.width).toBe(boxes[0].width)
+    if (index > 0) expect(box.y).toBeGreaterThanOrEqual(boxes[index - 1].bottom)
+  }
+  expect(boxes[0].width).toBeLessThanOrEqual(768)
+  await expect(page.getByRole("link", { name: "Review where you are signed in" })).toHaveAttribute(
+    "href",
+    "/account/sessions",
+  )
 
   // The password rule lights as it is met.
+  // Nothing is prefilled, and the current password alone raises no bar: a
+  // password manager fills it in unasked.
+  const bar = page.getByRole("region", { name: "Save changes" })
+  for (const label of ["Current password", "New password", "Confirm new password"]) {
+    const field = page.getByLabel(label, { exact: true })
+    await expect(field).toHaveValue("")
+    await expect(field).toHaveAttribute("type", "password")
+  }
+  await page.getByLabel("Current password", { exact: true }).fill("old-password-1A")
+  await expect(bar).toHaveCount(0)
+
+  // The password rule lights as it is met, and the change is the floating bar's.
   await page.getByLabel("New password", { exact: true }).fill("Correcthorse1")
   await expect(page.getByText("12 characters or more")).toHaveClass(/text-success/)
   await expect(page.getByText(/three of upper case/)).toHaveClass(/text-success/)
+  const change = bar.getByRole("button", { name: /^Change password/ })
+  await expect(bar.getByText("Password · The new passwords do not match yet")).toBeVisible()
+  await expect(change).toBeDisabled()
+  await page.getByLabel("Confirm new password", { exact: true }).fill("Correcthorse1")
+  await expect(bar.getByText("Password · Signs out every session, this one included")).toBeVisible()
+  const sent = page.waitForRequest(
+    (request) => request.method() === "POST" && request.url().endsWith("/api/v1/account/password"),
+  )
+  // Enter in a field is the bar's command.
+  await page.getByLabel("Confirm new password", { exact: true }).press("Enter")
+  expect((await sent).postDataJSON()).toEqual({
+    currentPassword: "old-password-1A",
+    newPassword: "Correcthorse1",
+  })
+})
+
+test("security keeps its sections where they are as a factor is read, and fits a phone", async ({
+  page,
+}) => {
+  await mockAccount(page)
+  await page.goto("/account/security")
+  const twoFactor = page.locator("[data-slot=setting]", { hasText: "Two-factor" })
+  await expect(
+    twoFactor.getByText("asked at every sign-in · optional on this install"),
+  ).toBeVisible()
+  await expect(twoFactor.getByRole("button", { name: "Regenerate recovery codes" })).toBeVisible()
+  await expect(twoFactor.getByRole("button", { name: "Turn off" })).toBeVisible()
+  // Discard empties what was typed.
+  await page.getByLabel("New password", { exact: true }).fill("x")
+  const bar = page.getByRole("region", { name: "Save changes" })
+  await bar.getByRole("button", { name: "Discard" }).click()
+  await expect(page.getByLabel("New password", { exact: true })).toHaveValue("")
+  await expect(bar).toHaveCount(0)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/account/security")
+  await expect(page.getByRole("heading", { name: "Password" })).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
 
   await expect(page.getByText("3 sessions signed in · 1 awaiting a second factor")).toBeVisible()
 })
@@ -382,7 +533,13 @@ for (const width of [1280, 1720, 390]) {
   test(`the account pages look right at ${width}`, async ({ page }) => {
     await mockAccount(page)
     await page.setViewportSize({ width, height: 1200 })
-    for (const path of ["/account", "/account/sessions", "/account/keys", "/account/users"]) {
+    for (const path of [
+      "/account",
+      "/account/sessions",
+      "/account/keys",
+      "/account/users",
+      "/account/workspace",
+    ]) {
       await page.goto(path)
       await page.waitForLoadState("networkidle")
       expect(

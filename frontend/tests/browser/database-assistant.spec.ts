@@ -809,7 +809,12 @@ test("on a phone the column lies over the editor, and the page is one pane at a 
   await page.setViewportSize({ width: 390, height: 844 })
   await mockAssistant(page, { settings: ON })
   await openEditor(page)
-  await openAssistant(page)
+  // On a phone the assistant is a stop of the Query page's bar, not a button in its head.
+  await page
+    .locator("[data-slot=pane-bar]")
+    .getByRole("tab", { name: "Assistant", exact: true })
+    .click()
+  await expect(pane(page)).toBeVisible()
   await ask(pane(page), "How many orders has each customer placed?")
   await expect(statements(page)).toBeVisible()
   const sideways = await page.evaluate(
@@ -882,6 +887,12 @@ test("the database's assistant, for the pull request @shots", async ({ page }) =
 
   const rail = page.getByRole("navigation", { name: "Sidebar" })
   await rail.getByRole("link", { name: "Assistant", exact: true }).click()
+  // The editor's column is the same chat (`[data-slot=agent-chat]`), so the
+  // question waits for the page: asked at once it was typed into the column
+  // of the page being left, and the page arrived with an empty box and an
+  // Ask that could not be pressed.
+  await expect(page).toHaveURL(/\/databases\/1\/assistant$/)
+  await expect(pane(page)).toHaveCount(0)
   await ask(chat(page), "How much disk does it use?")
   await expect(chat(page).locator("[data-slot=agent-approval]")).toBeVisible()
   await page.waitForTimeout(600)

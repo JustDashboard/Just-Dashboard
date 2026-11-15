@@ -13,6 +13,7 @@ import {
   type InstallJob,
   type InstallJobs,
 } from "@/components/packages/install-jobs"
+import { packageHref } from "@/components/packages/inventory"
 import { PackageMark } from "@/components/packages/marks"
 import { ProductLogo } from "@/components/product-logo"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
@@ -71,19 +72,20 @@ const SUGGESTIONS: { query: string; product: string; use: string }[] = [
 
 export function InstallPanel({
   onJob,
-  onInspect,
+  asked,
   manager,
   observedJob,
   onSettled,
 }: {
   onJob: (job: Job) => void
-  onInspect: (name: string) => void
+  /** A search the address handed over (`/packages?q=frr`): what the box opens on. */
+  asked?: string | null
   manager?: string
   observedJob?: Job | null
   onSettled?: () => void
 }) {
   const { can } = useAuth()
-  const [query, setQuery] = useSessionState("packages.install.query", "")
+  const [query, setQuery] = useSessionState("packages.install.query", "", asked || null)
   const [answer, setAnswer] = useState<{
     query: string
     revision: number
@@ -246,7 +248,6 @@ export function InstallPanel({
                 starting={starting}
                 manager={manager}
                 install={install}
-                onInspect={onInspect}
               />
             ))}
           </ChoiceList>
@@ -265,7 +266,6 @@ function InstallResult({
   starting,
   manager,
   install,
-  onInspect,
 }: {
   result: PackageSearchResult
   job?: InstallJob
@@ -275,7 +275,6 @@ function InstallResult({
   starting: string
   manager?: string
   install: (name: string) => Promise<void>
-  onInspect: (name: string) => void
 }) {
   const reading = usePoll(
     (signal) => get<{ job: Job }>(`/jobs/${job?.id}`, undefined, signal),
@@ -302,7 +301,7 @@ function InstallResult({
       title={<span className="font-mono">{result.name}</span>}
       verb={result.name}
       description={result.summary || "No description published"}
-      onSelect={() => onInspect(result.name)}
+      href={packageHref(result.name)}
       trailing={
         <span className="hidden min-w-0 items-center gap-3 sm:flex">
           {result.version && (

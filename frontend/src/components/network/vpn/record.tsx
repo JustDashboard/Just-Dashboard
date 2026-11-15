@@ -5,11 +5,11 @@ import { get, put, del } from "@/lib/api"
 import { bytes, plural, rate, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { WGEndpointEvidence, WGEvent, WGHistory, WGInterface, WGPeer } from "@/lib/types"
+import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import { Detail, DetailList } from "@/components/page"
 import { Row, RowList } from "@/components/row-list"
-import { SidePanel } from "@/components/side-panel"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Field } from "@/components/form"
@@ -39,35 +39,7 @@ const formatRate = (value: number) => rate(value)
 const axisRate = (value: number) => `${bytes(value, 0)}/s`
 const iso = (unix: number) => new Date(unix * 1000).toISOString()
 
-/**
- * What needs a look on a tunnel, read with it: an always-on peer whose
- * handshake went stale, a transport routed into a tunnel, a budget passed.
- * Each says what it is; none of them acts.
- */
-export function TunnelAlerts({ tunnel }: { tunnel: WGInterface }) {
-  const alerts = tunnel.alerts ?? []
-  if (alerts.length === 0) return null
-  return (
-    <Notice
-      tone="warning"
-      title={`${plural(alerts.length, "thing")} on ${tunnel.name} ${alerts.length === 1 ? "needs" : "need"} a look`}
-      className="mb-5"
-    >
-      <ul className="space-y-1" aria-label={`${tunnel.name} alerts`}>
-        {alerts.map((a) => (
-          <li key={`${a.kind}-${a.peer ?? ""}`}>
-            {a.message}
-            {a.since ? (
-              <span className="text-muted-foreground"> · since {relativeTime(iso(a.since))}</span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    </Notice>
-  )
-}
-
-function WindowToggle({
+export function WindowToggle({
   value,
   onChange,
 }: {
@@ -93,7 +65,7 @@ function WindowToggle({
 }
 
 /** One record: a trend, read from the server's samples. */
-function useHistory(tunnel: string, peer: string | undefined, span: HistoryWindow) {
+export function useHistory(tunnel: string, peer: string | undefined, span: HistoryWindow) {
   return usePoll<WGHistory>(
     (signal) =>
       get(
@@ -106,7 +78,7 @@ function useHistory(tunnel: string, peer: string | undefined, span: HistoryWindo
   )
 }
 
-function Trend({ history, title }: { history: WGHistory | undefined; title: string }) {
+export function Trend({ history, title }: { history: WGHistory | undefined; title: string }) {
   const rows = useMemo(
     () => (history?.points ?? []).map((p) => ({ ts: p.t * 1000, rx: p.rx, tx: p.tx })),
     [history],
@@ -275,6 +247,8 @@ function PeerBudget({
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
+  // Clearing a budget is a destructive route; setting one is not.
+  const { can } = useAuth()
   const [period, setPeriod] = useState<"day" | "week" | "month">(peer.quota?.period ?? "month")
   const [limit, setLimit] = useState("")
   const [busy, setBusy] = useState(false)
@@ -336,9 +310,11 @@ function PeerBudget({
           <p className="text-hint text-muted-foreground">
             An alert, not a limit: the peer stays connected past it.
           </p>
-          <Button size="xs" variant="outline" onClick={clear}>
-            Clear the budget
-          </Button>
+          {can("destructive") && (
+            <Button size="xs" variant="outline" onClick={clear}>
+              Clear the budget
+            </Button>
+          )}
         </div>
       )}
       <div className="flex flex-wrap items-end gap-2">
@@ -382,94 +358,7 @@ function PeerBudget({
   )
 }
 
-/**
- * A tunnel's record in a sheet: what this host can say about the endpoint its
- * clients dial, the tunnel's traffic over time, and its lifecycle — every
- * creation, change, failure and recovery, kept after the tunnel is removed.
- */
-export function TunnelRecord({
-  tunnel,
-  open,
-  onOpenChange,
-}: {
-  tunnel: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const [span, setSpan] = useState<HistoryWindow>("24h")
-  const history = useHistory(tunnel, undefined, span)
-  const [evidence, setEvidence] = useState<WGEndpointEvidence>()
-  const [checking, setChecking] = useState(false)
-  const check = async () => {
-    setChecking(true)
-    try {
-      setEvidence(
-        await get<WGEndpointEvidence>(
-          `/network/vpn/wireguard/${encodeURIComponent(tunnel)}/endpoint`,
-        ),
-      )
-    } catch (err) {
-      notify.error("The endpoint could not be checked", err)
-    } finally {
-      setChecking(false)
-    }
-  }
-  return (
-    <SidePanel
-      open={open}
-      onOpenChange={onOpenChange}
-      title={`${tunnel} history`}
-      description={`The endpoint, traffic and lifecycle of ${tunnel}`}
-      initialFocus="body"
-    >
-      <div className="flex min-w-0 flex-col gap-6">
-        <div className="flex min-w-0 flex-col gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-title font-medium">Endpoint</p>
-            <Button size="xs" variant="outline" onClick={() => void check()} pending={checking}>
-              Check endpoint
-            </Button>
-          </div>
-          {evidence ? (
-            <EndpointEvidence evidence={evidence} />
-          ) : (
-            <p className="text-hint text-muted-foreground">
-              Resolves the address clients are given and compares it with what this host holds.
-              Nothing is sent from outside.
-            </p>
-          )}
-        </div>
-        <div className="flex min-w-0 flex-col gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-title font-medium">Traffic</p>
-            <WindowToggle value={span} onChange={setSpan} />
-          </div>
-          {history.error && !history.data ? (
-            <ErrorState error={history.error} onRetry={history.refresh} />
-          ) : !history.data ? (
-            <LoadingRows rows={2} />
-          ) : (
-            <>
-              <NetworkReadWarning
-                error={history.error}
-                refresh={history.refresh}
-                lastSuccess={history.lastSuccess}
-                reading="WireGuard record"
-              />
-              <Trend history={history.data} title={`${tunnel} · every peer · ${span}`} />
-            </>
-          )}
-        </div>
-        <div className="flex min-w-0 flex-col gap-2">
-          <p className="text-title font-medium">Lifecycle</p>
-          <EventList events={history.data?.events ?? []} label={`${tunnel} lifecycle`} />
-        </div>
-      </div>
-    </SidePanel>
-  )
-}
-
-function EndpointEvidence({ evidence }: { evidence: WGEndpointEvidence }) {
+export function EndpointEvidence({ evidence }: { evidence: WGEndpointEvidence }) {
   return (
     <div className="space-y-2" aria-label="Endpoint evidence">
       <Status tone={verdictTone(evidence.verdict)} label={VERDICT_LABEL[evidence.verdict]} />

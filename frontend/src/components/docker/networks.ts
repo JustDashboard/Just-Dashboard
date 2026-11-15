@@ -395,3 +395,243 @@ export function networkChanges(
   }
   return out.sort((a, b) => b.at - a.at).slice(0, limit)
 }
+
+// ---------------------------------------------------------------- a page ---
+
+/** A network's own page; a view other than the one it opens on is in the address. */
+export function networkHref(name: string, tab?: string) {
+  const path = `/docker/networks/${encodeURIComponent(name)}`
+  return tab && tab !== "overview" ? `${path}?tab=${encodeURIComponent(tab)}` : path
+}
+
+/**
+ * The network an address names: by its name, else by its id, as the Engine
+ * resolves one. A deployment's removal plan and the old sheet's address both
+ * name a network by id.
+ */
+export function findNetwork<T extends Pick<DockerNetwork, "id" | "name">>(
+  networks: T[],
+  key: string,
+): T | undefined {
+  return networks.find((n) => n.name === key) ?? networks.find((n) => n.id === key)
+}
+
+/** Where the table keeps its search and its owner chip for the tab, read by a network's rail too. */
+export const NETWORK_FILTER_KEYS = {
+  query: "docker.networks.query",
+  shelf: "docker.networks.shelf",
+} as const
+
+export type Shelf = OwnerKind | "unused" | ""
+
+const SHELVES = ["compose", "dashboard", "standalone", "docker", "unused"]
+
+/** A remembered chip, or none where what was remembered is no chip. */
+export function shelfOf(remembered: string): Shelf {
+  return (SHELVES.includes(remembered) ? remembered : "") as Shelf
+}
+
+export function shelfLabel(shelf: Shelf) {
+  if (shelf === "unused") return "Unused"
+  return OWNER_KINDS.find((k) => k.kind === shelf)?.label ?? ""
+}
+
+/** The networks a search and an owner chip leave, in the order they were given. */
+export function filterNetworks(networks: DockerNetwork[], query: string, shelf: Shelf) {
+  const needle = query.trim().toLowerCase()
+  return networks.filter((n) => {
+    if (shelf === "unused" && !isUnused(n)) return false
+    if (shelf && shelf !== "unused" && networkOwner(n).kind !== shelf) return false
+    if (!needle) return true
+    return (
+      n.name.toLowerCase().includes(needle) ||
+      n.driver.toLowerCase().includes(needle) ||
+      n.subnets.some((s) => s.toLowerCase().includes(needle)) ||
+      n.usedBy.some((c) => c.toLowerCase().includes(needle))
+    )
+  })
+}
+
+/**
+ * Why a container cannot be attached from here, or undefined where one can:
+ * Docker's own three and the host network take none this way, the dashboard's
+ * private network takes no other, and a swarm network without `--attachable`
+ * takes only services. The first two offer no control at all (`hidden`).
+ */
+export function attachRefusal(
+  network: Pick<DockerNetwork, "name" | "driver" | "scope" | "attachable" | "owner">,
+): { hidden: boolean; reason?: string } | undefined {
+  if (isSystem(network) || network.driver === "host") return { hidden: true }
+  if (isDashboardOwn(network)) {
+    return {
+      hidden: false,
+      reason: "The dashboard's own private network takes no other containers",
+    }
+  }
+  if (refusesAttach(network)) {
+    return {
+      hidden: false,
+      reason: "A swarm network made without --attachable takes only services",
+    }
+  }
+  return undefined
+}
+
+/** Why a network cannot be removed, or undefined where Docker would remove it. */
+export function removeRefusal(network: DockerNetwork): string | undefined {
+  if (isSystem(network)) return "Docker's own network — cannot be removed"
+  if (!membersKnown(network)) return "Who uses it could not be read — cannot judge a removal"
+  if (network.usedBy.length > 0) {
+    return `In use by ${network.usedBy.length} container${network.usedBy.length === 1 ? "" : "s"} — cannot be removed while attached`
+  }
+  return undefined
+}
+
+export type NetworkStanding = {
+  tone: "running" | "stopped" | "warning"
+  label: string
+}
+
+/**
+ * Where a network stands, as the word beside its name: unread where the
+ * container listing failed, unused where nothing is attached to one somebody
+ * made (it holds a block of the pool), and otherwise in use, or how many of
+ * its members run where some do not.
+ */
+export function networkStanding(network: DockerNetwork, running?: number): NetworkStanding {
+  if (!membersKnown(network)) return { tone: "warning", label: "members unread" }
+  const count = network.usedBy.length
+  if (count === 0) {
+    return isSystem(network)
+      ? { tone: "stopped", label: "nothing attached" }
+      : { tone: "warning", label: "unused" }
+  }
+  if (running === undefined || running >= count) return { tone: "running", label: "in use" }
+  return { tone: "warning", label: `${running} of ${count} running` }
+}
+
+/** A member as a network's page reads it, from the inspect or, before it lands, the listing. */
+export type MemberReading = {
+  id: string
+  name: string
+  ipv4?: string
+  ipv6?: string
+  /** Undefined until the network's own inspect has listed them. */
+  aliases?: string[]
+  state: string
+  /** The other networks it is on: what joins this network to them. */
+  others: string[]
+  unread?: boolean
+  ingress?: boolean
+  dashboard?: boolean
+}
+
+type InspectedMember = {
+  id: string
+  name: string
+  ipv4?: string
+  ipv6?: string
+  aliases: string[]
+  state?: string
+  unread?: boolean
+  networks?: string[]
+  ingress?: boolean
+  dashboard?: boolean
+}
+
+/**
+ * Who is on a network. The inspect's members where it has landed, with each
+ * one's state as the containers socket has it now; before that the listing's
+ * endpoints, so the page draws who is there without waiting for the inspect
+ * (which reads every member for its aliases).
+ */
+export function memberReadings(
+  network: Pick<DockerNetwork, "name" | "endpoints"> & { members?: InspectedMember[] },
+  containers: Map<string, Pick<Container, "state" | "networks">>,
+): MemberReading[] {
+  const others = (id: string, known?: string[]) =>
+    (known ?? containers.get(id)?.networks ?? []).filter((name) => name !== network.name)
+  if (network.members) {
+    return network.members.map((m) => ({
+      id: m.id,
+      name: m.name,
+      ipv4: m.ipv4,
+      ipv6: m.ipv6,
+      aliases: m.aliases,
+      state: containers.get(m.id)?.state ?? m.state ?? "unknown",
+      others: others(m.id, m.networks),
+      unread: m.unread,
+      ingress: m.ingress,
+      dashboard: m.dashboard,
+    }))
+  }
+  return (network.endpoints ?? []).map((e) => ({
+    id: e.container,
+    name: e.name,
+    ipv4: e.ipv4,
+    ipv6: e.ipv6,
+    state: containers.get(e.container)?.state ?? "unknown",
+    others: others(e.container),
+  }))
+}
+
+/** The names the others on the network reach a member by, without the short id Docker adds. */
+export function memberNames(member: Pick<MemberReading, "id" | "name" | "aliases">) {
+  const names = (member.aliases ?? []).filter((alias) => !member.id.startsWith(alias))
+  return names.length > 0 ? [...new Set(names)] : [member.name]
+}
+
+export type JoinedNetwork = {
+  name: string
+  /** The members on both, which is how traffic gets from one to the other. */
+  through: string[]
+  /** Whether any of them is running: a join through stopped containers carries nothing. */
+  up: boolean
+}
+
+/** The other networks a network's members are on, the most-joined first. */
+export function joinedNetworks(
+  members: Pick<MemberReading, "name" | "others" | "state">[],
+): JoinedNetwork[] {
+  const out = new Map<string, JoinedNetwork>()
+  for (const member of members) {
+    for (const name of member.others) {
+      const joined = out.get(name) ?? { name, through: [], up: false }
+      joined.through.push(member.name)
+      joined.up ||= member.state === "running"
+      out.set(name, joined)
+    }
+  }
+  return [...out.values()].sort(
+    (a, b) => b.through.length - a.through.length || a.name.localeCompare(b.name),
+  )
+}
+
+export type WayOut =
+  /** Through this server's address on the network's bridge. */
+  | { kind: "gateway"; gateway?: string }
+  /** Straight onto a network card's own network: a macvlan or ipvlan. */
+  | { kind: "parent"; device?: string; gateway?: string }
+  /** `--internal`: its members reach each other and nothing beyond. */
+  | { kind: "internal" }
+  /** The host network: its containers are on the server's own interfaces. */
+  | { kind: "host" }
+  /** The `none` network: no interface at all. */
+  | { kind: "none" }
+
+/** How a network's members leave it, which is the other end of its picture. */
+export function wayOut(
+  network: Pick<DockerNetwork, "driver" | "internal" | "gateway"> & {
+    options?: Record<string, string>
+  },
+): WayOut {
+  if (network.driver === "host") return { kind: "host" }
+  if (network.driver === "null") return { kind: "none" }
+  if (network.internal) return { kind: "internal" }
+  // The card is one of the driver's options, which only the inspect has: it
+  // is a card's network either way, and named once the inspect lands.
+  if (network.driver === "macvlan" || network.driver === "ipvlan") {
+    return { kind: "parent", device: network.options?.parent, gateway: network.gateway }
+  }
+  return { kind: "gateway", gateway: network.gateway }
+}

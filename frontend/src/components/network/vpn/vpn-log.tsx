@@ -4,7 +4,9 @@ import { useMemo } from "react"
 import type { VPNView } from "@/lib/types"
 import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs } from "@/components/logs/service-logs"
+import { Logs } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { EmptyState } from "@/components/state"
 import { vpnLogSources } from "@/components/network/vpn/log-sources"
 
 /**
@@ -14,7 +16,15 @@ import { vpnLogSources } from "@/components/network/vpn/log-sources"
  */
 export function VPNLog({ vpn }: { vpn: VPNView }) {
   const sources = useMemo(() => vpnLogSources(vpn), [vpn])
-  if (sources.length === 0) return null
+  // The view is always in the strip, so it says why it has nothing to show.
+  if (sources.length === 0)
+    return (
+      <EmptyState
+        icon={Logs}
+        title="Nothing here writes a log yet"
+        description="A WireGuard tunnel's unit, tailscaled and a Headscale container write here once one of them runs."
+      />
+    )
   return (
     <Panel plain>
       <PanelHeader title="VPN log" />

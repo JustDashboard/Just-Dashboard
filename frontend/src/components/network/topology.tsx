@@ -1,18 +1,18 @@
 "use client"
 
-import Link from "next/link"
-import { createRef, useMemo, useRef, useState, type RefObject } from "react"
+import { useCallback, useMemo } from "react"
 import { Bridge, Globe } from "@/components/icons"
-import { rate } from "@/lib/format"
+import { plural, rate } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, ProductGlyphs, imageProduct } from "@/components/product-logo"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
 import { LinkGlyph, carrying, pulseDuration } from "@/components/network/marks"
 import { flowNeighbours, nodeFlows } from "@/components/network/topology-reading"
+import { deviceHref } from "@/components/network/interfaces/device-facts"
 
-type Tone = "default" | "warning" | "danger"
+type Tone = "default" | "warning"
 
 /** One node of the picture: where it sits, what it is, and the device its wire measures. */
 type Node = {
@@ -51,7 +51,8 @@ type Node = {
  * Docker networks reaching it. Where nothing is set up yet a dashed ring
  * stands in the place it would go, with the way to set it up.
  *
- * On the page's own ground, with no frame or dot grid. Three lanes from `lg`;
+ * On the page's own ground, with no frame or dot grid. Three lanes from `lg`
+ * (`WireFlow`);
  * below it the lanes stack, the wires are not drawn, and each node says its
  * traffic in words.
  */
@@ -63,195 +64,136 @@ export function Topology({
   /** The devices with their freshest rates; the overview's own until the live ring lands. */
   links: NetworkLink[]
 }) {
-  const container = useRef<HTMLDivElement>(null)
-  const host = useRef<HTMLDivElement>(null)
-  const [focus, setFocus] = useState<string | null>(null)
-
   const nodes = useMemo(() => buildNodes(overview, links), [overview, links])
   const neighbours = useMemo(() => flowNeighbours(overview.flows.edges), [overview.flows])
-  const lit = (id: string) => focus === null || focus === id || !!neighbours.get(focus)?.has(id)
-  const ids = nodes.map((n) => n.id).join("\n")
-  const refs = useMemo(() => {
-    const map = new Map<string, RefObject<HTMLDivElement | null>>()
-    for (const id of ids.split("\n")) if (id) map.set(id, createRef<HTMLDivElement>())
-    return map
-  }, [ids])
-
-  const outside = nodes.filter((n) => n.lane === "outside")
-  const inside = nodes.filter((n) => n.lane === "inside")
-  const watch = (id: string) => ({
-    onPointerEnter: () => setFocus(id),
-    onPointerLeave: () => setFocus((held) => (held === id ? null : held)),
-    onFocus: () => setFocus(id),
-    onBlur: () => setFocus((held) => (held === id ? null : held)),
-  })
-  // A wire meets a mark at its edge, not under its logo: half of `md` and a breath.
-  const port = 26
+  const related = useCallback(
+    (focus: string, id: string) => !!neighbours.get(focus)?.has(id),
+    [neighbours],
+  )
   const firewall = overview.firewall
   const firewallUnread = overview.observations?.some(
     (source) => source.source === "firewall" && source.state === "failed",
   )
+  const lane = (name: Node["lane"]): WireFlowNode[] =>
+    nodes.filter((node) => node.lane === name).map((node) => flowNode(node))
 
   return (
-    <div className="relative animate-rise py-4">
-      <div ref={container} className="relative">
-        {nodes.map((node, index) => {
-          const ref = refs.get(node.id)
-          if (!ref) return null
-          const rx = node.devices.reduce((n, d) => n + d.rxRate, 0)
-          const tx = node.devices.reduce((n, d) => n + d.txRate, 0)
-          const moving = !node.dashed && node.devices.some(carrying)
-          // Into the server for what arrives on an outside device, out of it
-          // for what a bridge carries to its containers (a bridge's transmit
-          // is the host sending into it).
-          const inward = node.lane === "outside" ? rx >= tx : rx > tx
-          return (
-            <AnimatedBeam
-              key={node.id}
-              containerRef={container}
-              fromRef={node.lane === "outside" ? ref : host}
-              toRef={node.lane === "outside" ? host : ref}
-              shape="s"
-              startXOffset={port}
-              endXOffset={-port}
-              reverse={node.lane === "outside" ? !inward : inward}
-              still={!moving}
-              dashed={node.dashed}
-              tone={node.tone ?? "default"}
-              duration={pulseDuration(rx + tx)}
-              delay={(index % 5) * 0.3}
-              className={cn("transition-opacity max-lg:hidden", !lit(node.id) && "opacity-15")}
-            />
-          )
-        })}
-
-        <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(2.5rem,6vw,6rem)_minmax(0,0.9fr)_clamp(2.5rem,6vw,6rem)_minmax(0,1fr)] lg:items-center">
-          <Lane title="Outside" className="lg:text-right">
-            {outside.map((node) => (
-              <NodeItem
-                key={node.id}
-                node={node}
-                nodeRef={refs.get(node.id)}
-                align="end"
-                dim={!lit(node.id)}
-                {...watch(node.id)}
-              />
-            ))}
-          </Lane>
-
-          <div aria-hidden className="max-lg:hidden" />
-
-          <div className="flex min-w-0 justify-center">
-            <WireNode
-              nodeRef={host}
-              align="center"
-              mark={<WireHost />}
-              eyebrow="This server"
-              title={<span className="block truncate">{overview.hostname || "This server"}</span>}
-              hint={
-                <>
-                  <span className={cn("block", !firewall.available && "text-warning")}>
-                    {firewallUnread
-                      ? "firewall unread"
-                      : !firewall.available
-                        ? "no firewall"
-                        : !firewall.enabled
-                          ? `${firewall.backend} not enforcing`
-                          : `${firewall.backend} · ${firewall.incoming ?? "—"} inbound`}
-                  </span>
-                  <span className="block">
-                    {overview.forwarding.ipv4 ? "routing on" : "routing off"}
-                    {overview.gateway.forwards > 0 &&
-                      ` · ${overview.gateway.forwards} forward${overview.gateway.forwards === 1 ? "" : "s"}`}
-                    {overview.gateway.nat > 0 && ` · NAT`}
-                  </span>
-                  {overview.gateway.dropped > 0 && (
-                    <span className="numeric block">
-                      {overview.gateway.dropped.toLocaleString()} refused
-                    </span>
-                  )}
-                </>
-              }
-            />
-          </div>
-
-          <div aria-hidden className="max-lg:hidden" />
-
-          <Lane title="Inside">
-            {inside.map((node) => (
-              <NodeItem
-                key={node.id}
-                node={node}
-                nodeRef={refs.get(node.id)}
-                align="start"
-                dim={!lit(node.id)}
-                {...watch(node.id)}
-              />
-            ))}
-          </Lane>
-        </div>
-      </div>
-    </div>
+    <WireFlow
+      className="animate-rise"
+      hubShare={0.9}
+      related={related}
+      start={{ title: "Outside", nodes: lane("outside") }}
+      end={{ title: "Inside", nodes: lane("inside") }}
+      hub={{
+        className: HUB_ROOM,
+        mark: <WireHost />,
+        eyebrow: "This server",
+        title: <span className="block truncate">{overview.hostname || "This server"}</span>,
+        hint: (
+          <>
+            <span className={cn("block", !firewall.available && "text-warning")}>
+              {firewallUnread
+                ? "firewall unread"
+                : !firewall.available
+                  ? "no firewall"
+                  : !firewall.enabled
+                    ? `${firewall.backend} not enforcing`
+                    : `${firewall.backend} · ${firewall.incoming ?? "—"} inbound`}
+            </span>
+            <span className="block">
+              {overview.forwarding.ipv4 ? "routing on" : "routing off"}
+              {overview.gateway.forwards > 0 &&
+                ` · ${overview.gateway.forwards} forward${overview.gateway.forwards === 1 ? "" : "s"}`}
+              {overview.gateway.nat > 0 && ` · NAT`}
+            </span>
+            {/* The connections and what was refused were tiles of their own
+                under the picture; they are this server's, so they are said
+                on it. */}
+            <span className="numeric block" data-testid="hub-connections">
+              {plural(overview.connections.total, "connection")}
+              {" · "}
+              {overview.connections.fromInternet.toLocaleString()} from the internet
+            </span>
+            <span className="numeric block">
+              {overview.connections.listening.toLocaleString()} listening
+              {overview.gateway.dropped > 0 && (
+                <span title={refusedBy(overview)}>
+                  {" · "}
+                  {overview.gateway.dropped.toLocaleString()} refused
+                </span>
+              )}
+            </span>
+          </>
+        ),
+      }}
+    />
   )
 }
 
-function Lane({
-  title,
-  className,
-  children,
+/**
+ * Room over and under this server's mark for the lines that hang under it:
+ * on a server with one device a side the picture is no taller than the mark,
+ * and its words ran into the section below.
+ */
+const HUB_ROOM = "lg:py-28"
+
+/** What did the refusing, for the figure's hover: the lists and limits in force. */
+function refusedBy(overview: NetworkOverview) {
+  const { blocklists, limits } = overview.gateway
+  return blocklists + limits === 0
+    ? "no blocklist or rate limit yet"
+    : `by ${plural(blocklists, "blocklist")} and ${plural(limits, "limit")} since loaded`
+}
+
+/**
+ * The picture before its first read: the hub and as many grey rows a side as
+ * the last visit drew, so the blocks under it stand where they will.
+ */
+export function TopologyLoading({
+  outside = 3,
+  inside = 3,
 }: {
-  title: string
-  className?: string
-  children: React.ReactNode
+  outside?: number
+  inside?: number
 }) {
   return (
-    <section className={cn("min-w-0", className)} aria-label={title}>
-      <p className="eyebrow mb-4 lg:hidden">{title}</p>
-      <ol className="flex flex-col gap-5">{children}</ol>
-    </section>
+    <WireFlow
+      loading
+      hubShare={0.9}
+      start={{ title: "Outside", nodes: [], loadingRows: outside }}
+      end={{ title: "Inside", nodes: [], loadingRows: inside }}
+      hub={{ className: HUB_ROOM, mark: <WireHost />, eyebrow: "This server" }}
+    />
   )
 }
 
-function NodeItem({
-  node,
-  nodeRef,
-  align,
-  dim,
-  ...handlers
-}: {
-  node: Node
-  nodeRef?: RefObject<HTMLDivElement | null>
-  align: "start" | "end"
-  dim: boolean
-} & React.HTMLAttributes<HTMLLIElement>) {
-  const mark = node.href ? (
-    <Link
-      href={node.href}
-      aria-label={node.name ?? (typeof node.title === "string" ? node.title : undefined)}
-      className="rounded-xl focus-ring"
-    >
-      {node.mark}
-    </Link>
-  ) : (
-    node.mark
-  )
-  return (
-    <li
-      {...handlers}
-      data-node={node.id}
-      data-dim={dim ? "" : undefined}
-      className={cn("min-w-0 transition-opacity", dim && "opacity-40")}
-    >
-      <WireNode
-        nodeRef={nodeRef}
-        align={align}
-        mark={mark}
-        eyebrow={node.eyebrow}
-        title={node.title}
-        hint={node.hint}
-      />
-    </li>
-  )
+/**
+ * A node as the picture draws it, with its wire read from its devices: it
+ * carries while one of them moves, runs the way most of the bytes go — into
+ * the server for what arrives on an outside device, out of it for what a
+ * bridge carries to its containers (a bridge's transmit is the host sending
+ * into it) — and pulses faster the busier they are.
+ */
+function flowNode(node: Node): WireFlowNode {
+  const rx = node.devices.reduce((n, d) => n + d.rxRate, 0)
+  const tx = node.devices.reduce((n, d) => n + d.txRate, 0)
+  const inward = node.lane === "outside" ? rx >= tx : rx > tx
+  return {
+    id: node.id,
+    mark: node.mark,
+    eyebrow: node.eyebrow,
+    title: node.title,
+    hint: node.hint,
+    name: node.name,
+    href: node.href,
+    line: {
+      state: node.tone === "warning" ? "warning" : "up",
+      moving: !node.dashed && node.devices.some(carrying),
+      dashed: node.dashed,
+      reverse: node.lane === "outside" ? !inward : inward,
+      duration: pulseDuration(rx + tx),
+    },
+  }
 }
 
 /** In and out as words, for the hint under a node and the stacked picture. */
@@ -444,7 +386,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
       ),
       devices: [l],
       dashed: !l.adminUp,
-      href: `/network/interfaces?device=${encodeURIComponent(l.name)}`,
+      href: deviceHref(l.name),
     })
   }
   if (!links.some((l) => l.managed && l.role === "bridge")) {

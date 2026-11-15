@@ -31,6 +31,7 @@ import {
   targetWords,
   windowWords,
 } from "@/components/database/ops/pitr-model"
+import { ArchivePathPicture } from "@/components/database/ops/pitr-picture"
 import { RestorePitr } from "@/components/database/ops/pitr-restore"
 import { SetupPitr } from "@/components/database/ops/pitr-setup"
 import type {
@@ -59,7 +60,7 @@ import {
 } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ScheduleBuilder, scheduleExpression, scheduleFields } from "@/components/schedule-builder"
-import { EmptyState, LoadingPanel, Notice } from "@/components/state"
+import { LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -272,77 +273,74 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
     ) : undefined
 
   const roomy = width === 0 || width >= COMMANDS_FROM
-  const offered = archive ? mayBackup || mayAdmin : Boolean(data?.available && maySetup)
-  const commands = !offered ? null : archive ? (
-    <>
-      {mayBackup && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || !data?.running}
-          onClick={() => setAsking({ kind: "point" })}
-        >
-          <Pin />
-          Mark a restore point
-        </Button>
-      )}
-      {mayBackup && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || !data?.running}
-          onClick={() => void start("/pitr/backup", {})}
-        >
-          <Database />
-          Take a base backup
-        </Button>
-      )}
-      {mayAdmin && (
-        <Button
-          size="sm"
-          disabled={busy || !recoverable}
-          onClick={() => setAsking({ kind: "restore", archive, covers: data.window })}
-        >
-          <ClockRewind />
-          Recover to a moment
-        </Button>
-      )}
-      {(mayAdmin || maySetup) && (
-        <VerbActions
-          menuLabel="More point-in-time recovery actions"
-          verbs={[
-            ...(mayAdmin
-              ? [
-                  {
-                    key: "schedule",
-                    label: "Change schedule and retention",
-                    icon: Pencil,
-                    run: () => setAsking({ kind: "schedule", archive }),
-                  },
-                ]
-              : []),
-            ...(maySetup
-              ? [
-                  {
-                    key: "off",
-                    label: "Turn off",
-                    icon: StopCircle,
-                    danger: true,
-                    disabled: busy || !data?.running,
-                    run: () => setAsking({ kind: "off", archive }),
-                  },
-                ]
-              : []),
-          ]}
-        />
-      )}
-    </>
-  ) : (
-    <Button size="sm" disabled={busy} onClick={() => setAsking({ kind: "setup" })}>
-      <ClockRewind />
-      Set up point-in-time recovery
-    </Button>
-  )
+  // With no archive the title line holds no command: the one there is, setting
+  // it up, stands under the picture of what is missing.
+  const commands =
+    !archive || !(mayBackup || mayAdmin) ? null : (
+      <>
+        {mayBackup && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !data?.running}
+            onClick={() => setAsking({ kind: "point" })}
+          >
+            <Pin />
+            Mark a restore point
+          </Button>
+        )}
+        {mayBackup && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !data?.running}
+            onClick={() => void start("/pitr/backup", {})}
+          >
+            <Database />
+            Take a base backup
+          </Button>
+        )}
+        {mayAdmin && (
+          <Button
+            size="sm"
+            disabled={busy || !recoverable}
+            onClick={() => setAsking({ kind: "restore", archive, covers: data.window })}
+          >
+            <ClockRewind />
+            Recover to a moment
+          </Button>
+        )}
+        {(mayAdmin || maySetup) && (
+          <VerbActions
+            menuLabel="More point-in-time recovery actions"
+            verbs={[
+              ...(mayAdmin
+                ? [
+                    {
+                      key: "schedule",
+                      label: "Change schedule and retention",
+                      icon: Pencil,
+                      run: () => setAsking({ kind: "schedule", archive }),
+                    },
+                  ]
+                : []),
+              ...(maySetup
+                ? [
+                    {
+                      key: "off",
+                      label: "Turn off",
+                      icon: StopCircle,
+                      danger: true,
+                      disabled: busy || !data?.running,
+                      run: () => setAsking({ kind: "off", archive }),
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        )}
+      </>
+    )
 
   return (
     <Panel
@@ -392,13 +390,19 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
 
           {archive ? (
             <ArchiveReading pitr={data} archive={archive} width={width} />
-          ) : data.available ? (
-            <EmptyState
-              icon={ClockRewind}
-              title={`The log of ${data.container} is not archived`}
-              description={`With its write-ahead log archived, ${name} can be recovered as it was at any second of the last days, not only at its last dump. The log and a nightly base backup go to a directory, S3 or Backblaze B2, encrypted.`}
-              action={
-                maySetup && (
+          ) : (
+            // The path the log would take, one sentence and the one command.
+            // Where it cannot be set up, the same picture under the server's
+            // own reason, and no command.
+            <div data-slot="pitr-empty" className="space-y-4 lg:space-y-1">
+              <ArchivePathPicture container={data.container ?? ""} />
+              <div className="flex min-w-0 flex-col items-center gap-3 text-center">
+                <p className="max-w-prose text-body text-pretty">
+                  {data.available
+                    ? `The log of ${data.container} is not archived: ${name} can be recovered only as it was at a dump.`
+                    : data.reason}
+                </p>
+                {data.available && maySetup && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -408,11 +412,9 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
                     <ClockRewind />
                     Set up point-in-time recovery
                   </Button>
-                )
-              }
-            />
-          ) : (
-            <FormNote>{data.reason}</FormNote>
+                )}
+              </div>
+            </div>
           )}
 
           <RestoredCopies

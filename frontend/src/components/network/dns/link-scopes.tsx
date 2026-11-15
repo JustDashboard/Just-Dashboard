@@ -10,7 +10,9 @@ import type { DNSView } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, OptionRow } from "@/components/form"
 import { Detail, DetailList } from "@/components/page"
-import { Row, RowList } from "@/components/row-list"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { NetworkDevice } from "@/components/icons"
+import { ProductLogo, interfaceProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -18,6 +20,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { NetworkReadWarning } from "@/components/network/read-warning"
+import { GhostRows } from "@/components/network/dns/ghost"
 import { encryptionOf } from "@/components/network/dns/resolvers"
 import {
   splitDNSDraft,
@@ -36,10 +39,26 @@ type Link = DNSView["resolved"]["links"][number]
  * corp.example go to the VPN's server" — is written through the link's native
  * profile, with the same temporary apply and reconnection confirmation as
  * every other native profile change.
+ *
+ * A link is a card of one height whatever it carries: its name over its
+ * servers and domains, its transport, its DNSSEC setting and its route in
+ * columns that line up down the list. For an administrator the card opens the
+ * link's split DNS; for anyone else it is a reading, with no arrow.
  */
-export function LinkScopes({ view, onChanged }: { view: DNSView; onChanged: () => void }) {
+export function LinkScopes({
+  view,
+  rows,
+  onChanged,
+}: {
+  /** Undefined while the first read is out. */
+  view?: DNSView
+  /** How many links the list held last time, for the height it waits at. */
+  rows: number
+  onChanged: () => void
+}) {
   const { can } = useAuth()
   const [open, setOpen] = useState<string>()
+  if (!view) return rows > 0 ? <GhostRows rows={rows} /> : null
   const links = view.resolved.links
   return (
     <>
@@ -50,7 +69,7 @@ export function LinkScopes({ view, onChanged }: { view: DNSView; onChanged: () =
             : "systemd-resolved is not running, so no link has a DNS scope."}
         </EmptyNote>
       ) : (
-        <RowList>
+        <ChoiceList>
           {links.map((link) => (
             <LinkRow
               key={link.name}
@@ -58,7 +77,7 @@ export function LinkScopes({ view, onChanged }: { view: DNSView; onChanged: () =
               onSplit={can("system.admin") ? () => setOpen(link.name) : undefined}
             />
           ))}
-        </RowList>
+        </ChoiceList>
       )}
       <SidePanel
         open={Boolean(open)}
@@ -89,11 +108,12 @@ function LinkRow({ link, onSplit }: { link: Link; onSplit?: () => void }) {
   const encryption = encryptionOf(link.dnsOverTLS)
   const route = link.defaultRoute ? "Default route" : "Routed names only"
   return (
-    <Row
-      title={link.name}
-      mono
-      subtitle={
-        <>
+    <ChoiceRow
+      leading={<ProductLogo id={interfaceProduct(link.name)} size="sm" fallback={NetworkDevice} />}
+      title={<span className="align-top font-mono">{link.name}</span>}
+      verb={`Edit split DNS for ${link.name}`}
+      description={
+        <span className="align-top font-mono">
           {[
             link.servers.length > 0 ? link.servers.join(" ") : "no servers",
             routing.length > 0 && `routes ${routing.join(" ")}`,
@@ -101,29 +121,23 @@ function LinkRow({ link, onSplit }: { link: Link; onSplit?: () => void }) {
           ]
             .filter(Boolean)
             .join(" · ")}
-          {/* On a phone the readings at the row's edge give way to its name. */}
-          <span className="sm:hidden"> · {route.toLowerCase()}</span>
-        </>
+          {/* On a phone the readings at the card's edge give way to its name. */}
+          <span className="align-top font-sans sm:hidden"> · {route.toLowerCase()}</span>
+        </span>
       }
+      disabled={!onSplit}
+      onSelect={onSplit}
       trailing={
         <>
-          <Tag className="max-md:hidden">
-            {encryption === "plain" ? "classic" : `DoT ${link.dnsOverTLS}`}
-          </Tag>
-          <Tag className="max-md:hidden">DNSSEC {link.dnssec || "default"}</Tag>
-          <span className="max-sm:hidden">
+          <span className="w-28 max-lg:hidden">
+            <Tag>{encryption === "plain" ? "classic DNS" : `DoT ${link.dnsOverTLS}`}</Tag>
+          </span>
+          <span className="w-32 max-lg:hidden">
+            <Tag>DNSSEC {link.dnssec || "default"}</Tag>
+          </span>
+          <span className="w-36 max-sm:hidden">
             <Status tone={link.defaultRoute ? "running" : "notice"} label={route} />
           </span>
-          {onSplit && (
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={onSplit}
-              aria-label={`Edit split DNS for ${link.name}`}
-            >
-              Split DNS
-            </Button>
-          )}
         </>
       }
     />

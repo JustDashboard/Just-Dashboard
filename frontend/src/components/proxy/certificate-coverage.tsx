@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import { useRouter } from "next/navigation"
 import type { CertificateCoverage, CoveredName } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -8,7 +9,8 @@ import { ErrorState, LoadingRows } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import type { PollState } from "@/hooks/use-poll"
-import { useQuerySelection } from "@/hooks/use-query-selection"
+import { useProxyRead } from "@/components/proxy/proxy-context"
+import { certificatesHref, sheetRedirect } from "@/components/proxy/certificate-paths"
 
 const STATE: Record<CoveredName["state"], { tone: DotTone; label: string }> = {
   served: { tone: "running", label: "Covered" },
@@ -32,7 +34,12 @@ export function CertificateCoveragePanel({
   coverage: PollState<CertificateCoverage>
   onIssue?: (names: string[]) => void
 }) {
-  const [, select] = useQuerySelection("cert")
+  // A certificate in either list opens on its own page; it opened the sheet
+  // over the list at ?cert= before a certificate had one.
+  const router = useRouter()
+  const certs = useProxyRead("certs")
+  const select = (path: string) =>
+    router.push(sheetRedirect(certs.data, path) ?? certificatesHref())
   const names = useMemo(
     () =>
       [...(coverage.data?.names ?? [])].sort(

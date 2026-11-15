@@ -174,3 +174,23 @@ func TestDNSCandidatesAreBounded(t *testing.T) {
 		t.Fatalf("unbounded/wrong family: %#v %v", r, err)
 	}
 }
+
+// The report links each layer to the page that owns it; a path that is not a
+// page sends the reader to the not-found screen.
+func TestOwnerLayerLinksToThePortsPage(t *testing.T) {
+	skipped, err := Investigate(context.Background(), pathRequest(), Providers{
+		DNS: func(context.Context, Request) (DNSAnswer, error) { return DNSAnswer{}, fmt.Errorf("unavailable") },
+	})
+	if err != nil || findEvidence(t, skipped, "owner").OwnerPath != "/proxy/ports" {
+		t.Fatalf("skipped owner layer links elsewhere: %#v %v", skipped, err)
+	}
+	req := pathRequest()
+	req.Target = "127.0.0.1"
+	req.Measure = false
+	read, err := Investigate(context.Background(), req, Providers{Route: func(context.Context, Request) (netx.RouteLookup, error) {
+		return netx.RouteLookup{Path: netx.Path{Local: true}}, nil
+	}})
+	if err != nil || findEvidence(t, read, "owner").OwnerPath != "/proxy/ports" {
+		t.Fatalf("owner layer links elsewhere: %#v %v", read, err)
+	}
+}

@@ -5,6 +5,9 @@ import type { QdiscStat, ShapeDevice } from "@/lib/types"
 import { delayLabel, type CakeTin } from "@/lib/network-traffic"
 import { Notice } from "@/components/state"
 import { Disclosure } from "@/components/form"
+import { Information } from "@/components/icons"
+import { cn } from "@/lib/utils"
+import { formatKbit } from "./shaping-math"
 import {
   Table,
   TableBody,
@@ -38,6 +41,82 @@ export function tinSummary(tins: CakeTin[] | undefined): string | undefined {
   const busiest = [...tins].sort((a, b) => b.sentPackets - a.sentPackets)[0]
   const peak = Math.max(...tins.map((t) => t.peakDelayUs))
   return `CAKE delay ${delayLabel(busiest.avgDelayUs)} average in ${busiest.name.toLowerCase()} · ${delayLabel(peak)} peak`
+}
+
+/**
+ * What the kernel says of a device's queues, as the lines the Queues table
+ * printed under the device's name: what the queue dropped, held back and is
+ * holding (the leaf's counters where there is a shaper, the root's where
+ * there is not), whether the kernel still holds the saved limits, the upload
+ * CAKE profile and the delay it measured, the download queue on its IFB with
+ * its own counters, the card's offloads, the helper and the boot command,
+ * and why a device cannot be shaped. Every line is drawn only where the
+ * device has it.
+ */
+export function QueueEvidence({ device }: { device: ShapeDevice }) {
+  const stat = device.leaf ?? device.root
+  const verification = device.verification
+  const upload = tinSummary(device.root?.tins)
+  const download = tinSummary(device.sqm?.queue?.tins)
+  if (!stat && !verification && !device.upload && !device.sqm && !device.guard) return null
+  return (
+    <div
+      aria-label={`${device.name} queue evidence`}
+      className="flex min-w-0 flex-col gap-1.5 text-hint leading-relaxed text-muted-foreground"
+    >
+      {stat && (
+        <p className="numeric text-foreground">
+          {num(stat.drops)} dropped · {num(stat.overlimits)} over limit · {bytes(stat.backlog)} held
+        </p>
+      )}
+      {verification && (
+        <p className={cn(verification.status === "drift" && "text-warning")}>
+          {verification.status === "verified"
+            ? "Kernel shaping matches saved limits"
+            : verification.status === "drift"
+              ? "Kernel shaping differs from saved limits"
+              : "Kernel shaping could not be verified"}
+          {verification.reason && ` · ${verification.reason}`}
+        </p>
+      )}
+      {device.upload && (
+        <p>
+          Upload CAKE · {device.upload.diffserv} · {device.upload.flowMode}
+          {device.upload.overhead !== 0 && ` · overhead ${device.upload.overhead}`}
+          {device.upload.linkLayer !== "noatm" && ` · ${device.upload.linkLayer}`}
+        </p>
+      )}
+      {upload && <p>Upload {upload}</p>}
+      {device.sqm && (
+        <div className="flex flex-col gap-1.5">
+          <p>
+            Download SQM · CAKE on <span className="font-mono">{device.sqm.ifb}</span> ·{" "}
+            {formatKbit(device.ingressKbit)} · {device.sqm.diffserv} · {device.sqm.flowMode}
+          </p>
+          {device.sqm.queue && (
+            <p className="numeric">
+              IFB: {num(device.sqm.queue.packets)} packets · {num(device.sqm.queue.drops)} dropped ·{" "}
+              {bytes(device.sqm.queue.backlog)} held
+            </p>
+          )}
+          {download && <p>Download {download}</p>}
+          <OffloadLine device={device} />
+          <p>
+            Host helper {device.sqm.helper.status} · loaded boot command {device.sqm.boot.status}
+          </p>
+          {(device.sqm.helper.reason || device.sqm.boot.reason) && (
+            <p>{device.sqm.helper.reason || device.sqm.boot.reason}</p>
+          )}
+        </div>
+      )}
+      {device.guard && (
+        <p className="flex items-start gap-1.5">
+          <Information aria-hidden className="mt-0.5 size-3 shrink-0" />
+          {device.guard}
+        </p>
+      )}
+    </div>
+  )
 }
 
 /**

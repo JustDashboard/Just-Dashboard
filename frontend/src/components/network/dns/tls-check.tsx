@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { post } from "@/lib/api"
 import type { DNSTLSCheck, DNSTLSReport } from "@/lib/types"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -27,10 +28,20 @@ const STATE: Record<
  * The DNS over TLS setting says what resolved insists on; this says what the
  * servers would show it. A server without a name is listed with why it cannot
  * be checked.
+ *
+ * It is a reading taken on a press, so the section is its title, how the last
+ * check went at the far end, and the press on the title's line; nothing is
+ * drawn under the title until there is a check to draw.
  */
-export function TLSCheck() {
+export function TLSCheck({
+  report,
+  onReport: setReport,
+}: {
+  /** The last check, held by the page so it outlives a look at another view. */
+  report?: DNSTLSReport
+  onReport: (report: DNSTLSReport) => void
+}) {
   const { can } = useAuth()
-  const [report, setReport] = useState<DNSTLSReport>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const check = async () => {
@@ -44,76 +55,86 @@ export function TLSCheck() {
       setBusy(false)
     }
   }
+  if (!can("read")) return null
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          variant="outline"
-          onClick={() => void check()}
-          pending={busy}
-          disabled={!can("read")}
-        >
-          Check certificates
-        </Button>
-        {report && (
-          <span className="numeric text-hint text-muted-foreground">
-            {report.checks.filter((c) => c.state === "trusted").length} of {report.checks.length}{" "}
-            trusted · checked {new Date(report.checkedAt).toLocaleTimeString()}
-          </span>
-        )}
-      </div>
-      {error && (
-        <p role="alert" className="text-body text-destructive">
-          {error}
-        </p>
-      )}
-      {report && (
-        <section aria-label="Certificate checks" className="flex min-w-0 flex-col gap-3">
-          {report.checks.length === 0 ? (
-            <EmptyNote>No configured server names a TLS identity to check.</EmptyNote>
-          ) : (
-            <RowList>
-              {report.checks.map((c) => (
-                <Row
-                  key={c.server}
-                  title={
-                    <>
-                      <span className="font-mono">{c.server}</span>
-                      <span className="font-normal text-muted-foreground"> · {c.scope}</span>
-                    </>
-                  }
-                  subtitle={
-                    c.error ??
-                    [
-                      c.version,
-                      c.issuer && `issued by ${c.issuer}`,
-                      c.notAfter && `valid until ${new Date(c.notAfter).toLocaleDateString()}`,
-                      `${Math.round(c.latencyMs)} ms`,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-                  }
-                  trailing={<Status tone={STATE[c.state].tone} label={STATE[c.state].label} />}
-                >
-                  {c.fingerprint && (
-                    <span className="sr-only">SHA-256 fingerprint {c.fingerprint}</span>
-                  )}
-                </Row>
-              ))}
-            </RowList>
+    <Panel plain>
+      <PanelHeader
+        title="Upstream certificates"
+        actions={
+          <>
+            {report && (
+              <span className="numeric text-hint text-muted-foreground">
+                {report.checks.filter((c) => c.state === "trusted").length} of{" "}
+                {report.checks.length} trusted · checked{" "}
+                {new Date(report.checkedAt).toLocaleTimeString()}
+              </span>
+            )}
+            <Button size="xs" variant="outline" onClick={() => void check()} pending={busy}>
+              Check certificates
+            </Button>
+          </>
+        }
+      />
+      {(error || report) && (
+        <PanelBody className="flex min-w-0 flex-col gap-3">
+          {error && (
+            <p role="alert" className="text-body text-destructive">
+              {error}
+            </p>
           )}
-          {report.omitted.map((o) => (
-            <p key={o.server} className="text-hint break-words text-muted-foreground">
-              <span className="font-mono">{o.server}</span> ({o.label}): not checked — {o.reason}
-            </p>
-          ))}
-          {report.limitations.map((line) => (
-            <p key={line} className="text-hint text-muted-foreground">
-              {line}
-            </p>
-          ))}
-        </section>
+          {report && (
+            <section
+              aria-label="Certificate checks"
+              className="flex min-w-0 animate-rise flex-col gap-3"
+            >
+              {report.checks.length === 0 ? (
+                <EmptyNote>No configured server names a TLS identity to check.</EmptyNote>
+              ) : (
+                <RowList>
+                  {report.checks.map((c) => (
+                    <Row
+                      key={c.server}
+                      title={
+                        <>
+                          <span className="font-mono">{c.server}</span>
+                          <span className="font-normal text-muted-foreground"> · {c.scope}</span>
+                        </>
+                      }
+                      subtitle={
+                        c.error ??
+                        [
+                          c.version,
+                          c.issuer && `issued by ${c.issuer}`,
+                          c.notAfter && `valid until ${new Date(c.notAfter).toLocaleDateString()}`,
+                          `${Math.round(c.latencyMs)} ms`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
+                      }
+                      trailing={<Status tone={STATE[c.state].tone} label={STATE[c.state].label} />}
+                    >
+                      {c.fingerprint && (
+                        <span className="sr-only">SHA-256 fingerprint {c.fingerprint}</span>
+                      )}
+                    </Row>
+                  ))}
+                </RowList>
+              )}
+              {report.omitted.map((o) => (
+                <p key={o.server} className="text-hint break-words text-muted-foreground">
+                  <span className="font-mono">{o.server}</span> ({o.label}): not checked —{" "}
+                  {o.reason}
+                </p>
+              ))}
+              {report.limitations.map((line) => (
+                <p key={line} className="text-hint text-muted-foreground">
+                  {line}
+                </p>
+              ))}
+            </section>
+          )}
+        </PanelBody>
       )}
-    </div>
+    </Panel>
   )
 }

@@ -29,6 +29,7 @@ import { DiffView } from "@/components/files/diff-view"
 import { unifiedDiff } from "@/components/files/diff"
 import { isImage, rawUrl } from "@/components/files/media"
 import { EditorSurface } from "./editor-surface"
+import { EditorToolbar } from "./editor-toolbar"
 import { ContentConflict } from "./content-conflict"
 import { FileIcon } from "./file-icon"
 import { handoffDraft, takeDraft } from "./editor-handoff"
@@ -91,6 +92,7 @@ export function FileEditorSheet({
   revealLine,
   destination,
   onDirtyChange,
+  grouped,
 }: {
   path: string | null
   onOpenChange: (open: boolean) => void
@@ -99,6 +101,12 @@ export function FileEditorSheet({
   revealLine?: number
   destination?: boolean
   onDirtyChange?: (dirty: boolean) => void
+  /**
+   * Draw the commands as the Files strip draws its own (`editor-toolbar.tsx`):
+   * grouped, one row on a phone, the rest in a menu. The Files pages ask for
+   * it; an editor opened from another page keeps the row it had.
+   */
+  grouped?: boolean
 }) {
   return (
     <FileEditorPanel
@@ -112,6 +120,7 @@ export function FileEditorSheet({
       revealLine={revealLine}
       destination={destination}
       onDirtyChange={onDirtyChange}
+      grouped={grouped}
     />
   )
 }
@@ -124,6 +133,7 @@ function FileEditorPanel({
   revealLine,
   destination,
   onDirtyChange,
+  grouped,
 }: {
   path: string | null
   onOpenChange: (open: boolean) => void
@@ -132,6 +142,7 @@ function FileEditorPanel({
   revealLine?: number
   destination?: boolean
   onDirtyChange?: (dirty: boolean) => void
+  grouped?: boolean
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -207,6 +218,10 @@ function FileEditorPanel({
         if (destination === path) {
           setFile((f) => (f ? { ...f, content: draft, revision: result.revision } : f))
           setConflict(false)
+          // The review is the last look before Save. Its button is drawn
+          // whether or not there is anything to review, so once the look is
+          // over the editor comes back rather than "No changes".
+          if (grouped) setReviewing(false)
         }
         onSaved?.(destination)
       } catch (err) {
@@ -217,7 +232,7 @@ function FileEditorPanel({
         setSaving(false)
       }
     },
-    [canEdit, draft, file, onSaved, path, saving],
+    [canEdit, draft, file, grouped, onSaved, path, saving],
   )
 
   const applyMode = async () => {
@@ -251,6 +266,49 @@ function FileEditorPanel({
             .catch(setError)
       },
     })
+
+  const caret =
+    `Ln ${cursor.line}, Col ${cursor.column}` +
+    (cursor.selected > 0 ? ` · ${cursor.selected} selected` : "") +
+    ` · ${bytes(new TextEncoder().encode(draft).length)}`
+
+  const openFull = () => {
+    if (!path) return
+    handoffDraft(path, draft, language, file)
+    router.push(editorHref(path, root, revealLine))
+  }
+
+  // The grouped row is drawn while the file is still being read, with what
+  // needs the file or the editor disabled, so the code arrives under it
+  // rather than pushing a row in above itself. A file that could not be
+  // read, or that is not text, has no commands to offer.
+  const toolbar =
+    grouped && !error && !file?.binary && !(path && !file && isImage(path)) ? (
+      <EditorToolbar
+        loading={!file}
+        language={language}
+        languages={LANGUAGES}
+        onLanguage={setLanguage}
+        commands={commands}
+        canEdit={canEdit}
+        dirty={dirty}
+        wrap={wrap}
+        onWrap={setWrap}
+        minimap={minimap}
+        onMinimap={setMinimap}
+        fontSize={fontSize}
+        onFontSize={setFontSize}
+        indent={indent}
+        onIndent={setIndent}
+        onFormat={() => format?.()}
+        reviewing={reviewing}
+        onReview={setReviewing}
+        onRevert={revert}
+        fullscreen={destination ? undefined : fullscreen}
+        onFullscreen={destination ? undefined : setFullscreen}
+        onOpenFull={destination ? undefined : openFull}
+      />
+    ) : undefined
 
   // Closing with unsaved work asks first. Every other way out of this panel —
   // Escape, the overlay, the X — comes through here, so one guard covers them
@@ -297,8 +355,8 @@ function FileEditorPanel({
       description={path ?? undefined}
       bodyClassName="flex min-h-0 flex-1 flex-col"
       actions={
-        file &&
-        !file.binary && (
+        toolbar ??
+        (file && !file.binary && (
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             <Select value={language} onValueChange={setLanguage}>
               <SelectTrigger size="sm" aria-label="File language" className="h-8 w-32 text-body">
@@ -404,22 +462,13 @@ function FileEditorPanel({
               Commands
             </Button>
             {!destination && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto"
-                onClick={() => {
-                  if (!path) return
-                  handoffDraft(path, draft, language, file)
-                  router.push(editorHref(path, root, revealLine))
-                }}
-              >
+              <Button size="sm" variant="outline" className="ml-auto" onClick={openFull}>
                 <External className="size-3.5" />
                 Open full editor
               </Button>
             )}
           </div>
-        )
+        ))
       }
       footer={
         file ? (
@@ -449,10 +498,10 @@ function FileEditorPanel({
             )}
             <span className="flex-1" />
             {!file.binary && (
-              <span className="numeric text-xs text-muted-foreground">
-                Ln {cursor.line}, Col {cursor.column}
-                {cursor.selected > 0 && ` · ${cursor.selected} selected`} ·{" "}
-                {bytes(new TextEncoder().encode(draft).length)}
+              <span
+                className={cn("numeric text-xs text-muted-foreground", grouped && "max-lg:hidden")}
+              >
+                {caret}
               </span>
             )}
             {canEdit && !file.binary && (
@@ -482,7 +531,13 @@ function FileEditorPanel({
           {path}
         </span>
         <span className="shrink-0">
-          {dirty ? "Unsaved changes" : canEdit ? "Saved to disk" : "Read only"}
+          {/* A phone's footer holds the mode and the two saves and nothing
+              more, so where the caret is is said up here instead. */}
+          {grouped && file && !file.binary && <span className="numeric lg:hidden">{caret} · </span>}
+          {/* Nothing is saved or unsaved about a file that has not been read
+              (the row an embedded editor keeps says it regardless). */}
+          {(file || !grouped) &&
+            (dirty ? "Unsaved changes" : canEdit ? "Saved to disk" : "Read only")}
         </span>
       </div>
       {conflict && (

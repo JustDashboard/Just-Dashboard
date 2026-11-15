@@ -319,6 +319,7 @@ export function SortHead({
   onSort,
   align = "left",
   className,
+  after,
 }: {
   label: string
   active: boolean
@@ -326,6 +327,8 @@ export function SortHead({
   onSort: () => void
   align?: "left" | "right"
   className?: string
+  /** Something beside the head's button that is not part of it: what the column means, as an `InfoTip`. */
+  after?: React.ReactNode
 }) {
   const Arrow = descending ? ArrowDown : ArrowUp
   return (
@@ -344,6 +347,7 @@ export function SortHead({
         {label}
         {active && <Arrow aria-hidden className="size-3" />}
       </button>
+      {after && <span className="ml-1 inline-flex align-middle">{after}</span>}
     </TableHead>
   )
 }

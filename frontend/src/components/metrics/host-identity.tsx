@@ -50,6 +50,12 @@ export function HostIdentity({
   facts,
   aside,
   bar,
+  state,
+  command,
+  menu,
+  foot,
+  label,
+  slot = "host-identity",
   className,
 }: {
   /** A `product-logo` id; nothing names the host when it is undefined. */
@@ -67,12 +73,59 @@ export function HostIdentity({
    * empty ground between them, and the operator asked for one bar.
    */
   bar?: boolean
+  /**
+   * The thing's state, beside its title: a `Status` dot and its word. With
+   * `state`, `command` or `menu` the line is laid out as a project's header.
+   */
+  state?: React.ReactNode
+  /** The one brand-faced command at the far end, and anything that sits before it. */
+  command?: React.ReactNode
+  /** The `⋯` menu after the command, holding the rest of the verbs. */
+  menu?: React.ReactNode
+  /**
+   * In a project's layout: where the line itself is narrower than 42rem, the
+   * command and the menu take a row of their own under the facts. For a line
+   * whose title is a name that must be read whole and whose end holds more
+   * than one control: sharing a narrow row, the controls kept theirs and the
+   * name and its facts were left a column a word wide.
+   */
+  foot?: boolean
+  /** The line's landmark name ("About api"): set, the line is a `section`. */
+  label?: string
+  /** The `data-slot`, for a page whose specs know its header by another name. */
+  slot?: string
   className?: string
 }) {
+  if (state !== undefined || command !== undefined || menu !== undefined)
+    return (
+      <ProjectLine
+        tile={
+          logo ?? (
+            <ProductLogo
+              id={mark}
+              fallback={fallback}
+              className="size-10 rounded-lg [&_img]:size-6"
+            />
+          )
+        }
+        title={title}
+        facts={facts}
+        state={state}
+        command={command}
+        menu={menu}
+        aside={aside}
+        foot={foot}
+        label={label}
+        slot={slot}
+        className={className}
+      />
+    )
   return (
     <div
-      data-slot="host-identity"
+      data-slot={slot}
       data-bar={bar || undefined}
+      aria-label={label}
+      role={label ? "region" : undefined}
       className={cn(
         "flex min-w-0 flex-wrap items-center justify-between",
         bar
@@ -121,6 +174,89 @@ export function HostIdentity({
       {aside && <div className="flex max-w-full shrink-0">{aside}</div>}
     </div>
   )
+}
+
+/**
+ * The identity line laid out as a project's header (`deploy/project-shell`),
+ * which the operator named the opening every page should reach: the tile
+ * beside two rows, the title with its state after it on the first and the
+ * facts on the second, the command and its `⋯` menu at the far end across
+ * both. On a phone the tile, the title and the command share the first row,
+ * the state takes the next, and the facts run the full width under them.
+ */
+function ProjectLine({
+  tile,
+  title,
+  facts,
+  state,
+  command,
+  menu,
+  aside,
+  foot,
+  label,
+  slot,
+  className,
+}: {
+  tile: React.ReactNode
+  title: React.ReactNode
+  facts: React.ReactNode
+  state?: React.ReactNode
+  command?: React.ReactNode
+  menu?: React.ReactNode
+  aside?: React.ReactNode
+  foot?: boolean
+  label?: string
+  slot: string
+  className?: string
+}) {
+  const Line = label ? "section" : "div"
+  const line = (
+    <Line
+      aria-label={label}
+      data-slot={slot}
+      data-layout="project"
+      className={cn(
+        "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5",
+        className,
+      )}
+    >
+      <div className="flex sm:row-span-2">{tile}</div>
+      <div
+        className={cn(
+          "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:contents",
+          foot && "@max-2xl:col-span-2",
+        )}
+      >
+        {/* A flex box, so a title that is a link or an address sits on the
+            row's centre rather than on the baseline of a taller line box. */}
+        <p className="flex max-w-full min-w-0 text-title font-semibold tracking-tight">{title}</p>
+        {state !== undefined && (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:order-2 max-sm:col-span-3">
+            {state}
+          </div>
+        )}
+      </div>
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-2 max-sm:order-1 sm:row-span-2",
+          // Important, so the row of its own wins over the phone's place for
+          // it whichever of the two rules the sheet happens to write last.
+          foot &&
+            "@max-2xl:order-last! @max-2xl:col-span-3 @max-2xl:row-span-1! @max-2xl:mt-1.5 @max-2xl:flex-wrap",
+        )}
+      >
+        {aside}
+        {command}
+        {menu}
+      </div>
+      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:order-3 sm:col-span-1 sm:col-start-2">
+        {facts}
+      </div>
+    </Line>
+  )
+  // The line measures itself, not the window (§12): a rail beside it takes a
+  // column of its own, so a laptop's worth of window is a tablet's of line.
+  return foot ? <div className="@container min-w-0">{line}</div> : line
 }
 
 /** A fact in the identity line, with the product it names drawn before it. */

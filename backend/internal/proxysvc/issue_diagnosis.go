@@ -167,7 +167,7 @@ func classify(d *IssuanceDiagnosis, kind string, local func(net.IP) (bool, bool)
 		strings.Contains(lower, "authentication") || strings.Contains(lower, "zone_id"):
 		set(d, StageDNSPlugin, "The DNS plugin's access to the zone", "The DNS provider credentials",
 			"The plugin could not edit the zone: check its credentials and that they cover this domain.",
-			DiagnosisLink{"DNS provider credentials", "/proxy/certificates"})
+			DiagnosisLink{"DNS provider credentials", "/proxy/certificates?tab=dns"})
 	case strings.Contains(lower, "txt record") || strings.Contains(lower, "_acme-challenge"):
 		set(d, StageDNS01, "DNS-01 challenge record", "The DNS provider and the plugin's propagation wait",
 			"Check that the plugin's credentials can edit the zone and that the record has propagated before validation; a longer propagation wait often fixes it.",
@@ -207,7 +207,7 @@ func classify(d *IssuanceDiagnosis, kind string, local func(net.IP) (bool, bool)
 	case strings.Contains(lower, "account") && failureLineRe.MatchString(lower) || strings.Contains(lower, "externalaccountrequired") || strings.Contains(lower, "invalidcontact"):
 		set(d, StageAccount, "The ACME account", "The ACME account and its authority",
 			"The authority refused the account: check the contact address, the External Account Binding, or register again.",
-			DiagnosisLink{"The account certbot uses", "/proxy/certificates"})
+			DiagnosisLink{"The account certbot uses", "/proxy/certificates?tab=accounts"})
 	case strings.Contains(lower, "nginx plugin") || strings.Contains(lower, "nginx -c") || strings.Contains(lower, "server block"):
 		set(d, StageInstaller, "Installing into nginx", "This host's nginx configuration",
 			"certbot's nginx plugin could not read or change the configuration; test it, or issue with the webroot method.",

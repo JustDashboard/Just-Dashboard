@@ -2,17 +2,28 @@ import { describe, expect, test } from "bun:test"
 import {
   addressPlan,
   answersTo,
+  attachRefusal,
   endpointsByContainer,
+  filterNetworks,
+  findNetwork,
   hostCapacity,
   isDashboardOwn,
   isUnused,
+  joinedNetworks,
+  memberNames,
+  memberReadings,
   networkChanges,
+  networkHref,
   networkHue,
   networkOrder,
   networkOwner,
+  networkStanding,
   ownerLabel,
   parseV4,
   refusesAttach,
+  removeRefusal,
+  shelfOf,
+  wayOut,
 } from "./networks"
 
 const net = (over) => ({
@@ -269,4 +280,170 @@ test("only a swarm network made without --attachable refuses docker network conn
   expect(refusesAttach({ scope: "local", attachable: false })).toBe(false)
   expect(refusesAttach({ scope: "swarm", attachable: false })).toBe(true)
   expect(refusesAttach({ scope: "swarm", attachable: true })).toBe(false)
+})
+
+describe("a network's page", () => {
+  test("its address is its name, with any view but the first in the query", () => {
+    expect(networkHref("shop_backend")).toBe("/docker/networks/shop_backend")
+    expect(networkHref("shop_backend", "overview")).toBe("/docker/networks/shop_backend")
+    expect(networkHref("shop_backend", "members")).toBe("/docker/networks/shop_backend?tab=members")
+  })
+
+  test("an address names a network by its name before its id", () => {
+    const networks = [net({ id: "abc", name: "lab" }), net({ id: "lab", name: "other" })]
+    expect(findNetwork(networks, "lab").id).toBe("abc")
+    expect(findNetwork(networks, "abc").name).toBe("lab")
+    expect(findNetwork(networks, "gone")).toBeUndefined()
+  })
+
+  test("the rail is the table as it was left: its search and its owner chip", () => {
+    const networks = [
+      net({ name: "bridge", usedBy: ["web"] }),
+      net({
+        name: "shop_default",
+        labels: { "com.docker.compose.project": "shop" },
+        usedBy: ["api"],
+      }),
+      net({ name: "spare", subnets: ["10.9.0.0/24"] }),
+    ]
+    expect(filterNetworks(networks, "", "").map((n) => n.name)).toEqual([
+      "bridge",
+      "shop_default",
+      "spare",
+    ])
+    expect(filterNetworks(networks, "", "compose").map((n) => n.name)).toEqual(["shop_default"])
+    expect(filterNetworks(networks, "", "unused").map((n) => n.name)).toEqual(["spare"])
+    expect(filterNetworks(networks, "10.9", "").map((n) => n.name)).toEqual(["spare"])
+    expect(filterNetworks(networks, " API ", "").map((n) => n.name)).toEqual(["shop_default"])
+    expect(shelfOf("unused")).toBe("unused")
+    expect(shelfOf("anything else")).toBe("")
+  })
+
+  test("where it stands is unread, unused, in use, or how many of its members run", () => {
+    expect(networkStanding(net({ name: "lab", membersKnown: false }))).toEqual({
+      tone: "warning",
+      label: "members unread",
+    })
+    expect(networkStanding(net({ name: "spare" })).label).toBe("unused")
+    expect(networkStanding(net({ name: "none", driver: "null" }))).toEqual({
+      tone: "stopped",
+      label: "nothing attached",
+    })
+    const lab = net({ name: "lab", usedBy: ["a", "b", "c"] })
+    expect(networkStanding(lab)).toEqual({ tone: "running", label: "in use" })
+    expect(networkStanding(lab, 3).label).toBe("in use")
+    expect(networkStanding(lab, 2)).toEqual({ tone: "warning", label: "2 of 3 running" })
+  })
+
+  test("attaching is refused with a reason, or not offered at all", () => {
+    expect(attachRefusal(net({ name: "lab" }))).toBeUndefined()
+    expect(attachRefusal(net({ name: "bridge" }))).toEqual({ hidden: true })
+    expect(attachRefusal(net({ name: "host", driver: "host" }))).toEqual({ hidden: true })
+    expect(attachRefusal(net({ name: "jd", owner: { kind: "dashboard" } })).reason).toMatch(
+      /takes no other containers/,
+    )
+    expect(attachRefusal(net({ name: "o", scope: "swarm" })).reason).toMatch(/--attachable/)
+  })
+
+  test("removing is refused for Docker's own, unread members and a network in use", () => {
+    expect(removeRefusal(net({ name: "spare" }))).toBeUndefined()
+    expect(removeRefusal(net({ name: "bridge" }))).toMatch(/Docker's own/)
+    expect(removeRefusal(net({ name: "lab", membersKnown: false }))).toMatch(/could not be read/)
+    expect(removeRefusal(net({ name: "lab", usedBy: ["a"] }))).toBe(
+      "In use by 1 container — cannot be removed while attached",
+    )
+    expect(removeRefusal(net({ name: "lab", usedBy: ["a", "b"] }))).toMatch(/2 containers/)
+  })
+})
+
+describe("memberReadings", () => {
+  const containers = new Map([
+    ["a", { state: "running", networks: ["lab", "proxy"] }],
+    ["b", { state: "exited", networks: ["lab"] }],
+  ])
+
+  test("before the inspect lands the listing's endpoints are who is on it", () => {
+    const members = memberReadings(
+      {
+        name: "lab",
+        endpoints: [
+          { container: "a", name: "api", ipv4: "10.4.0.3/24" },
+          { container: "b", name: "batch" },
+          { container: "c", name: "unlisted" },
+        ],
+      },
+      containers,
+    )
+    expect(members.map((m) => [m.name, m.state, m.others])).toEqual([
+      ["api", "running", ["proxy"]],
+      ["batch", "exited", []],
+      ["unlisted", "unknown", []],
+    ])
+    expect(members[0].aliases).toBeUndefined()
+  })
+
+  test("the inspect's members take the socket's state, and its own word on their other networks", () => {
+    const members = memberReadings(
+      {
+        name: "lab",
+        endpoints: [{ container: "a", name: "api" }],
+        members: [
+          { id: "a", name: "api", aliases: ["api", "app"], state: "exited", networks: ["bridge"] },
+          { id: "b", name: "batch", aliases: [], state: "running" },
+          { id: "z", name: "gone", aliases: [], unread: true },
+        ],
+      },
+      containers,
+    )
+    expect(members.map((m) => [m.name, m.state, m.others])).toEqual([
+      ["api", "running", ["bridge"]],
+      ["batch", "exited", []],
+      ["gone", "unknown", []],
+    ])
+    expect(members[2].unread).toBe(true)
+  })
+
+  test("a member answers to its aliases without the short id, else to its name", () => {
+    expect(
+      memberNames({ id: "abcdef123456", name: "db-1", aliases: ["db", "abcdef123456", "db"] }),
+    ).toEqual(["db"])
+    expect(memberNames({ id: "abc", name: "db-1", aliases: [] })).toEqual(["db-1"])
+    expect(memberNames({ id: "abc", name: "db-1" })).toEqual(["db-1"])
+  })
+})
+
+test("the networks a network is joined to are the ones its members are also on, most-joined first", () => {
+  const joined = joinedNetworks([
+    { name: "api", state: "running", others: ["shop_default"] },
+    { name: "worker", state: "exited", others: ["shop_default", "proxy"] },
+    { name: "db", state: "running", others: [] },
+  ])
+  expect(joined).toEqual([
+    { name: "shop_default", through: ["api", "worker"], up: true },
+    { name: "proxy", through: ["worker"], up: false },
+  ])
+})
+
+test("how a network's members leave it follows its driver, its internal flag and a macvlan's parent", () => {
+  expect(wayOut(net({ name: "host", driver: "host" }))).toEqual({ kind: "host" })
+  expect(wayOut(net({ name: "none", driver: "null" }))).toEqual({ kind: "none" })
+  expect(wayOut(net({ name: "back", internal: true, gateway: "10.0.0.1" }))).toEqual({
+    kind: "internal",
+  })
+  expect(wayOut(net({ name: "lab", gateway: "10.4.0.1" }))).toEqual({
+    kind: "gateway",
+    gateway: "10.4.0.1",
+  })
+  expect(
+    wayOut({
+      ...net({ name: "lan", driver: "macvlan", gateway: "192.168.1.1" }),
+      options: { parent: "enp3s0" },
+    }),
+  ).toEqual({ kind: "parent", device: "enp3s0", gateway: "192.168.1.1" })
+  // The listing has no driver options: it is a card's network, named once the inspect lands.
+  expect(wayOut(net({ name: "lan", driver: "macvlan", gateway: "192.168.1.1" }))).toEqual({
+    kind: "parent",
+    device: undefined,
+    gateway: "192.168.1.1",
+  })
 })

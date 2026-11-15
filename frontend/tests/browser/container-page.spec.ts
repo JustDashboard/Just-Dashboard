@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test"
-import { N8N, POSTGRES, RUNNER, STANDALONE, mockContainerPage } from "./container-page-fixture"
+import {
+  N8N,
+  POSTGRES,
+  RUNNER,
+  STANDALONE,
+  WORKER,
+  mockContainerPage,
+} from "./container-page-fixture"
 
 /**
  * One container's page after the 2026-10-08 overhaul, against n8n in a
@@ -217,3 +224,113 @@ for (const width of [390, 1280]) {
     ).toBe(true)
   })
 }
+
+test("the containers stand beside the page, and Alt+↓ walks them with the view carried", async ({
+  page,
+}) => {
+  await mockContainerPage(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${N8N}?tab=env`)
+
+  const rail = page.locator("[data-slot=container-rail]")
+  await expect(rail).toBeVisible()
+  const rows = rail.getByRole("list", { name: "Containers to open" }).getByRole("button")
+  await expect(rows).toHaveCount(6)
+  // The table's own order: what is failing first, then by name.
+  expect(
+    await rows.evaluateAll((all) => all.map((each) => each.getAttribute("aria-label"))),
+  ).toEqual([
+    "automations-runner-1",
+    "automations-n8n-1",
+    "automations-postgres-1",
+    "automations-redis-1",
+    "automations-worker-1",
+    "uptime-kuma",
+  ])
+  const current = rail.getByRole("button", { name: "automations-n8n-1", exact: true })
+  await expect(current).toHaveAttribute("aria-current", "page")
+  await expect(current).toContainText("automations")
+  await expect(rail.getByRole("button", { name: "automations-runner-1" })).toContainText(
+    "restarting",
+  )
+  await expect(rail.getByText("6 containers · failing first")).toBeVisible()
+
+  // A running row with readings and a restarting one without are one height.
+  const heights = await rows.evaluateAll((all) =>
+    all.map((each) => each.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+
+  await page.keyboard.press("Alt+ArrowDown")
+  await expect(page).toHaveURL(new RegExp(`/docker/containers/${POSTGRES}\\?tab=env$`), {
+    timeout: 15_000,
+  })
+  await expect(
+    rail.getByRole("button", { name: "automations-postgres-1", exact: true }),
+  ).toHaveAttribute("aria-current", "page")
+  await page.getByRole("button", { name: "Previous container" }).click()
+  await expect(page).toHaveURL(new RegExp(`/docker/containers/${N8N}\\?tab=env$`))
+  await rail.getByRole("button", { name: "automations-worker-1" }).click()
+  await expect(page).toHaveURL(new RegExp(`/docker/containers/${WORKER}\\?tab=env$`))
+})
+
+test("the rail keeps the table's filters, and still names the container on screen", async ({
+  page,
+}) => {
+  await mockContainerPage(page)
+  // The Containers table was left on its Failing chip.
+  await page.addInitScript(() =>
+    sessionStorage.setItem(
+      "jd.session.state.entry.docker.containers.state.075",
+      JSON.stringify("failing"),
+    ),
+  )
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${N8N}?tab=overview`)
+
+  const rail = page.locator("[data-slot=container-rail]")
+  const rows = rail.getByRole("list", { name: "Containers to open" }).getByRole("button")
+  await expect(rows).toHaveCount(2)
+  // The container on screen first, set apart from what the filter holds.
+  await expect(rows.first()).toHaveAttribute("aria-label", "automations-n8n-1")
+  await expect(rows.first()).toHaveAttribute("aria-current", "page")
+  await expect(rows.nth(1)).toHaveAttribute("aria-label", "automations-runner-1")
+  await expect(rail.getByText("1 of 6 · failing")).toBeVisible()
+
+  await rail.getByRole("button", { name: "Clear filters" }).click()
+  await expect(rows).toHaveCount(6)
+  await rail.getByPlaceholder("Name, image or stack").fill("kuma")
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(1)).toHaveAttribute("aria-label", "uptime-kuma")
+  await rail.getByPlaceholder("Name, image or stack").fill("no-such-container")
+  await expect(rows).toHaveCount(1)
+})
+
+test("on a phone the container's page is one pane with no rail", async ({ page }) => {
+  await mockContainerPage(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/docker/containers/${N8N}?tab=overview`)
+
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("automations-n8n-1")
+  await expect(page.locator("[data-slot=container-rail]")).toBeHidden()
+  await expect(page.getByRole("button", { name: "Next container" })).toBeHidden()
+})
+
+test("beside the rail at 1280 the overview's blocks stack rather than squeeze", async ({
+  page,
+}) => {
+  await mockContainerPage(page)
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await page.goto(`/docker/containers/${N8N}?tab=overview`)
+
+  await expect(page.locator("[data-slot=container-rail]")).toBeVisible()
+  const recent = page.getByRole("heading", { name: "Recent" })
+  const how = page.getByRole("heading", { name: "How it runs" })
+  await expect(how).toBeVisible()
+  // One under the other: side by side they had 330px each for a list of dates and paths.
+  expect((await how.boundingBox())!.y).toBeGreaterThan((await recent.boundingBox())!.y + 100)
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  )
+  expect(overflow).toBeLessThanOrEqual(1)
+})

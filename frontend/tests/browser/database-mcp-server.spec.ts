@@ -96,7 +96,9 @@ const picked = (dialog: Locator, name: string) =>
 
 async function open(page: Page) {
   await page.goto("/databases")
-  await page.getByRole("button", { name: "MCP server" }).click()
+  // A word in the menu at the end of the control center's identity line.
+  await page.getByRole("button", { name: "More about the databases" }).click()
+  await page.getByRole("menuitem", { name: "MCP server" }).click()
   const dialog = dialogOf(page)
   await expect(dialog.getByText("Server URL")).toBeVisible()
   return dialog

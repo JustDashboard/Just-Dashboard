@@ -17,6 +17,7 @@ import { ProjectFavicon } from "@/components/deploy/project-mark"
 import { isActionableProxyError } from "@/components/proxy/site-errors"
 import { useAuth } from "@/hooks/use-auth"
 import { compactCount, errorRateTone, readingHref, share } from "@/components/proxy/site-traffic"
+import { certificateFileHref } from "@/components/proxy/certificate-paths"
 
 /** How many sites and certificates a block names; the rest are one link away. */
 const SHOWN = 5
@@ -398,12 +399,12 @@ function CertificatesBlock({
           ),
           label: `${cert.name} ${reading}`,
           title: `${cert.name} · ${cert.error ?? (cert.expired ? "expired" : `${cert.daysLeft} days left`)}`,
-          // Contract with the Certificates page, which opens the certificate
-          // a ?cert= link names; the page itself is the destination either way.
+          // The certificate's own page, named with its file so two of one
+          // name cannot be confused.
           press: {
             label: `Show ${cert.name} in Certificates`,
             opens: true,
-            onPress: () => router.push(`/proxy/certificates?cert=${encodeURIComponent(cert.path)}`),
+            onPress: () => router.push(certificateFileHref(cert)),
           },
         }
       })}

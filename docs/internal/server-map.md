@@ -155,16 +155,28 @@ of the frame, the zoom controls float at the bottom left (with *Fit*, *All* and 
 inspector's toggle and full screen float at the top right. A failed save still says so in a toast.
 
 Below `lg` (1024 px) the map is the canvas alone, edge to edge, with no rail, inspector, zoom controls
-or full screen. It opens on the address's or last-read system, else the first one, since every system
-at once is too small to read or tap. A finger pans and pinches, and nothing can be dragged. A tap on
+or full screen. It opens on the address's or last-read system, drawn across the phone's width, else
+on the dashboard's own system from its head at no less than half size (a system five boxes wide
+across a phone was a fifth of its size), since every system at once is too small to read or tap. A
+finger pans and pinches, and nothing can be dragged. A tap on
 a box or a system's head floats one button, *Open …*, to its page; a tap on open ground takes it away.
-A phone writes nothing to the account's arrangement.
+A phone writes nothing to the account's arrangement. A page may ask the canvas for more there
+(`MapCanvas panes`): the rail and the inspector as panes of their own over the canvas, and a bar at
+the foot that picks which of the three is shown (`components/phone-panes.tsx`). The databases map
+asks for it; `/map` does not.
 
 ## Reading it
 
 - **The rail** lists every system, grouped by what anchors it, with what it holds in a few words and
   its anchor's dot; a row flies the canvas to its system, which the next visit opens on. The
   canvas's *All* fits every frame. `/map?system=<id>` opens on one system.
+- **The first view** is the system the address or the last visit named, else where the reader left
+  the canvas, else every system at once while their names can be read. Where everything at once
+  would be drawn under two fifths of its size (`READABLE` in `canvas.tsx`), the board's own system
+  is opened instead (`MapBoard.home`: the dashboard's, else the first), from its head and at no
+  less than half size (`ARRIVE`); *Fit* shows the whole of it and *All* is still everything. That
+  choice is the page's and is not written to the arrangement. The databases map names no home and
+  opens on everything.
 - **Choosing a box** lights what it is wired to in its system, draws those lines in the brand's blue
   with how each is known written on them — a pulse travelling the line where both ends are up — and
   steps the rest of the system back. Double-clicking a box, or Enter, opens its page; double-clicking
@@ -173,12 +185,23 @@ A phone writes nothing to the account's arrangement.
   where it has them, *show it with what it is wired to* and *copy the name*; then *Details* (the facts
   the server sends with it), *Wired to* (each line as a `Tag`, a pair the server knows several ways
   named by the surest, `mapViaOrder`, the others in its title) and *Also drawn in*. With a system and
-  no box chosen it is the system's account, box by box; with neither, the list of systems. Pointing
-  at a row rings its box on the canvas.
+  no box chosen it is the system's account, box by box; with neither, the whole server's: *On this
+  server* is a row for each kind (its glyph, its name, how many), and a row lights every box of
+  that kind on every system, steps the rest back and brings them into view; the same row, Escape or
+  open ground lets them go. A board whose figures name no kinds (the databases map's) keeps them as
+  figures. Pointing at a row rings its box on the canvas.
 - **No box spills.** A box's name and state are cut short with an ellipsis rather than wrapping or
   running past its outline, so the sizes `server-systems.ts` lays out are the sizes drawn.
-- **A source that could not be read says so** over the canvas, with its reason, and is never drawn as
-  an empty system (security invariants: an unavailable reading is neither healthy nor a problem).
+- **A source that could not be read says so**, and is never drawn as an empty system (security
+  invariants: an unavailable reading is neither healthy nor a problem). On the server map it is
+  said in the inspector, above whatever is being read, one line per cause (`map/unread.ts`):
+  everything a Docker that did not answer would have listed is "Docker is not answering:
+  containers, stacks and volumes not drawn" with **Open Docker**, the client's own sentence folded
+  behind *What the server said*; another failure is "Domains and certificates not read" with its
+  reason folded; a kind still being read for the first time is "Still reading …". With the
+  inspector put away, and on a phone, the same lines float at the top left of the canvas without
+  the fold. They were one pill per kind over the canvas, each with the daemon's whole error. The
+  databases map (`MapBoard.unread` unset) keeps a line per kind over its canvas.
 - **Keys**: `f` fit the system being read (or every system), `i` the inspector, Enter
   opens the chosen box's page, Escape lets it go; the zoom keys are under *Moving it*.
 
@@ -306,6 +329,11 @@ the danger or warning colour, and the inspector names each with its sessions (`l
 `linked database · 3 sessions`). Either reading may fail and the other is still drawn, with what
 could not be read said over the canvas; both failing is the page's error state.
 
+Below `lg` it is one pane at a time, *Databases*, *Map* and *Inspector*, picked from a bar at the
+foot. A database picked from the rail is shown on the canvas, and so is a link or a kind picked in
+the inspector; the canvas stays drawn under the other two, so it is where it was left. Like the
+server map's, a phone's view keeps nothing against the account.
+
 What differs from `/map` is a `MapBoard` (`components/map/board.ts`): the rail grouped by engine and
 named *Databases*, a diagram summed up as what it feeds, the sessions open and where it runs, and the
 inspector's account of every database at once. `?database=<id>` opens on one. It replaced, in 0.8.6
@@ -350,8 +378,13 @@ center's own copy of that picture went at the same time.
   slide, its pinch and the zoom keys; a mouse sliding the canvas from inside a frame; a system carried
   by its head with everything in it, not taken for a click, kept across a reload and tidied away; no
   box's words running out of it with every name and state stretched; thirty checkouts nothing claims
-  drawn in rows inside their frame, none over another; and a fresh server's offer to deploy with
-  what it could not read. `/map` is one of `design-system.spec.ts`'s surfaces.
+  drawn in rows inside their frame, none over another; a fresh server's offer to deploy with
+  what it is still reading; a crowded server opening on the dashboard's own system at a readable
+  size with nothing written down, a server whose systems can all be read opening on all of them,
+  and the last focus kept over both; what Docker did not answer for as one line in the inspector
+  (and floating once with the inspector away, and on a phone above the first system); and *On this
+  server* as rows of one height that light a kind's boxes. `components/map/unread.test.js` covers
+  the lines' words. `/map` is one of `design-system.spec.ts`'s surfaces.
 - `lib/database-systems.test.js`: a diagram for each database holding only what it is wired to; its
   columns from readers to backups; what two databases share drawn in each; the server map's own
   systems unchanged by it; the topology's readers, sessions, broken links and could-reach lines; a
@@ -359,4 +392,4 @@ center's own copy of that picture went at the same time.
   the other is saved. `tests/browser/database-control-center.spec.ts` (*the map*): the rail by
   engine, a diagram's columns and shapes, the inspector's link words, a diagram carried and kept under
   `boards.databases` beside the server map's own arrangement, what could not be read, and a phone's
-  bare canvas.
+  three panes with the server map's phone left as it was.

@@ -5,7 +5,6 @@ import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/compon
 import { FormNote } from "@/components/form"
 import { Meter } from "@/components/meter"
 import { Notice } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status, StatusDot } from "@/components/status-dot"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
@@ -14,13 +13,13 @@ import {
   copyFinished,
   copyShare,
   importTitle,
-  lagWords,
   progressWords,
   statusWords,
   tableLine,
   tableStateTone,
   tableStateWords,
 } from "@/components/database/import/model"
+import { ReplicationPicture } from "@/components/database/import/picture"
 import type { DbImportLive } from "@/components/database/import/types"
 
 /**
@@ -120,6 +119,13 @@ export function RunStep({
             </div>
           )}
 
+          {/* Drawn from the first moment of a replication, before there is a
+              subscription to read, so the step keeps its shape when one
+              appears. */}
+          {imp.mode === "replication" &&
+            ((running && !subscription) || (replicating && subscription)) && (
+              <ReplicationPicture live={live} />
+            )}
           {imp.mode === "replication" && running && !subscription && (
             <FormNote>
               Making {imp.database}, copying its structure, publishing on the source and
@@ -129,32 +135,10 @@ export function RunStep({
 
           {replicating && subscription && (
             <>
-              <StatGrid columns={4} dense className="-mx-4 border-y border-hairline">
-                <StatTile
-                  label="Tables copied"
-                  value={`${subscription.ready} of ${subscription.tables.length}`}
-                  meter={share}
-                  meterLabel="Tables copied"
-                />
-                <StatTile
-                  label="Behind the source"
-                  value={lagWords(live.lag)}
-                  hint={live.lag && !live.lag.active ? "The slot is not in use" : undefined}
-                  tone={live.lag && !live.lag.active ? "warning" : "default"}
-                />
-                <StatTile
-                  label="Applying changes"
-                  value={subscription.applying ? "Yes" : "No"}
-                  tone={subscription.applying ? "default" : "warning"}
-                />
-                <StatTile
-                  label="Errors"
-                  value={subscription.errors < 0 ? "—" : subscription.errors.toLocaleString()}
-                  hint={subscription.errors < 0 ? "Counted from PostgreSQL 15" : undefined}
-                  tone={subscription.errors > 0 ? "danger" : "default"}
-                />
-              </StatGrid>
-              <ul aria-label="Tables" className="max-h-72 divide-y divide-hairline overflow-y-auto">
+              <ul
+                aria-label="Tables"
+                className="max-h-72 divide-y divide-hairline overflow-y-auto border-t border-hairline"
+              >
                 {subscription.tables.map((table) => (
                   <li
                     key={`${table.schema}.${table.name}`}
@@ -282,7 +266,12 @@ export function RunStep({
         )}
       </FlowPanel>
       {(running || cutting) && (
-        <span aria-hidden className="pointer-events-none absolute inset-0 rounded-xl">
+        // Clipped to the frame: the light's own box is wider than the edge it
+        // lights, and on a phone it reached past the page and scrolled it.
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl"
+        >
           <BorderBeam size={96} duration={4} />
         </span>
       )}

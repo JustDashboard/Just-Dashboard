@@ -49,13 +49,16 @@ export function StreamServers({
   pool,
   onChange,
   hint,
+  warning,
   placeholder,
   picker,
 }: {
   pool: Pool
   onChange: (change: Pool) => void
-  /** The field's hint while there is one server. */
+  /** What the field takes while there is one server, behind its label. */
   hint: React.ReactNode
+  /** Something wrong with the server chosen, said under the field. */
+  warning?: React.ReactNode
   placeholder: string
   /** Beside the first server: a container to forward to. */
   picker?: React.ReactNode
@@ -77,11 +80,12 @@ export function StreamServers({
       <Field
         label={pooled ? "Servers" : "Forward to"}
         htmlFor="stream-upstream"
-        hint={
+        info={
           pooled
             ? "Weight is each server’s share. After max fails failed connects inside the fail window, nginx leaves a server out for that long; a backup takes connections only while no other can."
             : hint
         }
+        hint={pooled ? undefined : warning}
       >
         <div className="space-y-2">
           <ol className="space-y-2">
@@ -185,7 +189,7 @@ export function StreamServers({
       {pooled && (
         <Field
           label="Balancing"
-          hint={BALANCES.find((b) => b.value === (pool.balance ?? "round-robin"))?.hint}
+          info={BALANCES.find((b) => b.value === (pool.balance ?? "round-robin"))?.hint}
         >
           <ToggleGroup
             type="single"

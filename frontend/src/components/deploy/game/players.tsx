@@ -1,32 +1,35 @@
 "use client"
 
-import { useState } from "react"
-import {
-  Logout,
-  Shield,
-  ShieldOff,
-  Slash,
-  UserMinus,
-  UserPlus,
-  Users,
-  Warning,
-} from "@/components/icons"
+import { useEffect, useState } from "react"
+import { Logout, Shield, ShieldOff, Slash, UserMinus, UserPlus } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { clockMinute, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { useSessionState } from "@/lib/view-state"
 import type { GamePlayers as GamePlayersResponse } from "@/lib/types"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { InitialsMark } from "@/components/account/user-avatar"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FormFact } from "@/components/form"
+import { FormFact, InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { GameIdentity, useGameOverview } from "@/components/deploy/game/identity"
+import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
+import {
+  GameIdentity,
+  GameIdentitySkeleton,
+  useGameOverview,
+} from "@/components/deploy/game/identity"
+import { PlayerFace } from "@/components/deploy/game/player-face"
+import {
+  observePlayers,
+  sameRecord,
+  type PlayerRecord,
+  type PlayerSighting,
+} from "@/components/deploy/game/players-model"
 
 type PlayerAction = "op" | "deop" | "whitelist_add" | "whitelist_remove" | "kick" | "ban"
 
@@ -65,11 +68,12 @@ const ACTIONS: Record<PlayerAction, { label: string; progressive: string; done: 
 }
 
 /**
- * Who is on the server, each drawn as a person is drawn everywhere else in
- * the product — initials in a hue picked by their name (§14), the same hue
- * their name takes in the game console's replies — with the moderation verbs
+ * Who is on the server, each drawn the way their game draws them — the head,
+ * in the hue their name takes in the game console's replies — with how long
+ * the page has seen them on in a column of its own, and the moderation verbs
  * declared once (§13): kicking is the one pressed daily and stays inline, the
- * rest go behind one menu, and a ban asks first. While an action is on its way the row says so in the present tense
+ * rest go behind one menu, and a ban asks first. While an action is on its way
+ * the row says so in the present tense, in the column the reading was in,
  * until the server's next answer lands.
  *
  * Player controls appear only when a tested adapter can actually report
@@ -105,6 +109,18 @@ export function GamePlayers({ projectId }: { projectId: number }) {
   const names = players.data?.names ?? []
   const arrived = useArrivals(names)
   const address = overview.data?.address
+  const blueprintId = overview.data?.blueprintId
+  // Since when the page has had each player in an answer; see players-model.
+  const [record, setRecord] = useSessionState<PlayerRecord | undefined>(
+    `deploy.${projectId}.game.players.seen`,
+    undefined,
+  )
+  const answer = players.data?.supported ? players.data : undefined
+  useEffect(() => {
+    if (!answer) return
+    const next = observePlayers(record, answer.names, answer.observedAt)
+    if (!sameRecord(record, next)) setRecord(next)
+  }, [answer, record, setRecord])
 
   const act = async (action: PlayerAction, name: string) => {
     setPending((previous) => ({ ...previous, [name]: { action, sent: false } }))
@@ -144,7 +160,7 @@ export function GamePlayers({ projectId }: { projectId: number }) {
           confirm({
             title: "Ban this player",
             subject: {
-              mark: <InitialsMark name={name} size="sm" />,
+              mark: <PlayerFace name={name} blueprintId={blueprintId} />,
               name,
               facts: address && (
                 <FormFact label="Server" mono>
@@ -163,88 +179,122 @@ export function GamePlayers({ projectId }: { projectId: number }) {
 
   return (
     <div className="space-y-6">
-      {overview.data && (
+      {overview.data ? (
         <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
+      ) : (
+        !overview.error && <GameIdentitySkeleton />
       )}
       <Panel plain>
         <PanelHeader
           title="Players"
           actions={
             players.data?.supported && (
-              <span className="text-hint text-muted-foreground">
-                observed {relativeTime(players.data.observedAt)}
+              <span className="flex items-center gap-3 text-hint text-muted-foreground">
+                {/* A list the game could only partly give says so here, in
+                    the line that says when it was read. */}
+                {players.data.reason && (
+                  <span className="flex items-center gap-1.5">
+                    <Status tone="warning" label="Partial list" />
+                    <InfoTip label="Why the list is partial">{players.data.reason}</InfoTip>
+                  </span>
+                )}
+                <span>observed {relativeTime(players.data.observedAt)}</span>
               </span>
             )
           }
         />
-        <PanelBody className="space-y-3">
-          {players.error ? (
-            <ErrorState error={players.error} />
+        <PanelBody>
+          {players.error && !players.data ? (
+            <ErrorState error={players.error} onRetry={players.refresh} />
           ) : !players.data ? (
             <LoadingRows rows={3} />
           ) : !players.data.supported ? (
-            <Notice title="Player list not available" icon={Slash}>
-              {players.data.reason ??
-                "No tested adapter can report player identities for this server. The console remains available."}
-            </Notice>
-          ) : (
-            <>
-              {players.data.reason && (
-                <Notice title="Partial player list" tone="warning" icon={Warning}>
-                  {players.data.reason}
-                </Notice>
-              )}
-              {names.length === 0 ? (
-                <EmptyState
-                  icon={Users}
-                  title="Nobody is online"
-                  description={
+            <ProjectEmpty
+              title={
+                players.data.status === "unavailable"
+                  ? "No running server to ask who is on"
+                  : "This game cannot report who is online"
+              }
+              reason={players.data.reason}
+            >
+              <EmptyStep href={`/deploy/${projectId}/console`}>Console</EmptyStep>
+            </ProjectEmpty>
+          ) : names.length === 0 ? (
+            <ProjectEmpty
+              title="Nobody is online"
+              reason={
+                <>
+                  Up to {players.data.maximum} can join
+                  {address && (
                     <>
-                      Up to {players.data.maximum} can join
-                      {address && (
-                        <>
-                          {" "}
-                          at <span className="font-mono text-foreground">{address}</span>
-                        </>
-                      )}
-                      .
+                      {" "}
+                      at <span className="font-mono text-foreground">{address}</span>
                     </>
-                  }
-                  className="border-0 py-6"
-                />
-              ) : (
-                <RowList aria-label="Online players">
-                  {names.map((name) => (
-                    <Row
-                      key={name}
-                      className={
-                        arrived.has(name)
-                          ? "group animate-rise transition-colors hover:bg-row-hover"
-                          : "group transition-colors hover:bg-row-hover"
-                      }
-                      leading={<InitialsMark name={name} size="sm" />}
-                      title={name}
-                      trailing={
-                        pending[name] && (
-                          <Status
-                            tone="warning"
-                            label={`${ACTIONS[pending[name].action].progressive}…`}
-                          />
-                        )
-                      }
-                    >
-                      {can("service.control") && (
-                        <VerbActions dim verbs={verbsFor(name)} menuLabel={`Actions for ${name}`} />
-                      )}
-                    </Row>
-                  ))}
-                </RowList>
-              )}
-            </>
+                  )}
+                  .
+                </>
+              }
+            />
+          ) : (
+            <RowList aria-label="Online players">
+              {names.map((name) => {
+                const seen = <SeenFor sighting={record?.players[name]} />
+                return (
+                  <Row
+                    key={name}
+                    className={
+                      arrived.has(name)
+                        ? "group animate-rise transition-colors hover:bg-row-hover"
+                        : "group transition-colors hover:bg-row-hover"
+                    }
+                    leading={<PlayerFace name={name} blueprintId={blueprintId} />}
+                    title={name}
+                    // On a phone the reading is the row's second line; from
+                    // `sm` it is a column, so every player's reads down.
+                    subtitle={<span className="sm:hidden">{seen}</span>}
+                    trailing={
+                      // What is happening to the player replaces the reading
+                      // rather than joining it, so the row keeps its length.
+                      pending[name] ? (
+                        <Status
+                          tone="warning"
+                          label={`${ACTIONS[pending[name].action].progressive}…`}
+                          className="justify-end sm:w-36"
+                        />
+                      ) : (
+                        <span className="numeric w-36 text-right text-hint text-muted-foreground max-sm:hidden">
+                          {seen}
+                        </span>
+                      )
+                    }
+                  >
+                    {can("service.control") && (
+                      <VerbActions dim verbs={verbsFor(name)} menuLabel={`Actions for ${name}`} />
+                    )}
+                  </Row>
+                )
+              })}
+            </RowList>
           )}
         </PanelBody>
       </Panel>
       {dialog}
     </div>
+  )
+}
+
+/**
+ * How long the page has seen a player on: "joined 3m ago" for one it saw
+ * arrive, "on before 14:02" for one who was already there when it first
+ * asked — the game does not say when anybody joined.
+ */
+function SeenFor({ sighting }: { sighting?: PlayerSighting }) {
+  if (!sighting) return null
+  return (
+    <time dateTime={sighting.at}>
+      {sighting.arrived
+        ? `joined ${relativeTime(sighting.at)}`
+        : `on before ${clockMinute(sighting.at)}`}
+    </time>
   )
 }

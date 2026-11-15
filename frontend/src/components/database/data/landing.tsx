@@ -4,18 +4,19 @@ import { useMemo } from "react"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { RankList } from "@/components/rank-list"
-import { Metric, MetricStrip } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { KindGlyph, ROW_GROUPS, ROW_OBJECT_KINDS } from "@/components/database/data/kinds"
 import { schemaSummary } from "@/components/database/data/summary"
 import type { DbCatalog } from "@/components/database/data/types"
-import { compactCount, grouped } from "@/components/database/data/view"
+import { compactCount } from "@/components/database/data/view"
+import { FactsLine } from "@/components/database/workbench/facts-line"
+import { schemaFacts } from "@/components/database/workbench/table-facts"
 
 /**
  * What stands where a table would, before one is chosen: what the schema
- * holds, in figures, and its largest tables one press away.
+ * holds, said in one line, and its largest tables one press away.
  *
  * The place used to say "pick a table" in the middle of an empty frame. The
  * catalogue the rail has just read already knows how many tables there are,
@@ -37,6 +38,14 @@ export function SchemaLanding({
   const summary = useMemo(() => schemaSummary(catalog), [catalog])
   const kindOf = (group: string) => ROW_GROUPS.find((entry) => entry.group === group)!.kind
   const name = catalog.schema || `This ${engine.nouns.container}`
+  const facts = schemaFacts({
+    counts: summary.counts.map(({ group, count }) => {
+      const kind = ROW_OBJECT_KINDS[kindOf(group)]
+      return { key: group, count, one: kind.label.toLowerCase(), many: kind.plural.toLowerCase() }
+    }),
+    rows: summary.rows,
+    size: summary.size,
+  })
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -52,26 +61,11 @@ export function SchemaLanding({
           <EngineMark engine={engine} />
           <div className="min-w-0">
             <h2 className="truncate text-title font-medium">Pick a {engine.nouns.object}</h2>
-            <p className="text-body text-muted-foreground">
-              Its rows open here, to read, filter and edit.
-              {railShown ? " They are listed on the left." : ""}
-            </p>
+            {/* What the schema holds, where a sentence about the page stood
+                over a strip of the same figures as tiles. */}
+            <FactsLine facts={facts} />
           </div>
         </div>
-
-        <MetricStrip>
-          {summary.counts.map(({ group, count }) => (
-            <Metric
-              key={group}
-              label={ROW_OBJECT_KINDS[kindOf(group)].plural}
-              value={grouped(count)}
-            />
-          ))}
-          {summary.rows !== null && (
-            <Metric label="Rows" value={`~${compactCount(summary.rows)}`} hint="estimated" />
-          )}
-          {summary.size !== null && <Metric label="On disk" value={bytes(summary.size)} />}
-        </MetricStrip>
 
         {summary.largest.length > 0 && (
           <section aria-label={`Largest in ${name}`} className="min-w-0">

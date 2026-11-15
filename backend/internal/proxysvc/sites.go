@@ -227,6 +227,12 @@ type SiteSpec struct {
 	edgeRules       []EdgeRule
 	crowdSecList    string
 	limitRetryAfter int
+	// listenHTTP2 writes HTTP/2 as the `listen … http2` parameter, for an
+	// nginx older than 1.25.1 that refuses `http2 on;` (nginx_http2.go).
+	// The service sets it from the host's nginx before writing a file, and
+	// the parser from a file that spells it that way, so the file reads back
+	// as what it is.
+	listenHTTP2 bool
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs

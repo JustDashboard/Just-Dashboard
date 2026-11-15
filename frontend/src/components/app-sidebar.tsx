@@ -26,6 +26,7 @@ import {
   PROJECT_NAV,
   PROJECT_SETTINGS_NAV,
   groupedChildren,
+  navCurrent,
   navMatches,
   navOwns,
   sectionEntry,
@@ -279,6 +280,9 @@ export function AppSidebar() {
   const panel = stack[depth]
   const parent = depth > 0 ? stack[depth - 1] : null
   const onRoute = stack.every((level, index) => level.key === levels[index]?.key)
+  const hrefs = panel.groups.flatMap((group) =>
+    group.items.flatMap((item) => (item.href === undefined ? [] : [item.href])),
+  )
 
   // Pressing the section you stepped out of means "put it back", not "throw
   // away the page I was on and open the section's front door". Any other
@@ -405,11 +409,13 @@ export function AppSidebar() {
 
                           // A section's own landing page is the first row in
                           // its panel and shares the section's href, so a
-                          // prefix match would light it up on every page of the
-                          // section. Inside a panel a row is where you are or
-                          // it is not.
+                          // plain prefix match would light it up on every page
+                          // of the section: `navCurrent` is the rule that
+                          // lights one row and only one.
                           active={
-                            panel.root ? navMatches(item.href, pathname) : isCurrent(item, pathname)
+                            panel.root
+                              ? navMatches(item.href, pathname)
+                              : navCurrent(item.href, hrefs, pathname)
                           }
                         />
                       ),
@@ -471,26 +477,6 @@ function SearchButton({ onOpen }: { onOpen: () => void }) {
       </span>
     </button>
   )
-}
-
-/**
- * Whether a row inside a section panel is the page being looked at.
- *
- * An exact match of the path, with one exception: a row whose href carries
- * the reader's place in its query string (a database's panel keeps the
- * schema and the table there, so Schema opens on the table Data was showing)
- * is the same page whatever that place is. A database's Home is
- * `/databases/<id>` and its other pages hang off that path, which is why
- * this is not a prefix match: Home is current on Home alone.
- */
-function isCurrent(item: NavScopeEntry, pathname: string) {
-  const path = item.href.split("?")[0]
-  // A run is opened from its project's Deployments, and is one of them.
-  const run = /^\/deploy\/(\d+)\/runs\//.exec(pathname)
-  if (run) return path === `/deploy/${run[1]}/deployments`
-  // An account, the groups and the defaults are opened from System users.
-  if (pathname.startsWith("/system-users/")) return path === "/system-users"
-  return path === pathname
 }
 
 /**

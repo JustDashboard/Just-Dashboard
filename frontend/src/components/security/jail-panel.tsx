@@ -12,66 +12,46 @@ import {
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { BlocksView, Fail2banJail, JailConfig, JailParamResult, JailPolicy } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
+import type { Fail2banJail, JailConfig, JailParamResult, JailPolicy } from "@/lib/types"
+import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { EmptyNote, EmptyState, Notice } from "@/components/state"
-import { DimActions, IconAction } from "@/components/icon-action"
-import { SidePanel } from "@/components/side-panel"
+import { EmptyNote, EmptyState, LoadingRows, Notice } from "@/components/state"
 import { ProductLogo } from "@/components/product-logo"
-import { heldSentence } from "@/components/security/blocks"
-import { boundaryVerdict } from "@/components/security/boundary"
-import { BoundaryImpacts, useBoundaryCheck } from "@/components/security/boundary-view"
 import { jailProduct } from "@/components/security/marks"
 import { Status } from "@/components/status-dot"
-import { Meter } from "@/components/meter"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Field, FieldRow, FormSection } from "@/components/form"
-import { Label } from "@/components/ui/label"
+import { VerbMenu, type Verb } from "@/components/verbs"
+
+/** A jail's own page. */
+export const jailHref = (name: string) => `/security/intrusion/jails/${encodeURIComponent(name)}`
+
+/** The service a jail watches, on a tile: its logo, a key for sshd, a bar for the rest. */
+export function JailMark({ name, className }: { name: string; className?: string }) {
+  return (
+    <ProductLogo
+      id={jailProduct(name)}
+      fallback={name === "sshd" ? SecureConnection : Slash}
+      className={className}
+    />
+  )
+}
 
 /**
- * Every jail as a card you open, with the addresses it is holding one press
- * away.
- *
- * A jail was a row in a table, and before that a card in a two-column grid
- * whose boxes were all one size whatever was in them. It is a card again, of
- * the shape the Backups and Docker pages settled on: every one of these opens
- * the jail's own sheet, so it is a destination and takes the lit edge §16
- * gives to things you take — and its readings, which the table lined up in
- * columns, keep a fixed measure each on a wide screen so a column of cards is
- * still scanned down the way the table was. Beneath its name the jail says
- * what it watches, and its mark is the service it watches for: nginx's for
- * `nginx-http-auth`, a glyph for `sshd`, which has no mark to draw.
+ * Releasing every address a jail holds. Not destructive on the server by
+ * design: whoever earned a ban earns the next one within minutes.
  */
-export function JailsPanel({
-  jails,
-  canManage,
-  clientIp,
-  blocks,
-  onChanged,
-}: {
-  jails: Fail2banJail[]
-  canManage: boolean
-  /** The address this browser arrived from, offered to the allowlist by name. */
-  clientIp?: string
-  /** Every engine's refused addresses, so a ban can say what already holds one. */
-  blocks?: BlocksView
-  onChanged: () => void
-}) {
-  const [open, setOpen] = useState<string | null>(null)
-  const [tuning, setTuning] = useState<string | null>(null)
+export function useJailRelease(onChanged: () => void) {
   const [busy, setBusy] = useState(false)
-  const [banning, setBanning] = useState("")
-
-  const act = async (fn: () => Promise<unknown>, ok: string) => {
+  const releaseAll = async (jail: string) => {
     setBusy(true)
     try {
-      await fn()
-      notify.success(ok)
+      await post(`/fail2ban/${encodeURIComponent(jail)}/unban-all`, {})
+      notify.success(`Released every ban in ${jail}`)
       onChanged()
     } catch (err) {
       notify.error("Could not apply", err)
@@ -79,28 +59,34 @@ export function JailsPanel({
       setBusy(false)
     }
   }
+  return { busy, releaseAll }
+}
 
-  const selected = jails.find((j) => j.name === open)
-  // What the typed ban does to the way the dashboard is reached, before it is made.
-  const boundary = useBoundaryCheck(
-    selected && banning.trim() ? { kind: "ban", target: banning.trim() } : undefined,
-  )
-  const crossing = boundaryVerdict(boundary.impacts ?? [])
-  // A ban by hand. The route has been on the server since the jail controls
-  // shipped and nothing on the page reached it — so the address that kept
-  // appearing in the log could be blocked forever at the firewall, or not at
-  // all, with no ten-minute answer in between.
-  const ban = () => {
-    if (!selected || !banning.trim()) return
-    const ip = banning.trim()
-    void act(async () => {
-      await post(`/fail2ban/${encodeURIComponent(selected.name)}/ban`, {
-        ip,
-        ...(crossing === "acknowledge" && { acknowledgeBoundary: true }),
-      })
-      setBanning("")
-    }, `${ip} banned in ${selected.name}`)
-  }
+/**
+ * Every jail as a card you open, one line each.
+ *
+ * A jail is a destination: its page holds the addresses it has banned, the
+ * policy it runs and the way to ban by hand, so its row takes the lit edge
+ * §16 gives to things you take. The row is one height whatever the jail
+ * holds. Its counts stand in columns at the row's end so a run of jails is
+ * scanned down them, and its state is one word. It used to carry a band of
+ * four readings and a meter under its line, which made a jail a row and a
+ * half and said again what the tiles over it had said.
+ */
+export function JailsPanel({
+  jails,
+  canManage,
+  clientIp,
+  onChanged,
+}: {
+  jails: Fail2banJail[]
+  canManage: boolean
+  /** The address this browser arrived from, offered to the allowlist by name. */
+  clientIp?: string
+  onChanged: () => void
+}) {
+  const [tuning, setTuning] = useState<string | null>(null)
+  const { busy, releaseAll } = useJailRelease(onChanged)
 
   return (
     <>
@@ -109,9 +95,7 @@ export function JailsPanel({
           title="Jails"
           actions={
             jails.length > 0 ? (
-              <span className="numeric text-hint text-muted-foreground">
-                {jails.length === 1 ? "1 jail" : `${jails.length} jails`}
-              </span>
+              <span className="numeric text-hint text-muted-foreground">{jails.length}</span>
             ) : undefined
           }
         />
@@ -124,228 +108,61 @@ export function JailsPanel({
             />
           ) : (
             <ChoiceList className="animate-rise">
-              {jails.map((jail, index) => (
-                <ChoiceRow
-                  key={jail.name}
-                  index={index}
-                  verb={jail.name}
-                  onSelect={() => setOpen(jail.name)}
-                  leading={
-                    <ProductLogo
-                      id={jailProduct(jail.name)}
-                      fallback={jail.name === "sshd" ? SecureConnection : Slash}
-                    />
-                  }
-                  title={jail.name}
-                  description={
-                    <span className="font-mono">{jail.fileList.join(", ") || "no log named"}</span>
-                  }
-                  trailing={
-                    <Status
-                      tone={jail.currentlyBanned > 0 ? "warning" : "running"}
-                      label={
-                        jail.currentlyBanned > 0 ? `${jail.currentlyBanned} banned now` : "Watching"
-                      }
-                    />
-                  }
-                  actions={
-                    canManage ? (
-                      <DimActions>
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          aria-label={`Tune ${jail.name}`}
-                          onClick={() => setTuning(jail.name)}
-                        >
-                          Tune
-                        </Button>
-                        <IconAction
-                          label={`Release every ban in ${jail.name}`}
-                          disabled={busy || jail.bannedIps.length === 0}
-                          onClick={() =>
-                            act(
-                              () =>
-                                post(`/fail2ban/${encodeURIComponent(jail.name)}/unban-all`, {}),
-                              `Released every ban in ${jail.name}`,
-                            )
+              {jails.map((jail) => {
+                const verbs: Verb[] = [
+                  {
+                    key: "tune",
+                    label: "Tune",
+                    icon: SettingsSliders,
+                    run: () => setTuning(jail.name),
+                  },
+                  {
+                    key: "release",
+                    label: "Release every ban",
+                    icon: LockOpen,
+                    disabled: busy || jail.bannedIps.length === 0,
+                    run: () => void releaseAll(jail.name),
+                  },
+                ]
+                return (
+                  <ChoiceRow
+                    key={jail.name}
+                    verb={jail.name}
+                    href={jailHref(jail.name)}
+                    leading={<JailMark name={jail.name} />}
+                    title={jail.name}
+                    description={
+                      <span className="font-mono">
+                        {jail.fileList.join(", ") || "no log named"}
+                      </span>
+                    }
+                    trailing={
+                      <>
+                        <JailFigure value={jail.currentlyFailed} label="failing now" />
+                        <JailFigure value={jail.totalBanned} label="bans in total" />
+                        <Status
+                          className="w-28 max-sm:w-auto"
+                          tone={jail.currentlyBanned > 0 ? "warning" : "running"}
+                          label={
+                            jail.currentlyBanned > 0
+                              ? `${jail.currentlyBanned} banned now`
+                              : "Watching"
                           }
-                        >
-                          <LockOpen />
-                        </IconAction>
-                      </DimActions>
-                    ) : undefined
-                  }
-                >
-                  <div className="grid grid-cols-2 items-center gap-4 border-t border-hairline pt-3 sm:grid-cols-4">
-                    <JailReading label="failing now" value={jail.currentlyFailed} />
-                    <JailReading label="bans in total" value={jail.totalBanned} muted />
-                    <JailReading label="failures in total" value={jail.totalFailed} muted />
-                    <div className="space-y-1.5">
-                      <span className="text-hint text-muted-foreground">Currently held</span>
-                      <Meter
-                        value={
-                          jail.totalBanned > 0 ? (jail.currentlyBanned / jail.totalBanned) * 100 : 0
-                        }
-                        size="thin"
-                        tone={jail.currentlyBanned > 0 ? "warning" : "default"}
-                        label={`${jail.currentlyBanned} of ${jail.totalBanned} bans still active`}
-                      />
-                    </div>
-                  </div>
-                </ChoiceRow>
-              ))}
+                        />
+                      </>
+                    }
+                    actions={
+                      canManage ? (
+                        <VerbMenu verbs={verbs} label={`Actions for ${jail.name}`} />
+                      ) : undefined
+                    }
+                  />
+                )
+              })}
             </ChoiceList>
           )}
         </PanelBody>
       </Panel>
-
-      <SidePanel
-        open={Boolean(selected)}
-        onOpenChange={(o) => !o && setOpen(null)}
-        width="sm"
-        title={selected?.name ?? ""}
-        description={
-          selected
-            ? `${selected.currentlyBanned} banned now · ${selected.totalBanned} in total · ${selected.currentlyFailed} failing`
-            : undefined
-        }
-        actions={
-          canManage &&
-          selected && (
-            <>
-              <Button size="xs" variant="outline" onClick={() => setTuning(selected.name)}>
-                <SettingsSliders className="size-3.5" />
-                Tune
-              </Button>
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={busy || selected.bannedIps.length === 0}
-                onClick={() =>
-                  act(
-                    () => post(`/fail2ban/${encodeURIComponent(selected.name)}/unban-all`, {}),
-                    `Released every ban in ${selected.name}`,
-                  )
-                }
-              >
-                Release all
-              </Button>
-            </>
-          )
-        }
-      >
-        <div className="space-y-5">
-          {selected && (
-            <div className="flex items-center gap-3">
-              <ProductLogo
-                id={jailProduct(selected.name)}
-                fallback={selected.name === "sshd" ? SecureConnection : Slash}
-              />
-              <div>
-                <span className="text-title font-medium">{selected.name}</span>
-                <p className="text-hint text-muted-foreground">
-                  {selected.bannedIps.length} addresses held · {selected.totalBanned} bans in total
-                </p>
-              </div>
-            </div>
-          )}
-          {canManage && selected && (
-            <div className="space-y-1.5">
-              <Label htmlFor="jail-ban-address">Ban an address now</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="jail-ban-address"
-                  aria-describedby="jail-ban-held"
-                  value={banning}
-                  onChange={(e) => setBanning(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && ban()}
-                  placeholder="203.0.113.9"
-                  className="font-mono text-xs"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={ban}
-                  disabled={busy || !banning.trim() || boundary.checking || crossing === "refused"}
-                >
-                  <Slash className="size-3.5" />
-                  Ban
-                </Button>
-              </div>
-              {heldSentence(banning, blocks) && (
-                <p id="jail-ban-held" className="text-hint text-warning">
-                  {heldSentence(banning, blocks)}
-                </p>
-              )}
-              <BoundaryImpacts impacts={boundary.impacts} />
-              <p className="text-hint leading-relaxed text-muted-foreground">
-                For this jail&rsquo;s ban time, the same as an earned ban. Your own address is
-                refused. A block that should outlive the ban is a firewall rule, from the offenders
-                list below.
-              </p>
-            </div>
-          )}
-
-          {selected && <JailPolicySection jail={selected.name} />}
-
-          <div>
-            <p className="eyebrow mb-1">Banned now</p>
-            {selected && selected.bannedIps.length === 0 ? (
-              <p className="text-body leading-relaxed text-muted-foreground">
-                Nothing currently banned. Bans expire, so an empty list is not the same as a quiet
-                night — the ban activity on the page behind this is the record.
-              </p>
-            ) : (
-              <div className="divide-y divide-hairline">
-                {selected?.bannedIps.map((ip) => (
-                  <div key={ip} className="flex items-center justify-between gap-2 py-1.5">
-                    <span className="truncate font-mono text-xs">{ip}</span>
-                    {/* Always visible, not revealed on hover: in a table the
-                        actions are an aside to the data, but this sheet was opened
-                        *to* release an address, so hiding the release button until
-                        the pointer finds the row hides the only thing here. */}
-                    {canManage && (
-                      <span className="flex shrink-0 items-center gap-0.5">
-                        <IconAction
-                          label={`Unban ${ip}`}
-                          disabled={busy}
-                          onClick={() =>
-                            act(
-                              () =>
-                                post(`/fail2ban/${encodeURIComponent(selected.name)}/unban`, {
-                                  ip,
-                                }),
-                              `${ip} unbanned`,
-                            )
-                          }
-                        >
-                          <LockOpen />
-                        </IconAction>
-                        <IconAction
-                          label={`Never ban ${ip} again`}
-                          disabled={busy}
-                          onClick={() =>
-                            act(
-                              () =>
-                                post(`/fail2ban/${encodeURIComponent(selected.name)}/ignore`, {
-                                  ip,
-                                  add: true,
-                                }),
-                              `${ip} added to the allowlist`,
-                            )
-                          }
-                        >
-                          <Shield />
-                        </IconAction>
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </SidePanel>
 
       {tuning && (
         <JailTuning
@@ -361,74 +178,97 @@ export function JailsPanel({
 }
 
 /**
+ * One of a jail's counts, in a fixed measure so a column of cards lines up
+ * the way a table's columns do. It goes quiet at zero: a column of grey
+ * noughts is not a signal.
+ */
+function JailFigure({ value, label }: { value: number; label: string }) {
+  return (
+    <span className="flex w-24 shrink-0 flex-col items-end pr-3 max-md:hidden">
+      <span
+        className={cn(
+          "numeric text-body leading-5 font-medium",
+          value === 0 && "text-muted-foreground",
+        )}
+      >
+        {value.toLocaleString()}
+      </span>
+      <span className="text-hint leading-4 text-muted-foreground">{label}</span>
+    </span>
+  )
+}
+
+/**
  * What the jail's numbers and actions mean together: the rule as a sentence,
  * what it reads, what each action does with a ban, and — for sshd — whether
  * the ban lands on the port sshd actually listens on. Values the running
  * server holds that the dashboard's drop-in would change at the next start
  * are marked, since a restart is when that difference stops being invisible.
  */
-function JailPolicySection({ jail }: { jail: string }) {
-  const { data, error, loading } = usePoll<JailPolicy>(
-    (signal) => get(`/fail2ban/${encodeURIComponent(jail)}/policy`, undefined, signal),
-    0,
-    [jail],
-  )
+export function JailPolicySection({ policy }: { policy: PollState<JailPolicy> }) {
+  const { data, error, loading } = policy
   return (
-    <section aria-label="Policy" className="space-y-3">
-      <p className="eyebrow">Policy</p>
-      {loading && !data ? (
-        <p className="text-body text-muted-foreground">Reading the running server…</p>
-      ) : error && !data ? (
-        <p className="text-body text-muted-foreground">The policy could not be read.</p>
-      ) : data?.error ? (
-        <p className="text-body text-muted-foreground">{data.error}</p>
-      ) : data ? (
-        <>
-          <p className="text-body font-medium">{data.rule}.</p>
-          {data.findings.map((finding) => (
-            <Notice
-              key={finding.text}
-              tone={finding.level === "critical" ? "danger" : "warning"}
-              title={finding.level === "critical" ? "Bans here do not stop the traffic" : "Check"}
-            >
-              {finding.text}
-            </Notice>
-          ))}
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-body">
-            <dt className="text-muted-foreground">Reads</dt>
-            <dd className="min-w-0 font-mono text-hint break-words">
-              {data.watches.kind === "files"
-                ? data.watches.files?.join(", ")
-                : data.watches.kind === "journal"
-                  ? `journal: ${data.watches.match}`
-                  : "nothing"}
-            </dd>
-            {data.actions.map((action) => (
-              <ActionLine key={action.name} action={action} />
+    <Panel plain aria-label="Policy">
+      <PanelHeader title="Policy" />
+      <PanelBody flush className="space-y-3 pt-3">
+        {loading && !data ? (
+          <LoadingRows rows={4} hold />
+        ) : error && !data ? (
+          <EmptyNote>The policy could not be read.</EmptyNote>
+        ) : data?.error ? (
+          <EmptyNote>{data.error}</EmptyNote>
+        ) : data && !Array.isArray(data.findings) ? (
+          // An answer that is not a policy is not one to draw half of.
+          <EmptyNote>The policy could not be read.</EmptyNote>
+        ) : data ? (
+          <>
+            {data.findings.map((finding) => (
+              <Notice
+                key={finding.text}
+                tone={finding.level === "critical" ? "danger" : "warning"}
+                title={finding.level === "critical" ? "Bans here do not stop the traffic" : "Check"}
+              >
+                {finding.text}
+              </Notice>
             ))}
-            {data.coverage && (
-              <>
-                <dt className="text-muted-foreground">sshd ports</dt>
-                <dd>
-                  {data.coverage.listening.map((port) => (
-                    <Tag
-                      key={port}
-                      mono
-                      tone={data.coverage!.uncovered.includes(port) ? "danger" : undefined}
-                    >
-                      {port} {data.coverage!.uncovered.includes(port) ? "not covered" : "covered"}
-                    </Tag>
-                  ))}
-                </dd>
-              </>
-            )}
-            {data.values.map((value) => (
-              <PolicyValueLine key={value.key} value={value} />
-            ))}
-          </dl>
-        </>
-      ) : null}
-    </section>
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-2.5 text-body">
+              <dt className="text-muted-foreground">Rule</dt>
+              <dd className="min-w-0 font-medium">{data.rule}.</dd>
+              <dt className="text-muted-foreground">Reads</dt>
+              <dd className="min-w-0 font-mono text-hint break-words">
+                {data.watches.kind === "files"
+                  ? data.watches.files?.join(", ")
+                  : data.watches.kind === "journal"
+                    ? `journal: ${data.watches.match}`
+                    : "nothing"}
+              </dd>
+              {data.actions.map((action) => (
+                <ActionLine key={action.name} action={action} />
+              ))}
+              {data.coverage && (
+                <>
+                  <dt className="text-muted-foreground">sshd ports</dt>
+                  <dd className="flex flex-wrap gap-2">
+                    {data.coverage.listening.map((port) => (
+                      <Tag
+                        key={port}
+                        mono
+                        tone={data.coverage!.uncovered.includes(port) ? "danger" : undefined}
+                      >
+                        {port} {data.coverage!.uncovered.includes(port) ? "not covered" : "covered"}
+                      </Tag>
+                    ))}
+                  </dd>
+                </>
+              )}
+              {data.values.map((value) => (
+                <PolicyValueLine key={value.key} value={value} />
+              ))}
+            </dl>
+          </>
+        ) : null}
+      </PanelBody>
+    </Panel>
   )
 }
 
@@ -466,42 +306,6 @@ function PolicyValueLine({ value }: { value: JailPolicy["values"][number] }) {
 }
 
 /**
- * One of a jail's counts, in a fixed measure so a column of cards lines up
- * the way the table's columns did. It goes quiet at zero — a column of grey
- * noughts is not a signal — and a count of addresses held right now takes the
- * warning tone, because that is the reading the page is opened for.
- */
-function JailReading({
-  label,
-  value,
-  tone,
-  muted,
-}: {
-  label: string
-  value: number
-  /** The tone the figure takes when it is not zero. */
-  tone?: "warning"
-  /** A lifetime total, quieter than the live counts beside it. */
-  muted?: boolean
-}) {
-  const active = value > 0 && !muted
-  return (
-    <span className="flex min-w-0 flex-col gap-1">
-      <span
-        className={cn(
-          "numeric text-title",
-          active ? "font-medium" : "text-muted-foreground",
-          active && tone === "warning" && "text-warning",
-        )}
-      >
-        {value}
-      </span>
-      <span className="text-hint text-muted-foreground">{label}</span>
-    </span>
-  )
-}
-
-/**
  * One jail's policy: the three numbers that decide whether it is doing
  * anything.
  *
@@ -512,7 +316,7 @@ function JailReading({
  * get right and honest about what is in force now; the same values are then
  * written to a drop-in under jail.d so they survive a restart.
  */
-function JailTuning({
+export function JailTuning({
   jail,
   clientIp,
   open,

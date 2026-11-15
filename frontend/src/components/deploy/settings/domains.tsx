@@ -113,6 +113,7 @@ import {
   ListField,
 } from "@/components/proxy/site-form"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
+import { siteHref } from "@/components/proxy/site-tabs"
 import { useConfirm } from "@/components/confirm-dialog"
 import {
   gatesHere,
@@ -321,7 +322,7 @@ function TailnetForm({
         <OptionList>
           <OptionRow
             title="Tailnet only"
-            hint="Answers on this server's tailnet address and nowhere else, as pull request previews do: no public domain, no public certificate, and only devices on your tailnet reach it."
+            hint="Only devices on your tailnet reach it: no public domain or certificate"
             checked={value.on}
             disabled={!canAdmin}
             onCheckedChange={(on) => draft.set({ ...value, on })}
@@ -734,7 +735,7 @@ function DomainsForm({
               // Which proxy answers is the host's, nginx or Caddy; the site is
               // this environment's own, named by its id.
               <Link
-                href={`/proxy/sites?site=${encodeURIComponent(observed.siteName)}`}
+                href={siteHref(observed.siteName)}
                 className="flex min-w-0 items-center gap-1 rounded-sm font-mono focus-ring transition-colors hover:text-foreground hover:underline"
               >
                 <span className="truncate">{observed.siteName}</span>
@@ -1606,7 +1607,7 @@ function AddDomainPanel({
             title="Serve through Cloudflare Tunnel"
             hint={
               !tunnelHeld
-                ? "Cloudflare's edge answers the name and HTTPS, and the connector on this host brings the requests here: no record points at this server and no port is opened."
+                ? "Cloudflare answers the name and HTTPS: no record points here, no port opens"
                 : tunnelTip({ tunnel: false, wildcard, fenced })
             }
             checked={tunnel}
@@ -1912,7 +1913,9 @@ function RouteHSTS({
     <OptionList>
       <OptionRow
         title="HSTS"
-        hint={`Tells browsers never to use plain HTTP for the HTTPS domains above again. Hard to undo — a mistake sticks for as long as the policy says. ${sentOn}${notOn}`}
+        // The cost, then which domains it is sent on: what the header is
+        // was a sentence in front of both, on a switch named for it.
+        hint={`Hard to undo. ${sentOn}${notOn}`}
         checked={Boolean(hsts)}
         disabled={disabled}
         onCheckedChange={(on) => onChange(on ? { includeSubDomains: true } : undefined)}
@@ -2018,7 +2021,7 @@ function RouteSignIn({
     <OptionList>
       <OptionRow
         title="Require sign-in"
-        hint="Every request is checked with Authelia, Authentik, oauth2-proxy or another server first. A visitor without a session is sent to sign in and brought back; if the server refuses or does not answer, so does the site."
+        hint="A sign-in server checks every request; if it does not answer, neither does the site"
         checked={Boolean(gate)}
         disabled={disabled}
         onCheckedChange={(on) =>
@@ -2211,7 +2214,7 @@ function MaintenanceForm({
         <OptionList>
           <OptionRow
             title="Answer with the maintenance page"
-            hint="Every visitor gets the maintenance page with a 503 as soon as this is saved, without a deployment, except the addresses let past below. Certificate renewals keep working."
+            hint="On saving, without a deployment; the addresses below are let past"
             tone={draft.value.on ? "warning" : "default"}
             checked={draft.value.on}
             disabled={!canSwitch || (!draft.value.on && !switched?.ready)}
@@ -2458,7 +2461,7 @@ function RoutePagesForm({
                 hint={
                   signsIn
                     ? "Not with sign-in on: the application's own 401s would be replaced as well."
-                    : "Without it only the errors the proxy produces itself get these pages; with it, the application's answers with those codes do too."
+                    : "The application's own answers with those codes get these pages too"
                 }
                 checked={pages.interceptErrors}
                 disabled={!canAdmin || (signsIn && !pages.interceptErrors)}

@@ -16,8 +16,6 @@ import { InitialsMark } from "@/components/account/user-avatar"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
-import { Page, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, variableProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -103,6 +101,10 @@ export function SharedVariables({
   frame: (parts: {
     /** How many there are, for a head that counts; nothing while loading. */
     count?: number
+    /** The variables themselves, for a place that draws them; nothing while loading. */
+    variables?: DeploymentSharedVariable[]
+    /** The list could not be read, so nothing will follow the loading state. */
+    failed?: boolean
     actions?: React.ReactNode
     body: React.ReactNode
   }) => React.ReactNode
@@ -312,6 +314,8 @@ export function SharedVariables({
     <>
       {frame({
         count: list?.length,
+        variables: list,
+        failed: Boolean(variables.error && !list),
         actions: list && list.length > 0 ? addButton : undefined,
         body,
       })}
@@ -568,43 +572,6 @@ function SharedReaders({
         </ul>
       </PopoverContent>
     </Popover>
-  )
-}
-
-/** The server's shared variables, under Deployments. */
-export function SharedVariablesPage() {
-  return (
-    <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Shared variables"
-      />
-      <SharedVariables
-        scope={{ kind: "server" }}
-        frame={({ count, actions, body }) => (
-          <Panel plain>
-            <PanelHeader
-              title="Server variables"
-              actions={
-                <span className="flex flex-wrap items-center gap-3">
-                  {count !== undefined && count > 0 && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {count} variable{count === 1 ? "" : "s"}
-                    </span>
-                  )}
-                  {actions}
-                </span>
-              }
-            />
-            <PanelBody>{body}</PanelBody>
-          </Panel>
-        )}
-      />
-    </Page>
   )
 }
 

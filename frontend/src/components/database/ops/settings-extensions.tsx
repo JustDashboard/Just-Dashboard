@@ -1,18 +1,16 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Plus, Puzzle } from "@/components/icons"
+import { Plus, Puzzle, Trash } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { SettingSection } from "@/components/deploy/settings/setting-card"
-import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { GroupRule } from "@/components/flow"
 import { FormNote } from "@/components/form"
 import { SearchInput } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
 import { LoadingRows, Notice } from "@/components/state"
-import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -23,10 +21,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { VerbMenu } from "@/components/verbs"
 import { CouldNotRead } from "@/components/database/home/blocks"
-import { powerConfirmation } from "@/components/database/home/power-subject"
 import { read } from "@/components/database/home/read"
-import { usePower } from "@/components/database/home/verbs"
 import {
   CategoryGlyph,
   DisableExtension,
@@ -40,7 +37,7 @@ import {
   extensionCounts,
   groupExtensions,
   hasUpdate,
-  listWords,
+  libraryState,
   needsLoading,
   OTHER,
   shownExtensions,
@@ -48,9 +45,9 @@ import {
   type DbExtension,
   type DbExtensions,
   type ExtensionShow,
-  type PreloadState,
 } from "@/components/database/ops/extensions-model"
 import { isDown } from "@/components/database/ops/performance-parts"
+import { usePendingReport } from "@/components/database/ops/settings-pending"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** A loaded module of a key–value server, from `GET /redis/server`. */
@@ -63,11 +60,15 @@ const LISTED = 12
 const EVERY_CATEGORY = "__every_category__"
 
 /**
- * One extension or module as a row you read: led by what it is — its
- * project's mark where one is bundled, the engine's own for its plugins and
- * modules, and the glyph of what it does for the rest — then its name as the
- * engine spells it, its version, the sentence that says what it does, what it
- * needs to work, and its commands at the row's edge.
+ * One extension or module on one line, at one height whatever is true of it:
+ * led by what it is (its project's mark where one is bundled, the engine's
+ * own for its plugins and modules, and the glyph of what it does for the
+ * rest), then its name as the engine spells it with its version, over one
+ * line that says what it needs to work, where it lives and what it does. Its
+ * commands are at the row's end: the one it is waiting for as a button, and
+ * the one that removes it behind the menu.
+ *
+ * A row used to be two lines or three, by whether it had a library to load.
  */
 function ExtensionRow({
   name,
@@ -76,7 +77,7 @@ function ExtensionRow({
   newer,
   where,
   about,
-  facts,
+  state,
   action,
 }: {
   name: string
@@ -87,30 +88,47 @@ function ExtensionRow({
   /** The schema it lives in. */
   where?: string
   about?: string
-  /** What it needs before it works, or why it cannot be had here, as a line of hint. */
-  facts?: { text: string; tone?: "warning" }
+  /** What it needs before it works, or why it cannot be had here, in a few words. */
+  state?: { text: string; tone?: "warning" }
   action?: React.ReactNode
 }) {
+  const said = about ? about.charAt(0).toUpperCase() + about.slice(1) : undefined
   return (
-    <li data-extension={name} className="flex min-w-0 items-center gap-3.5 py-3">
+    <li data-extension={name} className="flex h-14 min-w-0 items-center gap-3.5">
       {mark}
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-          <span className="min-w-0 font-mono text-body font-medium wrap-anywhere">{name}</span>
-          {version !== undefined && version !== "" && <Tag mono>{version}</Tag>}
-          {newer && <Tag tone="warning">{newer} available</Tag>}
-          {where && <span className="text-hint text-muted-foreground">in {where}</span>}
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="flex min-w-0 items-center gap-x-2">
+          <span className="min-w-0 truncate font-mono text-body font-medium">{name}</span>
+          {version !== undefined && version !== "" && (
+            <Tag mono className="shrink-0">
+              {version}
+            </Tag>
+          )}
+          {newer && (
+            <Tag tone="warning" className="shrink-0">
+              {newer} available
+            </Tag>
+          )}
         </p>
-        {about && (
-          <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground first-letter:uppercase">
-            {about}
-          </p>
-        )}
-        {facts && (
-          <FormNote tone={facts.tone} data-slot="extension-facts">
-            {facts.text}
-          </FormNote>
-        )}
+        <p
+          className="truncate text-xs text-muted-foreground"
+          title={[state?.text, where && `in ${where}`, said].filter(Boolean).join(" · ")}
+        >
+          {state && (
+            <>
+              <span
+                data-slot="extension-facts"
+                className={state.tone === "warning" ? "text-warning" : undefined}
+              >
+                {state.text}
+              </span>
+              {(where || said) && " · "}
+            </>
+          )}
+          {where && `in ${where}`}
+          {where && said && " · "}
+          {said}
+        </p>
       </div>
       {action && <div className="flex shrink-0 items-center gap-1">{action}</div>}
     </li>
@@ -130,45 +148,21 @@ function ExtensionRow({
  *
  * They are rows, not cards: nothing here is opened or taken, each is read and
  * has its commands (§15 pass 3).
+ *
+ * What the server loads at its next start, where that differs from what it
+ * loaded at this one, is on the strip at the head of the page with Restart
+ * beside it (`settings-pending.tsx`): each library named, as added or removed.
  */
-export function ExtensionsSection({ confirm }: { confirm: (request: ConfirmRequest) => void }) {
+export function ExtensionsSection() {
   const { engine } = useDatabase()
-  return engine.kind === "keyvalue" ? <Modules /> : <Extensions confirm={confirm} />
+  return engine.kind === "keyvalue" ? <Modules /> : <Extensions />
 }
 
 type Opened = { kind: "enable" | "update" | "disable" | "preload"; extension: DbExtension }
 
-/** What an extension needs before it works, read off what the server loads. */
-function libraryFacts(
-  extension: DbExtension,
-  preload: PreloadState | undefined,
-): { text: string; tone?: "warning" } | undefined {
-  if (extension.unavailable) return { text: "Not in this server's image." }
-  const library = extension.library
-  if (!library || !preload) return undefined
-  if (preload.loaded.includes(library)) {
-    return {
-      text: extension.module
-        ? "Loaded when the server starts."
-        : `The server loads ${library} when it starts.`,
-    }
-  }
-  if (preload.configured.includes(library)) {
-    return { text: `${library} is loaded once the server restarts.`, tone: "warning" }
-  }
-  if (extension.installed) {
-    return {
-      text: `Created, and idle: the server does not load ${library} when it starts.`,
-      tone: "warning",
-    }
-  }
-  return { text: `Needs ${library} loaded when the server starts, and a restart.` }
-}
-
-function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void }) {
-  const { id, conn, engine, readOnly, status, summary } = useDatabase()
+function Extensions() {
+  const { id, conn, engine, readOnly, status } = useDatabase()
   const { can } = useAuth()
-  const power = usePower()
   const down = isDown(status.state)
   const [show, setShow] = useState<ExtensionShow>("enabled")
   const [search, setSearch] = useState("")
@@ -212,17 +206,19 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
     setCategory("")
   }
 
-  const restartNow = () => {
-    if (!summary) return
-    confirm({
-      ...powerConfirmation("restart", engine, summary),
-      action: async () => {
-        await power.run("restart")
-        list.refresh()
-        return "reported"
-      },
-    })
-  }
+  // The libraries behind the one parameter that waits: named, not the parameter.
+  const libraries = waiting
+    ? [
+        ...waiting.adding.map((name) => ({ name, mono: true, state: "added" })),
+        ...waiting.removing.map((name) => ({ name, mono: true, state: "removed" })),
+      ]
+    : []
+  usePendingReport("extensions", {
+    waiting: libraries,
+    covers: libraries.length > 0 ? ["shared_preload_libraries"] : [],
+    refresh: list.refresh,
+    ready: data !== undefined || down || list.error !== undefined,
+  })
 
   const actions = (extension: DbExtension) => {
     if (extension.unavailable) return undefined
@@ -251,7 +247,6 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
         {mayEnable && hasUpdate(extension) && (
           <Button
             size="xs"
-            variant="outline"
             aria-label={`Update ${extension.name}`}
             onClick={() => setOpened({ kind: "update", extension })}
           >
@@ -259,14 +254,18 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
           </Button>
         )}
         {mayDisable && (
-          <Button
-            size="xs"
-            variant="ghost"
-            aria-label={`Disable ${extension.name}`}
-            onClick={() => setOpened({ kind: "disable", extension })}
-          >
-            Disable
-          </Button>
+          <VerbMenu
+            label={`More for ${extension.name}`}
+            verbs={[
+              {
+                key: "disable",
+                label: "Disable",
+                icon: Trash,
+                danger: true,
+                run: () => setOpened({ kind: "disable", extension }),
+              },
+            ]}
+          />
         )}
       </>
     )
@@ -288,7 +287,6 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
           </span>
         ) : undefined
       }
-      status={waiting && <Status verdict="warning" label="Waiting for a restart" />}
     >
       {down ? (
         <FormNote>
@@ -307,37 +305,6 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
         </Notice>
       ) : (
         <div className="animate-rise space-y-3">
-          {waiting && (
-            <Notice
-              tone="warning"
-              title={
-                waiting.adding.length > 0
-                  ? `${listWords(waiting.adding)} ${waiting.adding.length === 1 ? "is" : "are"} loaded once ${conn.name} restarts`
-                  : `What ${conn.name} loads at start changes when it restarts`
-              }
-            >
-              <p>
-                {waiting.removing.length > 0 &&
-                  `It stops loading ${listWords(waiting.removing)} then. `}
-                The server reads shared_preload_libraries only when it starts.
-                {!power.can.restart &&
-                  (summary?.power.restart
-                    ? " Restarting it is for a role that may interrupt it."
-                    : ` ${summary?.power.reason ?? "Nothing here can restart it."}`)}
-              </p>
-              {power.can.restart && (
-                <Button
-                  size="xs"
-                  variant="outline"
-                  className="mt-2"
-                  disabled={Boolean(power.change)}
-                  onClick={restartNow}
-                >
-                  Restart {conn.name}
-                </Button>
-              )}
-            </Notice>
-          )}
           <div className="space-y-2">
             <ChipStrip role="group" aria-label="Which extensions are listed">
               <FilterChip selected={show === "enabled"} onClick={() => choose("enabled")}>
@@ -462,7 +429,7 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
                           newer={hasUpdate(extension) ? extension.availableVersion : undefined}
                           where={extension.installed ? extension.schema : undefined}
                           about={extension.about ?? extension.comment}
-                          facts={libraryFacts(extension, preload)}
+                          state={libraryState(extension, preload)}
                           action={actions(extension)}
                         />
                       ))}

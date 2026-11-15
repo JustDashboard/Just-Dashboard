@@ -12,9 +12,10 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard } from "@/components/choice-card"
 import { Segments } from "@/components/deploy/settings/segments"
 import { GroupRule } from "@/components/flow"
-import { Disclosure, Field, OptionRow } from "@/components/form"
+import { Disclosure, Field, InfoTip, OptionRow } from "@/components/form"
 import { LanguageMark } from "@/components/language-icon"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { hasProductLogo, ProductLogo } from "@/components/product-logo"
 import { EmptyState, LoadingRows, Notice } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -37,6 +38,7 @@ import {
   editorLanguage,
   firstProblem,
   groupTargets,
+  logoKeys,
   optionProblem,
   optionsLine,
   readResult,
@@ -64,6 +66,9 @@ const NO_NAMES: string[] = []
 
 /** The card that is not a code generator: rows for the tables themselves. */
 const SEED = "seed"
+
+/** A generator's card: its mark, then its name over what it is written in. */
+const CARD = "min-h-0 flex-row items-center gap-2.5 px-2.5 py-2"
 
 /** How long the page waits after a switch is pressed before it asks again. */
 const SETTLE_MS = 450
@@ -303,19 +308,22 @@ export function Generate() {
                   selected={!seeding && entry.id === target.id}
                   aria-label={cannot ? `${entry.label}, not for ${engine.label}` : entry.label}
                   onClick={() => choose(entry)}
-                  className={cn("min-h-0 gap-1 p-2.5", cannot && "opacity-55")}
+                  className={cn(CARD, cannot && "opacity-55")}
                   data-target={entry.id}
                   data-group={groupIndex}
                 >
-                  <span
-                    title={cannot ?? entry.description}
-                    className="max-w-full truncate text-body font-medium"
-                  >
-                    {entry.label}
+                  <TargetLogo target={entry} />
+                  <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                    <span
+                      title={cannot ?? entry.description}
+                      className="max-w-full truncate text-body font-medium"
+                    >
+                      {entry.label}
+                    </span>
+                    <Tag className="max-w-full">
+                      <LanguageMark language={entry.language} />
+                    </Tag>
                   </span>
-                  <Tag className="max-w-full">
-                    <LanguageMark language={entry.language} />
-                  </Tag>
                 </ChoiceCard>
               )
             })}
@@ -330,18 +338,19 @@ export function Generate() {
               selected={seeding}
               aria-label="Seed data"
               onClick={chooseSeed}
-              className="min-h-0 gap-1 p-2.5"
+              className={CARD}
               data-target={SEED}
             >
-              <span
-                title="Inserts made-up test rows into the tables, parents first"
-                className="max-w-full truncate text-body font-medium"
-              >
-                Seed data
+              <ProductLogo size="sm" fallback={Table} />
+              <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                <span
+                  title="Inserts made-up test rows into the tables, parents first"
+                  className="max-w-full truncate text-body font-medium"
+                >
+                  Seed data
+                </span>
+                <Tag className="max-w-full">Test rows</Tag>
               </span>
-              <Tag icon={Table} className="max-w-full">
-                Test rows
-              </Tag>
             </ChoiceCard>
           </div>
         </section>
@@ -395,6 +404,14 @@ export function Generate() {
                   <Tag className="shrink-0">
                     <LanguageMark language={target.language} />
                   </Tag>
+                  {/* What it writes, and that it only reads: it was a
+                      paragraph in the files' place before anything was
+                      written, where it stood between the reader and Generate. */}
+                  <InfoTip label={`What ${target.label} writes`}>
+                    {target.description} Generate reads the catalogue and writes{" "}
+                    {target.filename || "the files"} for you to review; nothing in the database is
+                    changed.
+                  </InfoTip>
                 </span>
               }
               actions={
@@ -457,6 +474,19 @@ export function Generate() {
       </div>
     </SectionFrame>
   )
+}
+
+/**
+ * A generator drawn as the project it writes for: Prisma's prism, Diesel's
+ * can. One whose project publishes no mark is drawn as its language, and
+ * plain SQL as the engine it is written in, so a column of cards is scanned
+ * by marks rather than read.
+ */
+function TargetLogo({ target, size = "sm" }: { target: OrmTarget; size?: "sm" | "md" }) {
+  const { engine } = useDatabase()
+  const key =
+    logoKeys(target).find(hasProductLogo) ?? (target.language === "sql" ? engine.logo : undefined)
+  return <ProductLogo id={key} size={size} fallback={Code} />
 }
 
 /**
@@ -668,12 +698,17 @@ function Output({
         <LoadingRows rows={8} />
       </div>
     ) : (
+      // The generator as itself, and the one thing to press: what it writes
+      // is said once, behind the name's (i).
       <EmptyState
-        icon={Code}
+        mark={<TargetLogo target={target} size="md" />}
         title="Nothing written yet"
-        description={
-          problem ??
-          `${target.description} Generate reads the catalogue and writes ${target.filename || "the files"} for you to review; nothing in the database is changed.`
+        description={problem}
+        action={
+          <Button size="sm" variant="outline" disabled={Boolean(problem)} onClick={onRetry}>
+            <Sparkles />
+            Generate
+          </Button>
         }
       />
     )
@@ -769,7 +804,11 @@ function Output({
           }
         />
         {writing && (
-          <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
+          <span
+            aria-hidden
+            // Clipped to the frame: the light's own box is wider than the edge it lights.
+            className="pointer-events-none absolute -inset-px overflow-hidden rounded-xl"
+          >
             <BorderBeam size={120} duration={4} />
           </span>
         )}

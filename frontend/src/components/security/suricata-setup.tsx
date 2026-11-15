@@ -6,6 +6,7 @@ import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { Job, SuricataView } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
+import { InfoTip } from "@/components/form"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -185,26 +186,35 @@ export function SuricataSetup({ data, onChanged }: { data: SuricataView; onChang
       </Panel>
 
       <Panel plain>
-        <PanelHeader title="Inline queue" />
-        <PanelBody flush>
-          <Notice
-            tone={data.inline.queues.length > 0 && !data.inline.failOpen ? "warning" : "default"}
-            title={
-              data.inline.queues.length === 0
-                ? "Nothing is queued to Suricata"
-                : data.inline.failOpen
-                  ? "Every queue fails open"
-                  : "A queue fails closed"
-            }
-          >
-            <p>{data.inline.words}</p>
-            <p className="mt-1">
+        <PanelHeader
+          title="Inline queue"
+          actions={
+            <InfoTip label="About the inline queue">
               Queue rules are read here and never changed: switching to inline mode decides what
               reaches every port on this host, the dashboard&rsquo;s included, and belongs to
               Suricata&rsquo;s own configuration and the firewall that owns those rules.
+            </InfoTip>
+          }
+        />
+        <PanelBody flush className="pt-3">
+          {/* Only a queue that fails closed is a warning: one that fails open,
+              and no queue at all, are a sentence. */}
+          {data.inline.queues.length > 0 && !data.inline.failOpen ? (
+            <Notice tone="warning" title="A queue fails closed">
+              <p>{data.inline.words}</p>
+              {data.inline.error && <p className="mt-1">{data.inline.error}</p>}
+            </Notice>
+          ) : (
+            <p className="text-body text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {data.inline.queues.length === 0
+                  ? "Nothing is queued to Suricata."
+                  : "Every queue fails open."}
+              </span>{" "}
+              {data.inline.words}
+              {data.inline.error && ` ${data.inline.error}`}
             </p>
-            {data.inline.error && <p className="mt-1">{data.inline.error}</p>}
-          </Notice>
+          )}
           {data.inline.queues.length > 0 && (
             <RowList className="mt-2">
               {data.inline.queues.map((queue) => (

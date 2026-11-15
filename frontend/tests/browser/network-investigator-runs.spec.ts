@@ -153,7 +153,9 @@ for (const width of [390, 1440]) {
       "Private container baseline",
     )
     await dialog.getByRole("button", { name: "Run and save", exact: true }).click()
-    await expect(page).toHaveURL(/\/network\/runs\?run=saved-path-1$/)
+    // The investigator sends the reader to the address that used to select
+    // the run beside the list; it opens the run's own page.
+    await expect(page).toHaveURL(/\/network\/runs\/saved-path-1$/)
     await expect(page.getByRole("region", { name: "Connection path report" })).toContainText(
       "Provider policy remains unknown",
     )

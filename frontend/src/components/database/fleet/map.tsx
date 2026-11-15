@@ -116,6 +116,10 @@ const DATABASES_BOARD: MapBoard = {
  * own name (`useMapMemory("databases")`), and choosing a box lights what it
  * is wired to while the inspector names each link and opens the other end.
  *
+ * On a phone the canvas is one of three panes: the rail of databases and the
+ * inspector are the other two, and a bar at the foot picks which is shown.
+ * It was the canvas alone there, with no way to the list or to a link's name.
+ *
  * Its lines say what the old picture's did: one with sessions open on it
  * pulses, one known only as a stack or network shared is dashed, and one that
  * broke or went stale is in that colour. `?database=<id>` flies to one.
@@ -192,6 +196,7 @@ export function DatabaseMap() {
                 full={screen.full}
                 onFullscreen={screen.toggle}
                 initialSystem={asked}
+                panes
               />
             </ReactFlowProvider>
           ) : (

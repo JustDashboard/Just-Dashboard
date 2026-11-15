@@ -289,3 +289,87 @@ export function layerInstruction(createdBy: string): { verb: string; rest: strin
   const match = /^([A-Z]+)\s+([\s\S]*)$/.exec(text)
   return match ? { verb: match[1], rest: match[2] } : { verb: "", rest: text }
 }
+
+/* ------------------------------------------------------------- addresses -- */
+
+/**
+ * An image's place in an address: the sixty-four hex digits of its id.
+ *
+ * The id is the one handle every image has and no two share. A tag moves to
+ * another image on the next pull, two tags can name one image, and an
+ * untagged layer has no name at all. Without its `sha256:` the id needs no
+ * escaping in a path, and Docker lets no repository be named with sixty-four
+ * hex digits, so a segment of that shape can only be an id.
+ */
+export function imageKey(id: string) {
+  return id.trim().replace(/^sha256:/, "")
+}
+
+/** The views of an image's page, in the strip's order; the first needs no saying in an address. */
+export const IMAGE_TABS = ["layers", "containers", "history", "configuration"] as const
+export type ImageTab = (typeof IMAGE_TABS)[number]
+
+export function imageTab(value: string | null | undefined): ImageTab {
+  return (IMAGE_TABS as readonly string[]).includes(value ?? "") ? (value as ImageTab) : "layers"
+}
+
+/**
+ * An image's page, on the view asked for. Given a reference instead of an id
+ * it is that reference as one segment (`ghcr.io%2Facme%2Fapi%3Amain`), which
+ * the page resolves and then leaves for the image's own address.
+ */
+export function imageHref(id: string, tab?: string | null) {
+  const path = `/docker/images/${encodeURIComponent(imageKey(id))}`
+  const view = imageTab(tab)
+  return view === "layers" ? path : `${path}?tab=${view}`
+}
+
+/**
+ * What a path segment asks Docker for. Sixty-four hex digits are an id, which
+ * the engine takes with its `sha256:`; anything else is a reference as it was
+ * written. The segment may arrive escaped or not, depending on who read the
+ * address, and a reference holds no `%` of its own.
+ */
+export function imageRequest(segment: string) {
+  let text = segment
+  try {
+    text = decodeURIComponent(segment)
+  } catch {
+    // A stray `%` is not an escape: the segment is asked for as it stands.
+  }
+  text = text.trim()
+  return /^[0-9a-f]{64}$/.test(text) ? `sha256:${text}` : text
+}
+
+/* ----------------------------------------------------------------- steps -- */
+
+export type ImageStep = {
+  /** Its place in the build, from 1: the base image's first layer. */
+  step: number
+  verb: string
+  rest: string
+  size: number
+  created: string
+  comment?: string
+}
+
+/**
+ * An image's history in the order it was built, each line read as the
+ * instruction that wrote it. Docker lists the last step first.
+ */
+export function imageSteps(
+  layers: { createdBy: string; comment?: string; size: number; created: string }[],
+): ImageStep[] {
+  return [...layers].reverse().map((layer, index) => ({
+    step: index + 1,
+    ...layerInstruction(layer.createdBy || layer.comment || ""),
+    size: layer.size,
+    created: layer.created,
+    comment: layer.comment || undefined,
+  }))
+}
+
+/** Every name an image answers to, the dangling placeholder left out. */
+export function imageNames(image: Pick<DockerImage, "repoTags">) {
+  return image.repoTags.filter((tag) => tag && tag !== "<none>:<none>")
+}

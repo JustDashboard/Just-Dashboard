@@ -63,6 +63,7 @@ by commit, never a file under this directory ([`../../AGENTS.md`](../../AGENTS.m
 | 2026-10-14 | [`2026-10-14-operation-progress/`](2026-10-14-operation-progress/README.md) | Operation progress feedback | [43 files][2026-10-14-operation-progress] |
 | 2026-10-15 | [`2026-10-15-api-keys/`](2026-10-15-api-keys/README.md) | API key lifecycle and discovery | [11 files][2026-10-15-api-keys] |
 | 2026-11-05 | [`2026-11-05-hub-signin/`](2026-11-05-hub-signin/security-review.md) | Hub sign-in: security review against invariant 2 | — |
+| 2026-11-13 | [`2026-11-13-ui-overhaul-map/`](2026-11-13-ui-overhaul-map/README.md) | UI overhaul map: every page against the deploy pages, and what is left | [3 files][2026-11-13-ui-overhaul-map] |
 
 ## Records that were pictures only
 
@@ -203,3 +204,4 @@ under the same name.
 [2026-10-19-metrics-interfaces]: https://github.com/JustDashboard/Just-Dashboard/tree/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-19-metrics-interfaces
 [2026-10-19-overview]: https://github.com/JustDashboard/Just-Dashboard/tree/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-19-overview
 [2026-10-19-remote-session]: https://github.com/JustDashboard/Just-Dashboard/tree/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-19-remote-session
+[2026-11-13-ui-overhaul-map]: https://github.com/JustDashboard/Just-Dashboard/tree/0db4e0622e7916e77de2f4efcadb0f4ab0c23811

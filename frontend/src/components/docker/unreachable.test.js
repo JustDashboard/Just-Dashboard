@@ -49,14 +49,31 @@ describe("why Docker did not answer", () => {
     expect(state.startable).toBe(false)
   })
 
+  test("a systemd that knows no such unit says Docker was never installed", () => {
+    const state = dockerUnreachable(
+      { available: false, host, error: refusedConnection },
+      unit("inactive", "not-found"),
+    )
+    expect(state.fault).toBe("absent")
+    expect(state.title).toBe("Docker is not installed")
+    expect(state.description).toContain("systemd has no docker.service")
+    expect(state.description).toContain("JD_DOCKER_HOST")
+    expect(state.startable).toBe(false)
+    // A socket that refused the dashboard is there, whatever systemd knows.
+    expect(
+      dockerUnreachable(
+        { available: false, host, error: deniedSocket },
+        unit("inactive", "not-found"),
+      ).fault,
+    ).toBe("refused")
+  })
+
   test("without a word from systemd it claims neither", () => {
-    for (const reading of [undefined, unit("inactive", "not-found")]) {
-      const state = dockerUnreachable({ available: false, error: refusedConnection }, reading)
-      expect(state.fault).toBe("silent")
-      expect(state.title).toBe("Docker is not answering")
-      expect(state.description).toContain("/var/run/docker.sock")
-      expect(state.startable).toBe(false)
-    }
+    const state = dockerUnreachable({ available: false, error: refusedConnection }, undefined)
+    expect(state.fault).toBe("silent")
+    expect(state.title).toBe("Docker is not answering")
+    expect(state.description).toContain("/var/run/docker.sock")
+    expect(state.startable).toBe(false)
     // No error at all, as when the ping itself could not be read.
     expect(dockerUnreachable({ available: false }, undefined)).toMatchObject({
       fault: "silent",

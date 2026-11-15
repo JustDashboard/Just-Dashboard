@@ -446,7 +446,22 @@ describe("what the collectors left unsaid", () => {
 
   test("collectors that failed for one reason are one silence", () => {
     expect(scanSilences(scans)).toEqual([
-      { what: "containers and compose services", reason: "Docker did not answer: no socket" },
+      {
+        what: "containers and compose services",
+        reason: "Docker did not answer: no socket",
+        docker: true,
+      },
+    ])
+    // A silence Docker shares with another collector is not Docker's alone.
+    expect(
+      scanSilences([
+        { source: "docker", ok: false, reason: "permission denied", count: 0 },
+        { source: "units", ok: false, reason: "permission denied", count: 0 },
+        { source: "sockets", ok: false, count: 0 },
+      ]),
+    ).toEqual([
+      { what: "containers and systemd units", reason: "permission denied", docker: false },
+      { what: "unix sockets", reason: "it could not be read", docker: false },
     ])
     expect(scanSilences([{ source: "units", ok: true, count: 1 }])).toEqual([])
   })

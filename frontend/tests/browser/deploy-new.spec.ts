@@ -181,15 +181,15 @@ test("with neither GitHub identity connected the panel says so and each identity
   )
   await expect(page.getByRole("link", { name: "Connect GitHub" })).toHaveCount(0)
 
-  // GitHub's own tile for the App, a terminal with GitHub in its corner for the
-  // CLI — not two grey glyphs.
-  const identities = page.getByRole("list", { name: "GitHub connections" })
-  const [app, cli] = [
-    identities.getByRole("listitem").nth(0),
-    identities.getByRole("listitem").nth(1),
-  ]
+  // The App that is not connected is the Credentials page's picture, small:
+  // what would be connected to what, and the state in a word. The CLI is a
+  // terminal with GitHub in its corner — neither is a grey glyph.
+  const app = page.getByRole("group", { name: "GitHub App", exact: true })
   await expect(app.getByText("Disconnected", { exact: true })).toBeVisible()
-  await expect(app.locator("img").first()).toHaveAttribute("src", "/logos/github.svg")
+  await expect(app.getByText("This server", { exact: true })).toBeVisible()
+  const identities = page.getByRole("list", { name: "GitHub connections" })
+  await expect(identities.getByRole("listitem")).toHaveCount(1)
+  const cli = identities.getByRole("listitem").first()
   await expect(cli.getByText("Signed out", { exact: true })).toBeVisible()
   await expect(cli.locator("img").first()).toHaveAttribute("src", "/logos/terminal.svg")
   await expect(cli.locator("img").nth(1)).toHaveAttribute("src", "/logos/github.svg")

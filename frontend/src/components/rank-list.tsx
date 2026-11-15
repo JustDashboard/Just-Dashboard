@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -34,6 +35,8 @@ export type RankItem = {
   hint?: React.ReactNode
   title?: string
   onClick?: () => void
+  /** The page the name opens, for a row that is a way to one rather than a filter. */
+  href?: string
   /** A verb for the row, drawn before the figures so they stay the last columns. */
   trailing?: React.ReactNode
 }
@@ -55,16 +58,17 @@ export function RankList({
   return (
     <ul className={cn("-mx-2 flex min-w-0 flex-col", className)} data-slot="rank-list">
       {items.map((item) => {
-        const pressable = Boolean(item.onClick)
-        const Name = pressable ? "button" : "div"
+        const pressable = Boolean(item.href ?? item.onClick)
+        const Name: React.ElementType = item.href ? Link : item.onClick ? "button" : "div"
         return (
           <li
             key={item.key}
             data-slot="rank-row"
-            className="flex h-8 min-w-0 items-center gap-3 rounded-sm px-2 transition-colors has-[>button:hover]:bg-row-hover"
+            className="flex h-8 min-w-0 items-center gap-3 rounded-sm px-2 transition-colors has-[>a:hover]:bg-row-hover has-[>button:hover]:bg-row-hover"
           >
             <Name
-              type={pressable ? "button" : undefined}
+              href={item.href}
+              type={pressable && !item.href ? "button" : undefined}
               onClick={item.onClick}
               title={item.title}
               aria-label={pressable ? item.title : undefined}

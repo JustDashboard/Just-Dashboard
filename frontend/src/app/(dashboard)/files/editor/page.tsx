@@ -2,9 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft, MagnifyingGlass, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
+import {
+  ArrowLeft,
+  FolderOpen,
+  MagnifyingGlass,
+  Pencil,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+} from "@/components/icons"
 import { Page } from "@/components/page"
 import { PaneHeader } from "@/components/panel"
+import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
 import { FileTree } from "@/components/files/file-tree"
@@ -18,6 +26,13 @@ import { useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/state"
 import { cn } from "@/lib/utils"
+
+type EditorPane = "tree" | "editor"
+
+const PANES: PaneStop<EditorPane>[] = [
+  { key: "tree", label: "Files", icon: <FolderOpen /> },
+  { key: "editor", label: "Editor", icon: <Pencil /> },
+]
 
 /** Reading register: a scrolling tree and editor are working panes; counts live in their status strips. */
 export default function FileEditorPage() {
@@ -33,7 +48,9 @@ export default function FileEditorPage() {
       : requestedRoot
   const line = Number(params.get("line")) || undefined
   const [sidebar, setSidebar] = useViewState("files.fullEditor.sidebar", true)
-  const [mobileTree, setMobileTree] = useState(false)
+  // Which pane a phone shows. Both stay mounted while the other is looked
+  // at: the editor that is out of sight still holds its unsaved draft.
+  const [pane, setPane] = useState<EditorPane>("editor")
   const [find, setFind] = useState(false)
   const [searchMode, setSearchMode] = useState<FileSearchMode>("names")
   const [refresh, setRefresh] = useState(0)
@@ -61,7 +78,6 @@ export default function FileEditorPage() {
 
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileTree(false)
       if (!(event.ctrlKey || event.metaKey)) return
       if (event.key.toLowerCase() === "p" || (event.shiftKey && event.key.toLowerCase() === "f")) {
         event.preventDefault()
@@ -146,10 +162,13 @@ export default function FileEditorPage() {
     )
 
   return (
-    <Page fill className="max-w-none gap-2 px-2 py-2 md:px-3 md:py-3">
-      {/* A frame is needed because both the tree and editor own their scrolling. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
-        <PaneHeader className="flex-wrap gap-2 px-2 py-1.5">
+    <Page fill className="max-w-none gap-2 p-0 md:px-0 md:py-0 lg:px-3 lg:py-3">
+      {/* A frame is needed because both the tree and editor own their scrolling.
+          Below `lg` it runs to the screen's edges and shows one of the two,
+          picked on the bar at its foot: beside each other on a phone the tree
+          was a drawer over the code, opened from a glyph in the strip. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border">
+        <PaneHeader className="gap-2 px-2 py-1.5">
           <Button
             variant="ghost"
             size="sm"
@@ -160,19 +179,11 @@ export default function FileEditorPage() {
           </Button>
           <IconAction
             label={sidebar ? "Hide file tree" : "Show file tree"}
-            className="hidden size-8 md:inline-flex"
+            className="hidden size-8 lg:inline-flex"
             aria-pressed={sidebar}
             onClick={() => setSidebar(!sidebar)}
           >
             {sidebar ? <SidebarLeftClose /> : <SidebarLeftOpen />}
-          </IconAction>
-          <IconAction
-            label={mobileTree ? "Hide file tree" : "Show file tree"}
-            className="size-8 md:hidden"
-            aria-expanded={mobileTree}
-            onClick={() => setMobileTree(!mobileTree)}
-          >
-            {mobileTree ? <SidebarLeftClose /> : <SidebarLeftOpen />}
           </IconAction>
           <span
             className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground"
@@ -183,6 +194,7 @@ export default function FileEditorPage() {
           <Button
             variant="outline"
             size="sm"
+            className="shrink-0"
             onClick={() => {
               setSearchMode("names")
               setFind(true)
@@ -192,22 +204,16 @@ export default function FileEditorPage() {
             Find file
           </Button>
         </PaneHeader>
-        <div className="relative flex min-h-0 min-w-0 flex-1">
-          {mobileTree && (
-            <button
-              type="button"
-              aria-label="Close file tree"
-              className="absolute inset-0 z-10 bg-background/70 md:hidden"
-              onClick={() => setMobileTree(false)}
-            />
-          )}
-          {(sidebar || mobileTree) && (
+        <div className="flex min-h-0 min-w-0 flex-1">
+          {/* Hidden at a desk is a desk's choice: the bar reaches the tree
+              whether or not the column was put away. */}
+          {(sidebar || pane === "tree") && (
             <aside
               aria-label="File explorer"
               className={cn(
-                "absolute inset-y-0 left-0 z-20 w-56 shrink-0 flex-col border-r border-hairline bg-card md:static md:z-auto md:w-64",
-                mobileTree ? "flex" : "hidden",
-                sidebar ? "md:flex" : "md:hidden",
+                "flex shrink-0 flex-col border-hairline max-lg:min-h-0 max-lg:min-w-0 max-lg:flex-1 lg:w-64 lg:border-r",
+                !sidebar && "lg:hidden",
+                paneShown(pane === "tree"),
               )}
             >
               <FileTree
@@ -218,7 +224,8 @@ export default function FileEditorPage() {
                 canWrite={can("file.write")}
                 canDelete={can("destructive")}
                 onOpenFile={(next) => {
-                  setMobileTree(false)
+                  // Choosing a file is asking to see it, the open one included.
+                  setPane("editor")
                   if (next !== path) requestNavigate(editorHref(next, root))
                 }}
                 onConfirm={(request) =>
@@ -237,31 +244,35 @@ export default function FileEditorPage() {
               />
             </aside>
           )}
-          {isImage(path) && can("file.write") ? (
-            <ImageEditor
-              key={params.toString()}
-              path={path}
-              root={root}
-              destination
-              onDirtyChange={setDirty}
-              onClose={() => undefined}
-              onSaved={() => {
-                setRefresh((v) => v + 1)
-              }}
-            />
-          ) : (
-            <FileEditorSheet
-              key={params.toString()}
-              path={path}
-              root={root}
-              destination
-              revealLine={line}
-              onDirtyChange={setDirty}
-              onOpenChange={() => undefined}
-              onSaved={() => setRefresh((v) => v + 1)}
-            />
-          )}
+          <div className={cn("flex min-h-0 min-w-0 flex-1", paneShown(pane === "editor"))}>
+            {isImage(path) && can("file.write") ? (
+              <ImageEditor
+                key={params.toString()}
+                path={path}
+                root={root}
+                destination
+                onDirtyChange={setDirty}
+                onClose={() => undefined}
+                onSaved={() => {
+                  setRefresh((v) => v + 1)
+                }}
+              />
+            ) : (
+              <FileEditorSheet
+                key={params.toString()}
+                grouped
+                path={path}
+                root={root}
+                destination
+                revealLine={line}
+                onDirtyChange={setDirty}
+                onOpenChange={() => undefined}
+                onSaved={() => setRefresh((v) => v + 1)}
+              />
+            )}
+          </div>
         </div>
+        <PaneBar label="File editor" stops={PANES} active={pane} onPick={setPane} />
       </div>
       <QuickOpen
         open={find}

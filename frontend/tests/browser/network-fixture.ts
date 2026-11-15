@@ -504,7 +504,7 @@ export const overview = {
       title: "ens3 dropped or failed 43 packets in the last hour",
       detail:
         "Errors on the uplink are a cable, a driver or the provider; drops are a queue too short for the traffic.",
-      href: "/network/interfaces?device=ens3",
+      href: "/network/interfaces/ens3",
       source: "history",
     },
     {
@@ -600,7 +600,7 @@ export const overview = {
       level: "warning",
       title: "ens3 dropped or failed 43 packets in the last hour",
       detail: "Errors on the uplink are a cable, a driver or the provider.",
-      href: "/network/interfaces?device=ens3",
+      href: "/network/interfaces/ens3",
       openedAt: iso(42),
       lastSeenAt: iso(0),
       related: [6],
@@ -612,7 +612,7 @@ export const overview = {
       level: "critical",
       title: "ens3 has no carrier",
       detail: "The device is up but nothing is connected to it.",
-      href: "/network/interfaces?device=ens3",
+      href: "/network/interfaces/ens3",
       openedAt: iso(43),
       lastSeenAt: iso(40),
       resolvedAt: iso(39),

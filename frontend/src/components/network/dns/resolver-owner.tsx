@@ -22,6 +22,22 @@ const CONFIDENCE: Record<ResolverOwner["confidence"], string> = {
   unknown: "Unrecognised",
 }
 
+/** Where the owner's hand-off leads, as a link that says so. */
+export function OwnerHandoff({ owner }: { owner: ResolverOwner }) {
+  if (!owner.handoffHref) return null
+  return owner.handoffHref.startsWith("/") ? (
+    <Link className="underline" href={owner.handoffHref}>
+      Open the interfaces
+    </Link>
+  ) : (
+    // An anchor of the page's first view, linked whole so it also leads there
+    // from the settings, where the same hand-off is said.
+    <Link className="underline" href={`/network/dns${owner.handoffHref}`}>
+      Per-link DNS
+    </Link>
+  )
+}
+
 /**
  * Who decides what /etc/resolv.conf says on this host, and so where a DNS
  * change is made. The page writes systemd-resolved's drop-in; on a host where
@@ -32,9 +48,8 @@ const CONFIDENCE: Record<ResolverOwner["confidence"], string> = {
  * and disagreements between them are drawn as a warning, not resolved.
  */
 export function ResolverOwnerPanel({ owner }: { owner: ResolverOwner }) {
-  const internal = owner.handoffHref?.startsWith("/")
   return (
-    <Panel plain>
+    <Panel plain className="animate-rise">
       <PanelHeader
         title="Resolver owner"
         actions={
@@ -62,17 +77,7 @@ export function ResolverOwnerPanel({ owner }: { owner: ResolverOwner }) {
               : "Does not reach what programs ask"}
           </Detail>
           <Detail label="Change DNS" className="break-words">
-            {owner.handoff}{" "}
-            {owner.handoffHref &&
-              (internal ? (
-                <Link className="underline" href={owner.handoffHref}>
-                  Open the interfaces
-                </Link>
-              ) : (
-                <a className="underline" href={owner.handoffHref}>
-                  Per-link DNS
-                </a>
-              ))}
+            {owner.handoff} <OwnerHandoff owner={owner} />
           </Detail>
         </DetailList>
         {owner.conflicts.length > 0 && (

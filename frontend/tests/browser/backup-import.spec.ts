@@ -11,6 +11,11 @@ import { OLD_KEY, ORIGIN, catalogue, mockImport } from "./backup-import-fixture"
  */
 
 const importDialog = (page: Page) => page.getByRole("dialog", { name: "Import from a destination" })
+/** Import is behind the identity line's menu: New backup is the page's one command. */
+async function openImport(page: Page) {
+  await page.getByRole("button", { name: "Backup actions" }).click()
+  await page.getByRole("menuitem", { name: "Import from a destination…" }).click()
+}
 
 test.beforeEach(async ({ page }) => {
   await mockWorkbench(page)
@@ -21,7 +26,7 @@ test("a fresh server reads a destination's catalogue, grouped by server and job,
 }) => {
   const state = await mockImport(page)
   await page.goto("/backups")
-  await page.getByRole("button", { name: "Import…" }).click()
+  await openImport(page)
   const dialog = importDialog(page)
   await expect(dialog).toBeVisible()
   // This server's own destinations are the choices, a bucket's prefix apart.
@@ -72,7 +77,7 @@ test("a sealed archive names the key it needs, and imports once that key is brou
 }) => {
   const state = await mockImport(page)
   await page.goto("/backups")
-  await page.getByRole("button", { name: "Import…" }).click()
+  await openImport(page)
   const dialog = importDialog(page)
   await dialog.getByRole("button", { name: "Read Backblaze B2 wayy-backups/db" }).click()
   const view = dialog.getByTestId("backup-catalogue")
@@ -97,7 +102,7 @@ test("a destination typed in is read with its keys, and a copy can be kept here"
 }) => {
   const state = await mockImport(page)
   await page.goto("/backups")
-  await page.getByRole("button", { name: "Import…" }).click()
+  await openImport(page)
   const dialog = importDialog(page)
   await dialog.getByRole("button", { name: "Read another destination" }).click()
   const read = dialog.getByRole("button", { name: "Read destination" })

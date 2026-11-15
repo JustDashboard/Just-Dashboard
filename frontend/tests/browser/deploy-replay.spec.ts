@@ -170,10 +170,21 @@ test("a drifting candidate's replay names the requests it answered differently",
   const record = page.getByRole("region", { name: "Traffic replay" })
   await expect(record.getByText("replay_status_drift", { exact: true })).toBeVisible()
   const report = record.getByRole("region", { name: "Replay report" })
-  await expect(report.getByText("of 64 recorded requests", { exact: true })).toBeVisible()
-  await expect(report.getByText("4% · 2% allowed", { exact: true })).toBeVisible()
-  await expect(report.getByText("38 ms", { exact: true })).toBeVisible()
-  await expect(report.getByText("42 ms recorded", { exact: true })).toBeVisible()
+  // The verdict is one sentence on the step's mark, in the colour of how it
+  // went, with the figures as a line of facts: no tile is left in the report.
+  const verdict = report.locator('[data-slot="run-verdict"]')
+  await expect(
+    verdict.getByText("48 of 50 replayed requests matched the record", { exact: true }),
+  ).toBeVisible()
+  await expect(verdict.getByText("2 drifted (4%), 2% allowed", { exact: true })).toHaveClass(
+    /text-destructive/,
+  )
+  await expect(
+    verdict.getByText("19 in 20 inside 38 ms, 42 ms recorded", { exact: true }),
+  ).toBeVisible()
+  await expect(verdict.getByText("Took 1.8 s, 4 at a time", { exact: true })).toBeVisible()
+  await expect(verdict.getByText("From 64 recorded requests", { exact: true })).toBeVisible()
+  await expect(report.locator('[data-slot="stat-tile"]')).toHaveCount(0)
   const requests = report.getByRole("list", { name: "Requests answered differently" })
   await expect(requests.getByRole("listitem")).toHaveCount(2)
   await expect(requests.getByRole("listitem").first()).toContainText("GET/pricing?plan=team")
@@ -201,7 +212,13 @@ test("a passing replay reads as the record matched", async ({ page }) => {
   )
   await step.click()
   const report = page.getByRole("region", { name: "Replay report" })
-  await expect(report.getByText(/Within the live release's record over 50 requests/)).toBeVisible()
+  // The server's own account of a replay inside its terms is the sentence's
+  // title; the sentence says it in the page's words.
+  await expect(report.getByTitle(/Within the live release's record over 50 requests/)).toHaveText(
+    "All 50 replayed requests matched the record",
+  )
+  await expect(report.getByText("None drifted, 2% allowed", { exact: true })).toBeVisible()
+  await expect(report.locator('[data-slot="stat-tile"]')).toHaveCount(0)
   await expect(report.getByRole("list", { name: "Requests answered differently" })).toHaveCount(0)
 })
 

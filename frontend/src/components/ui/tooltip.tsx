@@ -19,21 +19,100 @@ function TooltipProvider({
   )
 }
 
+/**
+ * The trigger a tooltip's own focus last landed on, and when: what `Tooltip`
+ * needs to tell a scroll the focus caused from one the reader made.
+ */
+type Focused = { trigger: Element; at: number }
+const FocusedContext = React.createContext<((trigger: Element) => void) | null>(null)
+
+/** How long after a focus a scroll is still the page bringing the trigger into view. */
+const FOCUS_SCROLL_MS = 800
+
+/**
+ * When anything last scrolled. One listener for every tooltip, in the capture
+ * phase and registered when the first tooltip mounts, so it has run before
+ * Radix's own listener for the same event (which a tooltip registers only
+ * while it is open).
+ */
+let scrolledAt = -Infinity
+let watching = false
+function watchScrolls() {
+  if (watching || typeof window === "undefined") return
+  watching = true
+  window.addEventListener("scroll", () => (scrolledAt = performance.now()), {
+    capture: true,
+    passive: true,
+  })
+}
+
+/**
+ * Radix closes a tooltip when anything around its trigger scrolls, since a
+ * tooltip a pointer opened is then no longer under the pointer. A keyboard is
+ * another matter: tabbing to a trigger below the fold opens its tooltip and
+ * scrolls the page to it, and that scroll closed the tooltip a frame after it
+ * opened, so a reader who tabbed to an info mark never read it. A close that
+ * comes with a scroll, while the trigger still holds the focus that opened
+ * it a moment ago, is that scroll and is not followed. Escape, a blur, a
+ * pointer leaving and a scroll the reader makes later close it as before.
+ */
 function Tooltip({
   disableHoverableContent = true,
+  open,
+  defaultOpen = false,
+  onOpenChange,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+  const focused = React.useRef<Focused | null>(null)
+  const noteFocus = React.useCallback((trigger: Element) => {
+    focused.current = { trigger, at: performance.now() }
+  }, [])
+  const [shown, setShown] = React.useState(defaultOpen)
+  React.useEffect(watchScrolls, [])
+  const change = (next: boolean) => {
+    if (!next) {
+      const now = performance.now()
+      const held = focused.current
+      const byScroll = now - scrolledAt < 16
+      if (
+        byScroll &&
+        held &&
+        held.trigger === document.activeElement &&
+        now - held.at < FOCUS_SCROLL_MS
+      )
+        return
+    }
+    if (open === undefined) setShown(next)
+    onOpenChange?.(next)
+  }
   return (
-    <TooltipPrimitive.Root
-      data-slot="tooltip"
-      disableHoverableContent={disableHoverableContent}
-      {...props}
-    />
+    <FocusedContext.Provider value={noteFocus}>
+      <TooltipPrimitive.Root
+        data-slot="tooltip"
+        disableHoverableContent={disableHoverableContent}
+        open={open ?? shown}
+        onOpenChange={change}
+        {...props}
+      />
+    </FocusedContext.Provider>
   )
 }
 
-function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+function TooltipTrigger({
+  onFocus,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
+  const noteFocus = React.useContext(FocusedContext)
+  return (
+    <TooltipPrimitive.Trigger
+      data-slot="tooltip-trigger"
+      onFocus={(event) => {
+        onFocus?.(event)
+        noteFocus?.(event.currentTarget)
+      }}
+      {...props}
+    />
+  )
 }
 
 function TooltipContent({

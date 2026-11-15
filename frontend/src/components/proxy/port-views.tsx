@@ -1,0 +1,446 @@
+"use client"
+
+import { useId, useState } from "react"
+import Link from "next/link"
+import { Inspect, NetworkDevice } from "@/components/icons"
+import { errorMessage, post } from "@/lib/api"
+import { plural, timestamp } from "@/lib/format"
+import type { PortIdentification } from "@/lib/types"
+import { Field, FormSection } from "@/components/form"
+import { Detail, DetailList } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import {
+  ownerLabel,
+  ownerLinks,
+  socketAddresses,
+  socketClients,
+  socketHolders,
+  type Socket,
+} from "@/components/proxy/ports"
+import { FirewallVerdict } from "@/components/proxy/ports-firewall"
+import { proxyWords } from "@/components/proxy/ports-proxy"
+import { DockerPath, ExternalProof } from "@/components/proxy/port-reachability"
+import { reachNotes, ReachWord } from "@/components/proxy/port-marks"
+import { Notice } from "@/components/state"
+import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { processHref } from "@/components/procs/process-facts"
+
+/** The backend sends a socket's busiest peers, at most this many. */
+const CLIENT_PEERS_SENT = 5
+
+const MANAGER_WORDS: Record<NonNullable<Socket["manager"]>, string> = {
+  systemd: "systemd unit",
+  container: "Container",
+  session: "Login session",
+  pm2: "PM2 app",
+  kernel: "Kernel thread",
+  unmanaged: "Nothing supervises it",
+}
+
+/**
+ * A port's views, as its page draws them under its identity line
+ * (`port-page.tsx`). They were the side sheet's sections, opened from a row
+ * at `?socket=tcp:0.0.0.0:443`, until a port had a page of its own.
+ *
+ * Reach: where it answers and what stands in front of it — the addresses,
+ * the reach and why, the firewall's verdict, the proxy, the provider no
+ * reading here can see — and, for an admin, the proof from outside, the path
+ * Docker publishes it by, and what the socket says when asked.
+ */
+export function PortReach({ socket, admin }: { socket: Socket; admin: boolean }) {
+  const nat = socket.source === "docker-nat"
+  const proxy = proxyWords(socket)
+  const notes = reachNotes(socket)
+  return (
+    <div className="space-y-8">
+      <Panel plain>
+        <PanelHeader title="Where it answers" />
+        <PanelBody className="space-y-3">
+          <DetailList>
+            <Detail label={socketAddresses(socket).length > 1 ? "Addresses" : "Address"}>
+              <span className="font-mono">{socketAddresses(socket).join(", ")}</span>
+            </Detail>
+            <Detail label="Reach">
+              <span className="block">
+                <ReachWord socket={socket} />
+              </span>
+              {notes.map((note) => (
+                <span key={note} className="mt-0.5 block text-hint text-muted-foreground">
+                  {note}
+                </span>
+              ))}
+            </Detail>
+            <Detail label="Firewall">
+              <FirewallVerdict socket={socket} />
+            </Detail>
+            <Detail label="Proxy">{proxy ?? "Nothing in the proxy routes to it"}</Detail>
+            {/* Every grade above is the host's own reading. What stands in
+              front of the host is not visible from it, and a port graded
+              open here can still be closed upstream, or the reverse. */}
+            {socket.exposed && (
+              <Detail label="Provider">
+                <span className="text-muted-foreground">
+                  Not visible — no provider adapter. Reaching it from outside is unproven until an
+                  external check measures it.
+                </span>
+              </Detail>
+            )}
+          </DetailList>
+          {(socket.routes ?? []).length > 1 && (
+            <ul aria-label="Sites routing to it" className="space-y-1 text-xs">
+              {(socket.routes ?? []).map((route) => (
+                <li key={route.site} className="flex items-center gap-2">
+                  <span className="font-mono">{route.serverName || route.site}</span>
+                  {route.tls && <Tag>TLS</Tag>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </PanelBody>
+      </Panel>
+
+      {admin && socket.exposed && <ExternalProof socket={socket} />}
+
+      {admin && <DockerPath socket={socket} />}
+
+      {admin && socket.protocol === "tcp" && !nat && <Identify socket={socket} />}
+    </div>
+  )
+}
+
+/**
+ * Owner: the whole command a row cuts, every process holding the socket
+ * rather than the one a row names, and the chain from the process up to
+ * whoever supervises it, with the owner's own pages.
+ */
+export function PortOwner({ socket }: { socket: Socket }) {
+  const nat = socket.source === "docker-nat"
+  const holders = socketHolders(socket)
+  const label = ownerLabel(socket)
+  const links = ownerLinks(socket)
+  return (
+    <div className="space-y-8">
+      <Panel plain>
+        <PanelHeader title="Command" />
+        <PanelBody className="space-y-3">
+          {nat ? (
+            <p className="text-body text-muted-foreground">
+              Forwarded by Docker&apos;s NAT rules; no process listens.
+            </p>
+          ) : (
+            <>
+              <pre className="rounded-lg border bg-card px-4 py-3 font-mono text-xs break-all whitespace-pre-wrap">
+                {socket.cmdline || "No command reported"}
+              </pre>
+              <DetailList>
+                <Detail label="User">{socket.user || "unknown"}</Detail>
+                <Detail label={holders.length === 1 ? "Process" : "Processes"}>
+                  {holders.length === 0 ? (
+                    "None this account can see"
+                  ) : (
+                    <span className="flex flex-wrap gap-x-2 gap-y-1">
+                      {holders.map((pid) => (
+                        <Link
+                          key={pid}
+                          href={processHref(pid)}
+                          className="numeric rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
+                        >
+                          {pid}
+                          {pid === socket.pid && holders.length > 1 && " (owner)"}
+                        </Link>
+                      ))}
+                    </span>
+                  )}
+                </Detail>
+                {socket.startedAt && <Detail label="Started">{timestamp(socket.startedAt)}</Detail>}
+              </DetailList>
+            </>
+          )}
+        </PanelBody>
+      </Panel>
+
+      <Panel plain>
+        <PanelHeader title="Who runs it" />
+        <PanelBody className="space-y-3">
+          <ol className="space-y-1.5 text-xs">
+            {!nat && socket.pid > 0 && (
+              <li>
+                <span className="text-muted-foreground">Process </span>
+                {socket.displayName || socket.process}{" "}
+                <span className="numeric font-mono text-muted-foreground">PID {socket.pid}</span>
+              </li>
+            )}
+            {!nat && socket.ppid !== undefined && socket.ppid > 0 && (
+              <li>
+                <span className="text-muted-foreground">started by </span>
+                <Link
+                  href={processHref(socket.ppid)}
+                  className="numeric rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
+                >
+                  PID {socket.ppid}
+                </Link>
+              </li>
+            )}
+            {socket.manager && (
+              <li>
+                <span className="text-muted-foreground">supervised by </span>
+                {MANAGER_WORDS[socket.manager]}
+                {socket.managerName && <span className="font-mono"> {socket.managerName}</span>}
+              </li>
+            )}
+            {socket.socketUnit && (
+              <li>
+                <span className="text-muted-foreground">socket unit </span>
+                <span className="font-mono">{socket.socketUnit}</span>
+                {socket.activates && (
+                  <>
+                    <span className="text-muted-foreground"> starts </span>
+                    <span className="font-mono">{socket.activates}</span>
+                  </>
+                )}
+              </li>
+            )}
+            {label && (
+              <li>
+                <span className="text-muted-foreground">answers for </span>
+                {label}
+              </li>
+            )}
+          </ol>
+          {links.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {links.map((link) => (
+                <Button key={link.key} asChild variant="outline" size="xs">
+                  <Link href={link.href}>{link.label}</Link>
+                </Button>
+              ))}
+            </div>
+          )}
+        </PanelBody>
+      </Panel>
+    </div>
+  )
+}
+
+/** Clients: who is connected now, from the listing's own walk of the socket tables. */
+export function PortClients({ socket }: { socket: Socket }) {
+  const clients = socketClients(socket)
+  return (
+    <Panel plain>
+      <PanelHeader
+        title="Connected now"
+        actions={
+          <Button asChild variant="outline" size="xs">
+            <Link href={`/network/connections?q=${socket.port}`}>
+              <NetworkDevice />
+              Open in Connections
+            </Link>
+          </Button>
+        }
+      />
+      <PanelBody flush className="pt-3">
+        {!clients ? (
+          <p className="text-body text-muted-foreground">
+            {socket.protocol === "udp"
+              ? "A UDP socket keeps no connections to count."
+              : "The listing did not count this socket's connections."}
+          </p>
+        ) : clients.count === 0 ? (
+          <p className="text-body text-muted-foreground">
+            No connection was open when it was listed.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-body">
+              <span className="numeric">{plural(clients.count, "connection")}</span>
+              {/* Only the busiest five arrive, so a sixth caller is not counted here. */}
+              {clients.peers.length < CLIENT_PEERS_SENT && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  from {plural(clients.peers.length, "address", "addresses")}
+                </span>
+              )}
+            </p>
+            <ul aria-label="Top peers" className="divide-y divide-hairline">
+              {clients.peers.map((peer) => (
+                <li key={peer.address} className="flex h-9 items-center justify-between gap-3">
+                  <Link
+                    href={`/network/connections?q=${encodeURIComponent(peer.address)}`}
+                    className="truncate rounded-sm font-mono text-xs underline-offset-2 focus-ring hover:underline"
+                  >
+                    {peer.address}
+                  </Link>
+                  <span className="numeric shrink-0 text-hint text-muted-foreground">
+                    {peer.count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </PanelBody>
+    </Panel>
+  )
+}
+
+/**
+ * Asks the socket what it is: a banner if it speaks first, else a TLS
+ * handshake and an HTTP request. The server name is sent as SNI and Host, for
+ * a server that picks its certificate by name or refuses a handshake without
+ * one.
+ */
+function Identify({ socket }: { socket: Socket }) {
+  const id = useId()
+  const [serverName, setServerName] = useState(
+    socket.routes?.find((route) => route.serverName)?.serverName ?? "",
+  )
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<PortIdentification | null>(null)
+
+  const identify = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      setResult(
+        await post<PortIdentification>("/ports/identify", {
+          protocol: socket.protocol,
+          address: socket.address,
+          port: socket.port,
+          serverName: serverName.trim(),
+        }),
+      )
+    } catch (err) {
+      setResult(null)
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <FormSection title="Identify">
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void identify()
+        }}
+      >
+        <Field
+          label="Server name"
+          htmlFor={`${id}-name`}
+          hint="Sent as SNI and Host; leave blank to ask by address"
+        >
+          <Input
+            id={`${id}-name`}
+            value={serverName}
+            onChange={(e) => setServerName(e.target.value.trim())}
+            placeholder="app.example.com"
+            className="font-mono"
+          />
+        </Field>
+        <Button type="submit" variant="outline" size="sm" disabled={busy}>
+          <Inspect />
+          {busy ? "Asking…" : "Identify"}
+        </Button>
+      </form>
+      {error && <p className="text-hint text-destructive">{error}</p>}
+      {result && <Identification result={result} port={socket.port} />}
+    </FormSection>
+  )
+}
+
+function Identification({ result, port }: { result: PortIdentification; port: number }) {
+  if (!result.connected) {
+    return (
+      <Notice tone="warning" title={`Could not connect to ${result.endpoint}`}>
+        <p>{result.error}</p>
+      </Notice>
+    )
+  }
+  const { tls, http } = result
+  const stepError = (step: "tls" | "http") => result.steps?.find((s) => s.step === step)?.error
+  // The TLS report scans port 443 by name, so it is offered only where that
+  // is the socket asked and the certificate names a host.
+  const reportName = port === 443 ? tls?.names?.find((name) => !/^[\d.:]+$/.test(name)) : undefined
+  return (
+    <DetailList>
+      <Detail label="Asked">
+        <span className="font-mono">{result.endpoint}</span>
+      </Detail>
+      {result.banner !== undefined && (
+        <Detail label="Banner">
+          <span className="font-mono break-all">{result.banner}</span>
+        </Detail>
+      )}
+      {!result.banner && (
+        <Detail label="TLS">
+          {tls?.alert ? (
+            `Speaks TLS but refused the handshake: ${tls.alert}`
+          ) : tls ? (
+            <span className="space-y-0.5">
+              <span className="block">
+                {tls.version}
+                {tls.alpn ? ` · ALPN ${tls.alpn}` : " · no ALPN"}
+              </span>
+              {tls.subject && <span className="block font-mono">{tls.subject}</span>}
+              {tls.names && tls.names.length > 0 && (
+                <span className="block font-mono break-all text-muted-foreground">
+                  {tls.names.join(", ")}
+                </span>
+              )}
+              <span className="block text-muted-foreground">
+                {tls.selfSigned ? "Self-signed" : `Issued by ${tls.issuer || "unknown"}`}
+                {tls.notAfter && ` · until ${timestamp(tls.notAfter)}`}
+              </span>
+              {reportName && (
+                <Link
+                  href={`/proxy/tls?domain=${encodeURIComponent(reportName)}`}
+                  className="block rounded-sm underline underline-offset-2 focus-ring"
+                >
+                  TLS report for {reportName}
+                </Link>
+              )}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              No{stepError("tls") ? ` (${stepError("tls")})` : ""}
+            </span>
+          )}
+        </Detail>
+      )}
+      {!result.banner && !tls?.alert && (
+        <Detail label="HTTP">
+          {http ? (
+            <>
+              <span className="numeric">{http.status}</span>
+              {http.reason && ` ${http.reason}`}
+              {http.server && (
+                <span className="text-muted-foreground"> · Server {http.server}</span>
+              )}
+              {http.location && (
+                <span className="block font-mono break-all text-muted-foreground">
+                  to {http.location}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-muted-foreground">
+              No answer{stepError("http") ? ` (${stepError("http")})` : ""}
+            </span>
+          )}
+        </Detail>
+      )}
+      {!result.banner && !tls && !http && (
+        <Detail label="Said">
+          <span className="text-muted-foreground">
+            Nothing recognisable: no banner, no TLS and no HTTP
+          </span>
+        </Detail>
+      )}
+    </DetailList>
+  )
+}

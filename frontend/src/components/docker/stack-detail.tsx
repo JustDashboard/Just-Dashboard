@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
@@ -8,6 +8,8 @@ import {
   ArrowCircleUp,
   ArrowLeft,
   Box,
+  ChevronDown,
+  ChevronUp,
   Cross,
   Logs,
   Play,
@@ -34,6 +36,7 @@ import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { ROOMY_BESIDE_RAIL, WIDE_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
@@ -46,6 +49,7 @@ import { StackHistory } from "@/components/docker/stack-history"
 import { StackLogs } from "@/components/docker/stack-logs"
 import { StackMap } from "@/components/docker/stack-map"
 import { StackPreview } from "@/components/docker/stack-preview"
+import { StackRail, useStackRail } from "@/components/docker/stack-rail"
 import { DASHBOARD_STACK } from "@/components/docker/stack-readings"
 import { ServiceRows } from "@/components/docker/stack-services-table"
 import { StackUsageBand } from "@/components/docker/stack-usage-band"
@@ -63,6 +67,7 @@ import {
   type ServiceReading,
 } from "@/components/docker/stack-service-readings"
 import { useConfirm } from "@/components/confirm-dialog"
+import { IconAction } from "@/components/icon-action"
 import { LogoGlyph } from "@/components/logo"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext } from "@/components/page"
@@ -114,20 +119,140 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
  *     the directory and its checkout, how many services run and how many
  *     ports it publishes — with the verdict at its end, which counts what is
  *     failing and narrows the table to it;
+ *   - the Services page's band for its services (`StackUsageBand`): what the
+ *     stack takes of the machine, and what just happened to it;
  *   - a picture of how it is reached and what it is wired to (`StackMap`):
  *     its published ports, its services and their networks, each wire
  *     pulsing with the traffic the containers socket measures;
- *   - its services as a table of live readings (`ServiceRows`), each row its
- *     state with how long or how it went down, its processor's hour, its
+ *   - and its services as a table of live readings (`ServiceRows`), each row
+ *     its state with how long or how it went down, its processor's hour, its
  *     memory against its limit, its traffic, its ports and its compose verbs,
- *     under state chips that count and narrow;
- *   - and the Services page's band for its services (`StackUsageBand`): what
- *     the stack takes of the machine, and what just happened to it.
+ *     under state chips that count and narrow.
+ *
+ * That is the order a container's page reads in (what it uses, the picture,
+ * the table); until 0.8.7 the table came first and the picture last. The
+ * Stacks list stays beside the page from `xl` (`StackRail`) with its search
+ * and state chip, Alt+↑ and Alt+↓ walk it, and the view on screen goes along.
  */
 export function StackPage() {
   const { name } = useParams<{ name: string }>()
   const stack = decodeURIComponent(name)
-  return <StackBody key={stack} name={stack} />
+  const router = useRouter()
+  const requested = useSearchParams().get("tab")
+  const [remembered] = useViewState("docker.stack.tab", "services")
+  // What the stack's own body says back: the view it is on, which the walk
+  // carries to the next stack, and whether its table is narrowed to what is
+  // failing, which the shortcut's label says.
+  const [shown, setShown] = useState<{ stack: string; tab: string; failing: boolean }>()
+  const tab = shown?.stack === stack ? shown.tab : (requested ?? remembered)
+  const onShown = useCallback(
+    (next: { tab: string; failing: boolean }) =>
+      setShown((held) =>
+        held?.stack === stack && held.tab === next.tab && held.failing === next.failing
+          ? held
+          : { stack, ...next },
+      ),
+    [stack],
+  )
+  const controls = useRef<StackControls>(NO_CONTROLS)
+  const onControls = useCallback((next: StackControls) => {
+    controls.current = next
+  }, [])
+
+  const rail = useStackRail()
+  const at = rail.rows.findIndex((line) => line.stack.name === stack)
+  const open = useCallback(
+    (next: string) =>
+      router.push(`/docker/stacks/${encodeURIComponent(next)}?tab=${encodeURIComponent(tab)}`),
+    [router, tab],
+  )
+  const adjacent = (direction: number) => {
+    const next = at >= 0 ? rail.rows[at + direction] : rail.rows[direction > 0 ? 0 : -1]
+    if (next) open(next.stack.name)
+  }
+  const previous = { disabled: at <= 0, run: () => adjacent(-1) }
+  const next = {
+    disabled: rail.rows.length === 0 || at >= rail.rows.length - 1,
+    run: () => adjacent(1),
+  }
+  const failing = shown?.stack === stack && shown.failing
+
+  return (
+    <Workspace
+      name="Stack"
+      stateKey={`stack.${stack}.${tab}`}
+      refresh={() => {
+        controls.current.refresh()
+        rail.refresh()
+      }}
+      search={false}
+      escape={() => controls.current.escape()}
+      commands={[
+        {
+          id: "failing",
+          label: failing ? "Show every service" : "Show failing services",
+          run: () => controls.current.toggleFailing(),
+        },
+        {
+          id: "previous",
+          label: "Previous stack",
+          keys: "Alt+↑",
+          chord: "Alt+ArrowUp",
+          disabled: previous.disabled,
+          run: previous.run,
+        },
+        {
+          id: "next",
+          label: "Next stack",
+          keys: "Alt+↓",
+          chord: "Alt+ArrowDown",
+          disabled: next.disabled,
+          run: next.run,
+        },
+      ]}
+    >
+      <Page fill>
+        {/* The list stays beside the stack from `xl`, as the table does beside
+            a container: it holds still while a view scrolls. Narrower, the
+            page is the one pane. */}
+        <div className="flex min-h-0 min-w-0 flex-1 gap-6">
+          <StackRail
+            className="hidden w-72 shrink-0 xl:flex"
+            rows={rail.rows}
+            current={stack}
+            currentRow={rail.all.find((line) => line.stack.name === stack)}
+            loading={rail.loading}
+            query={rail.query}
+            onQuery={rail.setQuery}
+            filtered={rail.filtered}
+            onClearFilters={rail.clearFilters}
+            caption={rail.caption}
+            onOpen={open}
+            bindings={rail.bindings}
+          />
+          <StackBody
+            key={stack}
+            name={stack}
+            onShown={onShown}
+            onControls={onControls}
+            previous={previous}
+            next={next}
+          />
+        </div>
+      </Page>
+    </Workspace>
+  )
+}
+
+type Step = { disabled: boolean; run: () => void }
+
+/** What the page's keys do, which only the stack's own body knows how to. */
+type StackControls = { refresh: () => void; escape: () => boolean; toggleFailing: () => void }
+
+const NO_CONTROLS: StackControls = {
+  refresh: () => {},
+  escape: () => false,
+  toggleFailing: () => {},
 }
 
 /** What each compose verb is doing while it runs, for the row and the line that wait on it. */
@@ -192,7 +317,21 @@ const STATES: { value: ServiceBucket; label: string; tone?: "warning" | "danger"
   { value: "paused", label: "Paused" },
 ]
 
-function StackBody({ name }: { name: string }) {
+function StackBody({
+  name,
+  onShown,
+  onControls,
+  previous,
+  next,
+}: {
+  name: string
+  /** Says which view is on screen and whether the table is narrowed to what is failing. */
+  onShown: (shown: { tab: string; failing: boolean }) => void
+  /** Hands the page what its keys run. */
+  onControls: (controls: StackControls) => void
+  previous: Step
+  next: Step
+}) {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
@@ -498,169 +637,220 @@ function StackBody({ name }: { name: string }) {
   ]
   const tab = tabs.some((entry) => entry.value === requestedTab) ? requestedTab : "services"
 
-  return (
-    <Workspace
-      name="Stack"
-      stateKey={`stack.${name}.${tab}`}
-      refresh={() => {
+  const refreshTrends = trends.refresh
+  const refreshFeed = feed.refresh
+  useEffect(() => {
+    onControls({
+      refresh: () => {
         reload()
-        feed.refresh()
-        trends.refresh()
-      }}
-      search={false}
-      escape={() => {
-        if (state) {
-          setState("")
-          return true
-        }
-        return false
-      }}
-      commands={[
-        {
-          id: "failing",
-          label: state === "failing" ? "Show every service" : "Show failing services",
-          run: () => {
-            setTab("services")
-            setState(state === "failing" ? "" : "failing")
-          },
-        },
-      ]}
-    >
-      <Page fill>
-        <div className="flex min-w-0 shrink-0 flex-col gap-4">
-          <PageContext
-            eyebrow={
-              <Link
-                href="/docker/stacks"
-                className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-              >
-                <ArrowLeft className="size-3" /> Stacks
-              </Link>
-            }
-            title={name}
-            actions={
-              data && (
-                <>
-                  <StackActions data={data} confirmRun={confirmRun} run={run} busy={busy} />
+        refreshFeed()
+        refreshTrends()
+      },
+      escape: () => {
+        if (!state) return false
+        setState("")
+        return true
+      },
+      toggleFailing: () => {
+        setTab("services")
+        setState(state === "failing" ? "" : "failing")
+      },
+    })
+  })
+  useEffect(() => onShown({ tab, failing: state === "failing" }), [onShown, tab, state])
+
+  // The table is the last block of the view now, so a press that narrows it
+  // brings it to the reader rather than changing something off the screen.
+  const services = useRef<HTMLDivElement>(null)
+  const showServices = () =>
+    requestAnimationFrame(() =>
+      services.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+    )
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6 md:gap-8">
+      <div className="flex min-w-0 shrink-0 flex-col gap-4">
+        <PageContext
+          eyebrow={
+            <Link
+              href="/docker/stacks"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> Stacks
+            </Link>
+          }
+          title={name}
+          actions={
+            data && (
+              <>
+                <StackActions data={data} confirmRun={confirmRun} run={run} busy={busy} />
+                <span className="flex items-center max-sm:hidden">
+                  <IconAction
+                    label="Previous stack"
+                    disabled={previous.disabled}
+                    onClick={previous.run}
+                  >
+                    <ChevronUp />
+                  </IconAction>
+                  <IconAction label="Next stack" disabled={next.disabled} onClick={next.run}>
+                    <ChevronDown />
+                  </IconAction>
                   <WorkspaceHelp />
-                </>
+                </span>
+              </>
+            )
+          }
+        />
+        {data && (
+          <HostIdentity
+            className="animate-rise border-b-0 pb-0"
+            logo={<StackMark stack={data} containers={containers} />}
+            title={name}
+            facts={
+              <StackFacts data={data} running={counts.running + counts.starting} ports={ports} />
+            }
+            aside={
+              pending ? (
+                <span className="flex items-center gap-2 px-1.5 text-xs font-medium">
+                  <Status tone="notice" label={<TextShimmer>{`${pending.label}…`}</TextShimmer>} />
+                </span>
+              ) : verdict.bucket && verdict.tone !== "running" ? (
+                <button
+                  type="button"
+                  aria-pressed={state === verdict.bucket}
+                  title="Show only these services"
+                  onClick={() => {
+                    setTab("services")
+                    setState(state === verdict.bucket ? "" : (verdict.bucket ?? ""))
+                    showServices()
+                  }}
+                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+                >
+                  <Status tone={verdict.tone} label={verdict.label} />
+                </button>
+              ) : (
+                <span className="px-1.5 py-1">
+                  <Status
+                    tone={verdict.tone}
+                    live={verdict.tone === "running" && containers !== undefined}
+                    label={verdict.label}
+                  />
+                </span>
               )
             }
           />
-          {data && (
-            <HostIdentity
-              className="animate-rise border-b-0 pb-0"
-              logo={<StackMark stack={data} containers={containers} />}
-              title={name}
-              facts={
-                <StackFacts data={data} running={counts.running + counts.starting} ports={ports} />
-              }
-              aside={
-                pending ? (
-                  <span className="flex items-center gap-2 px-1.5 text-xs font-medium">
-                    <Status
-                      tone="notice"
-                      label={<TextShimmer>{`${pending.label}…`}</TextShimmer>}
-                    />
-                  </span>
-                ) : verdict.bucket && verdict.tone !== "running" ? (
-                  <button
-                    type="button"
-                    aria-pressed={state === verdict.bucket}
-                    title="Show only these services"
-                    onClick={() => {
-                      setTab("services")
-                      setState(state === verdict.bucket ? "" : (verdict.bucket ?? ""))
-                    }}
-                    className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
-                  >
-                    <Status tone={verdict.tone} label={verdict.label} />
-                  </button>
-                ) : (
-                  <span className="px-1.5 py-1">
-                    <Status
-                      tone={verdict.tone}
-                      live={verdict.tone === "running" && containers !== undefined}
-                      label={verdict.label}
-                    />
-                  </span>
-                )
-              }
-            />
+        )}
+      </div>
+
+      {error && <ErrorState error={error} />}
+      {loading && !data && <LoadingRows />}
+
+      {data && (
+        <>
+          {!data.managed && (
+            <Notice title="Read-only here" icon={Warning}>
+              No compose file for this stack is reachable from the dashboard, so it can be watched
+              but not acted on. Compose records the project directory on the containers it creates —
+              if the stack was started elsewhere, or its directory has moved, that record no longer
+              points at anything.
+            </Notice>
           )}
-        </div>
+          {data.managed && !can("system.admin") && (
+            <Notice title="Administrator access required">
+              An administrator must create, edit, validate, or run Compose stacks. You can inspect
+              this stack here.
+            </Notice>
+          )}
+          {data.declaredError && (
+            <Notice title="This stack's compose file does not parse" icon={Warning} tone="danger">
+              {data.declaredError}
+            </Notice>
+          )}
+          <RunConsole
+            lines={runner.lines}
+            state={runner.state}
+            exitCode={runner.exitCode}
+            title={`compose · ${name}`}
+            onDismiss={runner.reset}
+          />
 
-        {error && <ErrorState error={error} />}
-        {loading && !data && <LoadingRows />}
-
-        {data && (
-          <>
-            {!data.managed && (
-              <Notice title="Read-only here" icon={Warning}>
-                No compose file for this stack is reachable from the dashboard, so it can be watched
-                but not acted on. Compose records the project directory on the containers it creates
-                — if the stack was started elsewhere, or its directory has moved, that record no
-                longer points at anything.
-              </Notice>
-            )}
-            {data.managed && !can("system.admin") && (
-              <Notice title="Administrator access required">
-                An administrator must create, edit, validate, or run Compose stacks. You can inspect
-                this stack here.
-              </Notice>
-            )}
-            {data.declaredError && (
-              <Notice title="This stack's compose file does not parse" icon={Warning} tone="danger">
-                {data.declaredError}
-              </Notice>
-            )}
-            <RunConsole
-              lines={runner.lines}
-              state={runner.state}
-              exitCode={runner.exitCode}
-              title={`compose · ${name}`}
-              onDismiss={runner.reset}
-            />
-
-            <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
-              {/* The same underlined strip every switcher between views of one
+          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
+            {/* The same underlined strip every switcher between views of one
                   page wears (§8): the brand underline says where you are and
                   the label stays ink. It was a filled tab list, a control with a
                   face on a page that had stopped drawing boxes. */}
-              <TabsPrimitive.List
-                aria-label="Stack views"
-                className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-              >
-                {tabs.map((entry) => (
-                  <TabsPrimitive.Trigger
-                    key={entry.value}
-                    value={entry.value}
-                    className={tabClasses(tab === entry.value, "h-10")}
-                  >
-                    {entry.label}
-                    {entry.count !== undefined && (
-                      <span className="numeric text-hint font-medium text-muted-foreground">
-                        {entry.count}
-                      </span>
-                    )}
-                    {"unsaved" in entry && entry.unsaved && (
-                      <span
-                        title="An edit that is not saved yet"
-                        className="size-1.5 rounded-full bg-warning"
+            <TabsPrimitive.List
+              aria-label="Stack views"
+              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
+            >
+              {tabs.map((entry) => (
+                <TabsPrimitive.Trigger
+                  key={entry.value}
+                  value={entry.value}
+                  className={tabClasses(tab === entry.value, "h-10")}
+                >
+                  {entry.label}
+                  {entry.count !== undefined && (
+                    <span className="numeric text-hint font-medium text-muted-foreground">
+                      {entry.count}
+                    </span>
+                  )}
+                  {"unsaved" in entry && entry.unsaved && (
+                    <span
+                      title="An edit that is not saved yet"
+                      className="size-1.5 rounded-full bg-warning"
+                    />
+                  )}
+                </TabsPrimitive.Trigger>
+              ))}
+            </TabsPrimitive.List>
+            <TabsContent value="services" className="min-h-0 flex-1 overflow-y-auto pt-5">
+              {data.services.length === 0 ? (
+                <EmptyState
+                  icon={Box}
+                  title="Nothing running"
+                  description="This stack has a compose file but no containers. Bring it up to start them."
+                />
+              ) : (
+                <div className="flex min-w-0 flex-col gap-8 pb-6">
+                  {/* In the order a container's page reads: what it is
+                        using now, the picture of how it is wired, then its
+                        services as the table. */}
+                  {data.deployed && (
+                    <StackUsageBand
+                      readings={readings}
+                      changes={changes}
+                      snapshot={snapshot}
+                      eventsRead={feed.data !== undefined || feed.error !== undefined}
+                      productOf={productOf}
+                      onOpen={openService}
+                    />
+                  )}
+                  {data.deployed && (
+                    /* A plain head over the picture: between a band of
+                         headed readings and a table, without one it read as
+                         part of Recent. */
+                    <Panel plain aria-label="Ports and networks">
+                      <PanelHeader
+                        title="Ports and networks"
+                        actions={
+                          <span className="numeric flex h-7 items-center text-hint text-muted-foreground">
+                            {plural(ports, "port")} published · {plural(networks, "network")}
+                          </span>
+                        }
                       />
-                    )}
-                  </TabsPrimitive.Trigger>
-                ))}
-              </TabsPrimitive.List>
-              <TabsContent value="services" className="min-h-0 flex-1 overflow-y-auto pt-5">
-                {data.services.length === 0 ? (
-                  <EmptyState
-                    icon={Box}
-                    title="Nothing running"
-                    description="This stack has a compose file but no containers. Bring it up to start them."
-                  />
-                ) : (
-                  <div className="flex min-w-0 flex-col gap-8 pb-6">
+                      <PanelBody className="pt-2">
+                        <StackMap
+                          stack={name}
+                          readings={readings}
+                          networksRead={containers !== undefined}
+                          productOf={productOf}
+                          onOpen={openService}
+                        />
+                      </PanelBody>
+                    </Panel>
+                  )}
+                  <div ref={services} className="min-w-0 scroll-mt-4">
                     <ServicesPanel
                       readings={visible}
                       all={readings.length}
@@ -680,110 +870,76 @@ function StackBody({ name }: { name: string }) {
                       onOpen={openService}
                       busy={busy}
                     />
-                    {data.deployed && (
-                      <StackUsageBand
-                        readings={readings}
-                        changes={changes}
-                        snapshot={snapshot}
-                        eventsRead={feed.data !== undefined || feed.error !== undefined}
-                        productOf={productOf}
-                        onOpen={openService}
-                      />
-                    )}
-                    {data.deployed && (
-                      /* A plain head over the picture: it is the last block,
-                         under a band of headed readings, and without one it
-                         read as part of Recent. */
-                      <Panel plain aria-label="Ports and networks">
-                        <PanelHeader
-                          title="Ports and networks"
-                          actions={
-                            <span className="numeric flex h-7 items-center text-hint text-muted-foreground">
-                              {plural(ports, "port")} published · {plural(networks, "network")}
-                            </span>
-                          }
-                        />
-                        <PanelBody className="pt-2">
-                          <StackMap
-                            stack={name}
-                            readings={readings}
-                            networksRead={containers !== undefined}
-                            productOf={productOf}
-                            onOpen={openService}
-                          />
-                        </PanelBody>
-                      </Panel>
-                    )}
                   </div>
-                )}
-              </TabsContent>
-              <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto pt-5">
-                {tab === "preview" && (
-                  <StackPreview
-                    stack={data.name}
-                    epoch={epoch}
-                    readings={readings}
-                    productOf={productOf}
-                    onDeploy={deploy}
-                    busy={busy}
-                    onEdit={() => setTab("compose")}
-                  />
-                )}
-              </TabsContent>
-              <TabsContent value="compose" className="min-h-0 flex-1 pt-5">
-                {tab === "compose" && (
-                  <StackCompose
-                    stack={data}
-                    onSaved={reload}
-                    canWrite={can("system.admin") && can("file.write")}
-                    canValidate={can("system.admin")}
-                    readings={readings}
-                    productOf={productOf}
-                    onPreview={() => setTab("preview")}
-                    onDeploy={deploy}
-                    busy={busy}
-                  />
-                )}
-              </TabsContent>
-              {data.workingDir && (
-                <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto pt-5">
-                  {tab === "files" && (
-                    <StackFiles
-                      stack={data}
-                      productOf={productOf}
-                      onOpenCompose={() => setTab("compose")}
-                    />
-                  )}
-                </TabsContent>
+                </div>
               )}
-              <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto pt-5">
-                {tab === "history" && (
-                  <StackHistory
-                    stack={data.name}
-                    epoch={epoch}
+            </TabsContent>
+            <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto pt-5">
+              {tab === "preview" && (
+                <StackPreview
+                  stack={data.name}
+                  epoch={epoch}
+                  readings={readings}
+                  productOf={productOf}
+                  onDeploy={deploy}
+                  busy={busy}
+                  onEdit={() => setTab("compose")}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="compose" className="min-h-0 flex-1 pt-5">
+              {tab === "compose" && (
+                <StackCompose
+                  stack={data}
+                  onSaved={reload}
+                  canWrite={can("system.admin") && can("file.write")}
+                  canValidate={can("system.admin")}
+                  readings={readings}
+                  productOf={productOf}
+                  onPreview={() => setTab("preview")}
+                  onDeploy={deploy}
+                  busy={busy}
+                />
+              )}
+            </TabsContent>
+            {data.workingDir && (
+              <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto pt-5">
+                {tab === "files" && (
+                  <StackFiles
+                    stack={data}
                     productOf={productOf}
-                    onRestore={
-                      can("system.admin") && can("file.write") && data.configPath
-                        ? (content, from) => {
-                            setDraft({ content, from })
-                            setTab("compose")
-                          }
-                        : undefined
-                    }
+                    onOpenCompose={() => setTab("compose")}
                   />
                 )}
               </TabsContent>
-              <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-5">
-                {tab === "logs" && (
-                  <StackLogs stack={data} readings={readings} productOf={productOf} />
-                )}
-              </TabsContent>
-            </Tabs>
-          </>
-        )}
-        {dialog}
-      </Page>
-    </Workspace>
+            )}
+            <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto pt-5">
+              {tab === "history" && (
+                <StackHistory
+                  stack={data.name}
+                  epoch={epoch}
+                  productOf={productOf}
+                  onRestore={
+                    can("system.admin") && can("file.write") && data.configPath
+                      ? (content, from) => {
+                          setDraft({ content, from })
+                          setTab("compose")
+                        }
+                      : undefined
+                  }
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-5">
+              {tab === "logs" && (
+                <StackLogs stack={data} readings={readings} productOf={productOf} />
+              )}
+            </TabsContent>
+          </Tabs>
+        </>
+      )}
+      {dialog}
+    </div>
   )
 }
 
@@ -899,8 +1055,8 @@ function ServicesPanel({
   React.ComponentProps<typeof ServiceRows>,
   "pending" | "verbsFor" | "onCreate" | "onOpen"
 >) {
-  const wide = useMediaQuery("(min-width: 1280px)")
-  const roomy = useMediaQuery("(min-width: 1536px)")
+  const wide = useMediaQuery(WIDE_BESIDE_RAIL)
+  const roomy = useMediaQuery(ROOMY_BESIDE_RAIL)
   return (
     <Panel aria-label="Services">
       <PanelHeader

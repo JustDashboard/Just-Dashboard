@@ -8,6 +8,7 @@ import type {
 } from "../../src/lib/network-diagnostics"
 import { TOOL_EVIDENCE } from "./fixtures/network-tool-results"
 import { admin, json, mockNetwork } from "./network-fixture"
+import { risen } from "./risen"
 
 type Call = { method: string; path: string; query: URLSearchParams; body: unknown }
 
@@ -178,7 +179,7 @@ test("a quick result is saved from the server's hold without running the tool ag
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Run name", { exact: true }).fill("Unanswered ping")
   await dialog.getByRole("button", { name: "Save result", exact: true }).click()
-  await expect(page).toHaveURL(/\/network\/runs\?run=saved-run/)
+  await expect(page).toHaveURL(/\/network\/runs\/saved-run/)
   expect(calls.find((call) => call.path === "/network/diagnostics/results")?.body).toEqual({
     resultId: pingUnknown.resultId,
     name: "Unanswered ping",
@@ -636,10 +637,12 @@ test("a saved run shows its structured evidence, metric history and measurement 
   const evidence = page.getByLabel("Structured evidence")
   await expect(evidence.getByText("3 of 4 replies.", { exact: true })).toBeVisible()
   await expect(evidence.getByText("answered with findings", { exact: true })).toBeVisible()
+  await page.getByRole("tab", { name: "History", exact: true }).click()
   const historyPanel = page.getByLabel("Run history")
   await expect(historyPanel.getByRole("columnheader", { name: "Packet loss" })).toBeVisible()
   await expect(historyPanel.getByRole("cell", { name: "0%", exact: true })).toBeVisible()
   await expect(historyPanel.getByRole("cell", { name: "25%", exact: true })).toBeVisible()
+  await page.getByRole("tab", { name: /^Compare/ }).click()
   await page.getByRole("combobox", { name: "Baseline run", exact: true }).click()
   await page.getByRole("option").first().click()
   await page.getByRole("button", { name: "Compare", exact: true }).click()
@@ -745,4 +748,122 @@ test("a port check's endpoint is watched as a probe on the watch list's schedule
   await panel(page).getByRole("button", { name: "Watch on a schedule" }).click()
   await expect(page.getByText(`192.0.2.10:${sent} is already watched`)).toBeVisible()
   await expect(page.getByText("whose handshake checks the connection too")).toBeVisible()
+})
+
+test("the workbench is one frame held to the window, with its strip, rail and pane inside", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await tools(page, {})
+  await page.goto("/network/tools")
+  await expect(run(page)).toBeVisible()
+  await risen(page)
+  const frame = (await panel(page).boundingBox())!
+  expect(frame.y + frame.height).toBeLessThanOrEqual(800)
+  expect(frame.height).toBeGreaterThan(700)
+  // The page itself never scrolls: the rail and the pane do.
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(800)
+  const strip = panel(page).locator("[data-slot=pane-header]").first()
+  await expect(strip).toContainText("Tools")
+  await expect(strip).toContainText("sent from this server · 27 diagnostics")
+  await expect(strip.getByRole("link", { name: "Saved runs", exact: true })).toHaveAttribute(
+    "href",
+    "/network/runs",
+  )
+  // Nothing opens the page above the frame, and no tiles anywhere.
+  await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  const rail = page.getByRole("navigation", { name: "Diagnostics" })
+  const last = rail.getByRole("button", { name: "Subnet calculator", exact: true })
+  await expect(last).not.toBeInViewport()
+  await last.scrollIntoViewIfNeeded()
+  await expect(last).toBeInViewport()
+  expect((await panel(page).boundingBox())!).toEqual(frame)
+})
+
+for (const width of [390, 1280]) {
+  test(`every diagnostic has a mark in its group's hue and the rail's rows are one height at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await tools(page, {})
+    await page.goto("/network/tools")
+    await expect(run(page)).toBeVisible()
+    if (width < 768) await page.getByRole("tab", { name: "Every tool" }).click()
+    const rail = page.getByRole("navigation", { name: "Diagnostics" })
+    const rows = rail.getByRole("button")
+    await expect(rows).toHaveCount(28)
+    await expect(rows.locator("[data-slot=tool-mark]")).toHaveCount(28)
+    const read = await rows.evaluateAll((items) =>
+      items.map((item) => ({
+        height: Math.round(item.getBoundingClientRect().height),
+        colour: getComputedStyle(item.querySelector("[data-slot=tool-mark]")!).color,
+      })),
+    )
+    expect(new Set(read.map((row) => row.height)).size).toBe(1)
+    // Seven reachability tools share one hue; five groups and the calculator
+    // make six in all.
+    expect(new Set(read.slice(0, 7).map((row) => row.colour)).size).toBe(1)
+    expect(new Set(read.map((row) => row.colour)).size).toBe(6)
+  })
+
+  test(`an empty tool offers its example, which fills the target and sends nothing, at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const calls = await tools(page, { ping: pingUnknown })
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/network/probe", async (route) => {
+      calls.push({ method: "POST", path: "/network/probe", query: new URLSearchParams(), body: 0 })
+      await held
+      await json(route, pingUnknown)
+    })
+    await page.goto("/network/tools?tool=ping")
+    const pane = panel(page).locator("[data-tool=ping]")
+    const empty = pane.locator("[data-slot=tool-empty]")
+    await expect(empty.locator("[data-slot=tool-mark]")).toBeVisible()
+    await expect(run(page)).toBeDisabled()
+    await risen(page)
+    const before = { run: (await run(page).boundingBox())!, empty: (await empty.boundingBox())! }
+    await empty.getByRole("button", { name: "Try example.com" }).click()
+    await expect(pane.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+      "example.com",
+    )
+    expect(probes(calls)).toHaveLength(0)
+    // In flight the pane keeps its shape: the answer replaces it, nothing grows first.
+    await run(page).click()
+    await expect(empty).toContainText("Running diagnostic")
+    expect((await run(page).boundingBox())!).toEqual(before.run)
+    expect((await empty.boundingBox())!).toEqual(before.empty)
+    release!()
+    await expect(pane.getByText("inconclusive", { exact: true })).toBeVisible()
+    await expect(empty).toHaveCount(0)
+    expect((await run(page).boundingBox())!).toEqual(before.run)
+    // A tool that asks for no target offers no example.
+    await page.goto("/network/tools?tool=listeners")
+    await expect(panel(page).locator("[data-tool=listeners] [data-slot=tool-empty]")).toBeVisible()
+    await expect(panel(page).getByRole("button", { name: /^Try / })).toHaveCount(0)
+  })
+}
+
+test("a reader is shown the calculator alone: no probe, no saved runs, no control to refuse", async ({
+  page,
+}) => {
+  const reader = { ...admin, capabilities: ["read"], user: { ...admin.user, role: "readonly" } }
+  const calls = await tools(page, {}, reader)
+  await page.goto("/network/tools?tool=tls&target=example.com")
+  await expect(
+    page.getByText("Server diagnostics need the admin capability", { exact: true }),
+  ).toBeVisible()
+  const rail = page.getByRole("navigation", { name: "Diagnostics" })
+  await expect(rail.getByRole("button")).toHaveCount(1)
+  await expect(
+    rail.getByRole("button", { name: "Subnet calculator", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true")
+  await expect(panel(page).locator("[data-tool]")).toHaveCount(1)
+  await expect(page.getByRole("link", { name: "Saved runs", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Run and save", exact: true })).toHaveCount(0)
+  await expect(panel(page).getByText("calculated in this browser", { exact: true })).toBeVisible()
+  expect(calls).toEqual([])
 })

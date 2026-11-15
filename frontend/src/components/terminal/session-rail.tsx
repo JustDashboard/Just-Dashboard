@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Cross, Plus, SidebarLeftClose } from "@/components/icons"
+import { Cross, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { TerminalActivity, TerminalWorkspace } from "@/lib/types"
 import { sessionLabel, sessionProgram, sessionWorking } from "@/lib/terminal-activity"
@@ -34,14 +34,10 @@ export function SessionRail({
   onSelect,
   onClose,
   onNew,
-  onHide,
   className,
 }: RowHandlers & {
   sessions: TerminalWorkspace[]
   onNew: () => void
-  /** Given when the rail covers the emulator rather than sitting beside it,
-   *  so the only way back to the shell is not a session pick. */
-  onHide?: () => void
   className?: string
 }) {
   const [filter, setFilter] = useState("")
@@ -66,11 +62,6 @@ export function SessionRail({
         <IconAction label="New session" className="size-7" onClick={onNew}>
           <Plus />
         </IconAction>
-        {onHide && (
-          <IconAction label="Hide this panel" className="size-7" onClick={onHide}>
-            <SidebarLeftClose />
-          </IconAction>
-        )}
       </PaneHeader>
       {/* A filter over one session is a box with nothing to do. It appears
           once the list is long enough that scanning it stops being faster
@@ -91,6 +82,11 @@ export function SessionRail({
         {matches.map((session) => (
           <SessionRow key={session.id} session={session} {...rows} />
         ))}
+        {/* On a phone the list is a pane of its own, and an empty one with
+            nothing in it reads as a page that did not load. */}
+        {sessions.length === 0 && (
+          <p className="px-2 py-4 text-center text-xs text-muted-foreground">No sessions yet.</p>
+        )}
         {matches.length === 0 && filter && (
           <p className="px-2 py-4 text-center text-xs text-muted-foreground">
             No session matches <span className="font-medium text-foreground">{filter}</span>.

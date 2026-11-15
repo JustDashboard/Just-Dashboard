@@ -722,6 +722,11 @@ func TestBackupRunsAsAJobAndIsListedWithWhatItHolds(t *testing.T) {
 	if row.ID != f.id || row.Count != 2 || row.Newest == nil || row.TotalSize == 0 || row.Job != nil {
 		t.Errorf("summary row = %+v", row)
 	}
+	// And when each of its newest dumps was written, newest first, for a strip.
+	if len(row.Recent) != 2 || row.Recent[0].TakenAt.Before(row.Recent[1].TakenAt) ||
+		row.Recent[0].Size == 0 || row.Recent[0].Size+row.Recent[1].Size != row.TotalSize {
+		t.Errorf("summary recent = %+v", row.Recent)
+	}
 }
 
 func TestASecondTransferOfTheSameConnectionIsRefused(t *testing.T) {

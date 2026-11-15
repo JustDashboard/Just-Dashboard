@@ -654,7 +654,12 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	if err := s.writeMissingPages(spec); err != nil {
 		return result, fmt.Errorf("the route's pages could not be written: %w", err)
 	}
-	if _, err := s.applySiteLocked(ctx, spec, content, true, true, true); err != nil {
+	if saved, err := s.applySiteLocked(ctx, spec, content, true, true, true); err != nil {
+		// nginx's own reason travels with the refusal: "failed validation"
+		// alone left a first deployment failing with nothing to go on.
+		if errors.Is(err, ErrInvalidConf) && saved != nil && saved.Validation != nil {
+			err = fmt.Errorf("%w: %s", err, failureLine(saved.Validation.Output))
+		}
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		restoreErr := s.restoreDeploymentRouteLocked(recoveryCtx, snapshot)
 		cancel()
@@ -951,6 +956,7 @@ func wildcardCertificateCovers(pattern, domain string) bool {
 func (s *Service) deploymentSpec(route DeploymentRoute) *SiteSpec {
 	spec := deploymentSiteSpec(route, s.deploymentAuthFile(route))
 	s.SetPagesDir(spec)
+	s.forHostNginx(spec)
 	if route.CrowdSec {
 		spec.crowdSecList = s.nginxCrowdSecList()
 	}

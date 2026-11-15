@@ -35,13 +35,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   stickyTableHeader,
   Table,
   TableBody,
@@ -90,6 +83,15 @@ export const PROCESS_FILTER_KEYS = {
   sort: "processes.table.sort.v2",
   refresh: "processes.table.refresh",
 } as const
+
+/** The rankings as chips: a word on the chip, what it means on its tooltip. */
+const FOCUSES: { value: ProcessSort; label: string; title: string }[] = [
+  { value: "auto", label: "Automatic", title: "Ranks by what the host is short of" },
+  { value: "cpu", label: "CPU", title: "Highest CPU first" },
+  { value: "memory", label: "Memory", title: "Highest memory first" },
+  { value: "io", label: "Disk I/O", title: "Highest disk I/O first" },
+  { value: "uptime", label: "Uptime", title: "Longest-running first" },
+]
 
 const SORT_LABEL: Record<Exclude<ProcessSort, "auto">, string> = {
   cpu: "highest CPU",
@@ -331,29 +333,7 @@ export function LiveProcesses() {
           edge is what says so (§2). Everything above it stays plain. */}
         <Panel>
           <PanelHeader
-            actions={
-              <>
-                <FacetSelect
-                  label="All users"
-                  value={user}
-                  onChange={setUser}
-                  options={data?.users ?? []}
-                />
-                <Select value={sort} onValueChange={(value) => setSort(value as ProcessSort)}>
-                  <SelectTrigger size="sm" className="w-44" aria-label="Process focus">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Automatic focus</SelectItem>
-                    <SelectItem value="cpu">Highest CPU</SelectItem>
-                    <SelectItem value="memory">Highest memory</SelectItem>
-                    <SelectItem value="io">Highest disk I/O</SelectItem>
-                    <SelectItem value="uptime">Longest-running</SelectItem>
-                  </SelectContent>
-                </Select>
-                {!known && controls}
-              </>
-            }
+            actions={!known && controls}
             title={
               <>
                 Processes
@@ -406,6 +386,21 @@ export function LiveProcesses() {
                 })}
               </ChipStrip>
             )}
+            {/* Which rows the table holds, as chips on the title's line: the
+              ranking is part of what "Processes" lists. It was a select beside
+              a second select, the only two on a toolbar of chips. */}
+            <ChipStrip aria-label="Focus">
+              {FOCUSES.map(({ value, label, title }) => (
+                <FilterChip
+                  key={value}
+                  selected={sort === value}
+                  title={value === "auto" ? `${title}: now ${automatic.reason}` : title}
+                  onClick={() => setSort(value)}
+                >
+                  {label}
+                </FilterChip>
+              ))}
+            </ChipStrip>
           </PanelHeader>
           <PanelToolbar>
             <SearchInput
@@ -443,6 +438,7 @@ export function LiveProcesses() {
                 </FilterChip>
               )}
             </ChipStrip>
+            <UserChips users={data?.users ?? []} value={user} onChange={setUser} />
           </PanelToolbar>
           <PanelBody flush>
             {processList.loading && !data && <LoadingPanel />}
@@ -880,31 +876,64 @@ function Owner({ process }: { process: ProcessRow }) {
   )
 }
 
-function FacetSelect({
-  label,
+/** Accounts drawn as chips of their own before the rest fold into one. */
+const USER_CHIPS = 3
+
+/**
+ * Whose processes, as chips beside the owner chips. The accounts with the
+ * most processes are chips of their own, each a second press away from
+ * clearing; a server with a dozen service accounts keeps the rest behind one
+ * more chip rather than a strip that pushes the table down. The account the
+ * table is narrowed to is always drawn, so the filter in force is never
+ * hidden in a menu.
+ */
+function UserChips({
+  users,
   value,
   onChange,
-  options,
 }: {
-  label: string
+  users: ProcessList["users"]
   value: string
   onChange: (value: string) => void
-  options: ProcessList["users"]
 }) {
+  if (users.length === 0) return null
+  const fold = users.length > USER_CHIPS + 1
+  const shown = fold ? users.slice(0, USER_CHIPS) : users
+  const rest = fold ? users.slice(USER_CHIPS) : []
+  const chosen = rest.find((option) => option.value === value)
   return (
-    <Select value={value || "all"} onValueChange={(next) => onChange(next === "all" ? "" : next)}>
-      <SelectTrigger size="sm" className="w-36" aria-label={label}>
-        <SelectValue placeholder={label} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">{label}</SelectItem>
-        {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label} ({option.count})
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <ChipStrip aria-label="User">
+      {[...shown, ...(chosen ? [chosen] : [])].map((option) => (
+        <FilterChip
+          key={option.value}
+          selected={value === option.value}
+          onClick={() => onChange(value === option.value ? "" : option.value)}
+        >
+          <span className="font-mono">{option.label}</span> <ChipCount>{option.count}</ChipCount>
+        </FilterChip>
+      ))}
+      {rest.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <FilterChip aria-label={`${rest.length} more users`}>+{rest.length}</FilterChip>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-80 w-52 overflow-y-auto">
+            <DropdownMenuLabel>User</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={value}
+              onValueChange={(next) => onChange(next === value ? "" : next)}
+            >
+              {rest.map((option) => (
+                <DropdownMenuRadioItem key={option.value} value={option.value}>
+                  <span className="min-w-0 flex-1 truncate font-mono">{option.label}</span>
+                  <span className="numeric text-hint text-muted-foreground">{option.count}</span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </ChipStrip>
   )
 }
 

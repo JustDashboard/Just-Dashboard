@@ -9,10 +9,10 @@ export function SettingsNetwork() {
   const { engine } = useDatabase()
   return (
     <SettingsFrame page="network">
-      {(confirm) => (
+      {() => (
         <>
-          <ReachabilitySection confirm={confirm} />
-          {engine.can("serverTLS") && <TransportSecuritySection confirm={confirm} />}
+          <ReachabilitySection />
+          {engine.can("serverTLS") && <TransportSecuritySection />}
         </>
       )}
     </SettingsFrame>

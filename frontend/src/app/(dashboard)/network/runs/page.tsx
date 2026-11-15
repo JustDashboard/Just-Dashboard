@@ -2,7 +2,7 @@
 
 import { Suspense } from "react"
 import { Page } from "@/components/page"
-import { SavedRuns } from "@/components/network/saved-runs"
+import { SavedRuns, WatchedProbesEmpty } from "@/components/network/saved-runs"
 import { WatchedProbes } from "@/components/network/watched-probes"
 import { useAuth } from "@/hooks/use-auth"
 
@@ -13,9 +13,10 @@ export default function NetworkRunsPage() {
   return (
     <Page className="animate-rise">
       <Suspense>
-        <SavedRuns />
+        <SavedRuns
+          watched={<WatchedProbes admin={can("system.admin")} empty={<WatchedProbesEmpty />} />}
+        />
       </Suspense>
-      <WatchedProbes admin={can("system.admin")} />
     </Page>
   )
 }

@@ -29,10 +29,13 @@ export function Allowlist({
   value,
   onChange,
   disabled,
+  hint = "Checked before the login page. Keep 127.0.0.1/32.",
 }: {
   value: string
   onChange: (value: string) => void
   disabled?: boolean
+  /** The line under the list; `false` where the ⓘ beside the name is all a column carries. */
+  hint?: React.ReactNode
 }) {
   const [adding, setAdding] = useState("")
   const entries = value
@@ -55,8 +58,8 @@ export function Allowlist({
     <Field
       label="Network allowlist"
       htmlFor="cfg-cidr-add"
-      hint="Checked before the login page. Keep 127.0.0.1/32."
-      info="The allowlist is enforced before authentication, so removing your own network does not give you an error page — it makes the dashboard stop existing for you. Loopback is the way back in over an SSH tunnel."
+      hint={hint || undefined}
+      info="Checked before the login page, so removing your own network does not give you an error page — it makes the dashboard stop existing for you. Keep 127.0.0.1/32: loopback is the way back in over an SSH tunnel."
     >
       <RowList aria-label="Allowed networks">
         {entries.map((entry) => {

@@ -6,10 +6,11 @@ import { ApiKeysView, useApiKeys } from "@/components/account/api-keys"
 import { useDashboardUsers } from "@/components/account/dashboard-users"
 
 /**
- * Keys, read as the credentials they are: where each one reaches, drawn as
- * the product that holds it wired through the role it carries into this
- * server's API, then the keys under chips that count and narrow them, then
- * the command that uses one.
+ * Keys, read as the credentials they are: one line that counts them, by
+ * role and by how soon the first stops, with New key at its end; where each
+ * one reaches, drawn as the product that holds it wired through the role it
+ * carries into this server's API; then the keys as cards under chips that
+ * count and narrow them; then the command that uses one.
  *
  * It opened on four tiles — in use, used this week, never used, expiring
  * soon — and the operator asked for them to go. In use is the list's count;

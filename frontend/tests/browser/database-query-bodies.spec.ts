@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { headMenu } from "./database-workbench"
 
 /**
  * Stored programs in the SQL editor (`/databases/<id>/query`): a statement
@@ -515,7 +516,7 @@ test("a SQL Server procedure that runs on past its END says so, and GO 3 runs it
   ).toHaveCount(3)
 
   // Format lays the statement out and leaves GO on its own line.
-  await commands(page).getByRole("button", { name: "Format" }).click()
+  await headMenu(page, "Format")
   await expect
     .poll(() => editorText(page))
     .toBe("INSERT INTO dbo.stock_log (note)\nVALUES ('counted')\nGO 3")

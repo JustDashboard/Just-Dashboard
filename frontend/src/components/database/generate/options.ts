@@ -1,8 +1,9 @@
 /**
  * Code generation, as the server describes it and as the page asks for it:
  * the targets and their switches come from `GET /databases/orm/targets`, and
- * nothing here knows one target from another. A target the server adds
- * tomorrow is drawn, configured and asked for with no change to this file.
+ * nothing here knows one target from another but for whose mark it is drawn
+ * with. A target the server adds tomorrow is drawn, configured and asked for
+ * with no change to this file.
  */
 
 export type OrmGroup = string
@@ -47,6 +48,19 @@ export interface OrmResult {
 }
 
 export type OptionValues = Record<string, boolean | string>
+
+/** The targets whose project's mark is kept under another name than their own id. */
+const LOGO_ALIASES: Record<string, string> = { eloquent: "laravel", jsonschema: "json" }
+
+/**
+ * The names a target's mark may be kept under, the likeliest first: its own
+ * project's, then its language's. Which of them has a file is the logo
+ * table's to say.
+ */
+export function logoKeys(target: Pick<OrmTarget, "id" | "language">): string[] {
+  const own = Object.hasOwn(LOGO_ALIASES, target.id) ? LOGO_ALIASES[target.id] : target.id
+  return [own, target.language].filter(Boolean)
+}
 
 /** The groups in the order the page lists them; one the server invents comes after. */
 const GROUP_ORDER = ["ORM", "Query builder", "Types & validation", "Schema"]

@@ -174,12 +174,22 @@ test("the server's shared variables name who reads each one and what is not live
 }) => {
   await mockProject(page)
   const { writes } = await mockShared(page)
+  // Room for the picture and the list above the corner a toast rises in: a
+  // toast over the last row's verbs takes the press meant for them.
+  await page.setViewportSize({ width: 1280, height: 1100 })
   await page.goto("/deploy/variables")
 
   await expect(page.getByRole("heading", { name: "Shared variables", exact: true })).toBeVisible()
   await expect(
     page.locator("[data-slot=panel-header]").filter({ hasText: "Server variables" }),
-  ).toContainText("3 variables")
+  ).toContainText("3 variables · 1 not live yet")
+  // The picture over the list: the projects that read them, each once.
+  const reach = page.locator("[data-slot=wire-flow]")
+  await expect(reach.getByRole("link", { name: "Open api-production" })).toHaveAttribute(
+    "href",
+    "/deploy/7",
+  )
+  await expect(reach.getByRole("link", { name: "Open worker" })).toHaveCount(1)
   const sentry = sharedRow(page, "Server variables", "SENTRY_DSN")
   await expect(sentry).toContainText("${{server.SENTRY_DSN}}")
   await expect(sentry).toContainText("Read by 2")

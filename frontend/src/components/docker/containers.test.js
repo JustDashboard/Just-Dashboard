@@ -3,6 +3,8 @@ import {
   containerBucket,
   containerWord,
   exitCodeOf,
+  matchingContainers,
+  STANDALONE,
   exitedWhen,
   exitWords,
   networkRates,
@@ -192,5 +194,41 @@ describe("recentEntries and oomKilledIds", () => {
     expect(loop).toHaveLength(1)
     expect(loop[0].kind).toBe("loop")
     expect(loop[0].times).toBe(3)
+  })
+})
+
+describe("matchingContainers", () => {
+  const rows = [
+    container({ id: "1", name: "shop-web", image: "nginx:alpine", composeStack: "shop" }),
+    container({
+      id: "2",
+      name: "shop-worker",
+      image: "node:22",
+      composeStack: "shop",
+      state: "exited",
+      status: "Exited (1) 2 minutes ago",
+    }),
+    container({ id: "3", name: "portainer", image: "portainer/portainer-ce:2" }),
+  ]
+  const bucketOf = (c) => containerBucket(c)
+  const names = (filter) => matchingContainers(rows, filter, bucketOf).map((c) => c.name)
+
+  test("no filter is every container", () => {
+    expect(names({ query: "", state: "", stack: "" })).toEqual([
+      "shop-web",
+      "shop-worker",
+      "portainer",
+    ])
+  })
+
+  test("the search reads the name, the image and the stack", () => {
+    expect(names({ query: " NGINX ", state: "", stack: "" })).toEqual(["shop-web"])
+    expect(names({ query: "shop", state: "", stack: "" })).toEqual(["shop-web", "shop-worker"])
+  })
+
+  test("the state and stack chips narrow together, and standalone is a stack of its own", () => {
+    expect(names({ query: "", state: "failing", stack: "shop" })).toEqual(["shop-worker"])
+    expect(names({ query: "", state: "", stack: STANDALONE })).toEqual(["portainer"])
+    expect(names({ query: "", state: "failing", stack: STANDALONE })).toEqual([])
   })
 })

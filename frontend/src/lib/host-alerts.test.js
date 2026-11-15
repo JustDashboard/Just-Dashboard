@@ -6,6 +6,7 @@ import {
   describeHostAlert,
   hostAlertCounts,
   hostAlertDraft,
+  hostAlertFact,
   hostAlertFields,
   minutesWords,
   readsMetrics,
@@ -84,4 +85,11 @@ describe("host alerts", () => {
       ]),
     ).toEqual({ firing: 1, holding: 1 })
   })
+})
+
+test("a kind's card says its default as one fact", () => {
+  expect(hostAlertFact("cpu_high")).toBe("90% or more over 10 min")
+  expect(hostAlertFact("disk_filling")).toBe("90% of space or inodes")
+  expect(hostAlertFact("container_down")).toBe("down for 2 min")
+  for (const kind of HOST_ALERT_KINDS) expect(hostAlertFact(kind).length).toBeLessThanOrEqual(32)
 })

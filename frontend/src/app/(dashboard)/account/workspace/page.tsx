@@ -2,25 +2,35 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { GridSquare } from "@/components/icons"
+import { PURPOSES, purposeShown } from "@/lib/sidebar-sections"
 import { notify } from "@/lib/toast"
+import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
-import { Page, PageContext, Section } from "@/components/page"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { hideableSections } from "@/components/nav"
+import { Page, PageContext } from "@/components/page"
 import { PurposePicker, SidebarEditor, useSectionCount } from "@/components/account/workspace"
 import { SaveBarProvider, useSaveBarEntry } from "@/components/deploy/settings/save-bar"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { EditedTag, SettingsColumn } from "@/components/settings-column"
 import { Button } from "@/components/ui/button"
 
 /**
  * The first-run answer, after the first run: what this account uses the
- * server for, as the question's purposes, beside the rail itself with a
- * switch on every row it may hide. The cards are the coarse answer and the
+ * server for, as the question's purposes, over the rail's own entries with a
+ * switch on every one it may hide. The cards are the coarse answer and the
  * switches the fine one; both edit one draft, so pressing a purpose throws
  * its switches and throwing a switch can leave a purpose partly shown.
  *
- * A reading of the account's own setting that happens to be editable, so it
- * is drawn in the reading register — the welcome screen is the flow. Nothing
- * on it is framed but the rail, which is a picture of one. An edit raises
- * the settings pages' one Save at the foot of the window rather than a
- * disabled button sitting under the page for as long as nothing has changed.
+ * It opens on one line that says where the answer stands — how many of the
+ * sections the role may hide are shown, and how many purposes that makes —
+ * with *Ask me again* at its end, and then it is a settings column, as a
+ * project's settings are: the purposes as a grid of choices, the sidebar as
+ * full-width switch rows on hairlines. They were two columns side by side,
+ * the rail in a framed box. An edit raises the settings pages' one Save at
+ * the foot of the window rather than a disabled button sitting under the
+ * page for as long as nothing has changed.
  */
 export default function AccountWorkspacePage() {
   return (
@@ -31,6 +41,7 @@ export default function AccountWorkspacePage() {
 }
 
 function Workspace() {
+  const { can } = useAuth()
   const { hidden, save } = useHiddenSections()
   const [draft, setDraft] = useState<Set<string> | null>(null)
   const current = draft ?? hidden
@@ -39,6 +50,11 @@ function Workspace() {
       [...hidden].filter((key) => !draft.has(key)).length
     : 0
   const { shown, total } = useSectionCount(current)
+  const offered = new Set<string>(
+    hideableSections(can).flatMap((group) => group.sections.map(({ key }) => key)),
+  )
+  const purposes = PURPOSES.filter((purpose) => purposeShown(purpose.key, current, offered)).length
+  const edited = changes > 0 ? <EditedTag /> : undefined
 
   useSaveBarEntry(
     true,
@@ -68,31 +84,39 @@ function Workspace() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Account" title="Workspace" />
-      <div className="grid min-w-0 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem]">
-        <Section
-          title="What you use this server for"
-          actions={
-            // The question again, on its own screen, for somebody whose use
-            // of the server changed rather than one section of it.
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/welcome">Ask me again</Link>
-            </Button>
-          }
-        >
-          <PurposePicker hidden={current} onChange={setDraft} />
-        </Section>
-        <Section
-          title="Sidebar"
-          actions={
-            // As tall as Ask me again, so the rail starts level with the cards.
-            <span className="numeric flex h-8 items-center text-hint text-muted-foreground">
+      <HostIdentity
+        fallback={GridSquare}
+        title="Your sidebar"
+        facts={
+          <>
+            <span className="numeric">
               {shown} of {total} shown
             </span>
-          }
-        >
+            <FactDot />
+            <span className="numeric">
+              {purposes === PURPOSES.length
+                ? `${purposes} purposes`
+                : `${purposes} of ${PURPOSES.length} purposes`}
+            </span>
+          </>
+        }
+        command={
+          // The question again, on its own screen, for somebody whose use
+          // of the server changed rather than one section of it.
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/welcome">Ask me again</Link>
+          </Button>
+        }
+      />
+      <SettingsColumn>
+        <SettingSection title="What you use this server for">
+          <PurposePicker hidden={current} onChange={setDraft} />
+        </SettingSection>
+        {/* The switches are what is stored, so theirs is the head that says so. */}
+        <SettingSection title="Sidebar" status={edited}>
           <SidebarEditor hidden={current} onChange={setDraft} />
-        </Section>
-      </div>
+        </SettingSection>
+      </SettingsColumn>
     </Page>
   )
 }

@@ -39,8 +39,12 @@ const openGateway = async (
   await mockNetwork(page, options.mutations, { overrides: data, session: options.session })
   await page.goto("/network/gateway")
   await loaded(page)
+  await openEvidence(page)
   return data
 }
+
+/** The evidence is behind the admission word in the identity line. */
+const openEvidence = (page: Page) => page.getByRole("button", { name: "Policy evidence" }).click()
 
 const chainReading = (page: Page, label: string) =>
   page
@@ -66,6 +70,9 @@ test("a missing IPv6 INPUT rule is identified independently and repaired only af
   await expect(page.getByText("Owned admission rules need attention", { exact: true })).toHaveCount(
     0,
   )
+  await expect(
+    page.getByRole("region", { name: "About the gateway" }).getByText("Admission missing"),
+  ).toBeVisible()
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("absent")
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("ip6tables INPUT")
   for (const label of ["IPv4 INPUT", "IPv4 FORWARD", "IPv6 FORWARD", "IPv6 DOCKER-USER"]) {
@@ -84,6 +91,10 @@ test("a missing IPv6 INPUT rule is identified independently and repaired only af
   await review.getByRole("button", { name: "Repair rules", exact: true }).click()
   await expect.poll(() => mutations.length).toBe(1)
   expect(mutations[0]).toMatchObject({ method: "POST", path: "/network/gateway/admission/repair" })
+  // The line's word turns with the repair, and the evidence behind it.
+  const identity = page.getByRole("region", { name: "About the gateway" })
+  await expect(identity.getByText("Admission present", { exact: true })).toBeVisible()
+  await openEvidence(page)
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("Owned rule present")
   await expect(page.getByRole("button", { name: "Repair owned rules", exact: true })).toHaveCount(0)
 })
@@ -113,9 +124,13 @@ test("a reader can inspect absent admission evidence while repair remains unavai
   await openGateway(page, "absent", { session: reader, mutations })
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("absent")
   await expect(page.getByRole("button", { name: "Repair owned rules", exact: true })).toHaveCount(0)
-  await expect(
-    page.getByRole("button", { name: "Forward a port", exact: true }).first(),
-  ).toBeDisabled()
+  // A reader is drawn no command it cannot use.
+  await expect(page.getByRole("button", { name: "Forward a port", exact: true })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Gateway actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Refresh" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Repair owned rules" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Share a network" })).toHaveCount(0)
   expect(mutations).toEqual([])
 })
 
@@ -159,6 +174,7 @@ test("an explicit INPUT drop remains visible beside an accept policy and unverif
   await expect(
     page.getByText("An explicit drop in ip6 filter INPUT refuses the owned marked traffic."),
   ).toBeVisible()
+  await openEvidence(page)
   await page.getByText("Checked policy layers", { exact: true }).click()
   await expect(page.getByText("ip6 filter INPUT: blocked", { exact: false })).toBeVisible()
   await expect(
@@ -196,8 +212,20 @@ const openBlocklist = async (
   })
   await page.goto("/network/protection")
   await loaded(page)
+  // The evidence is in the list's editor: a row is one line.
+  await page
+    .locator("#blocklists")
+    .getByRole("button", {
+      name: `${session === admin ? "Edit" : "Open"} ${list.name}`,
+      exact: true,
+    })
+    .click()
   return page.getByLabel(`${list.name} enforcement evidence`, { exact: true })
 }
+
+/** The list's one state word, in its row: found by its place, since the editor over it hides the page from roles. */
+const rowState = (page: Page, label: string) =>
+  page.locator("#blocklists li").getByText(label, { exact: true }).filter({ visible: true })
 
 for (const [status, error] of [
   ["missing", "The cached blocklist is missing."],
@@ -215,7 +243,7 @@ for (const [status, error] of [
       runtime: { status: "present", count: 2, generation: loadedGeneration },
       enforcement: "degraded",
     })
-    await expect(page.getByText("Degraded enforcement", { exact: true })).toBeVisible()
+    await expect(rowState(page, "Degraded enforcement")).toBeVisible()
     await expect(evidence).toContainText(
       `Cache ${status}: 0 networks · last fetched count 2 · kernel present: 2 networks`,
     )
@@ -238,7 +266,7 @@ test("current cache, rendered policy, and drifted kernel generations remain sepa
     runtime: { status: "present", count: 1, generation: loadedGeneration },
     enforcement: "degraded",
   })
-  await expect(page.getByText("Degraded enforcement", { exact: true })).toBeVisible()
+  await expect(rowState(page, "Degraded enforcement")).toBeVisible()
   await expect(evidence).toContainText("Cache ready: 2 networks · kernel present: 1 networks")
   await evidence.getByText("Policy generations", { exact: true }).click()
   await expect(evidence).toContainText(`Cache: ${cacheGeneration}`)
@@ -263,17 +291,23 @@ test("an unreadable kernel set reports an unknown count and retains reader acces
     reader,
     mutations,
   )
-  await expect(page.getByText("Enforcement unknown", { exact: true })).toBeVisible()
+  await expect(rowState(page, "Enforcement unknown")).toBeVisible()
   await expect(evidence).toContainText("kernel unreadable: unknown networks")
   await expect(evidence).not.toContainText("kernel unreadable: 0 networks")
   await expect(evidence.getByRole("alert")).toHaveText("nft list set: permission denied")
+  // A reader is shown no control it cannot use: not the switch, the row's
+  // menu, the page's command or a Save in the editor it is reading.
+  const editor = page.getByRole("dialog")
+  await expect(editor.getByRole("button", { name: "Save list" })).toHaveCount(0)
+  await expect(editor.getByRole("textbox", { name: "Name" })).toBeDisabled()
+  await editor.getByRole("button", { name: "Close" }).first().click()
   await expect(
     page.getByRole("switch", { name: `${list.name} in force`, exact: true }),
-  ).toBeDisabled()
-  await expect(
-    page.getByRole("button", { name: `Refresh ${list.name}`, exact: true }),
-  ).toBeDisabled()
-  await expect(page.getByRole("button", { name: "New blocklist", exact: true })).toBeDisabled()
+  ).toHaveCount(0)
+  await expect(page.getByRole("button", { name: `${list.name} actions`, exact: true })).toHaveCount(
+    0,
+  )
+  await expect(page.getByRole("button", { name: "New blocklist", exact: true })).toHaveCount(0)
   expect(mutations).toEqual([])
 })
 
@@ -288,7 +322,7 @@ test("a verified normalized address union may contain fewer kernel intervals tha
     runtime: { status: "present", count: 2, generation: cacheGeneration },
     enforcement: "verified",
   })
-  await expect(page.getByText("Verified set", { exact: true })).toBeVisible()
+  await expect(rowState(page, "Verified set")).toBeVisible()
   await expect(evidence).toContainText("Cache ready: 3 networks · kernel present: 2 networks")
   await expect(page.getByText("Degraded enforcement", { exact: true })).toHaveCount(0)
 })

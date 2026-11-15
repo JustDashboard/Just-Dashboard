@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Locator, type Page } from "@playwright/test"
 import { SHOP, mockDatabases, summaryOf, type DatabaseMock } from "./database-fixture"
+import { tallShot } from "./database-settings-shots"
 
 /**
  * A database's Version page: which release its server runs, and moving it to
@@ -323,9 +324,20 @@ test("the page reads the release, checks the newer one and lists what the checks
   await expect(picture).toContainText("PostgreSQL 16.4")
   await expect(picture).toContainText("PostgreSQL 17")
   await expect(picture).toContainText("postgres:17-alpine")
+  // What it runs from and where its data is are the captions of the server that runs.
+  await expect(picture).toContainText("image postgres:16-alpine")
+  await expect(picture).toContainText("data shop-db-data")
+  // Between them, the four things an upgrade does, each a mark with a few words, none taken yet.
+  const steps = picture.locator("[data-step]")
+  await expect(steps).toHaveCount(4)
+  await expect(steps).toContainText(["Dump", "New server", "Copy", "Switch"])
+  await expect(picture.locator("[data-step][data-state=ahead]")).toHaveCount(4)
+  await expect(picture.locator("[data-step=start]")).toContainText("PostgreSQL 17 starts beside it")
   const upgrade = section(page, "upgrade")
   await expect(upgrade).toContainText("Not checked yet")
-  await expect(upgrade).toContainText("shop takes reads only")
+  // The sentences about what it does are the confirmation's, not the page's.
+  await expect(page.locator("[data-slot=page]")).not.toContainText("takes reads only")
+  await expect(upgrade.getByRole("listitem")).toHaveCount(0)
   // Nothing is offered to run before the checks have said it can.
   await expect(upgrade.getByRole("button", { name: /^Upgrade to/ })).toHaveCount(0)
 
@@ -340,6 +352,10 @@ test("the page reads the release, checks the newer one and lists what the checks
     "pg_stat_statements 1.10 → 1.11",
   )
   await expect(upgrade).toContainText("ready, 1 thing to know")
+  // The copy's size is known once it has been checked.
+  await expect(picture.locator("[data-step=copy]")).toContainText(
+    /[\d.]+ [kKMG]?B, reads only meanwhile/,
+  )
   // The console has said its lines; the report says them as checks.
   await expect(progress(page)).toHaveCount(0)
   await expect(upgrade.getByRole("button", { name: "Upgrade to PostgreSQL 17" })).toBeEnabled()
@@ -410,9 +426,15 @@ test("an upgrade is confirmed with what it does, followed to its end, and leaves
   )
   await expect(progress(page)).toContainText("2 databases, 14 tables and 182311 rows match")
 
-  await expect(
-    section(page, "version").getByRole("list", { name: "The server and the one kept" }),
-  ).toContainText("shop-db-pg16")
+  const pair = section(page, "version").getByRole("list", { name: "The server and the one kept" })
+  await expect(pair).toContainText("shop-db-pg16")
+  // Each server's data volume is its own caption.
+  await expect(pair.locator("[data-slot=kept-server]")).toContainText("data shop-db-data")
+  await expect(pair).toContainText("data shop-db-pg17-data")
+  await expect(pair.getByRole("link", { name: "shop-db-pg16" })).toHaveAttribute(
+    "href",
+    "/docker/containers/shop-db-pg16",
+  )
   const kept = section(page, "kept")
   await expect(kept).toContainText("PostgreSQL 16 is kept")
   await expect(kept).toContainText("Upgraded 41m ago by operator")
@@ -533,13 +555,15 @@ test("an upgrade already running is shown on arrival, and nothing else begins be
   page,
 }) => {
   const running = job("u9", "major-upgrade", "running", "Upgrade shop to PostgreSQL 17")
+  let phase = "prepare"
   await mockUpgrade(page, {
-    "GET /databases/1/upgrade": {
+    "GET /databases/1/upgrade": () => ({
       ...OFFERED,
       offered: false,
       reason: "An upgrade is running.",
+      window: { ...KEPT.window, state: "running", phase, upgradedAt: undefined },
       job: running,
-    },
+    }),
     "GET /jobs/u9": { job: running, lines: UPGRADE_LINES },
   })
   await visit(page, PAGE)
@@ -550,6 +574,53 @@ test("an upgrade already running is shown on arrival, and nothing else begins be
   await expect(
     section(page, "upgrade").getByRole("button", { name: "Check PostgreSQL 17" }),
   ).toBeDisabled()
+
+  // The picture says where it has got to: the dump and the new server first.
+  const picture = section(page, "version").getByRole("list", {
+    name: "The server and its newer release",
+  })
+  await expect(picture).toContainText("Being copied into")
+  await expect(picture.locator("[data-step=dump]")).toHaveAttribute("data-state", "running")
+  await expect(picture.locator("[data-step=copy]")).toHaveAttribute("data-state", "ahead")
+  // The record is read again while the job runs, and the steps follow it.
+  phase = "copy"
+  await expect(picture.locator("[data-step=dump]")).toHaveAttribute("data-state", "done")
+  await expect(picture.locator("[data-step=copy]")).toHaveAttribute("data-state", "running")
+  await expect(picture.locator("[data-step=dump]")).toContainText("Dump, done")
+  phase = "cutover"
+  await expect(picture.locator("[data-step=switch]")).toHaveAttribute("data-state", "running")
+  await expect(picture.locator("[data-step=copy]")).toHaveAttribute("data-state", "done")
+})
+
+test("every step is on the screen with its words, on one line when wide and in a column on a phone", async ({
+  page,
+}) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockUpgrade(page, { "GET /databases/1/upgrade": OFFERED })
+    await visit(page, PAGE)
+    const picture = section(page, "version").getByRole("list", {
+      name: "The server and its newer release",
+    })
+    await expect(picture.locator("[data-step]")).toHaveCount(4)
+    // Every step is on the screen, with its words.
+    for (const step of await picture.locator("[data-step]").all()) {
+      const box = await step.boundingBox()
+      expect(box && box.x >= 0 && box.x + box.width <= width).toBe(true)
+    }
+    if (width === 1280) {
+      // Wide, the six marks stand on one line.
+      const tops = await picture.locator("[data-step] > div:first-child").evaluateAll((all) =>
+        all.map((one) => {
+          const box = one.getBoundingClientRect()
+          return Math.round(box.top + box.height / 2)
+        }),
+      )
+      expect(new Set(tops).size).toBe(1)
+    }
+    expect(await noSideways(page)).toBe(false)
+  }
 })
 
 test("a server the page cannot move says why, and offers nothing to run", async ({ page }) => {
@@ -667,98 +738,104 @@ test("at a phone's width nothing scrolls sideways, with the report and with the 
 
 test("the Version page, in each of its states @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "JD_SHOTS is unset")
-  test.setTimeout(180_000)
-  const shot = (name: string) => `${process.env.JD_SHOTS}/${name}.png`
-  await page.setViewportSize({ width: 1440, height: 900 })
+  test.setTimeout(300_000)
+  const shot = (name: string, width: number) =>
+    `${process.env.JD_SHOTS}/after-version-${name}-${width}.png`
 
-  let state: unknown = OFFERED
-  let found: unknown = report()
-  await mockUpgrade(page, {
-    "GET /databases/1": () => serverAt(state === KEPT ? "17.6" : "16.4"),
-    "GET /databases/1/upgrade": () => state,
-    "POST /databases/1/upgrade/check": job(
-      "c1",
-      "major-upgrade-check",
-      "running",
-      "Check shop for PostgreSQL 17",
-    ),
-    "GET /jobs/c1": (call: number) =>
-      jobThatEnds(
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    let state: unknown = OFFERED
+    let found: unknown = report()
+    await mockUpgrade(page, {
+      "GET /databases/1": () => serverAt(state === KEPT ? "17.6" : "16.4"),
+      "GET /databases/1/upgrade": () => state,
+      "POST /databases/1/upgrade/check": job(
         "c1",
         "major-upgrade-check",
+        "running",
         "Check shop for PostgreSQL 17",
-        CHECK_LINES,
-        found,
-      )(call),
-    "POST /databases/1/upgrade": job(
-      "u1",
-      "major-upgrade",
-      "running",
-      "Upgrade shop to PostgreSQL 17",
-    ),
-    "GET /jobs/u1": {
-      job: job("u1", "major-upgrade", "running", "Upgrade shop to PostgreSQL 17"),
-      lines: UPGRADE_LINES,
-    },
-  })
+      ),
+      "GET /jobs/c1": (call: number) =>
+        jobThatEnds(
+          "c1",
+          "major-upgrade-check",
+          "Check shop for PostgreSQL 17",
+          CHECK_LINES,
+          found,
+        )(call),
+      "POST /databases/1/upgrade": () => {
+        state = {
+          ...OFFERED,
+          offered: false,
+          reason: "An upgrade is running.",
+          window: { ...KEPT.window, state: "running", phase: "copy", upgradedAt: undefined },
+          job: job("u1", "major-upgrade", "running", "Upgrade shop to PostgreSQL 17"),
+        }
+        return job("u1", "major-upgrade", "running", "Upgrade shop to PostgreSQL 17")
+      },
+      "GET /jobs/u1": {
+        job: job("u1", "major-upgrade", "running", "Upgrade shop to PostgreSQL 17"),
+        lines: UPGRADE_LINES,
+      },
+    })
 
-  // Checked, ready, with one thing to know.
-  await visit(page, PAGE)
-  const upgrade = section(page, "upgrade")
-  await upgrade.getByRole("button", { name: "Check PostgreSQL 17" }).click()
-  await expect(report_(page)).toBeVisible()
-  await settled(page.locator("[data-slot=page]").first())
-  await page.screenshot({ path: shot("version-report-1440"), fullPage: true })
+    // Not checked yet: the release, the four steps, and Check.
+    await visit(page, PAGE)
+    const upgrade = section(page, "upgrade")
+    await expect(upgrade).toContainText("Not checked yet")
+    await settled(page.locator("[data-slot=page]").first())
+    await tallShot(page, shot("full", width))
 
-  // The upgrade asked for, over the page from its top.
-  await atTop(section(page, "version"))
-  await upgrade.getByRole("button", { name: "Upgrade to PostgreSQL 17" }).click()
-  await expect(dialog(page)).toBeVisible()
-  await settled(dialog(page))
-  await page.screenshot({ path: shot("version-confirm-1440") })
+    // Checked, ready, with one thing to know.
+    await upgrade.getByRole("button", { name: "Check PostgreSQL 17" }).click()
+    await expect(report_(page)).toBeVisible()
+    await settled(page.locator("[data-slot=page]").first())
+    await tallShot(page, shot("report", width))
 
-  // The upgrade under way.
-  await dialog(page).getByRole("button", { name: "Upgrade", exact: true }).click()
-  const underWay = page.getByRole("region", { name: "Upgrade shop to PostgreSQL 17, running" })
-  await expect(underWay).toContainText("shop_main: 21.4 MB copied")
-  await expect(dialog(page)).toHaveCount(0)
-  await atTop(section(page, "upgrade"))
-  await settled(underWay)
-  await page.screenshot({ path: shot("version-upgrading-1440") })
+    // The upgrade asked for, over the page from its top.
+    await atTop(section(page, "version"))
+    await upgrade.getByRole("button", { name: "Upgrade to PostgreSQL 17" }).click()
+    await expect(dialog(page)).toBeVisible()
+    await settled(dialog(page))
+    await page.screenshot({ path: shot("confirm", width) })
 
-  // A check that stops it.
-  state = OFFERED
-  found = BLOCKED
-  await visit(page, PAGE)
-  await section(page, "upgrade").getByRole("button", { name: "Check PostgreSQL 17" }).click()
-  await expect(report_(page).locator("[data-check=extensions]")).toHaveAttribute(
-    "data-verdict",
-    "blocker",
-  )
-  await settled(page.locator("[data-slot=page]").first())
-  await page.screenshot({ path: shot("version-blocked-1440"), fullPage: true })
+    // The upgrade under way, at its copy.
+    await dialog(page).getByRole("button", { name: "Upgrade", exact: true }).click()
+    const underWay = page.getByRole("region", { name: "Upgrade shop to PostgreSQL 17, running" })
+    await expect(underWay).toContainText("shop_main: 21.4 MB copied")
+    await expect(dialog(page)).toHaveCount(0)
+    await expect(
+      section(page, "version").locator("[data-step=copy][data-state=running]"),
+    ).toBeVisible()
+    await atTop(section(page, "version"))
+    await settled(underWay)
+    await tallShot(page, shot("upgrading", width))
 
-  // Upgraded, with the old server kept.
-  state = KEPT
-  await visit(page, PAGE)
-  await expect(section(page, "kept")).toBeVisible()
-  await settled(page.locator("[data-slot=page]").first())
-  await page.screenshot({ path: shot("version-kept-1440"), fullPage: true })
+    // A check that stops it.
+    state = OFFERED
+    found = BLOCKED
+    await visit(page, PAGE)
+    await section(page, "upgrade").getByRole("button", { name: "Check PostgreSQL 17" }).click()
+    await expect(report_(page).locator("[data-check=extensions]")).toHaveAttribute(
+      "data-verdict",
+      "blocker",
+    )
+    await settled(page.locator("[data-slot=page]").first())
+    await tallShot(page, shot("blocked", width))
 
-  // Reverting, asked with a dump of the new server first.
-  await section(page, "kept").getByRole("button", { name: "Revert to PostgreSQL 16…" }).click()
-  await expect(dialog(page)).toBeVisible()
-  await settled(dialog(page))
-  await page.screenshot({ path: shot("version-revert-1440") })
-  await dialog(page).getByRole("button", { name: "Cancel" }).click()
+    // Upgraded, with the old server kept.
+    state = KEPT
+    await visit(page, PAGE)
+    await expect(section(page, "kept")).toBeVisible()
+    await settled(page.locator("[data-slot=page]").first())
+    await tallShot(page, shot("kept", width))
 
-  // The checked report on a phone.
-  await page.setViewportSize({ width: 390, height: 844 })
-  state = OFFERED
-  found = report()
-  await visit(page, PAGE)
-  await section(page, "upgrade").getByRole("button", { name: "Check PostgreSQL 17" }).click()
-  await expect(report_(page)).toBeVisible()
-  await settled(page.locator("[data-slot=page]").first())
-  await page.screenshot({ path: shot("version-report-390"), fullPage: true })
+    // A server with nowhere to go, and one the page cannot move.
+    state = { ...KEPT, window: undefined, reason: "PostgreSQL 17 is the newest release offered." }
+    await visit(page, PAGE)
+    await expect(section(page, "version")).toContainText("newest release")
+    await settled(page.locator("[data-slot=page]").first())
+    await tallShot(page, shot("newest", width))
+  }
 })

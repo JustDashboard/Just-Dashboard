@@ -652,6 +652,9 @@ func (b *npmBuilder) host(row npmRow, kind string) {
 		skip("It does not map onto a site: %v.", err)
 		return
 	}
+	if b.s != nil {
+		b.s.forHostNginx(spec)
+	}
 	content, err := RenderNginx(spec)
 	if err != nil {
 		skip("It does not map onto a site: %v.", err)

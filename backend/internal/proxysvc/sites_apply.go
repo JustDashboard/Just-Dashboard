@@ -132,6 +132,7 @@ func (s *Service) SaveSite(ctx context.Context, spec *SiteSpec, opts SiteSave) (
 	s.SetPagesDir(spec)
 	s.SetRealIPDir(spec)
 	s.SetAccessListDir(spec)
+	s.forHostNginx(spec)
 	content, err := RenderNginx(spec)
 	if err != nil {
 		return nil, err

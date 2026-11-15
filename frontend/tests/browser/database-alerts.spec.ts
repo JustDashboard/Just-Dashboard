@@ -1,11 +1,12 @@
 import { expect, test, type Page } from "@playwright/test"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { risen } from "./risen"
 
 /**
- * A database's Alerts page: rules read as sentences with where each stands,
- * a new one is a form that speaks its own sentence back, a test says where it
- * went, and what was told lately is listed under them. Only an administrator
- * is offered anything to change.
+ * A database's Alerts page: each rule is a card of one height with where it
+ * stands, a new one is a form that speaks its own sentence back, a test says
+ * where it went, and what was told lately is listed under them. Only an
+ * administrator is offered anything to change.
  */
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
@@ -252,8 +253,12 @@ const recent = (page: Page) => page.getByRole("region", { name: "Recent alerts" 
 const ruleRow = (page: Page, sentence: string) =>
   rules(page).getByRole("listitem").filter({ hasText: sentence })
 
+/** What a rule's status opens: what the server read, in its own words. */
+const reading = (page: Page, kind: string) =>
+  page.getByRole("dialog", { name: `What ${kind} read` })
+
 test.describe("database alerts", () => {
-  test("rules read as sentences with where each stands, over what was told lately", async ({
+  test("rules read as cards with where each stands, over what was told lately", async ({
     page,
   }) => {
     await mockAlerts(page)
@@ -266,9 +271,16 @@ test.describe("database alerts", () => {
     await expect(disk.getByText("above 90% for 5 min")).toBeVisible()
     // Said to the minute: a status that ticked seconds read as a clock.
     await expect(disk.getByText(/^Firing for \d+ min · 92% used$/)).toBeVisible()
-    // The reading is drawn against the rule's line, and said in the server's words.
+    // The reading is drawn against the rule's line, beside the words.
     await expect(disk.getByRole("meter", { name: "92% used against a 90% line" })).toBeVisible()
-    await expect(disk.getByText(/of the volume shop-pgdata is used/)).toBeVisible()
+    // What the server said about it is behind the status, not under the row.
+    await expect(page.getByText(/of the volume shop-pgdata is used/)).toHaveCount(1)
+    await disk.getByRole("button", { name: /^Firing for/ }).click()
+    await expect(reading(page, "Disk filling up")).toContainText(
+      "92% of the volume shop-pgdata is used (184.8 GB of 200.0 GB); the line is 90%.",
+    )
+    await expect(reading(page, "Disk filling up")).toContainText(/checked (just now|\d+s ago)/)
+    await page.keyboard.press("Escape")
     await expect(rules(page).getByText("1 firing")).toBeVisible()
     // Where the messages go is its own phrase beside the count.
     await expect(rules(page).getByText("Goes to", { exact: true })).toBeVisible()
@@ -278,8 +290,13 @@ test.describe("database alerts", () => {
     ).toBeVisible()
     await expect(ruleRow(page, "Server down").getByText("no answer for 2 min")).toBeVisible()
     const missed = ruleRow(page, "Backup missed")
-    await expect(missed.getByText("Every database")).toBeVisible()
-    await expect(missed.getByText("follows nightly-db")).toBeVisible()
+    await expect(missed).toContainText("no successful run 1 h after one is due · every database")
+    await missed.getByRole("button", { name: /^Quiet/ }).click()
+    await expect(reading(page, "Backup missed")).toContainText("follows nightly-db")
+    // Its scope is said here too: a phone may cut it off the end of a long condition.
+    await expect(reading(page, "Backup missed")).toContainText("watches every database")
+    await expect(reading(page, "Backup missed")).toContainText("The next run of nightly-db is due")
+    await page.keyboard.press("Escape")
     // Firing first: the rule telling somebody is the one a reader came for.
     await expect(rules(page).getByRole("listitem").first()).toContainText("Disk filling up")
 
@@ -288,6 +305,59 @@ test.describe("database alerts", () => {
     await expect(recent(page).getByText(/told 1 channel, 1 failed/)).toBeVisible()
     await expect(recent(page).getByText(/kept back by the cooldown/)).toBeVisible()
     await expect(recent(page).getByText(/rule removed/)).toBeVisible()
+  })
+
+  for (const width of [1280, 390]) {
+    test(`at ${width} px every rule is one height, whatever it reads`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const state = watching()
+      // A rule that is paused, one with nothing here to read yet, and one whose
+      // status runs long: none of them is a taller card than a quiet one.
+      state.rules.push(
+        rule(15, { kind: "replication", threshold: 60, minutes: 2, enabled: false }),
+        rule(16, { kind: "backup_failed" }),
+      )
+      state.subjects[0] = { ...state.subjects[0], state: "held" }
+      await mockAlerts(page, { alerts: state })
+      await visit(page)
+      await expect(ruleRow(page, "Backup failed")).toContainText("No backup job dumps it")
+      await risen(page)
+      const cards = rules(page).locator("[data-slot=choice-row]")
+      await expect(cards).toHaveCount(6)
+      const boxes = await cards.evaluateAll((rows) =>
+        rows.map((row) => {
+          const box = row.getBoundingClientRect()
+          return { top: box.top, height: box.height }
+        }),
+      )
+      const spread = (values: number[]) => Math.max(...values) - Math.min(...values)
+      expect(spread(boxes.map((box) => box.height))).toBeLessThan(0.5)
+      // Nothing hangs between two cards: each starts where the last one ended, plus the gap.
+      expect(spread(boxes.slice(1).map((box, at) => box.top - boxes[at].top))).toBeLessThan(0.5)
+      // No bar on a row of its own, and no sentence under one.
+      await expect(page.getByText(/of the volume shop-pgdata is used/)).toHaveCount(1)
+      await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true)
+    })
+  }
+
+  test("a card opens its rule's form, and its status opens what was read", async ({ page }) => {
+    await mockAlerts(page)
+    await visit(page)
+    // The card's name is the control, and the press on the card is the pointer's larger target.
+    await page.getByRole("button", { name: "Edit Disk filling up: above 90% for 5 min" }).click()
+    const sheet = page.getByRole("dialog", { name: "Edit alert" })
+    await expect(sheet.getByLabel("Alert line")).toHaveValue("90")
+    await sheet.getByRole("button", { name: "Cancel" }).click()
+    await expect(sheet).toHaveCount(0)
+    // A press on the status is the status's own: it does not open the form as well.
+    await ruleRow(page, "Server down")
+      .getByRole("button", { name: /^Quiet/ })
+      .click()
+    await expect(reading(page, "Server down")).toContainText("shop answers.")
+    await expect(page.getByRole("dialog", { name: "Edit alert" })).toHaveCount(0)
   })
 
   test("a new rule is added from a form that speaks it back", async ({ page }) => {
@@ -420,6 +490,14 @@ test.describe("database alerts", () => {
     await expect(page.getByRole("button", { name: "Add alert" })).toHaveCount(0)
     // The strip's own menu is the database's, not a rule's.
     await expect(rules(page).getByRole("button", { name: /^Actions for/ })).toHaveCount(0)
+    // A card that cannot be opened is not drawn as one that can: no control on its name.
+    await expect(rules(page).getByRole("button", { name: /^Edit / })).toHaveCount(0)
+    // What was read is still the viewer's to read.
+    await ruleRow(page, "Disk filling up")
+      .getByRole("button", { name: /^Firing for/ })
+      .click()
+    await expect(reading(page, "Disk filling up")).toContainText("shop-pgdata")
+    await page.keyboard.press("Escape")
 
     await page.unrouteAll({ behavior: "ignoreErrors" })
     await mockAlerts(page, { viewer: true, alerts: NOTHING() })

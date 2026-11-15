@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Copy, Download } from "@/components/icons"
+import { Copy, Download, Logs } from "@/components/icons"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
@@ -9,6 +9,7 @@ import { IconAction } from "@/components/icon-action"
 import { Status } from "@/components/status-dot"
 import { TranscriptRow, useTranscriptDrip } from "@/components/transcript-line"
 import { BorderBeam } from "@/components/ui/border-beam"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   Select,
   SelectContent,
@@ -31,7 +32,9 @@ import { copyText } from "@/lib/clipboard"
 import { downloadText } from "@/lib/metrics-export"
 import { transcriptLine, type TranscriptLine } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
-import type { DeploymentRunState, DeploymentStep } from "@/lib/types"
+import type { DeploymentRunState, DeploymentStep, DeploymentSummary } from "@/lib/types"
+import { StepTile } from "@/components/deploy/run-evidence"
+import { WireMark } from "@/components/deploy/wire"
 
 /**
  * One `step.log` event as the stream delivers it: a chunk, not a line, from
@@ -161,6 +164,7 @@ export function BuildConsole({
   onSelectStep,
   focusLine,
   flush,
+  deployment,
   className,
 }: {
   /** The transcript as lines, read once by the page (`consoleRows`). */
@@ -190,6 +194,8 @@ export function BuildConsole({
   focusLine?: { seq: number; nonce: number }
   /** Inside a pane the page draws — the Logs page's Builds view — with no frame of its own. */
   flush?: boolean
+  /** The project, for the product a waiting step is drawn as (`StepTile`). */
+  deployment?: DeploymentSummary
   /** The console's size where the page decides it; the run page's own height otherwise. */
   className?: string
 }) {
@@ -478,15 +484,15 @@ export function BuildConsole({
                 </div>
               ))}
             </div>
+          ) : rows.length === 0 && active ? (
+            <Waiting steps={steps} operation={operation} deployment={deployment} />
           ) : (
             <div className="flex h-full min-h-48 items-center justify-center px-6 text-center text-body text-muted-foreground">
               {rows.length
                 ? selectedStep && !needle && !errorsOnly
                   ? `${stepName(stepById.get(selectedStep)?.key ?? "this_stage", operation)} wrote nothing to the build log.`
                   : "No lines match. Try another search or stage."
-                : active
-                  ? "Waiting for build output. New lines appear here automatically."
-                  : "No build output was retained for this run."}
+                : "No build output was retained for this run."}
             </div>
           )}
         </div>
@@ -511,6 +517,50 @@ export function BuildConsole({
         </span>
       </PaneFooter>
     </Pane>
+  )
+}
+
+/**
+ * A run at work that has written nothing yet: the step it is at, drawn as the
+ * steps rail draws it, with its name lit the way the fleet's card lights the
+ * stage of a release in flight. It was a grey sentence in the middle of a
+ * tall empty pane, which read as a console with nothing behind it. It is not a
+ * live region: the run's header already announces the stage, and before a step
+ * has begun the page says it is waiting for a slot.
+ */
+function Waiting({
+  steps,
+  operation,
+  deployment,
+}: {
+  steps: DeploymentStep[]
+  operation?: string
+  deployment?: DeploymentSummary
+}) {
+  const working = steps.find((step) => step.state === "running")
+  return (
+    <div
+      data-slot="console-waiting"
+      className="flex h-full min-h-48 flex-col items-center justify-center gap-3 px-6 text-center"
+    >
+      <span data-slot="console-waiting-mark" className="flex">
+        {working ? (
+          <StepTile step={working} state="running" deployment={deployment} size="md" />
+        ) : (
+          <WireMark size="md">
+            <Logs aria-hidden className="text-muted-foreground" />
+          </WireMark>
+        )}
+      </span>
+      <div className="space-y-1">
+        <TextShimmer className="text-body font-medium">
+          {working ? stepName(working.key, operation) : "Waiting for the first line"}
+        </TextShimmer>
+        <p className="text-hint text-muted-foreground">
+          Nothing written yet. Its lines appear here as they are.
+        </p>
+      </div>
+    </div>
   )
 }
 

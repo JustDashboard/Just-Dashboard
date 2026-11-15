@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { exitCode, stackBucket, stackChanges, stackLines } from "./stack-readings"
+import { exitCode, stackBucket, stackChanges, stackLines, visibleStacks } from "./stack-readings"
 
 const service = (name, over = {}) => ({
   name,
@@ -116,6 +116,49 @@ describe("stackLines", () => {
     expect(line.lines.map((l) => l.service.name)).toEqual(["api", "worker", "cron", "web"])
     expect(line.lines.find((l) => l.service.name === "web").orphan).toBe(true)
     expect(line.lines.find((l) => l.service.name === "cron").key).toBe("shop/cron")
+  })
+})
+
+describe("visibleStacks", () => {
+  const lines = stackLines(
+    [
+      stack("shop", {
+        services: [
+          service("db", { image: "postgres:16" }),
+          service("web", { image: "nginx:1.27" }),
+        ],
+      }),
+      stack("wiki", { deployed: false, running: 0, services: [] }),
+      stack("n8n", { services: [service("postgres", { image: "postgres:16" })] }),
+    ],
+    [],
+    {},
+  )
+
+  test("a stack's name keeps it whole; a service or an image says which matched", () => {
+    expect(visibleStacks(lines, { query: "" }).map((v) => v.line.stack.name)).toEqual(
+      lines.map((l) => l.stack.name),
+    )
+    expect(visibleStacks(lines, { query: "Shop" })).toEqual([
+      { line: lines.find((l) => l.stack.name === "shop") },
+    ])
+    const found = visibleStacks(lines, { query: "postgres" })
+    expect(found.map((v) => [v.line.stack.name, v.matched])).toEqual([
+      ["n8n", ["postgres"]],
+      ["shop", ["db"]],
+    ])
+    // The stack keeps every service: the row is the stack, not a part of it.
+    expect(found[1].line.lines).toHaveLength(2)
+  })
+
+  test("the state chip and the band's pick narrow before the search does", () => {
+    expect(
+      visibleStacks(lines, { query: "", state: "undeployed" }).map((v) => v.line.stack.name),
+    ).toEqual(["wiki"])
+    expect(
+      visibleStacks(lines, { query: "postgres", focus: "shop" }).map((v) => v.line.stack.name),
+    ).toEqual(["shop"])
+    expect(visibleStacks(lines, { query: "nothing" })).toEqual([])
   })
 })
 

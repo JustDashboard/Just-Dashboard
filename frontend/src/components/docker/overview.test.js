@@ -1,13 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  containerBucket,
-  crashed,
-  exitOf,
-  mergeEvents,
-  overviewOrder,
-  recentChanges,
-  stoppedWords,
-} from "./overview"
+import { crashed, exitOf, mergeEvents, recentChanges } from "./overview"
 
 const NOW = Date.UTC(2026, 9, 8, 12, 0, 0)
 const ago = (ms) => new Date(NOW - ms).toISOString()
@@ -44,55 +36,12 @@ describe("exitOf", () => {
   })
 })
 
-describe("containerBucket", () => {
-  test("a failing health check is failing while the process is up", () => {
-    expect(containerBucket(container({ health: "unhealthy" }))).toBe("failing")
-    expect(containerBucket(container({ health: "starting" }))).toBe("starting")
-    expect(containerBucket(container({ health: "healthy" }))).toBe("running")
-  })
-
-  // A one-shot job that finished, or a service stopped by hand, is not a problem.
-  test("only a crash is failing among the stopped", () => {
-    const exited = (code) => container({ state: "exited", status: `Exited (${code}) 3 days ago` })
-    expect(containerBucket(exited(137))).toBe("failing")
-    expect(containerBucket(exited(1))).toBe("failing")
-    expect(containerBucket(exited(0))).toBe("stopped")
-    expect(containerBucket(exited(143))).toBe("stopped")
-    expect(crashed(exited(143))).toBe(false)
-    expect(containerBucket(container({ state: "created", status: "Created" }))).toBe("stopped")
-    expect(containerBucket(container({ state: "paused", status: "Up 2 hours (Paused)" }))).toBe(
-      "stopped",
-    )
-    expect(containerBucket(container({ state: "restarting", status: "Restarting (1)" }))).toBe(
-      "failing",
-    )
-    expect(containerBucket(container({ state: "dead", status: "Dead" }))).toBe("failing")
-  })
-})
-
-test("overviewOrder puts failing first and keeps names together", () => {
-  const order = overviewOrder([
-    container({ name: "shop-web" }),
-    container({ name: "mailhog", state: "exited", status: "Exited (0) 2 days ago" }),
-    container({ name: "shop-worker", state: "exited", status: "Exited (137) 1 minute ago" }),
-    container({ name: "kuma", health: "starting" }),
-    container({ name: "shop-api" }),
-  ]).map((c) => c.name)
-  expect(order).toEqual(["shop-worker", "kuma", "shop-api", "shop-web", "mailhog"])
-})
-
-describe("stoppedWords", () => {
-  test("reports the exit code without an inferred cause", () => {
-    const worker = container({ id: "w", state: "exited", status: "Exited (137) 12 minutes ago" })
-    expect(stoppedWords(worker)).toBe("exit 137 · 12 minutes ago")
-    expect(stoppedWords(worker, [{ id: "container.oom.w", targetId: "w" }])).toBe(
-      "exit 137 · 12 minutes ago",
-    )
-    expect(stoppedWords(container({ state: "exited", status: "Exited (0) 2 days ago" }))).toBe(
-      "finished · 2 days ago",
-    )
-    expect(stoppedWords(container({ state: "created", status: "Created" }))).toBe("never started")
-  })
+test("crashed is an exit that is neither a finish nor an honoured stop", () => {
+  const exited = (code) => container({ state: "exited", status: `Exited (${code}) 3 days ago` })
+  expect(crashed(exited(1))).toBe(true)
+  expect(crashed(exited(0))).toBe(false)
+  expect(crashed(exited(143))).toBe(false)
+  expect(crashed(container({}))).toBe(false)
 })
 
 describe("recentChanges", () => {

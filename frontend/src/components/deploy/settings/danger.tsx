@@ -6,14 +6,21 @@ import { Fragment, useState } from "react"
 import {
   Archive,
   Box,
+  Clock,
   Database,
   External,
   FolderClosed,
+  GitBranch,
+  GitPullRequest,
   Globe,
+  Key,
+  Layers,
   NetworkDevice,
   Play,
   RefreshClockwise,
   RotateCounterClockwise,
+  Rss,
+  SettingsGear,
   StopCircle,
   Trash,
   type Icon,
@@ -36,7 +43,7 @@ import { GroupRule } from "@/components/flow"
 import { FormFact, FormFacts, FormNote } from "@/components/form"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { Panel, Well } from "@/components/panel"
-import { ProductLogo, imageProduct } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, imageProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -44,10 +51,9 @@ import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
 import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
 import { useConfiguration } from "@/components/deploy/settings/use-configuration"
-import { humanize, projectState } from "@/components/deploy/vocabulary"
+import { humanize, projectState, sourceProduct } from "@/components/deploy/vocabulary"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { useProject } from "@/components/deploy/project-context"
-import { StageStrip } from "@/components/deploy/run-pipeline"
 import { archiveRequest, purgeRequest, useProjectVerbs } from "@/components/deploy/project-verbs"
 
 /**
@@ -120,11 +126,10 @@ function DangerZone({ configuration }: { configuration: DeploymentEnvironmentCon
       ].filter(Boolean)
 
   return (
-    <SettingSection
-      title="Danger zone"
-      tone="danger"
-      state={staging ? undefined : <Lifecycle archived={project.archived} />}
-    >
+    <SettingSection title="Danger zone" tone="danger">
+      {/* On a line of its own, at the column's width: in the head's facts
+          slot it had a third of that, and read "In use · Arch… · Dele…". */}
+      {!staging && <Lifecycle archived={project.archived} />}
       {rows.length === 0 ? (
         <EmptyNote className="px-0 text-left">
           Your role cannot stop, archive or delete this deployment.
@@ -146,10 +151,35 @@ function Lifecycle({ archived }: { archived: boolean }) {
   const at = archived ? 1 : 0
   // Keyed on the step, so archiving or restoring moves the lit bar by
   // arriving at its new place rather than repainting under the reader.
+  // Drawn here rather than as a `StageStrip`: that one keeps only the
+  // current step's name on a phone, for a path of seven; this one is three
+  // words, and the order they stand in is what the strip is for.
   return (
-    <span key={at} className="block animate-rise">
-      <StageStrip steps={steps} current={at} label={`Now: ${steps[at]}`} />
-    </span>
+    <ol key={at} aria-label={`Now: ${steps[at]}`} className="flex animate-rise gap-1.5">
+      {steps.map((step, index) => (
+        <li
+          key={step}
+          aria-current={index === at ? "step" : undefined}
+          className="min-w-0 flex-1 space-y-1.5"
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "block h-1 rounded-full",
+              index === at ? "bg-brand" : index < at ? "bg-muted-foreground/40" : "bg-meter-track",
+            )}
+          />
+          <span
+            className={cn(
+              "block text-micro",
+              index === at ? "font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {step}
+          </span>
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -220,6 +250,47 @@ function Reach({
       <span className="mr-1">{label}</span>{" "}
       <span className={cn("text-foreground", mono && "font-mono break-words")}>{children}</span>
     </p>
+  )
+}
+
+/** One thing an act touches: what it is drawn as, and how many. */
+type ReachItem = { key: string; mark: React.ReactNode; text: string }
+
+const reachGlyph = (Glyph: Icon) => (
+  <Glyph aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+)
+
+/**
+ * What an act touches, as the things themselves: each a mark and its count,
+ * the way the overview draws a project's parts. It was one run of words
+ * ("git watching on main · 2 webhooks · 1 schedule"), which a reader about to
+ * archive has to read rather than see. `empty` is said when there is nothing.
+ */
+function ReachMarks({
+  label,
+  items,
+  empty,
+}: {
+  label: string
+  items: ReachItem[]
+  empty?: string
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint leading-relaxed text-muted-foreground">
+      <span>{label}</span>
+      {items.length === 0 ? (
+        <span className="text-foreground">{empty}</span>
+      ) : (
+        <ul aria-label={label} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          {items.map((item) => (
+            <li key={item.key} className="inline-flex min-w-0 items-center gap-1.5">
+              {item.mark}
+              <span className="numeric min-w-0 text-foreground">{item.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -417,15 +488,30 @@ function useArchiveReach(configuration: DeploymentEnvironmentConfiguration) {
     engine,
   )
   const watch = project.gitWatch
+  const host = sourceProduct(project.detail.deployment)
+  const webhooks = triggers.data?.filter((one) => one.enabled).length ?? 0
+  const scheduled = schedules.data?.filter((one) => one.enabled).length ?? 0
+  const open = previews.data?.filter((one) => one.state === "open").length ?? 0
   const stops = [
-    watch?.automatic && watch.branch && `git watching on ${watch.branch}`,
-    triggers.data?.filter((one) => one.enabled).length &&
-      plural(triggers.data.filter((one) => one.enabled).length, "webhook"),
-    schedules.data?.filter((one) => one.enabled).length &&
-      plural(schedules.data.filter((one) => one.enabled).length, "schedule"),
-    previews.data?.filter((one) => one.state === "open").length &&
-      plural(previews.data.filter((one) => one.state === "open").length, "preview environment"),
-  ].filter(Boolean) as string[]
+    watch?.automatic &&
+      watch.branch && {
+        key: "watch",
+        // The forge the branch is watched on, drawn as itself.
+        mark: host ? <ProductGlyph id={host} /> : reachGlyph(GitBranch),
+        text: `git watching on ${watch.branch}`,
+      },
+    webhooks > 0 && { key: "webhooks", mark: reachGlyph(Rss), text: plural(webhooks, "webhook") },
+    scheduled > 0 && {
+      key: "schedules",
+      mark: reachGlyph(Clock),
+      text: plural(scheduled, "schedule"),
+    },
+    open > 0 && {
+      key: "previews",
+      mark: reachGlyph(GitPullRequest),
+      text: plural(open, "preview environment"),
+    },
+  ].filter(Boolean) as ReachItem[]
   // What could not be read is not what is off: archiving turns these off all
   // the same, so the confirmation has to say it does not know how many.
   const unread = [
@@ -438,11 +524,23 @@ function useArchiveReach(configuration: DeploymentEnvironmentConfiguration) {
     (mount) => !mount.source.startsWith("/"),
   )
   const keeps = [
-    "its runtime",
-    configuration.domains.length > 0 && plural(configuration.domains.length, "domain"),
-    volumes.length > 0 && plural(volumes.length, "volume"),
-    project.releases.length > 0 && plural(project.releases.length, "release"),
-  ].filter(Boolean) as string[]
+    { key: "runtime", mark: reachGlyph(Box), text: "its runtime" },
+    configuration.domains.length > 0 && {
+      key: "domains",
+      mark: reachGlyph(Globe),
+      text: plural(configuration.domains.length, "domain"),
+    },
+    volumes.length > 0 && {
+      key: "volumes",
+      mark: reachGlyph(Archive),
+      text: plural(volumes.length, "volume"),
+    },
+    project.releases.length > 0 && {
+      key: "releases",
+      mark: reachGlyph(Layers),
+      text: plural(project.releases.length, "release"),
+    },
+  ].filter(Boolean) as ReachItem[]
   return { stops, unread, reading, keeps }
 }
 
@@ -453,16 +551,18 @@ function ArchiveRow({ configuration }: { configuration: DeploymentEnvironmentCon
   const facts = (
     <>
       {(stops.length > 0 || unread.length === 0) && (
-        <Reach label="Stops">
-          {stops.length > 0 ? stops.join(" · ") : reading ? "reading…" : "nothing is automatic"}
-        </Reach>
+        <ReachMarks
+          label="Stops"
+          items={stops}
+          empty={reading ? "reading…" : "nothing is automatic"}
+        />
       )}
       {unread.length > 0 && (
         <Reach label="Could not read">
           {unread.join(" · ")}. Any of them that are on stop as well.
         </Reach>
       )}
-      <Reach label="Keeps">{keeps.join(" · ")}</Reach>
+      <ReachMarks label="Keeps" items={keeps} />
     </>
   )
   return (
@@ -782,11 +882,26 @@ function PurgeRow({ configuration }: { configuration: DeploymentEnvironmentConfi
   const ready = project.archived
   const facts = (
     <>
-      <Reach label="Forgets">
-        configuration (revision {configuration.revision}) ·{" "}
-        {plural(configuration.variables.length, "variable")} ·{" "}
-        {plural(project.releases.length, "release")} and their logs
-      </Reach>
+      <ReachMarks
+        label="Forgets"
+        items={[
+          {
+            key: "configuration",
+            mark: reachGlyph(SettingsGear),
+            text: `configuration (revision ${configuration.revision})`,
+          },
+          {
+            key: "variables",
+            mark: reachGlyph(Key),
+            text: plural(configuration.variables.length, "variable"),
+          },
+          {
+            key: "releases",
+            mark: reachGlyph(Layers),
+            text: `${plural(project.releases.length, "release")} and their logs`,
+          },
+        ]}
+      />
       <Reach label="Leaves">
         containers, routes, images, files, data — remove them above first
       </Reach>

@@ -6,7 +6,6 @@ import { LANES, hueFor } from "@/lib/hue"
 import { useMemoryState } from "@/lib/view-state"
 import { RankList, type RankItem } from "@/components/rank-list"
 import { Segments } from "@/components/deploy/settings/segments"
-import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -17,6 +16,7 @@ import { bytesId, bytesLabel, globEscape } from "@/components/database/redis/byt
 import { TypeComposition } from "@/components/database/redis/composition"
 import { DbPicker } from "@/components/database/redis/db-picker"
 import { KindMark, kindLabel, sizeOf } from "@/components/database/redis/kinds"
+import { Fig, FigureLine } from "@/components/database/ops/performance-words"
 import { ReadError } from "@/components/database/redis/read-error"
 import { ttlWord } from "@/components/database/redis/ttl"
 import type { RedisAnalysis, RedisAnalysisGroup } from "@/components/database/redis/types"
@@ -201,34 +201,44 @@ export function MemoryView({ redis }: { redis: Redis }) {
   return (
     <div data-slot="redis-analysis" className="animate-rise space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <MetricStrip>
-          <Metric
-            label="Measured"
-            value={`${result.sampled.toLocaleString()} of ${result.total.toLocaleString()} keys`}
-            hint={
-              result.complete
-                ? "every key: nothing is an estimate"
-                : `scaled ×${result.scale.toFixed(2)} to the database${result.timedOut ? " · stopped at 25 s" : ""}`
-            }
-          />
-          <Metric
-            label={`In db${result.db}`}
-            value={noMemory ? "—" : `${about}${bytes(result.estimatedMemory)}`}
-            hint={noMemory ?? `the server uses ${bytes(result.usedMemory)} in all`}
-          />
+        {/* What was measured, as a line that reads: four tiles said it as
+            a figure over a label each, with the sentence under it. */}
+        <FigureLine className="flex-1 basis-80">
+          <span>
+            <Fig>
+              {result.sampled.toLocaleString()} of {result.total.toLocaleString()}
+            </Fig>{" "}
+            keys measured
+            {result.complete
+              ? ", so nothing is an estimate"
+              : `, scaled ×${result.scale.toFixed(2)} to the database${result.timedOut ? ", stopped at 25 s" : ""}`}
+          </span>
+          <span>
+            {noMemory ? (
+              noMemory
+            ) : (
+              <>
+                <Fig>
+                  {about}
+                  {bytes(result.estimatedMemory)}
+                </Fig>{" "}
+                in db{result.db} of the {bytes(result.usedMemory)} the server uses
+              </>
+            )}
+          </span>
           {kept && !noMemory && (
-            <Metric
-              label="Never given back"
-              value={`${about}${bytes(kept.estimatedMemory)}`}
-              hint={`${plural(kept.estimatedKeys, "key")} with no expiry`}
-            />
+            <span>
+              <Fig>
+                {about}
+                {bytes(kept.estimatedMemory)}
+              </Fig>{" "}
+              never given back: {plural(kept.estimatedKeys, "key")} with no expiry
+            </span>
           )}
-          <Metric
-            label="Taken"
-            value={relativeTime(result.at)}
-            hint={`in ${result.elapsedMs} ms`}
-          />
-        </MetricStrip>
+          <span>
+            taken {relativeTime(result.at)} in {result.elapsedMs} ms
+          </span>
+        </FigureLine>
         {controls}
       </div>
       {error && <ReadError error={error} onRetry={() => void analyse()} />}

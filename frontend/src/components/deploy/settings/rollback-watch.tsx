@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { RollbackPolicy, RollbackWatchResponse } from "@/lib/types"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import { FactsLine } from "@/components/deploy/settings/facts-line"
 import {
   InputGroup,
   InputGroupAddon,
@@ -73,6 +74,32 @@ function policyOf(draft: PolicyDraft): RollbackPolicy | string {
     latencyFactor: factor,
     minRequests: requests,
   }
+}
+
+/**
+ * The terms in the few words a section's head holds. The model's own sentence
+ * (`policyLine`) is the full account, two lines of it, and is what the mark
+ * beside this line opens.
+ */
+function factsLine(policy: RollbackPolicy, skew: boolean) {
+  if (!policy.keepWarm)
+    return skew
+      ? "Previous release removed once a new one is live · visitors keep it while it drains"
+      : "Previous release removed once a new one is live"
+  const minutes = Math.round(policy.windowSeconds / 60)
+  const window =
+    policy.windowSeconds % 60 === 0
+      ? `${minutes} ${minutes === 1 ? "minute" : "minutes"}`
+      : `${policy.windowSeconds} seconds`
+  return [
+    `Previous release kept warm for ${window}`,
+    policy.automatic
+      ? `rolls back at +${policy.errorRateMargin} points of 5xx or ${policy.latencyFactor}× slower`
+      : "switch back by hand",
+    skew && "visitors keep their release",
+  ]
+    .filter(Boolean)
+    .join(" · ")
 }
 
 /**
@@ -196,35 +223,43 @@ export function RollbackWatchForm({
         id="rollback-watch"
         title="After a release goes live"
         state={
-          <span
-            key={typeof parsed === "string" ? "invalid" : policyLine(parsed)}
-            className="block animate-rise"
+          <FactsLine
+            line={typeof parsed === "string" ? parsed : factsLine(parsed, value.skewProtection)}
+            about="What happens after a release goes live"
           >
             {typeof parsed === "string" ? parsed : policyLine(parsed)}
             {typeof parsed !== "string" && skewLine(value.skewProtection, parsed) && (
               <> {skewLine(value.skewProtection, parsed)}</>
-            )}
-          </span>
+            )}{" "}
+            With skew protection, each visitor&apos;s first answer sets a jd_release cookie naming
+            the release that gave it, and the previous release keeps answering the visitors whose
+            cookie names it — pages, scripts and styles alike — so a page loaded before the cutover
+            never asks the new release for files it does not have.
+          </FactsLine>
         }
         status={settingStatus({ dirty: draft.dirty })}
       >
         <OptionList>
           <OptionRow
             title="Keep the previous release warm"
-            hint="Paused rather than removed, holding its memory and doing no work, so traffic can switch back to it in a moment with nothing rebuilt. A new deployment, or less than a tenth of the server's memory left, removes it early."
+            hint="Paused, not removed, so traffic can switch back in a moment"
             checked={value.keepWarm}
             onCheckedChange={(keepWarm) => patch({ keepWarm })}
             disabled={!canEdit}
           >
             <FieldRow>
-              <Field label="Window" htmlFor="rollback-window">
+              <Field
+                label="Window"
+                htmlFor="rollback-window"
+                info="How long the previous release is held, with its memory and doing no work. A new deployment, or less than a tenth of the server's memory left, removes it early."
+              >
                 {number("rollback-window", "windowMinutes", "minutes", { min: 1, max: 60 })}
               </Field>
             </FieldRow>
           </OptionRow>
           <OptionRow
             title="Roll back automatically"
-            hint="During the window the new release's requests are read against the previous release's own. When it fails or slows past these lines, traffic goes back to the warm release and every channel that hears about failures is told."
+            hint="Traffic goes back when the new release fails or slows past these lines"
             checked={value.keepWarm && value.automatic}
             onCheckedChange={(automatic) => patch({ automatic })}
             disabled={!canEdit || !value.keepWarm}
@@ -233,7 +268,7 @@ export function RollbackWatchForm({
               <Field
                 label="5xx share above the previous release"
                 htmlFor="rollback-margin"
-                info="In percentage points: with 5, a release whose 5xx share is more than five points above the previous release's is rolled back. A previous release that served too little to trust is taken as clean."
+                info="During the window the new release's requests are read against the previous release's own, and a rollback tells every channel that hears about failures. In percentage points: with 5, a release whose 5xx share is more than five points above the previous release's is rolled back. A previous release that served too little to trust is taken as clean."
               >
                 {number("rollback-margin", "errorRateMargin", "points", {
                   min: 0.5,
@@ -261,7 +296,7 @@ export function RollbackWatchForm({
           </OptionRow>
           <OptionRow
             title="Keep each visitor on the release that answered them"
-            hint="Skew protection. Each visitor's first answer sets a jd_release cookie naming the release that gave it. After a cutover the previous release stays running rather than paused and keeps answering the visitors whose cookie names it — pages, scripts and styles alike — until the window ends, so a page loaded before the cutover never asks the new release for files it does not have. Everyone else, and everyone after the window, gets the new release."
+            hint="Skew protection: a page loaded before a cutover keeps its release"
             checked={value.skewProtection}
             onCheckedChange={(skewProtection) => patch({ skewProtection })}
             disabled={!canEdit || (Boolean(skew.refusal) && !value.skewProtection)}

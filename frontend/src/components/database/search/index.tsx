@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { useMemoryState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
 import { EmptyState, Notice } from "@/components/state"
@@ -273,6 +274,7 @@ export function SqlSearch() {
   const stop = () => setStopped(asking)
 
   const groups = useMemo(() => (held ? groupHits(held.result, held.q) : []), [held])
+  const skipped = held?.result.tablesSkipped ?? []
   const [only, setOnly] = useState<string | null>(null)
   const shown = only && groups.some((group) => group.key === only) ? only : null
   const visible = shown ? groups.filter((group) => group.key === shown) : groups
@@ -477,8 +479,7 @@ export function SqlSearch() {
                   <span className="numeric font-medium">
                     {plural(held.result.matches.length, "row")}
                   </span>{" "}
-                  {held.result.matches.length === 1 ? "is" : "are"} shown, at most {PER_TABLE} from
-                  each.
+                  {held.result.matches.length === 1 ? "is" : "are"} shown.
                 </>
               )}{" "}
               <span className="text-muted-foreground">
@@ -488,6 +489,34 @@ export function SqlSearch() {
                   : `${(held.tookMs / 1000).toFixed(1)} s`}
                 .
               </span>
+              {/* Only where a limit was hit, and as the sentence's own tail: it
+                  was a paragraph in a box over every result, which a search
+                  that found three rows had to be read past. */}
+              {held.result.truncated && (
+                <span
+                  data-slot="search-limit"
+                  // A table showing its first rows is not a warning; a search
+                  // that stopped short of the whole scope is.
+                  className={held.tables ? "text-muted-foreground" : "text-warning"}
+                >
+                  {" "}
+                  {held.tables
+                    ? `At most ${PER_TABLE} are shown from each: open one for every match.`
+                    : `It stops at 60 ${engine.nouns.objects}, ${PER_TABLE} rows from each and 200 in all: open one for every match, or narrow it.`}
+                </span>
+              )}
+              {skipped.length > 0 && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  {skipped.length} not read{" "}
+                  <span className="inline-flex translate-y-0.5">
+                    <InfoTip label={`The ${engine.nouns.objects} not read`}>
+                      Usually for want of a permission:{" "}
+                      <span className="font-mono">{skipped.join(", ")}</span>
+                    </InfoTip>
+                  </span>
+                </span>
+              )}
             </p>
             {groups.length > 1 && (
               <ChipStrip role="group" aria-label={`Narrow to one ${engine.nouns.object}`}>
@@ -509,22 +538,6 @@ export function SqlSearch() {
               </ChipStrip>
             )}
           </div>
-
-          {/* Only where the search itself stopped short. A table showing its
-              first rows is not a warning: its count says so with a plus. */}
-          {held.result.truncated && !held.tables && (
-            <Notice tone="warning" title="There may be more than this">
-              The search stops at 60 {engine.nouns.objects}, {PER_TABLE} rows from each and 200 rows
-              in all. Open a {engine.nouns.object} below to see every row of it that matches, tick
-              the {engine.nouns.objects} to read, or search a narrower value.
-            </Notice>
-          )}
-          {(held.result.tablesSkipped?.length ?? 0) > 0 && (
-            <p className="text-hint text-muted-foreground">
-              Not read — usually for want of a permission:{" "}
-              <span className="font-mono">{held.result.tablesSkipped!.join(", ")}</span>
-            </p>
-          )}
 
           {groups.length === 0 ? (
             <EmptyState
@@ -784,7 +797,7 @@ function TableGroup({
           {countText(group)}
         </span>
         <span aria-hidden className="h-px min-w-0 flex-1 bg-hairline" />
-        <Button size="xs" variant="ghost" asChild>
+        <Button size="xs" variant="outline" asChild>
           <Link href={everyHref} aria-label={`Every row of ${group.table} that matches`}>
             Every match
           </Link>

@@ -23,16 +23,18 @@ const HOMES: Partial<Record<EngineKind, ComponentType>> = {
 /**
  * A database's front page: this engine's control panel.
  *
- * It starts with the identity and verbs, recorded activity, attention and
- * rankings, then reference facts. Each engine family supplies its own blocks.
+ * It stands under the database's header, which the shell draws on every page
+ * of the database (`shell/header-rule.ts`), and starts with how the database
+ * is used, what it runs as, its recorded activity and rankings. Each engine
+ * family supplies its own blocks.
  *
  * A server that is not answering — stopped, paused, refusing, or a saved
- * connection that can no longer be opened — keeps its home: the same line,
+ * connection that can no longer be opened — keeps its home: the same header,
  * what state it is in, the one thing to do about it, and the facts that need
  * no dial, including retained history. Its engine is asked nothing until it is back.
  *
  * The page's name is the `h1` `SectionFrame` writes for assistive technology
- * (§14); the name drawn on the line is the switcher, which is a control.
+ * (§14); the name drawn in the header is the switcher, which is a control.
  */
 export function DatabaseHome() {
   const { engine, status } = useDatabase()

@@ -17,47 +17,28 @@ export function daysUntil(iso: string | undefined, now: number): number | undefi
   return Number.isNaN(at) ? undefined : Math.floor((at - now) / DAY)
 }
 
-/** The state in two words and the sentence under the section's picture. */
+/** The state in two words, for the section's head. */
 export function tlsState(tls: Pick<DbTLS, "supported" | "enabled" | "require" | "canOptional">): {
   word: string
   on: boolean
-  sentence: string
 } {
-  if (!tls.enabled && !tls.supported) {
-    return {
-      word: "Not managed here",
-      on: false,
-      sentence: "The dashboard does not hold this server's certificate.",
-    }
-  }
+  if (!tls.enabled && !tls.supported) return { word: "Not managed here", on: false }
+  if (!tls.enabled) return { word: "Off", on: false }
+  if (!tls.canOptional) return { word: "TLS only", on: true }
+  return { word: tls.require ? "TLS required" : "TLS allowed", on: true }
+}
+
+/** What the server's port accepts, as the caption under it in the section's picture. */
+export function portWords(
+  tls: Pick<DbTLS, "supported" | "enabled" | "require" | "canOptional">,
+): string {
   if (!tls.enabled) {
-    return {
-      word: "Off",
-      on: false,
-      sentence:
-        "The server speaks plain text. Anything between the client and the server can read the password and the data.",
-    }
+    return tls.supported
+      ? "speaks plain text: the password and the data can be read on the way"
+      : "its own configuration decides"
   }
-  if (!tls.canOptional) {
-    return {
-      word: "TLS only",
-      on: true,
-      sentence:
-        "The port speaks TLS and nothing else: a client that does not use TLS cannot connect.",
-    }
-  }
-  if (tls.require) {
-    return {
-      word: "TLS required",
-      on: true,
-      sentence: "A client that does not use TLS is refused.",
-    }
-  }
-  return {
-    word: "TLS allowed",
-    on: true,
-    sentence: "A client may use TLS or plain text. Switch to required to refuse plain text.",
-  }
+  if (!tls.canOptional) return "speaks TLS and nothing else"
+  return tls.require ? "refuses a client without TLS" : "takes TLS or plain text"
 }
 
 /** The certificate's lifetime as a sentence, with the day the renewal takes it up. */

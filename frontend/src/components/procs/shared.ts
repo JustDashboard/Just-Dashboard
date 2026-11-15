@@ -33,7 +33,7 @@ export function managerHref(process: Pick<ProcessRow, "manager" | "managerName">
     case "systemd":
       return `/processes/services/${encodeURIComponent(process.managerName)}`
     case "pm2":
-      return `/processes/pm2?app=${encodeURIComponent(process.managerName)}`
+      return `/processes/pm2/${encodeURIComponent(process.managerName)}`
     case "container":
       return `/docker/containers/${encodeURIComponent(process.managerName)}`
     default:

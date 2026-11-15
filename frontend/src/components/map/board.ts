@@ -29,8 +29,25 @@ export type MapBoard = {
     title: string
     line: string
     heading: string
-    facts: { label: string; value: string }[]
+    /**
+     * `kinds` are the node kinds a figure counts. Where a board names them
+     * the figure is a row that selects those boxes on the canvas; without
+     * them it is a figure.
+     */
+    facts: { label: string; value: string; kinds?: string[] }[]
   }
+  /**
+   * The system the canvas opens on when every system at once would be too
+   * small to read and the reader left no place of their own. A board without
+   * one opens on everything, however small.
+   */
+  home?: (systems: System[]) => string | undefined
+  /**
+   * Where what could not be read is said: `inspector` is one line per cause
+   * in the inspector (`unread.ts`), and over the canvas only while the
+   * inspector is not shown. Without it, each kind is a line over the canvas.
+   */
+  unread?: "inspector"
 }
 
 /** The server map's rail, in the order the systems are found. */
@@ -84,17 +101,22 @@ export const SERVER_BOARD: MapBoard = {
       line: "Each one is drawn on its own, with what it is wired to",
       heading: "On this server",
       facts: [
-        { label: "Deployments", value: of("projects") },
-        { label: "Stacks", value: of("stacks") },
-        { label: "Containers", value: of("containers") },
-        { label: "Databases", value: of("databases") },
-        { label: "Domains", value: of("domains") },
-        { label: "Volumes", value: of("volumes") },
-        { label: "Backups", value: of("backups") },
-        { label: "Apps and services", value: of("pm2", "services") },
+        { label: "Deployments", kinds: ["projects"] },
+        { label: "Stacks", kinds: ["stacks"] },
+        { label: "Containers", kinds: ["containers"] },
+        { label: "Databases", kinds: ["databases"] },
+        { label: "Domains", kinds: ["domains"] },
+        { label: "Volumes", kinds: ["volumes"] },
+        { label: "Backups", kinds: ["backups"] },
+        { label: "Apps and services", kinds: ["pm2", "services"] },
       ]
+        .map((t) => ({ ...t, value: of(...t.kinds) }))
         .filter((t) => t.value > 0)
-        .map((t) => ({ label: t.label, value: count(t.value) })),
+        .map((t) => ({ ...t, value: count(t.value) })),
     }
   },
+  // The dashboard's own system is the one every server has, and the first in
+  // the rail; a server whose reading left it out opens on the first there is.
+  home: (systems) => (systems.find((s) => s.kind === "dashboard") ?? systems[0])?.id,
+  unread: "inspector",
 }

@@ -179,7 +179,7 @@ export function SourceStep({
             {modes.length > 1 && (
               <Field
                 label="Encryption"
-                hint="Required encrypts without checking who answers; verified also checks the server's certificate."
+                info="Required encrypts without checking who answers; verified also checks the server's certificate."
               >
                 <Segments
                   label="Encryption"

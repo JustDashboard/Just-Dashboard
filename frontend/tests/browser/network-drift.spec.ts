@@ -102,7 +102,10 @@ test("drift reports observed evidence and does not offer execution for an adviso
   await page.goto("/network/drift")
   await loaded(page)
   await expect(page.getByRole("heading", { name: "Network drift", exact: true })).toBeVisible()
-  await expect(page.getByText("Reboot attribution is unknown", { exact: false })).toBeVisible()
+  // The caveat is the note beside the boot unit's state, not a framed notice.
+  await page.getByRole("button", { name: "What an activation does not establish" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText("Reboot attribution is unknown")
+  await page.keyboard.press("Escape")
   await page.getByRole("checkbox", { name: `Select repair for ${resource}` }).check()
   await page.getByRole("button", { name: "Review selected (1)" }).click()
   await expect(page.getByRole("dialog")).toContainText("No changes will be applied")

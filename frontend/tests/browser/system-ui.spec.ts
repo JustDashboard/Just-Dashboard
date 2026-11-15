@@ -10,10 +10,11 @@ test.use({ video: recordWorkspace ? "on" : "off" })
  * something to draw. The accounts have a spec of their own, system-users.spec.ts.
  *
  * What these assert is what a type check cannot (design-system.md §12, §14,
- * §15, §16): that the audit trail stays a framed table of readings under four
- * readings of the last day, with every entry drawn as what it touched and who
+ * §15, §16): that the audit trail stays a framed table of readings under the
+ * last day's line and strip, with every entry drawn as what it touched and who
  * touched it, shelved by day; and that the chips narrow it. The screenshots are
- * the eyes the assertions do not have.
+ * the eyes the assertions do not have. The page's own promises (one height to
+ * a row, the entry it opens, the export) are audit-ui.spec.ts's.
  */
 
 const now = Date.now()
@@ -198,12 +199,13 @@ test.describe("audit log", () => {
     await page.goto("/audit")
     await page.waitForLoadState("networkidle")
 
-    const tiles = page.locator("[data-slot='stat-tile']")
-    await expect(tiles).toHaveCount(4)
-    await expect(tiles.nth(0)).toContainText("8")
-    await expect(tiles.nth(1)).toContainText("1")
-    await expect(tiles.nth(2)).toContainText("2")
-    await expect(tiles.nth(3)).toContainText("1 attempt refused")
+    // The four tiles' readings are the identity line's state and facts.
+    await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+    const identity = page.getByRole("region", { name: "About the audit log" })
+    await expect(identity).toContainText("8 changes in the last day")
+    await expect(identity).toContainText("1 of 8 failed")
+    await expect(identity).toContainText("2 people and 2 automated changes")
+    await expect(identity).toContainText("1 sign-in refused")
 
     // A table of readings keeps its frame and its rows, shelved by day.
     const table = page.getByRole("table")
@@ -298,7 +300,7 @@ test("workspace: audit filter history and incoming entries preserve the row bein
   const rows = page.locator("[data-workspace-item]")
   await expect(rows.first()).toBeVisible()
   const first = await rows.first().getAttribute("data-workspace-item")
-  await rows.first().focus()
+  await rows.first().locator("[data-workspace-primary]").focus()
   incoming = true
   await page.keyboard.press("F5")
   await expect(page.getByRole("button", { name: "Show 1 new audit entry" })).toBeVisible()
@@ -323,16 +325,17 @@ test("workspace: mobile audit navigation respects input and sidebar focus", asyn
   await page.goto("/audit")
   const rows = page.locator("[data-workspace-item]:visible")
   await expect(rows.first()).toBeVisible()
-  await rows.first().focus()
+  // A row's place for the keyboard is its action, the button that opens it.
+  await rows.first().locator("[data-workspace-primary]").focus()
   await page.keyboard.press("ArrowDown")
-  await expect(rows.nth(1)).toBeFocused()
+  await expect(rows.nth(1).locator("[data-workspace-primary]")).toBeFocused()
   if (recordWorkspace) {
     await page.waitForTimeout(700)
     await page.screenshot({ path: testInfo.outputPath("audit-phone.png") })
   }
   await page.keyboard.press("?")
   await expect(page.getByRole("dialog", { name: "Audit shortcuts" })).toBeVisible()
-  await expect(page.getByRole("dialog")).not.toContainText("Open item")
+  await expect(page.getByRole("dialog")).toContainText("Open item")
   if (recordWorkspace) await page.waitForTimeout(700)
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toHaveCount(0)

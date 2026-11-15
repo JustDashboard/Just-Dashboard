@@ -389,8 +389,10 @@ test("a table's row security is a reading of its own, with its switches and its 
   await expect(policyRow(page, "notes_tenant_isolation")).toContainText("permissive")
   await expect(policyRow(page, "notes_auditor_read_only")).toContainText("Reading")
   await expect(policyRow(page, "notes_auditor_read_only")).toContainText("auditor")
-  // The table's own figures say so as well.
-  await expect(page.getByText("Row-level security", { exact: true }).first()).toBeVisible()
+  // The table's own line of facts says so as well.
+  await expect(page.locator("[data-slot=facts-line]").first()).toContainText(
+    "row-level security enabled",
+  )
 })
 
 test("a table with security off and no policy says what that means and offers to begin", async ({

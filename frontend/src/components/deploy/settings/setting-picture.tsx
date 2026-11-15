@@ -17,8 +17,8 @@ import { cn } from "@/lib/utils"
  * before the mark, the middle one's under it, the end one's after it — so
  * every line leaves a mark over nothing. Narrow, they stand in one column with
  * the words to the right, and the lines run down the marks. `startLabel` is a
- * caption written along the first gap, from `lg` where there is a gap to
- * write it in.
+ * caption written along the first gap, and `endLabel` along the second, from
+ * `lg` where there is a gap to write it in.
  *
  * The lines are the caller's `AnimatedBeam`s, measured against
  * `containerRef`, because only the caller knows what each line carries.
@@ -31,6 +31,7 @@ export function SettingPicture({
   middle,
   end,
   startLabel,
+  endLabel,
   className,
 }: {
   /** What the picture shows, as the list's accessible name. */
@@ -44,6 +45,8 @@ export function SettingPicture({
   /** A `WireNode align="start"`. */
   end: React.ReactNode
   startLabel?: React.ReactNode
+  /** The same along the gap after the middle node, for a picture whose second line carries a reading. */
+  endLabel?: React.ReactNode
   className?: string
 }) {
   return (
@@ -81,7 +84,9 @@ export function SettingPicture({
           {middle && (
             <>
               <li className="min-w-0">{middle}</li>
-              <li aria-hidden className="hidden lg:block" />
+              <li aria-hidden className="relative hidden self-stretch lg:block">
+                {endLabel}
+              </li>
             </>
           )}
           <li className="min-w-0">{end}</li>

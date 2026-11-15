@@ -692,3 +692,32 @@ func TestJournalPriorityWithALens(t *testing.T) {
 		}
 	}
 }
+
+// The whole journal opened on an instruction ("pick one below to narrow it").
+// Described on its own it says what it is: how much disk it holds and when
+// its first record was written. A unit's journal is not the whole one, and
+// says neither.
+func TestLogSourceSaysHowBigTheJournalIsAndHowFarBackItGoes(t *testing.T) {
+	s, _ := engineHost(t, map[string]string{
+		"systemctl": "",
+		"journalctl": `case "$1" in
+--disk-usage) echo "Archived and active journals take up 1.5G in the file system."; exit 0 ;;
+esac
+echo '{"__REALTIME_TIMESTAMP":"1731400000000000","MESSAGE":"Linux version 6.8.0"}'
+`,
+	})
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	whole := decode[logsx.Source](t, c.do("GET", "/api/v1/logs/source?source=journal:", "", nil))
+	if whole.Kind != logsx.KindJournal || whole.Size != 3<<29 {
+		t.Errorf("the journal = %+v", whole)
+	}
+	if want := time.UnixMicro(1731400000000000).UTC(); whole.Oldest == nil || !whole.Oldest.Equal(want) {
+		t.Errorf("oldest = %v, want %v", whole.Oldest, want)
+	}
+
+	unit := decode[logsx.Source](t, c.do("GET", "/api/v1/logs/source?source=journal:nginx.service", "", nil))
+	if unit.Size != 0 || unit.Oldest != nil {
+		t.Errorf("a unit's journal carried the whole journal's facts: %+v", unit)
+	}
+}

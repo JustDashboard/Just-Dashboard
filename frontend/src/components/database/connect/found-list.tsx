@@ -1,13 +1,15 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
-import { Eye, EyeOff } from "@/components/icons"
+import { Eye, EyeOff, Slash } from "@/components/icons"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
 import { Disclosure } from "@/components/form"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { DimActions, IconAction } from "@/components/icon-action"
+import { DockerMissing } from "@/components/docker/unreachable-state"
+import { MissingThing } from "@/components/missing-thing"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -55,7 +57,10 @@ const FILE_ROWS = 6
  * counts the rest.
  *
  * A collector that could not read is said so above the list: an empty list
- * under a Docker that did not answer is not a server with no containers. And
+ * under a Docker that did not answer is not a server with no containers. It
+ * is said as the product says any missing thing (`MissingThing`): Docker as
+ * itself, which of its faults this is and the step that fixes it, with the
+ * daemon's own sentence folded away. It was that sentence, printed. And
  * when the whole reading failed, the servers the fleet itself reported as
  * waiting for a password are still listed under the failure, so the one thing
  * the reader came to do is not lost with it.
@@ -123,24 +128,40 @@ export function FoundList({
 
   return (
     <div className="min-w-0 space-y-5">
-      {(silences.length > 0 || notes.length > 0 || inventory.scanning) && (
+      {silences.map((silence) => (
+        <div key={silence.what} data-slot="found-silence" className="min-w-0">
+          <GroupRule label={`Not looked at: ${silence.what}`} />
+          {silence.docker ? (
+            // It asks the daemon itself, and reads the list again once it answers.
+            <DockerMissing size="block" onAnswer={inventory.refresh} />
+          ) : (
+            <MissingThing
+              size="block"
+              icon={Slash}
+              title={`The ${silence.what} could not be read`}
+              raw={silence.reason}
+            >
+              A server known only from there is not in this list. The rest of it is what the other
+              readings found.
+            </MissingThing>
+          )}
+        </div>
+      ))}
+
+      {(notes.length > 0 || inventory.scanning) && (
         <div className="space-y-1 text-hint leading-relaxed text-muted-foreground">
           {inventory.scanning && (
             <TextShimmer>Scanning this server for database files…</TextShimmer>
           )}
-          {silences.map((silence) => (
-            <p key={silence.what}>
-              <span className="font-medium text-foreground/85">Not looked at: {silence.what}.</span>{" "}
-              {silence.reason}
-            </p>
-          ))}
           {notes.map((note) => (
             <p key={note}>{asSentence(note)}</p>
           ))}
         </div>
       )}
 
-      {nothing && (
+      {/* Said only of a reading that looked everywhere: with a collector
+          silent, "everything is connected" is more than the page knows. */}
+      {nothing && silences.length === 0 && (
         <EmptyNote className="px-0 text-left">
           {scanningFiles(data.scans)
             ? "Still looking for database files. Nothing else on this server is waiting to be connected."

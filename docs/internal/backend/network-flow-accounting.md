@@ -104,7 +104,10 @@ These paths do not enroll in network pending confirmation and never alter links,
 DNS or boot inputs. The server initializes this module after Docker exists, starts its recorder
 during startup and drains it before closing Docker. It mounts the admin-only routes within Network.
 No auto-reconcile daemon or automatically attached kernel program is installed. The reporting page
-is `/network/flows`; observer controls and quality live beside its native source readings.
+is `/network/flows`; observer controls and quality live beside its native source readings. While
+recording is off and nothing is retained, that page shows only what recording would sample and keep,
+the observer's state and the measurement boundaries; the period filters, the export and the socket
+rows appear once there is a record to read.
 
 ## Measured acceptance and its limits
 

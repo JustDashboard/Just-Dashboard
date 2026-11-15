@@ -1,15 +1,17 @@
 "use client"
 
+import { Suspense } from "react"
 import { Page } from "@/components/page"
 import { SSHPanel } from "@/components/security/ssh-panel"
-import { useSecurity } from "@/components/security/security-context"
 
+// The directive a link names lives in the query string, which the App Router
+// only hands out inside a Suspense boundary.
 export default function SecuritySSHPage() {
-  const {} = useSecurity()
-
   return (
     <Page className="animate-rise">
-      <SSHPanel />
+      <Suspense>
+        <SSHPanel />
+      </Suspense>
     </Page>
   )
 }

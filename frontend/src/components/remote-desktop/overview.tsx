@@ -4,15 +4,18 @@ import Link from "next/link"
 import { useMemo, useState } from "react"
 import { Modal } from "@/components/modal"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
-import { Plus, RefreshClockwise, TerminalWindow } from "@/components/icons"
+import { ChoiceList } from "@/components/flow"
+import { ArrowRight, Plus, RefreshClockwise, TerminalWindow } from "@/components/icons"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, Section } from "@/components/page"
+import { MissingThing } from "@/components/missing-thing"
+import { Page, PageContext } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogos } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { VerbMenu } from "@/components/verbs"
 import { useMetrics } from "@/hooks/use-metrics"
 import { del, put } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
@@ -30,7 +33,7 @@ import {
   type RdOverview,
 } from "@/lib/remote-desktop"
 import { notify } from "@/lib/toast"
-import { ComputerCard } from "@/components/remote-desktop/computer-card"
+import { ComputerRow } from "@/components/remote-desktop/computer-card"
 import {
   ComputerFields,
   draftOf,
@@ -49,11 +52,15 @@ const NEW_HREF = `${REMOTE_DESKTOP_HREF}/new`
  *
  * A reading page (§15). It opens on the computers as one line — their
  * systems as their own marks, how many there are and how many can be opened
- * now, the open sessions, and the path they take — with the verdict and Add
- * a computer at its end. Under it the picture of how a session travels, from
- * this browser through guacd on this server to each computer, wired by
- * whether it answers. Then the computers, each a card that opens its screen,
- * and the tailnet's desktops that are not added yet.
+ * now, the open sessions, and the path they take — with the verdict beside
+ * the name, Add a computer as the one command at its end and the rest in the
+ * menu after it. Under it the picture of how a session travels, from this
+ * browser through guacd on this server to each computer, wired by whether it
+ * answers. Then the computers, each a one-line row that opens its screen, and
+ * the tailnet's desktops that are not added yet.
+ *
+ * The line is drawn while the page loads, so it is in one place before and
+ * after the read lands.
  *
  * A server that has never had the engine opens on the one thing to do: the
  * install, with its output under it.
@@ -74,6 +81,50 @@ export function RemoteDesktopOverview() {
     </Button>
   )
 
+  const identity = (
+    <HostIdentity
+      className="animate-rise"
+      logo={data ? <Marks overview={data} /> : <Skeleton className="size-10 rounded-lg" />}
+      fallback={TerminalWindow}
+      title={
+        <span className="min-w-0 truncate">
+          Remote Desktop
+          {/* A phone has room for the name or the version, and the picture's
+              hub says the version under it. */}
+          {data && (
+            <span className="font-mono text-body font-normal text-muted-foreground max-sm:hidden">
+              {" "}
+              guacd {data.engine.version}
+            </span>
+          )}
+        </span>
+      }
+      state={data ? <Verdict overview={data} /> : null}
+      facts={data ? <Facts overview={data} /> : <Skeleton className="h-4 w-72 max-w-full" />}
+      command={
+        <Button size="sm" asChild>
+          <Link href={NEW_HREF} aria-label="Add a computer">
+            <Plus className="size-4" />
+            <span className="max-sm:hidden">Add a computer</span>
+            <span className="sm:hidden">Add</span>
+          </Link>
+        </Button>
+      }
+      menu={
+        <VerbMenu
+          verbs={[
+            {
+              key: "check",
+              label: "Check every computer again",
+              icon: RefreshClockwise,
+              run: refresh,
+            },
+          ]}
+        />
+      }
+    />
+  )
+
   if (!data) {
     return (
       <Page className="animate-rise">
@@ -81,14 +132,22 @@ export function RemoteDesktopOverview() {
         {error ? (
           <ErrorState error={error} onRetry={refresh} />
         ) : (
-          <div role="status" aria-label="Loading Remote Desktop" className="flex flex-col gap-8">
-            <Skeleton className="h-16 rounded-xl" />
-            <Skeleton className="h-64 rounded-xl" />
-          </div>
+          <>
+            {identity}
+            <div role="status" aria-label="Loading Remote Desktop" className="flex flex-col gap-8">
+              <Skeleton className="h-64 rounded-xl" />
+              <div className="flex flex-col gap-2">
+                <Skeleton className="h-14 rounded-xl" />
+                <Skeleton className="h-14 rounded-xl" />
+              </div>
+            </div>
+          </>
         )}
       </Page>
     )
   }
+
+  const ready = data.computers.filter((computer) => computer.reach.state === "open").length
 
   if (data.engine.state === "missing" && data.computers.length === 0) {
     return (
@@ -120,50 +179,37 @@ export function RemoteDesktopOverview() {
     <Page className="animate-rise">
       <PageContext eyebrow="Workspace" title="Remote Desktop" />
 
-      <HostIdentity
-        className="animate-rise"
-        logo={<Marks overview={data} />}
-        fallback={TerminalWindow}
-        title={
-          <>
-            Remote Desktop{" "}
-            <span className="font-mono text-body font-normal text-muted-foreground">
-              guacd {data.engine.version}
-            </span>
-          </>
-        }
-        facts={<Facts overview={data} />}
-        aside={
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <Verdict overview={data} />
-            <span className="flex items-center gap-2">
-              <IconAction label="Check every computer again" onClick={refresh}>
-                <RefreshClockwise />
-              </IconAction>
-              {add}
-            </span>
-          </div>
-        }
-      />
+      {identity}
 
       {data.engine.state !== "running" && <EngineNotice engine={data.engine} onReady={refresh} />}
 
       {data.computers.length > 0 ? (
         <>
           <ComputerPicture overview={data} hueOf={hueOf} hostname={host?.hostname} />
-          <Section title="Computers">
-            <ul className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-3">
-              {data.computers.map((computer, index) => (
-                <ComputerCard
-                  key={computer.id}
-                  computer={computer}
-                  index={index}
-                  onEdit={() => setEditing(computer)}
-                  onRemove={() => remove(computer)}
-                />
-              ))}
-            </ul>
-          </Section>
+          <Panel plain>
+            <PanelHeader
+              title="Computers"
+              actions={
+                <span className="numeric text-hint text-muted-foreground">
+                  {plural(data.computers.length, "computer")}
+                  {ready < data.computers.length && ` · ${ready} ready`}
+                </span>
+              }
+            />
+            <PanelBody>
+              <ChoiceList aria-label="Computers">
+                {data.computers.map((computer, index) => (
+                  <ComputerRow
+                    key={computer.id}
+                    computer={computer}
+                    index={index}
+                    onEdit={() => setEditing(computer)}
+                    onRemove={() => remove(computer)}
+                  />
+                ))}
+              </ChoiceList>
+            </PanelBody>
+          </Panel>
         </>
       ) : (
         <EmptyState
@@ -200,7 +246,7 @@ function Marks({ overview }: { overview: RdOverview }) {
   const ids = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id)
   if (ids.length === 0) ids.push("guacamole")
   return (
-    <span className="flex h-12 shrink-0 items-center">
+    <span className="flex h-10 shrink-0 items-center">
       <ProductLogos ids={ids} size="md" />
     </span>
   )
@@ -209,7 +255,6 @@ function Marks({ overview }: { overview: RdOverview }) {
 function Facts({ overview }: { overview: RdOverview }) {
   const { computers, tailnet, sessions } = overview
   const ready = computers.filter((computer) => computer.reach.state === "open").length
-  const live = computers.reduce((sum, computer) => sum + computer.live, 0)
   const last = sessions.find((session) => session.endedAt > 0)
   const facts = [
     <span key="count" className="numeric">
@@ -218,11 +263,6 @@ function Facts({ overview }: { overview: RdOverview }) {
     computers.length > 0 && (
       <span key="ready" className="numeric">
         {ready} ready now
-      </span>
-    ),
-    live > 0 && (
-      <span key="live" className="numeric font-medium text-success">
-        {plural(live, "session")} open
       </span>
     ),
     tailnet.installed ? (
@@ -282,23 +322,40 @@ function OnTheTailnet({
 }) {
   if (!overview.tailnet.installed) {
     return (
-      <Section title="On your tailnet">
-        <Notice title="This server is not on Tailscale">
-          <p className="text-body text-muted-foreground">
-            Remote Desktop reaches your computers over Tailscale, so neither Remote Desktop nor
-            Screen Sharing is ever opened to the internet.{" "}
-            <Link href="/network/vpn" className="font-medium text-foreground hover:underline">
-              Set up Tailscale
-            </Link>{" "}
-            on this server and on each computer, or add a computer this server can already reach.
-          </p>
-        </Notice>
-      </Section>
+      <Panel plain>
+        <PanelHeader title="On your tailnet" />
+        <MissingThing
+          thing="tailscale"
+          size="block"
+          reason="tailscale-absent"
+          title="This server is not on Tailscale"
+          step={
+            <Button size="sm" asChild>
+              <Link href="/network/vpn">
+                Set up Tailscale
+                <ArrowRight />
+              </Link>
+            </Button>
+          }
+        >
+          Remote Desktop reaches your computers over Tailscale, so neither Remote Desktop nor Screen
+          Sharing is ever opened to the internet. Set it up here and on each computer, or add a
+          computer this server can already reach.
+        </MissingThing>
+      </Panel>
     )
   }
   if (offered.length === 0) return null
   return (
-    <Section title="On your tailnet">
+    <Panel plain>
+      <PanelHeader
+        title="On your tailnet"
+        actions={
+          <span className="numeric text-hint text-muted-foreground">
+            {plural(offered.length, "desktop")} not added
+          </span>
+        }
+      />
       <ul aria-label="Desktops on the tailnet" className="flex min-w-0 flex-col">
         {offered.map((peer, index) => {
           const os = peerOS(peer.os)!
@@ -341,7 +398,7 @@ function OnTheTailnet({
           )
         })}
       </ul>
-    </Section>
+    </Panel>
   )
 }
 

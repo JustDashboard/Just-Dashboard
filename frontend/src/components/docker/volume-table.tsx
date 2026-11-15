@@ -2,22 +2,21 @@
 
 import Link from "next/link"
 import { ArrowDown, ArrowUp, CheckCircle, Database } from "@/components/icons"
-import { RowLink } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
 import {
   STANDING_COLOR,
-  STANDING_WORD,
-  VOLUME_HUE,
   holderHue,
   holderOf,
   isAnonymous,
-  prunable,
+  mountLines,
   sizeReading,
   splitName,
   standing,
+  standingWords,
+  volumeHref,
   volumeProduct,
   type Backup,
   type SortKey,
@@ -36,25 +35,37 @@ import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { VolumeDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-/** How many containers a row names before it counts the rest. */
-const NAMED = 2
+/**
+ * One height for every row, whatever it holds: two lines, which is a name over
+ * its facts, two containers, a state over its backup. A row with one line
+ * centres it in the same box, so the row under it never moves.
+ */
+const ROW = "h-16"
+
+/**
+ * Below `xl` the size and the menu give their padding to the name's column:
+ * its second line has to hold "prune deletes · no backup" whole at 390px.
+ */
+const NARROW_PAD = "px-2"
 
 /**
  * The volumes as a table: each row one volume read across — what it is, which
  * containers mount it and where, whether a prune would take it and whether a
- * backup covers it, and its size against the largest — that opens its sheet.
+ * backup covers it, and its size — that opens its page.
  *
  * It was a column of cards whose second line said "1 container" and nothing
  * about which, or at what path, so the question every volume is opened with —
  * what is using this — took a click to answer. The containers are the widest
  * column now, each by name with its state's dot and the path it sees the
  * volume at, linking to its page. The Images, Processes and Services tables
- * are the precedent: a row that opens a sheet is still read down its columns.
+ * are the precedent: a row that opens a page is still read down its columns.
  *
  * Wide, every reading has its column, the creation date joining at `2xl`.
- * Below `xl` the containers, the standing and the backup go to the name's
- * second line and the row keeps its size and its menu — chosen once by the
- * page rather than drawn twice and hidden (§12).
+ * Below `xl` the standing and the backup go to the name's second line and the
+ * row keeps its size and its menu — chosen once by the page rather than drawn
+ * twice and hidden (§12). The size is a figure in a column of figures: it had
+ * a bar under it against the largest volume, which the Held by band above
+ * already draws as spans of one bar.
  */
 export function VolumeTable({
   volumes,
@@ -84,7 +95,6 @@ export function VolumeTable({
   onOpen: (name: string) => void
   onHolder: (key: string) => void
 }) {
-  const largest = Math.max(...volumes.map((v) => v.size), 1)
   const head = (key: SortKey, label: string, className?: string, right?: boolean) => (
     <SortHead
       label={label}
@@ -103,8 +113,8 @@ export function VolumeTable({
           {wide && head("mounted", "Mounted by", "w-[32%]")}
           {wide && head("standing", "State", "w-44")}
           {widest && head("created", "Created", "w-28")}
-          {head("size", "Size", wide ? "w-28" : "w-24", true)}
-          <TableHead className={wide ? "w-20" : "w-12"}>
+          {head("size", "Size", wide ? "w-28" : cn("w-24", NARROW_PAD), true)}
+          <TableHead className={wide ? "w-20" : "w-10 px-1"}>
             <span className="sr-only">Actions</span>
           </TableHead>
         </TableRow>
@@ -119,17 +129,19 @@ export function VolumeTable({
               data-workspace-item={volume.name}
               data-workspace-name={volume.name}
               onActivate={() => onOpen(volume.name)}
-              className={cn("group", arrived.has(volume.name) && "animate-rise")}
+              className={cn("group", ROW, arrived.has(volume.name) && "animate-rise")}
             >
-              <TableCell>
-                <VolumeName
-                  volume={volume}
-                  product={volumeProduct(volume, productOf)}
-                  onOpen={() => onOpen(volume.name)}
-                />
+              <TableCell className={cn("py-0", !wide && "pr-0")}>
+                <VolumeName volume={volume} product={volumeProduct(volume, productOf)} />
                 {/* Wide, a volume with nothing to add under its name keeps one line. */}
                 {(!wide || facts.length > 0) && (
-                  <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate pl-11 text-hint text-muted-foreground">
+                  <p
+                    data-slot="volume-facts"
+                    className={cn(
+                      "mt-0.5 flex min-w-0 items-center truncate pl-11 text-hint text-muted-foreground",
+                      wide ? "gap-1.5" : "gap-1",
+                    )}
+                  >
                     {wide ? (
                       facts.map((fact, i) => (
                         <span key={i} className="inline-flex min-w-0 items-center gap-1.5">
@@ -138,23 +150,15 @@ export function VolumeTable({
                         </span>
                       ))
                     ) : (
+                      // The containers are counted in the standing's title and
+                      // named on the volume's page: the line has room for where
+                      // it stands and whether a backup covers it, whole.
                       <>
                         <StandingWord volume={volume} />
-                        {volume.usedBy.length > 0 && (
-                          <>
-                            <span className="text-muted-foreground/40">·</span>
-                            <span
-                              className="numeric shrink-0"
-                              title={volume.usedBy.map((u) => u.name).join(", ")}
-                            >
-                              {plural(volume.usedBy.length, "container")}
-                            </span>
-                          </>
-                        )}
                         {backup && (
                           <>
                             <span className="text-muted-foreground/40">·</span>
-                            <BackupWord backup={backup} />
+                            <BackupWord backup={backup} short />
                           </>
                         )}
                       </>
@@ -163,13 +167,13 @@ export function VolumeTable({
                 )}
               </TableCell>
               {wide && (
-                <TableCell>
+                <TableCell className="py-0">
                   <MountedBy volume={volume} />
                 </TableCell>
               )}
               {wide && (
-                <TableCell>
-                  <span className="flex flex-col gap-1">
+                <TableCell className="py-0">
+                  <span className="flex flex-col gap-0.5">
                     <StandingWord volume={volume} strong />
                     {backup && (
                       <span className="text-hint">
@@ -181,20 +185,20 @@ export function VolumeTable({
               )}
               {widest && (
                 <TableCell
-                  className="text-muted-foreground"
+                  className="py-0 text-muted-foreground"
                   title={volume.createdAt ? timestamp(volume.createdAt) : undefined}
                 >
                   {volume.createdAt ? relativeTime(volume.createdAt) : "—"}
                 </TableCell>
               )}
-              <TableCell className="numeric text-right">
+              <TableCell className={cn("numeric py-0 text-right", !wide && NARROW_PAD)}>
                 {removing === volume.name ? (
                   <TextShimmer>Removing…</TextShimmer>
                 ) : (
-                  <Size volume={volume} largest={largest} />
+                  <Size volume={volume} />
                 )}
               </TableCell>
-              <TableCell className="px-2">
+              <TableCell className={cn("py-0", wide ? "px-2" : "px-1")}>
                 <VerbActions
                   dim
                   className="justify-end"
@@ -256,41 +260,33 @@ function SortHead({
  * project's prefix a step back, because down a column of `shop_*` it is the
  * part after the underscore that differs.
  */
-function VolumeName({
-  volume,
-  product,
-  onOpen,
-}: {
-  volume: VolumeDetail
-  product?: string
-  onOpen: () => void
-}) {
+function VolumeName({ volume, product }: { volume: VolumeDetail; product?: string }) {
   const { prefix, rest } = splitName(volume)
   const anonymous = isAnonymous(volume)
   return (
     <div className="flex min-w-0 items-center gap-3">
       <ProductLogo id={product} fallback={Database} size="sm" />
-      <RowLink
-        mono
-        onClick={onOpen}
+      <Link
+        href={volumeHref(volume.name)}
         title={volume.name}
-        className={cn("text-body", anonymous && "text-muted-foreground")}
+        aria-label={volume.name}
+        className={cn(
+          "max-w-full min-w-0 truncate rounded-sm font-mono text-body font-medium focus-ring hover:underline",
+          anonymous && "text-muted-foreground",
+        )}
       >
-        <span className="sr-only">{volume.name}</span>
-        <span aria-hidden>
-          {anonymous ? (
-            <>
-              {volume.name.slice(0, 12)}
-              <span className="text-muted-foreground/60">…</span>
-            </>
-          ) : (
-            <>
-              {prefix && <span className="text-muted-foreground">{prefix}</span>}
-              {rest}
-            </>
-          )}
-        </span>
-      </RowLink>
+        {anonymous ? (
+          <>
+            {volume.name.slice(0, 12)}
+            <span className="text-muted-foreground/60">…</span>
+          </>
+        ) : (
+          <>
+            {prefix && <span className="text-muted-foreground">{prefix}</span>}
+            {rest}
+          </>
+        )}
+      </Link>
     </div>
   )
 }
@@ -364,9 +360,9 @@ function MountedBy({ volume }: { volume: VolumeDetail }) {
       </span>
     )
   }
-  const shown = volume.usedBy.slice(0, NAMED)
+  const { shown, more } = mountLines(volume.usedBy)
   return (
-    <ul className="min-w-0 space-y-1">
+    <ul className="min-w-0 space-y-0.5">
       {shown.map((u) => (
         <li key={`${u.id}-${u.destination}`} className="flex min-w-0 items-center gap-2">
           <Link
@@ -386,9 +382,14 @@ function MountedBy({ volume }: { volume: VolumeDetail }) {
           {u.readOnly && <Tag className="shrink-0">ro</Tag>}
         </li>
       ))}
-      {volume.usedBy.length > NAMED && (
+      {more > 0 && (
         <li className="numeric text-hint text-muted-foreground">
-          +{plural(volume.usedBy.length - NAMED, "more container")}
+          <Link
+            href={volumeHref(volume.name, "mounts")}
+            className="rounded-sm focus-ring hover:text-foreground hover:underline"
+          >
+            +{plural(more, "more container")}
+          </Link>
         </li>
       )}
     </ul>
@@ -401,25 +402,21 @@ function MountedBy({ volume }: { volume: VolumeDetail }) {
  */
 function StandingWord({ volume, strong }: { volume: VolumeDetail; strong?: boolean }) {
   const s = standing(volume)
-  const taken = prunable(volume)
-  const word =
-    s === "running" || s === "stopped"
-      ? STANDING_WORD[s]
-      : taken
-        ? strong
-          ? "prune deletes it"
-          : "prune deletes"
-        : "not mounted"
+  const { word, warning } = standingWords(volume, Boolean(strong))
   return (
     <span
       className={cn(
         "inline-flex shrink-0 items-center gap-1.5",
         strong && "text-xs font-medium",
-        taken && "text-warning",
+        warning && "text-warning",
         s === "running" && strong && "text-foreground",
       )}
       title={
-        s === "stopped" ? "A stopped container still holds it; a prune leaves it alone." : undefined
+        s === "stopped"
+          ? "A stopped container still holds it; a prune leaves it alone."
+          : !strong && volume.usedBy.length > 0
+            ? `${plural(volume.usedBy.length, "container")}: ${volume.usedBy.map((u) => u.name).join(", ")}`
+            : undefined
       }
     >
       <span
@@ -432,44 +429,37 @@ function StandingWord({ volume, strong }: { volume: VolumeDetail; strong?: boole
   )
 }
 
-function BackupWord({ backup }: { backup: Backup }) {
+/** Whether a backup covers it; `short` is the phone's line, which has room for two words. */
+function BackupWord({ backup, short }: { backup: Backup; short?: boolean }) {
+  const jobs = backup.jobs.map((j) => j.name).join(", ")
   if (backup.state === "protected") {
+    const when = backup.lastAt ? `backed up ${relativeTime(backup.lastAt)}` : "backup never ran"
     return (
       <span
         className="inline-flex min-w-0 items-center gap-1 text-success"
-        title={backup.jobs.map((j) => j.name).join(", ")}
+        title={short ? `${when} · ${jobs}` : jobs}
       >
         <CheckCircle aria-hidden className="size-3 shrink-0" />
-        <span className="truncate">
-          {backup.lastAt ? `backed up ${relativeTime(backup.lastAt)}` : "backup never ran"}
-        </span>
+        <span className="truncate">{short ? "backed up" : when}</span>
       </span>
     )
   }
   if (backup.state === "paused") {
     return (
-      <span className="truncate text-warning" title={backup.jobs.map((j) => j.name).join(", ")}>
+      <span className="truncate text-warning" title={jobs}>
         backup paused
       </span>
     )
   }
-  return <span className="truncate text-muted-foreground">not backed up</span>
+  return (
+    <span className="truncate text-muted-foreground">{short ? "no backup" : "not backed up"}</span>
+  )
 }
 
-function Size({ volume, largest }: { volume: VolumeDetail; largest: number }) {
+function Size({ volume }: { volume: VolumeDetail }) {
   const reading = sizeReading(volume)
   if (reading.bytes === undefined) {
     return <span className="text-hint text-muted-foreground">{reading.word}</span>
   }
-  return (
-    <span className="inline-flex w-full flex-col items-end gap-1.5">
-      <span>{bytes(reading.bytes)}</span>
-      <span aria-hidden className="h-0.5 w-14 overflow-hidden rounded-full bg-meter-track">
-        <span
-          className="block h-full transition-[width] duration-700 ease-out motion-reduce:transition-none"
-          style={{ width: `${(reading.bytes / largest) * 100}%`, background: VOLUME_HUE }}
-        />
-      </span>
-    </span>
-  )
+  return <span>{bytes(reading.bytes)}</span>
 }

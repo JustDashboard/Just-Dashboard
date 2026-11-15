@@ -170,6 +170,14 @@ export function TrafficFacets({
               }))}
               emptyLabel="No requests in this window."
             />
+            {/* What the pages weighed, as the line under them. It was a block
+                of its own, two figures under two captions, further down. */}
+            {summary.total > 0 && (
+              <p className="numeric pt-2 text-hint text-muted-foreground">
+                <span className="text-foreground">{bytes(summary.bytes)}</span> sent ·{" "}
+                <span className="text-foreground">{bytes(perAnswer)}</span> each on average
+              </p>
+            )}
           </Facet>
 
           <Facet
@@ -219,36 +227,20 @@ export function TrafficFacets({
             </Facet>
           )}
 
-          <Facet title="Served" index={5}>
-            <dl className="grid grid-cols-2 gap-4 pb-3">
-              {[
-                ["Sent", bytes(summary.bytes)],
-                ["Each, on average", bytes(perAnswer)],
-              ].map(([label, value]) => (
-                <div key={label} className="min-w-0">
-                  <dt className="truncate text-hint text-muted-foreground">{label}</dt>
-                  <dd className="numeric truncate text-title font-semibold">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            {heaviest.length > 0 && (
-              <>
-                <p className="pb-1 text-hint text-muted-foreground">
-                  Heaviest of the busiest pages
-                </p>
-                <RankList
-                  items={heaviest.map((p) => ({
-                    key: p.value,
-                    label: <RequestPath path={p.value} />,
-                    value: bytes(p.bytes ?? 0, 0),
-                    share: summary.bytes > 0 ? (p.bytes ?? 0) / summary.bytes : undefined,
-                    title: `Show every request to ${p.value}`,
-                    onClick: () => onFilterPath(p.value),
-                  }))}
-                />
-              </>
-            )}
-          </Facet>
+          {heaviest.length > 0 && (
+            <Facet title="Heaviest pages" reading="of the busiest" index={5}>
+              <RankList
+                items={heaviest.map((p) => ({
+                  key: p.value,
+                  label: <RequestPath path={p.value} />,
+                  value: bytes(p.bytes ?? 0, 0),
+                  share: summary.bytes > 0 ? (p.bytes ?? 0) / summary.bytes : undefined,
+                  title: `Show every request to ${p.value}`,
+                  onClick: () => onFilterPath(p.value),
+                }))}
+              />
+            </Facet>
+          )}
         </div>
 
         <div className="flex min-w-0 flex-col gap-8">

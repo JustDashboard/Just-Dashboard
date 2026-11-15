@@ -228,9 +228,10 @@ function RootRouteRow({
       leading={<ProductLogo size="sm" fallback={ShieldCheck} />}
       title={<span className={words.ink}>{words.title}</span>}
       subtitle={
-        <span className="flex flex-wrap items-center gap-x-1.5">
-          {route.via && <span>Through {route.via} ·</span>}
-          <span className="truncate font-mono">{route.file}</span>
+        // One line: a long sudoers path gives way rather than wrapping under itself.
+        <span className="flex min-w-0 items-center gap-x-1.5 overflow-hidden whitespace-nowrap">
+          {route.via && <span className="shrink-0">Through {route.via} ·</span>}
+          <span className="min-w-0 truncate font-mono">{route.file}</span>
         </span>
       }
       trailing={

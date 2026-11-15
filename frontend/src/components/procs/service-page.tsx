@@ -26,6 +26,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/components/deploy/vocabulary"
 import { rowReveal, IconAction } from "@/components/icon-action"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { missingFromError } from "@/components/missing-thing-model"
 import { PageContext, Page } from "@/components/page"
 import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
@@ -36,6 +37,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
+import { NoSystemd } from "@/components/procs/no-systemd"
 import { ServiceOverview } from "@/components/procs/service-overview"
 import { ServiceRail } from "@/components/procs/service-rail"
 import {
@@ -153,6 +155,18 @@ export function ServicePage() {
     run: () => adjacent(1),
   }
 
+  // No systemd is the page's answer, not one unit's failure: the rail would
+  // read "No service matches" beside a red box with systemctl's refusal.
+  const noSystemd = missingFromError(detail.error, { systemd: "service" })
+  if (rail.absent || noSystemd?.reason === "no-systemd") {
+    return (
+      <Page>
+        <PageContext eyebrow={BACK} title="Service" />
+        <NoSystemd reader="service" raw={noSystemd?.raw} />
+      </Page>
+    )
+  }
+
   return (
     <Workspace
       name="Service"
@@ -259,6 +273,8 @@ function useRail() {
   return {
     units: inspection.rows,
     bindings: inspection.bindings,
+    // The list answers `available: false` where there is no systemd to ask.
+    absent: list.data ? !list.data.available : false,
     loading: list.loading,
     refresh: list.refresh,
     query,

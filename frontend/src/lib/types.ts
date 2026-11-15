@@ -1684,6 +1684,8 @@ export type LogSource = {
   path?: string
   size?: number
   modified?: string
+  /** When the first record still kept was written: the whole journal's, from `/logs/source`. */
+  oldest?: string
   rotated: boolean
   /** Rotated generations sitting next to a live file, and their total size. */
   archives?: number

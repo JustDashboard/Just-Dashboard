@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readFileSync } from "node:fs"
+import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import {
   HUB_ENTER_PATH,
@@ -281,18 +282,24 @@ describe("a refusal, as the page says it", () => {
 
 // No other code reads a sign-in ticket out of an address: the fragment is read for one in this
 // module alone (hub-link-protocol §9.5, step 1).
-test("nothing else in the frontend reads ticket= from a fragment", () => {
+test("nothing else in the frontend reads ticket= from a fragment", async () => {
   const root = join(import.meta.dir, "..")
+  const sources = (await readdir(root, { recursive: true })).filter(
+    (name) => /\.(ts|tsx|js)$/.test(name) && !/hub-enter(\.test)?\.(ts|js)$/.test(name),
+  )
+  // Every source file is read, so what this takes is the size of the tree
+  // and how busy the disk is, not a unit's work: one file after another it
+  // ran into the five seconds a test is given by default when the machine
+  // was loaded. Read side by side, a batch at a time (a few thousand files
+  // open at once is past what a process may hold), with room to spare.
   const offenders = []
-  const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name)
-      if (statSync(path).isDirectory()) walk(path)
-      else if (/\.(ts|tsx|js)$/.test(name) && !/hub-enter(\.test)?\.(ts|js)$/.test(name)) {
-        if (/ticket=/.test(readFileSync(path, "utf8"))) offenders.push(path)
-      }
-    }
+  for (let from = 0; from < sources.length; from += 128) {
+    await Promise.all(
+      sources.slice(from, from + 128).map(async (name) => {
+        if ((await Bun.file(join(root, name)).text()).includes("ticket=")) offenders.push(name)
+      }),
+    )
   }
-  walk(root)
+  expect(sources.length).toBeGreaterThan(1000)
   expect(offenders).toEqual([])
-})
+}, 30_000)

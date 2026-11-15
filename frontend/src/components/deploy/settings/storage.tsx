@@ -3,8 +3,9 @@
 import { useState } from "react"
 import { Archive, Plus } from "@/components/icons"
 import { ApiError, get, refusedIndex } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
+import { bytes, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
@@ -152,6 +153,21 @@ function StorageForm({
         .filter(({ volume, resource }) => volume && !resource?.protected)
     : []
 
+  // What the mounts are, under the section's title: how many, how much the
+  // volumes among them hold, and how many the live release could not find.
+  const held = [...new Set(mounts.map((mount) => mount.source.trim()))]
+    .filter((source) => source && !source.startsWith("/"))
+    .reduce((sum, source) => sum + Math.max(0, volumeFacts(source, facts).volume?.size ?? 0), 0)
+  const missing =
+    storage?.status === "available"
+      ? storage.mounts.filter((mount) => mount.status === "missing").length
+      : 0
+  const mountFacts = [
+    plural(mounts.length, "mount"),
+    held > 0 && bytes(held),
+    missing > 0 && `${missing} missing`,
+  ].filter(Boolean) as string[]
+
   return (
     <>
       <SettingForm
@@ -168,6 +184,18 @@ function StorageForm({
       >
         <SettingSection
           title="Persistent mounts"
+          state={
+            mounts.length > 0 && (
+              <span key={mountFacts.join()} className="numeric block animate-rise">
+                {mountFacts.map((fact, index) => (
+                  <span key={fact} className={cn(fact.endsWith("missing") && "text-destructive")}>
+                    {index > 0 && <span className="text-muted-foreground"> · </span>}
+                    {fact}
+                  </span>
+                ))}
+              </span>
+            )
+          }
           status={settingStatus({ dirty: draft.dirty, refused: Boolean(mountError) })}
           actions={
             canAdmin && (
@@ -187,6 +215,7 @@ function StorageForm({
             onChange={draft.set}
             readOnly={!canAdmin}
             product={product}
+            headOnce
             rowError={(index) => (mountError?.index === index ? mountError.message : undefined)}
           />
         </SettingSection>

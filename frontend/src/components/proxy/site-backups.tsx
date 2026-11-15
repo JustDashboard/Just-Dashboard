@@ -3,22 +3,25 @@
 import { useState } from "react"
 import { Archive, RotateCounterClockwise, Trash } from "@/components/icons"
 import { del, errorMessage, post } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
-import { cn } from "@/lib/utils"
+import { notify } from "@/lib/toast"
+import { bytes, plural, relativeTime } from "@/lib/format"
 import type { SiteBackup, SitePlacementResult } from "@/lib/types"
 import type { PollState } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Field, FormSection, FormSections } from "@/components/form"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Field } from "@/components/form"
 import { Modal } from "@/components/modal"
-import { ROW_BLEED } from "@/components/row-list"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { Tag } from "@/components/tag"
-import { VerbActions } from "@/components/verbs"
+import { VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 
 const SITE_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/
+
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
 function backupPath(b: SiteBackup) {
   return `/proxy/site-backups/${encodeURIComponent(b.layout)}/${encodeURIComponent(b.file)}`
@@ -29,6 +32,10 @@ function backupPath(b: SiteBackup) {
  * editors and package managers. nginx reads none of them and the Sites list
  * does not show them, so without this they are found only from a terminal. A
  * restore is tested like an import; a purge is for good.
+ *
+ * Each is one line: the file over where it is, how big and how old, and at
+ * its end what a restore would do. A press on the row is the restore, or,
+ * for a file that cannot be one, why.
  */
 export function SiteBackupsPanel({
   backups,
@@ -62,12 +69,19 @@ export function SiteBackupsPanel({
 
   return (
     <>
-      <FormSections>
-        <FormSection
-          aside
+      <Panel plain aria-label="Deleted & backups">
+        <PanelHeader
           title="Deleted & backups"
-          hint={`${data?.length ?? 0} copies nginx does not read`}
-        >
+          actions={
+            data &&
+            data.length > 0 && (
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(data.length, "copy", "copies")}
+              </span>
+            )
+          }
+        />
+        <PanelBody flush className="pt-3">
           {loading ? (
             <LoadingRows rows={2} />
           ) : error ? (
@@ -77,70 +91,76 @@ export function SiteBackupsPanel({
               icon={Archive}
               title="No backups"
               description="Deleting a site keeps its file here as <name>.bak, to restore or delete."
-              className="mt-2"
             />
           ) : (
-            <ul className="animate-rise divide-y divide-hairline">
+            <ChoiceList aria-label="Deleted sites and backups" className="animate-rise">
               {data.map((b) => (
-                <li
+                <ChoiceRow
                   key={b.path}
-                  className={cn(
-                    "group flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
-                    ROW_BLEED,
-                  )}
-                >
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                      <span className="font-mono text-body font-medium break-all">{b.file}</span>
-                      <span className="text-hint text-muted-foreground">
-                        {b.layout} · {bytes(b.size)} · {relativeTime(b.modified)}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 text-hint text-muted-foreground">
+                  // One that cannot be restored still answers a press, with
+                  // why: a row that did nothing would be drawn without its
+                  // edge, two pixels shorter than the rows around it.
+                  onSelect={() =>
+                    b.restorable
+                      ? setRestoring(b)
+                      : notify.info(`${b.file} cannot be restored`, {
+                          description: b.reason ? `${capital(b.reason)}.` : undefined,
+                        })
+                  }
+                  verb={b.restorable ? `Restore ${b.file}` : `Why ${b.file} cannot be restored`}
+                  leading={<ProductLogo id={undefined} size="sm" fallback={Archive} />}
+                  title={<span className="font-mono">{b.file}</span>}
+                  description={`${b.layout} · ${bytes(b.size)} · ${relativeTime(b.modified)}`}
+                  trailing={
+                    <span
+                      className="max-w-64 truncate text-right text-hint text-muted-foreground max-sm:hidden"
+                      title={!b.restorable ? `Cannot be restored: ${b.reason}.` : undefined}
+                    >
                       {!b.restorable ? (
-                        <span>Cannot be restored: {b.reason}.</span>
+                        "cannot be restored"
                       ) : b.site && b.siteExists ? (
                         <>
-                          <Tag mono>{b.site}</Tag> exists — restore it under another name
+                          <span className="font-mono">{b.site}</span> exists
                         </>
                       ) : b.site ? (
                         <>
-                          Restores as <Tag mono>{b.site}</Tag>
+                          restores as <span className="font-mono">{b.site}</span>
                         </>
                       ) : (
-                        <span>Restores under a name you give it.</span>
+                        "restores under a name you give"
                       )}
-                    </div>
-                  </div>
-                  <VerbActions
-                    dim
-                    className="shrink-0"
-                    verbs={[
-                      ...(b.restorable
-                        ? [
-                            {
-                              key: "restore",
-                              label: "Restore",
-                              icon: RotateCounterClockwise,
-                              run: () => setRestoring(b),
-                            },
-                          ]
-                        : []),
-                      {
-                        key: "delete",
-                        label: "Delete for good",
-                        icon: Trash,
-                        danger: true,
-                        run: () => purge(b),
-                      },
-                    ]}
-                  />
-                </li>
+                    </span>
+                  }
+                  actions={
+                    <VerbMenu
+                      label={`More actions for ${b.file}`}
+                      verbs={[
+                        ...(b.restorable
+                          ? [
+                              {
+                                key: "restore",
+                                label: "Restore",
+                                icon: RotateCounterClockwise,
+                                run: () => setRestoring(b),
+                              },
+                            ]
+                          : []),
+                        {
+                          key: "delete",
+                          label: "Delete for good",
+                          icon: Trash,
+                          danger: true,
+                          run: () => purge(b),
+                        },
+                      ]}
+                    />
+                  }
+                />
               ))}
-            </ul>
+            </ChoiceList>
           )}
-        </FormSection>
-      </FormSections>
+        </PanelBody>
+      </Panel>
       {restoring && (
         <RestoreDialog
           key={restoring.path}

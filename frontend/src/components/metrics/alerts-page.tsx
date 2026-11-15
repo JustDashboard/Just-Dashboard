@@ -12,6 +12,7 @@ import {
   Cpu,
   Database,
   Gauge,
+  LockClosed,
   PaperAirplane,
   Pause,
   Pencil,
@@ -37,6 +38,7 @@ import {
   describeHostAlert,
   hostAlertCounts,
   hostAlertDraft,
+  hostAlertFact,
   hostAlertFields,
   readsMetrics,
   type HostAlertKind,
@@ -52,13 +54,15 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { ProductGlyph, ProductLogo, hasProductLogo } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, ProductLogos, hasProductLogo } from "@/components/product-logo"
+import { Bone } from "@/components/bone"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ChannelGlyph } from "@/components/deploy/vocabulary"
 import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
 import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -68,7 +72,9 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group"
 import { useConfirm } from "@/components/confirm-dialog"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { VerbActions, VerbMenu, type Verb } from "@/components/verbs"
+import { Skeleton } from "@/components/ui/skeleton"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   AllClear,
   ChannelTests,
@@ -201,10 +207,19 @@ function KindTile({
 export function HostAlertsPage() {
   const { can } = useAuth()
   const admin = can("system.admin")
-  const alerts = usePoll((signal) => get<HostAlerts>("/system/alerts", undefined, signal), 30_000)
+  // Every route of the page is an administrator's, so nobody else asks: the
+  // answer would be the server's refusal.
+  const alerts = usePoll(
+    (signal) => get<HostAlerts>("/system/alerts", undefined, signal),
+    30_000,
+    [],
+    { enabled: admin },
+  )
   const channels = usePoll(
     (signal) => get<NotificationChannel[]>("/deploy/notifications", undefined, signal),
     60_000,
+    [],
+    { enabled: admin },
   )
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<{ rule?: HostAlertRule; kind?: HostAlertKind }>()
@@ -364,31 +379,140 @@ export function HostAlertsPage() {
   const closeForm = () => setEditing(undefined)
   const { firing, holding } = hostAlertCounts(active)
   const paused = rules.filter((rule) => !rule.enabled).length
+  const on = rules.length - paused
+  const waiting = alerts.loading && !data
+  // A rule with no channels named tells every enabled one.
+  const told = channelList.filter(
+    (channel) =>
+      channel.enabled &&
+      rules.some(
+        (rule) =>
+          rule.enabled && (rule.channels.length === 0 || rule.channels.includes(channel.id)),
+      ),
+  ).length
+  const history = data?.history ?? []
+
+  const context = (
+    <PageContext
+      eyebrow={
+        <Link href="/metrics" className="rounded-sm focus-ring hover:underline">
+          Metrics
+        </Link>
+      }
+      title="Alerts"
+    />
+  )
+
+  if (!admin)
+    return (
+      <Page>
+        {context}
+        <EmptyState
+          icon={LockClosed}
+          title="Alerts are an administrator's"
+          description="The rules decide who is told about this server, so only an administrator reads or changes them."
+          action={
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/metrics">Back to Metrics</Link>
+            </Button>
+          }
+        />
+      </Page>
+    )
 
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/metrics" className="rounded-sm focus-ring hover:underline">
-            Metrics
-          </Link>
+      {context}
+
+      {/* What the page is about, as a project's header: what the rules are
+          doing now as the state, how many are on and who they reach as the
+          facts, the one command at the end and the rest behind the menu.
+          Add rule and Check now stood on two section lines. */}
+      <HostIdentity
+        fallback={Bell}
+        title="Host alerts"
+        state={
+          waiting ? (
+            <Bone className="w-16 text-xs" />
+          ) : !data ? (
+            <Status tone="warning" label="Unread" />
+          ) : firing > 0 ? (
+            <>
+              <Status tone="danger" label={`${firing} firing`} />
+              {holding > 0 && <Status tone="warning" label={`${holding} holding`} />}
+            </>
+          ) : holding > 0 ? (
+            <Status tone="warning" label={`${holding} holding`} />
+          ) : on === 0 ? (
+            <Status tone="stopped" label={rules.length === 0 ? "No rules" : "Paused"} />
+          ) : (
+            <Status tone="running" label="Watching" />
+          )
         }
-        title="Alerts"
+        command={
+          <Button size="sm" onClick={() => edit({})}>
+            <Plus className="size-3.5" />
+            Add rule
+          </Button>
+        }
+        menu={
+          <VerbMenu
+            label="Alert actions"
+            verbs={[
+              {
+                key: "check",
+                label: "Check now",
+                icon: RefreshClockwise,
+                disabled: checking || !data,
+                run: () => void check(),
+              },
+            ]}
+          />
+        }
+        facts={
+          waiting ? (
+            <Bone className="w-72" />
+          ) : !data ? (
+            <span>The rules could not be read</span>
+          ) : (
+            <>
+              <span className="numeric">
+                {plural(on, "rule")} on{paused > 0 && `, ${paused} paused`}
+              </span>
+              <FactDot />
+              <span className="numeric">
+                {channelList.length === 0
+                  ? "no channel to tell yet"
+                  : `telling ${plural(told, "channel")} of ${channelList.length}`}
+              </span>
+              <FactDot />
+              {checking ? (
+                <TextShimmer>checking now</TextShimmer>
+              ) : (
+                <span className="numeric">
+                  {data.lastPass ? `checked ${relativeTime(data.lastPass)}, ` : "checked "}
+                  {cadence}
+                </span>
+              )}
+            </>
+          )
+        }
       />
 
       {alerts.error && !data ? (
         <ErrorState error={alerts.error} onRetry={alerts.refresh} />
-      ) : alerts.loading && !data ? (
-        <LoadingPanel plain rows={4} />
       ) : (
         <>
-          {/* On the page's own ground, as Notifications' picture is. */}
+          {/* On the page's own ground, as Notifications' picture is. Drawn
+              while the rules are read too, with what it watches in place, so
+              nothing under it moves when they land. */}
           <div className="relative animate-rise py-2 lg:py-6">
             <AlertsPicture
               rules={rules}
               subjects={subjects}
               channels={channelList}
-              onAdd={admin ? (kind) => edit({ kind }) : undefined}
+              waiting={waiting}
+              onAdd={(kind) => edit({ kind })}
             />
           </div>
 
@@ -398,37 +522,27 @@ export function HostAlertsPage() {
                 <PanelHeader
                   title="Firing"
                   actions={
-                    <span className="flex flex-wrap items-center gap-3">
-                      {data?.lastPass && (
-                        <span className="numeric text-hint text-muted-foreground">
-                          checked {relativeTime(data.lastPass)}
-                        </span>
-                      )}
-                      {(firing > 0 || holding > 0) && (
-                        <span className="numeric text-hint text-muted-foreground">
-                          <span className={cn("font-medium", firing > 0 && "text-destructive")}>
-                            {firing}
-                          </span>{" "}
-                          firing
-                          {holding > 0 && (
-                            <>
-                              {" · "}
-                              <span className="font-medium text-warning">{holding}</span> holding
-                            </>
-                          )}
-                        </span>
-                      )}
-                      {admin && (
-                        <Button size="sm" variant="outline" onClick={check} pending={checking}>
-                          <RefreshClockwise className="size-3.5" />
-                          Check now
-                        </Button>
-                      )}
-                    </span>
+                    (firing > 0 || holding > 0) && (
+                      <span className="numeric text-hint text-muted-foreground">
+                        <span className={cn("font-medium", firing > 0 && "text-destructive")}>
+                          {firing}
+                        </span>{" "}
+                        firing
+                        {holding > 0 && (
+                          <>
+                            {" · "}
+                            <span className="font-medium text-warning">{holding}</span> holding
+                          </>
+                        )}
+                      </span>
+                    )
                   }
                 />
                 <PanelBody>
-                  {active.length === 0 ? (
+                  {waiting ? (
+                    // The height of the card that says nothing is firing.
+                    <Skeleton className="h-15.5 rounded-xl" />
+                  ) : active.length === 0 ? (
                     <AllClear rules={rules.length} cadence={cadence} />
                   ) : (
                     <ul aria-label="Firing" className="animate-rise space-y-2">
@@ -452,46 +566,41 @@ export function HostAlertsPage() {
                 <PanelHeader
                   title="Rules"
                   actions={
-                    <span className="flex flex-wrap items-center gap-3">
-                      {rules.length > 0 && (
-                        <span className="numeric text-hint text-muted-foreground">
-                          {plural(rules.length, "rule")}
-                          {paused > 0 && ` · ${paused} paused`}
-                        </span>
-                      )}
-                      {admin && (
-                        <Button size="sm" onClick={() => edit({})}>
-                          <Plus className="size-3.5" />
-                          Add rule
-                        </Button>
-                      )}
-                    </span>
+                    rules.length > 0 && (
+                      <span className="numeric text-hint text-muted-foreground">
+                        {plural(rules.length, "rule")}
+                        {paused > 0 && ` · ${paused} paused`}
+                      </span>
+                    )
                   }
                 />
                 <PanelBody>
-                  {rules.length === 0 ? (
-                    <div className="space-y-4">
-                      <p className="max-w-prose text-body text-pretty text-muted-foreground">
-                        Nobody is told when the CPU or memory stays high, a disk fills, a container
-                        goes down, a backup fails or the Cloudflare Tunnel loses the edge. A rule is
-                        checked {cadence} and tells your channels once on the way over and once on
-                        the way back.
-                      </p>
-                      <ChoiceGrid columns={2} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-                        {HOST_ALERT_KINDS.map((kind) => (
-                          <KindCard
-                            key={kind}
-                            kind={kind}
-                            onClick={admin ? () => edit({ kind }) : undefined}
-                          />
-                        ))}
-                      </ChoiceGrid>
+                  {waiting ? (
+                    <div aria-hidden className="space-y-2">
+                      {[0, 1, 2].map((index) => (
+                        <Skeleton key={index} className="h-15.5 rounded-xl" />
+                      ))}
                     </div>
+                  ) : rules.length === 0 ? (
+                    // What can be watched, each a rule one press away. The
+                    // paragraph that stood over them said what the cards and
+                    // the line above already say.
+                    <ChoiceGrid
+                      columns={2}
+                      role="group"
+                      aria-label="Rules to add"
+                      className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2"
+                    >
+                      {HOST_ALERT_KINDS.map((kind) => (
+                        <KindCard key={kind} kind={kind} onClick={() => edit({ kind })} />
+                      ))}
+                    </ChoiceGrid>
                   ) : (
                     <ChoiceList aria-label="Alert rules" className="animate-rise">
                       {rules.map((rule) => {
                         const fires = firingOf(rule)
                         const words = HOST_ALERT_WORDS[rule.kind]
+                        const unjudged = rule.enabled ? rule.unjudged : undefined
                         return (
                           <ChoiceRow
                             key={rule.id}
@@ -504,17 +613,29 @@ export function HostAlertsPage() {
                             }
                             title={words.label}
                             verb={`Edit ${words.label}`}
-                            onSelect={admin ? () => edit({ rule }) : undefined}
-                            disabled={!admin}
+                            onSelect={() => edit({ rule })}
                             description={
-                              <>
-                                {describeHostAlert(rule.kind, rule.params)}
-                                {" · "}
-                                <ChannelNames ids={rule.channels} channels={channelList} />
-                                {rule.enabled && rule.unjudged && (
-                                  <span className="block text-warning">{rule.unjudged}</span>
-                                )}
-                              </>
+                              // Why it cannot be judged takes the line: under
+                              // it, it made this row a line taller than the
+                              // rest. What the rule watches is in its form.
+                              unjudged ? (
+                                <span
+                                  className="text-warning"
+                                  title={`${describeHostAlert(rule.kind, rule.params)}. ${unjudged}`}
+                                >
+                                  {unjudged}
+                                </span>
+                              ) : (
+                                <>
+                                  {describeHostAlert(rule.kind, rule.params)}
+                                  {" · "}
+                                  <ChannelNames
+                                    ids={rule.channels}
+                                    channels={channelList}
+                                    className="flex-nowrap align-bottom"
+                                  />
+                                </>
+                              )
                             }
                             trailing={
                               !rule.enabled ? (
@@ -528,13 +649,11 @@ export function HostAlertsPage() {
                               )
                             }
                             actions={
-                              admin && (
-                                <VerbActions
-                                  dim
-                                  verbs={verbsFor(rule)}
-                                  menuLabel={`Actions for ${words.label}, ${describeHostAlert(rule.kind, rule.params)}`}
-                                />
-                              )
+                              <VerbActions
+                                dim
+                                verbs={verbsFor(rule)}
+                                menuLabel={`Actions for ${words.label}, ${describeHostAlert(rule.kind, rule.params)}`}
+                              />
                             }
                           />
                         )
@@ -578,19 +697,26 @@ export function HostAlertsPage() {
                 <PanelHeader
                   title="Recently told"
                   actions={
-                    (data?.history ?? []).length > 0 && (
+                    history.length > 0 && (
                       <span className="numeric text-hint text-muted-foreground">
-                        newest {Math.min((data?.history ?? []).length, 100)}
+                        newest {Math.min(history.length, 100)}
                       </span>
                     )
                   }
                 />
                 <PanelBody>
-                  {(data?.history ?? []).length === 0 ? (
-                    <EmptyNote className="px-0 text-left">Nothing has been told yet.</EmptyNote>
+                  {waiting ? (
+                    <Skeleton className="h-28 rounded-xl" />
+                  ) : history.length === 0 ? (
+                    <EmptyState
+                      icon={Bell}
+                      title="Nothing told yet"
+                      description="What a rule tells a channel is kept here, newest first."
+                      className="py-8"
+                    />
                   ) : (
                     <ul aria-label="Alert history" className="animate-rise">
-                      {(data?.history ?? []).slice(0, 12).map((event) => (
+                      {history.slice(0, 12).map((event) => (
                         <HistoryRow
                           key={event.id}
                           event={event}
@@ -624,14 +750,33 @@ export function HostAlertsPage() {
                   }
                 />
                 <PanelBody>
-                  <ChannelTests
-                    channels={channelList}
-                    error={channels.error && !channels.data ? channels.error : undefined}
-                    onRetry={channels.refresh}
-                    admin={admin}
-                    busy={busy}
-                    onTest={(channel) => void testChannel(channel)}
-                  />
+                  {channels.loading && !channels.data ? (
+                    <Skeleton className="h-28 rounded-xl" />
+                  ) : channels.data && channelList.length === 0 ? (
+                    // The services a channel can be, drawn as themselves, and
+                    // the way to add one: channels are the deployments'
+                    // Notifications', made there.
+                    <EmptyState
+                      mark={<ProductLogos ids={["slack", "discord", "telegram"]} size="md" />}
+                      title="No channels yet"
+                      description="A rule tells nobody until there is a channel to tell."
+                      action={
+                        <Button size="sm" variant="outline" asChild>
+                          <Link href="/deploy/notifications">Add a channel</Link>
+                        </Button>
+                      }
+                      className="py-8"
+                    />
+                  ) : (
+                    <ChannelTests
+                      channels={channelList}
+                      error={channels.error && !channels.data ? channels.error : undefined}
+                      onRetry={channels.refresh}
+                      admin={admin}
+                      busy={busy}
+                      onTest={(channel) => void testChannel(channel)}
+                    />
+                  )}
                 </PanelBody>
               </Panel>
             </div>
@@ -666,14 +811,24 @@ export function HostAlertsPage() {
   )
 }
 
-function KindCard({ kind, onClick }: { kind: HostAlertKind; onClick?: () => void }) {
+/**
+ * A rule that could be added: what it watches and the line it would be added
+ * with. The two sentences each card carried are the form's, where the kind is
+ * chosen with room to read them.
+ */
+function KindCard({ kind, onClick }: { kind: HostAlertKind; onClick: () => void }) {
   return (
-    <ChoiceCard onClick={onClick} disabled={!onClick} className="min-h-0 flex-row gap-3 p-3">
+    <ChoiceCard
+      onClick={onClick}
+      title={HOST_ALERT_WORDS[kind].hint}
+      className="min-h-0 flex-row items-center gap-3 px-3 py-2.5"
+    >
       <KindTile kind={kind} size="sm" />
-      <span className="min-w-0 space-y-0.5">
+      <span className="flex min-w-0 flex-1 flex-col">
         <ChoiceCardTitle className="truncate">{HOST_ALERT_WORDS[kind].label}</ChoiceCardTitle>
-        <ChoiceCardHint className="line-clamp-2">{HOST_ALERT_WORDS[kind].hint}</ChoiceCardHint>
+        <ChoiceCardHint className="truncate leading-snug">{hostAlertFact(kind)}</ChoiceCardHint>
       </span>
+      <Plus aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
     </ChoiceCard>
   )
 }
@@ -689,11 +844,14 @@ function AlertsPicture({
   rules,
   subjects,
   channels,
+  waiting,
   onAdd,
 }: {
   rules: HostAlertRule[]
   subjects: HostAlertSubject[]
   channels: NotificationChannel[]
+  /** The rules are not read yet: what is watched keeps its place, without its words. */
+  waiting?: boolean
   onAdd?: (kind: HostAlertKind) => void
 }) {
   const wide = useMediaQuery("(min-width: 1024px)")
@@ -707,8 +865,20 @@ function AlertsPicture({
     enabled.some((rule) => rule.channels.length === 0 || rule.channels.includes(channel.id))
   const targets = pictureTargets(channels)
   const told = channels.filter(reaches).length
-  const title = enabled.length === 0 ? "No rules on" : plural(enabled.length, "rule")
-  const reach = channels.length === 0 ? "telling nobody yet" : `telling ${plural(told, "channel")}`
+  const title = waiting ? (
+    <Bone className="w-16" />
+  ) : enabled.length === 0 ? (
+    "No rules on"
+  ) : (
+    plural(enabled.length, "rule")
+  )
+  const reach = waiting ? (
+    <Bone className="w-24" />
+  ) : channels.length === 0 ? (
+    "telling nobody yet"
+  ) : (
+    `telling ${plural(told, "channel")}`
+  )
 
   const areas = AREAS.map((area, index) => (
     <PictureArea
@@ -720,6 +890,7 @@ function AlertsPicture({
       containerRef={container}
       hubRef={hub}
       compact={!wide}
+      waiting={waiting}
       onAdd={onAdd}
     />
   ))
@@ -797,6 +968,7 @@ function PictureArea({
   containerRef,
   hubRef,
   compact,
+  waiting,
   onAdd,
 }: {
   area: Area
@@ -806,6 +978,7 @@ function PictureArea({
   containerRef: RefObject<HTMLDivElement | null>
   hubRef: RefObject<HTMLDivElement | null>
   compact: boolean
+  waiting?: boolean
   onAdd?: (kind: HostAlertKind) => void
 }) {
   const mark = useRef<HTMLDivElement>(null)
@@ -823,6 +996,8 @@ function PictureArea({
     <WireMark tone={tone ?? "logo"} size={size}>
       {glyph}
     </WireMark>
+  ) : waiting ? (
+    <WirePlaceholder size={size} product={area.product} fallback={Glyph} />
   ) : (
     <WireLink
       label={`Watch ${area.title.toLowerCase()}`}
@@ -869,14 +1044,18 @@ function PictureArea({
         mark={drawn}
         title={watched ? area.title : <span className="text-muted-foreground">{area.title}</span>}
         hint={
-          <span
-            className={cn(
-              tone === "danger" && "font-medium text-destructive",
-              tone === "warning" && "font-medium text-warning",
-            )}
-          >
-            {words}
-          </span>
+          waiting ? (
+            <Bone className="w-16" />
+          ) : (
+            <span
+              className={cn(
+                tone === "danger" && "font-medium text-destructive",
+                tone === "warning" && "font-medium text-warning",
+              )}
+            >
+              {words}
+            </span>
+          )
         }
       />
     </div>

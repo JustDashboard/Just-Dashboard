@@ -2,14 +2,17 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowRight,
+  Clock,
+  FolderOpen,
   Key,
   LockClosed,
   LockOpen,
   SettingsSliders,
   ShieldCheck,
+  Terminal,
   Trash,
   UserPlus,
   Users,
@@ -20,8 +23,9 @@ import { Address } from "@/components/security/marks"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { platformProduct, ProductGlyph } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
-import { GroupRule } from "@/components/flow"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { DimActions } from "@/components/icon-action"
+import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import {
   accountFindings,
@@ -32,18 +36,15 @@ import {
   signInSummary,
   type RootSummary,
 } from "@/components/system-users/access"
-import { AccountMark, groupProduct } from "@/components/system-users/marks"
+import { ChoiceRowsWaiting } from "@/components/system-users/group-parts"
+import { AccountMark, FaceRun, groupProduct } from "@/components/system-users/marks"
+import { AdminOnly, ReadFailed } from "@/components/system-users/read-state"
+import { RootPicture } from "@/components/system-users/root-picture"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
@@ -67,14 +68,20 @@ const ROOT_INK: Record<RootSummary["tone"], string> = {
 const SEARCH_FROM = 8
 
 /**
- * The host's accounts, as a table you read down and open.
+ * The host's accounts: who can be root as a picture, what to change as a line
+ * each, then every account as a row to open.
  *
- * It opened on three report blocks — last sign-ins on an axis, who can become
- * root, whose keys open the host — and the operator asked for what is not needed
- * to go. On a small server all three said "nobody", "never" and "none", and every
- * figure in them is a column here: who can sign in and how, how far they can
- * reach, when they last did. What the blocks were for is the list of findings
- * under the line, which is drawn only when there is something to change.
+ * It opened on three report blocks (last sign-ins on an axis, who can become
+ * root, whose keys open the host) and the operator asked for what is not needed
+ * to go: on a small server all three said "nobody", "never" and "none". What
+ * the blocks were for is the list of findings under the line, drawn only when
+ * there is something to change, and every figure in them is a column of the
+ * rows. The picture came back in 0.8.7 as one thing: the ways to root, which is
+ * the question a table of seven accounts answers one row at a time.
+ *
+ * An account is a row to open, not a table row read down a column: it is one
+ * line at every width, its readings in columns from `xl` and on two lines of
+ * their own under the name below it, so no account is taller than another.
  *
  * Root is in the list however the system-accounts switch is set. It is a system
  * account by number and the most important account by every other measure, and
@@ -82,14 +89,28 @@ const SEARCH_FROM = 8
  * where root signs in with a password.
  */
 export default function SystemUsersPage() {
+  return (
+    <AdminOnly title="System users">
+      <SystemUsers />
+    </AdminOnly>
+  )
+}
+
+function SystemUsers() {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
   const { host } = useMetrics()
-  const wide = useMediaQuery("(min-width: 768px)")
+  const wide = useMediaQuery("(min-width: 1280px)")
   const [showSystem, setShowSystem] = useViewState("system-users.show-system", false)
   const [query, setQuery] = useSessionState("system-users.query", "")
   const [scope, setScope] = useSessionState<Scope>("system-users.scope", "all")
+  // How many findings there were and how many accounts reached root at the
+  // last read, so both wait at the height they will have and the list under
+  // them does not move when the read lands.
+  const [expected, setExpected] = useViewState("system-users.shape", { findings: 0, root: 3 })
   const [selected, setSelected] = useState<string[]>([])
+  const [acting, setActing] = useState(false)
+  const list = useRef<HTMLElement>(null)
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<SystemUser[]>("/system-users/", { system: showSystem }, signal),
     30000,
@@ -102,11 +123,16 @@ export default function SystemUsersPage() {
       people: users.filter((u) => !u.system).length,
       signIn: users.filter((u) => u.signIn.password.allowed || u.signIn.key.allowed).length,
       root: users.filter(reachesRoot).length,
+      becomeRoot: users.filter((u) => u.uid !== 0 && reachesRoot(u)).length,
       disabled: users.filter((u) => u.disabled).length,
       latest: latestSignIn(users),
       findings: accountFindings(users),
     }
   }, [data])
+  const shape = { findings: figures.findings.length, root: figures.becomeRoot }
+  useEffect(() => {
+    if (data) setExpected({ findings: shape.findings, root: shape.root })
+  }, [data, shape.findings, shape.root, setExpected])
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -133,15 +159,25 @@ export default function SystemUsersPage() {
   const chosen = selected.filter((name) => selectable.includes(name))
 
   const bulk = async (action: string, extra?: object) => {
-    const { results } = await post<BulkResults>("/system-accounts/bulk", {
-      action,
-      usernames: chosen,
-      ...extra,
-    })
-    reportBulk(results)
-    setSelected([])
-    refresh()
+    // One at a time: a second press while the first is on its way would lock
+    // or end the same accounts twice.
+    if (acting) return
+    setActing(true)
+    try {
+      const { results } = await post<BulkResults>("/system-accounts/bulk", {
+        action,
+        usernames: chosen,
+        ...extra,
+      })
+      reportBulk(results)
+      setSelected([])
+      refresh()
+    } finally {
+      setActing(false)
+    }
   }
+  const bulkNow = (action: string) =>
+    void bulk(action).catch((err) => notify.error("That did not go through", err))
 
   const bulkDisable = () =>
     confirm({
@@ -189,34 +225,62 @@ export default function SystemUsersPage() {
   const toggle = (name: string) =>
     setSelected((now) => (now.includes(name) ? now.filter((n) => n !== name) : [...now, name]))
 
+  // A press on the picture's "more" narrows the rows to those accounts and
+  // brings them into view.
+  const narrow = (next: Scope) => {
+    setScope(next)
+    list.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
   const row = (user: SystemUser) => (
     <AccountRow
       key={user.username}
       user={user}
       wide={wide}
+      selecting={selectable.length > 0}
       selected={chosen.includes(user.username)}
       onToggle={user.system ? undefined : () => toggle(user.username)}
-      onOpen={() => router.push(accountHref(user.username))}
+      go={(href) => router.push(href)}
     />
   )
+
+  const menu: Verb[] = [
+    {
+      key: "groups",
+      label: "Groups",
+      icon: Users,
+      run: () => router.push("/system-users/groups"),
+    },
+    {
+      key: "defaults",
+      label: "Account defaults",
+      icon: SettingsSliders,
+      run: () => router.push("/system-users/defaults"),
+    },
+  ]
 
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Advanced" title="System users" />
 
-      {data && (
-        <HostIdentity
-          className="animate-rise"
-          mark={platformProduct(host?.platform)}
-          fallback={Users}
-          title={host?.hostname ?? "Accounts"}
-          facts={
+      <HostIdentity
+        mark={platformProduct(host?.platform)}
+        fallback={Users}
+        title={host?.hostname ?? "Accounts"}
+        state={
+          data ? (
+            <Status
+              tone={figures.signIn > 0 ? "running" : "unknown"}
+              label={`${figures.signIn} can sign in`}
+            />
+          ) : undefined
+        }
+        facts={
+          data ? (
             <>
               <span className="numeric">{plural(figures.people, "person", "people")}</span>
               <FactDot />
-              <span className={cn("numeric", figures.signIn > 0 && "text-success")}>
-                {figures.signIn} can sign in
-              </span>
+              <span className="numeric">{figures.root} reach root</span>
               {figures.latest && (
                 <>
                   <FactDot />
@@ -232,38 +296,39 @@ export default function SystemUsersPage() {
                 </>
               )}
             </>
-          }
-          aside={
-            <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/system-users/groups">
-                  <Users className="size-4" />
-                  Groups
-                </Link>
-              </Button>
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/system-users/defaults">
-                  <SettingsSliders className="size-4" />
-                  Defaults
-                </Link>
-              </Button>
-              <Button size="sm" asChild>
-                <Link href="/system-users/new">
-                  <UserPlus className="size-4" />
-                  New account
-                </Link>
-              </Button>
-            </div>
-          }
-        />
-      )}
+          ) : error ? (
+            <span>Not read</span>
+          ) : (
+            <TextShimmer>Reading the accounts…</TextShimmer>
+          )
+        }
+        command={
+          <Button size="sm" asChild>
+            <Link href="/system-users/new">
+              <UserPlus className="size-4" />
+              New account
+            </Link>
+          </Button>
+        }
+        menu={<VerbMenu verbs={menu} label="Groups and defaults" />}
+      />
 
+      {!data && !error && expected.findings > 0 && (
+        <ul aria-hidden className="-mt-3 divide-y divide-hairline md:-mt-5">
+          {Array.from({ length: expected.findings }, (_, index) => (
+            <li key={index} className="flex h-[38px] items-center">
+              <span className="h-3 w-64 max-w-full animate-pulse rounded-md bg-muted" />
+            </li>
+          ))}
+        </ul>
+      )}
       {figures.findings.length > 0 && (
         <ul data-slot="account-findings" className="-mt-3 divide-y divide-hairline md:-mt-5">
           {figures.findings.map((finding) => (
             <li
               key={finding.id}
-              className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
+              // A set height, so the waiting lines are as tall as these.
+              className="flex min-h-[38px] min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2"
             >
               <Status tone={finding.tone} label={finding.title} className="font-medium" />
               {finding.detail && (
@@ -281,56 +346,84 @@ export default function SystemUsersPage() {
         </ul>
       )}
 
-      {/* A plain block: the table has its own hairlines, and a frame around them
-          is one more box saying nothing (§7). */}
-      <Panel plain>
-        <PanelToolbar>
-          {chosen.length > 0 ? (
-            <div data-slot="bulk-bar" className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="numeric text-body font-medium">{chosen.length} selected</span>
-              <Button size="xs" variant="outline" onClick={() => void bulk("lock")}>
-                <LockClosed className="size-3" />
-                Lock passwords
-              </Button>
-              <Button size="xs" variant="outline" onClick={bulkDisable}>
-                <LockClosed className="size-3" />
-                Disable
-              </Button>
-              <Button size="xs" variant="outline" onClick={() => void bulk("enable")}>
-                <LockOpen className="size-3" />
-                Enable
-              </Button>
-              <Button size="xs" variant="outline" onClick={bulkEnd}>
-                End sessions
-              </Button>
-              <Button size="xs" variant="outline" className="text-destructive" onClick={bulkDelete}>
-                <Trash className="size-3" />
-                Delete
-              </Button>
-              <Button size="xs" variant="ghost" onClick={() => setSelected([])}>
-                Clear
-              </Button>
-            </div>
-          ) : (
-            <>
-              {(data?.length ?? 0) >= SEARCH_FROM && (
-                <SearchInput
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Name or group"
-                  containerClassName="sm:w-56"
-                />
-              )}
-              {data && (
+      {!(error && !data) && (
+        <RootPicture
+          users={data}
+          loading={!data}
+          expected={expected.root}
+          onMore={() => narrow("root")}
+        />
+      )}
+
+      {error && !data ? (
+        <ReadFailed error={error} onRetry={refresh} />
+      ) : (
+        /* A plain block: each row owns its edge, and a frame around them is one
+         more box saying nothing (§7). */
+        <Panel plain ref={list} className="scroll-mt-6">
+          <PanelToolbar>
+            {chosen.length > 0 ? (
+              <div data-slot="bulk-bar" className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="numeric text-body font-medium">{chosen.length} selected</span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={acting}
+                  onClick={() => bulkNow("lock")}
+                >
+                  <LockClosed className="size-3" />
+                  Lock passwords
+                </Button>
+                <Button size="xs" variant="outline" disabled={acting} onClick={bulkDisable}>
+                  <LockClosed className="size-3" />
+                  Disable
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={acting}
+                  onClick={() => bulkNow("enable")}
+                >
+                  <LockOpen className="size-3" />
+                  Enable
+                </Button>
+                <Button size="xs" variant="outline" disabled={acting} onClick={bulkEnd}>
+                  End sessions
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="text-destructive"
+                  disabled={acting}
+                  onClick={bulkDelete}
+                >
+                  <Trash className="size-3" />
+                  Delete
+                </Button>
+                <Button size="xs" variant="ghost" onClick={() => setSelected([])}>
+                  Clear
+                </Button>
+              </div>
+            ) : (
+              <>
+                {(data?.length ?? 0) >= SEARCH_FROM && (
+                  <SearchInput
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Name or group"
+                    aria-label="Search the accounts"
+                    containerClassName="sm:w-56"
+                  />
+                )}
                 <ChipStrip>
                   <FilterChip selected={scope === "all"} onClick={() => setScope("all")}>
-                    All <ChipCount>{data.length}</ChipCount>
+                    All {data && <ChipCount>{data.length}</ChipCount>}
                   </FilterChip>
                   <FilterChip selected={scope === "signin"} onClick={() => setScope("signin")}>
-                    Can sign in <ChipCount>{figures.signIn}</ChipCount>
+                    Can sign in {data && <ChipCount>{figures.signIn}</ChipCount>}
                   </FilterChip>
                   <FilterChip selected={scope === "root"} onClick={() => setScope("root")}>
-                    Reach root <ChipCount>{figures.root}</ChipCount>
+                    Reach root {data && <ChipCount>{figures.root}</ChipCount>}
                   </FilterChip>
                   {figures.disabled > 0 && (
                     <FilterChip
@@ -341,56 +434,55 @@ export default function SystemUsersPage() {
                     </FilterChip>
                   )}
                 </ChipStrip>
-              )}
-              <FilterChip
-                className="sm:ml-auto"
-                selected={showSystem}
-                onClick={() => setShowSystem(!showSystem)}
-              >
-                System accounts
-              </FilterChip>
-            </>
-          )}
-        </PanelToolbar>
-        <PanelBody flush>
-          {loading && !data && <LoadingPanel />}
-          {error && !data && <ErrorState error={error} />}
-          {data && rows.length === 0 && (
-            <EmptyState
-              icon={Users}
-              title="No accounts match"
-              description="Clear the search or pick All."
-            />
-          )}
-          {data && rows.length > 0 && (
-            <Table>
-              {wide && (
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8" />
-                    <TableHead>Account</TableHead>
-                    <TableHead>Sign-in</TableHead>
-                    <TableHead>Root access</TableHead>
-                    <TableHead>Last sign-in</TableHead>
-                    <TableHead className="w-8" />
-                  </TableRow>
-                </TableHeader>
-              )}
-              <TableBody>
-                {accounts.map(row)}
-                {daemons.length > 0 && (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={wide ? 6 : 2} className="pt-5 pb-2">
-                      <GroupRule label="System accounts" count={daemons.length} />
-                    </TableCell>
-                  </TableRow>
+                <FilterChip
+                  className="sm:ml-auto"
+                  selected={showSystem}
+                  onClick={() => setShowSystem(!showSystem)}
+                >
+                  System accounts
+                </FilterChip>
+              </>
+            )}
+          </PanelToolbar>
+          <PanelBody flush className="pt-3">
+            {loading && !data && <ChoiceRowsWaiting rows={5} />}
+            {data && rows.length === 0 && (
+              <EmptyState
+                mark={<FaceRun names={["ada", "lin", "sam"]} max={3} />}
+                title="No accounts match"
+                description="Clear the search or pick All."
+                action={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setQuery("")
+                      setScope("all")
+                    }}
+                  >
+                    Show all accounts
+                  </Button>
+                }
+              />
+            )}
+            {data && rows.length > 0 && (
+              <div className="flex min-w-0 flex-col gap-2">
+                {accounts.length > 0 && (
+                  <ChoiceList aria-label="Accounts">{accounts.map(row)}</ChoiceList>
                 )}
-                {daemons.map(row)}
-              </TableBody>
-            </Table>
-          )}
-        </PanelBody>
-      </Panel>
+                {daemons.length > 0 && (
+                  <>
+                    <div className="pt-4 pb-1">
+                      <GroupRule label="System accounts" count={daemons.length} />
+                    </div>
+                    <ChoiceList aria-label="System accounts">{daemons.map(row)}</ChoiceList>
+                  </>
+                )}
+              </div>
+            )}
+          </PanelBody>
+        </Panel>
+      )}
       {dialog}
     </Page>
   )
@@ -408,34 +500,21 @@ function reportBulk(results: BulkResults["results"]) {
   )
 }
 
-/**
- * One account: named readings in columns from `md`, and under the name below it,
- * chosen once rather than drawn twice. A phone has no width for four columns, and
- * a table that scrolls sideways there hid the one that says who can become root.
- */
-function AccountRow({
-  user,
-  wide,
-  selected,
-  onToggle,
-  onOpen,
-}: {
-  user: SystemUser
-  wide: boolean
-  selected: boolean
-  onToggle?: () => void
-  onOpen: () => void
-}) {
+/** How the account gets in, as marks and words on one line. */
+function SignInReading({ user }: { user: SystemUser }) {
   const signIn = signInSummary(user)
-  const root = rootSummary(user)
-  const signInCell = (
-    <span className="flex flex-wrap items-center gap-x-3 gap-y-1" title={signIn.detail}>
+  return (
+    <span
+      data-slot="account-sign-in"
+      className="flex min-w-0 items-center gap-x-3 overflow-hidden whitespace-nowrap"
+      title={signIn.detail}
+    >
       {signIn.password || signIn.key ? (
         <>
           {signIn.password && (
             <span
               className={cn(
-                "inline-flex items-center gap-1",
+                "inline-flex shrink-0 items-center gap-1",
                 user.noPassword ? "text-destructive" : "text-success",
               )}
             >
@@ -444,7 +523,7 @@ function AccountRow({
             </span>
           )}
           {signIn.key && (
-            <span className="inline-flex items-center gap-1 text-success">
+            <span className="inline-flex shrink-0 items-center gap-1 text-success">
               <Key aria-hidden className="size-3.5" />
               <span className="numeric">
                 {user.sshKeyCount > 0 ? plural(user.sshKeyCount, "key") : "Unread keys"}
@@ -453,20 +532,28 @@ function AccountRow({
           )}
         </>
       ) : (
-        <Status tone={signIn.tone} label={signIn.label} />
+        <Status tone={signIn.tone} label={signIn.label} className="font-normal" />
       )}
     </span>
   )
-  const rootCell = (
-    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+}
+
+/** How far the account reaches, the strongest way first, then the groups that are root by another name. */
+function RootReading({ user, none }: { user: SystemUser; none: string }) {
+  const root = rootSummary(user)
+  return (
+    <span
+      data-slot="account-root"
+      className="flex min-w-0 items-center gap-x-3 overflow-hidden whitespace-nowrap"
+    >
       {root.label !== "None" && root.label !== "Through a group" && (
-        <span className={cn("inline-flex items-center gap-1", ROOT_INK[root.tone])}>
+        <span className={cn("inline-flex shrink-0 items-center gap-1", ROOT_INK[root.tone])}>
           <ShieldCheck aria-hidden className="size-3.5" />
           {root.label}
         </span>
       )}
       {root.groups.map((group) => (
-        <span key={group} className="inline-flex items-center gap-1 text-warning">
+        <span key={group} className="inline-flex shrink-0 items-center gap-1 text-warning">
           {groupProduct(group) ? (
             <ProductGlyph id={groupProduct(group) as string} />
           ) : (
@@ -475,66 +562,128 @@ function AccountRow({
           {group}
         </span>
       ))}
-      {root.label === "None" && wide && <span className="text-muted-foreground/60">None</span>}
+      {root.label === "None" && <span className="text-muted-foreground/60">{none}</span>}
     </span>
   )
-  const lastCell = user.lastLogin ? (
+}
+
+/**
+ * One account on one line: who it is, its name over its number, and how it
+ * gets in, how far it reaches and when it last signed in, each in a column of
+ * its own from `xl`. Narrower there is no width for three columns beside a
+ * name, so the first two take a line each under it (every account has both,
+ * so every card is the same height) and the last sign-in ends the first.
+ */
+function AccountRow({
+  user,
+  wide,
+  selecting,
+  selected,
+  onToggle,
+  go,
+}: {
+  user: SystemUser
+  wide: boolean
+  /** The list has accounts that can be selected, so every row keeps the box's place. */
+  selecting: boolean
+  selected: boolean
+  onToggle?: () => void
+  go: (href: string) => void
+}) {
+  const href = accountHref(user.username)
+  const last = user.lastLogin ? (
     <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
       <span className="numeric shrink-0">{relativeTime(user.lastLogin)}</span>
-      {user.lastLoginFrom && <Address ip={user.lastLoginFrom} className="min-w-0" />}
+      {wide && user.lastLoginFrom && <Address ip={user.lastLoginFrom} className="min-w-0" />}
     </span>
   ) : (
-    <span className="text-muted-foreground/60">Never</span>
+    <span className="text-muted-foreground/60">{wide ? "Never" : "Never signed in"}</span>
   )
+  const verbs: Verb[] = [
+    ...(user.canLogin
+      ? [
+          {
+            key: "terminal",
+            label: "Terminal",
+            icon: Terminal,
+            run: () => go(`/terminal?as=${encodeURIComponent(user.username)}`),
+          },
+        ]
+      : []),
+    {
+      key: "files",
+      label: "Files",
+      icon: FolderOpen,
+      run: () => go(`/files?path=${encodeURIComponent(user.home)}`),
+    },
+    {
+      key: "settings",
+      label: "Settings",
+      icon: SettingsSliders,
+      run: () => go(`${href}?tab=settings`),
+    },
+    { key: "history", label: "History", icon: Clock, run: () => go(`${href}?tab=history`) },
+  ]
   return (
-    <TableRow
-      data-slot="account-row"
-      onActivate={onOpen}
+    <ChoiceRow
+      href={href}
+      verb={`Open ${user.username}`}
       className={cn(user.disabled && "opacity-60", selected && "bg-accent/40")}
-    >
-      <TableCell className="w-8 pr-0 align-top md:align-middle">
-        {onToggle && (
-          <Checkbox
-            aria-label={`Select ${user.username}`}
-            checked={selected}
-            onCheckedChange={onToggle}
-          />
-        )}
-      </TableCell>
-      <TableCell className={cn(!wide && "whitespace-normal")}>
-        <span className="flex min-w-0 items-center gap-3">
+      leading={
+        <span className="flex items-center gap-3">
+          {selecting && (
+            <span className="flex w-4 justify-center">
+              {onToggle && (
+                <Checkbox
+                  aria-label={`Select ${user.username}`}
+                  checked={selected}
+                  onCheckedChange={onToggle}
+                />
+              )}
+            </span>
+          )}
           <AccountMark user={user} />
-          <span className="min-w-0">
-            <span className="block truncate font-mono text-body font-medium">{user.username}</span>
-            {user.comment && user.comment !== user.username && (
-              <span className="block truncate text-hint text-muted-foreground">{user.comment}</span>
-            )}
-          </span>
         </span>
-        {!wide && (
-          <span className="mt-2 flex flex-col gap-1.5">
-            {signInCell}
-            {rootCell}
-            {user.lastLogin && lastCell}
-          </span>
-        )}
-      </TableCell>
-      {wide && (
+      }
+      title={<span className="font-mono">{user.username}</span>}
+      description={
         <>
-          <TableCell>{signInCell}</TableCell>
-          <TableCell>{rootCell}</TableCell>
-          <TableCell>{lastCell}</TableCell>
-          <TableCell className="pl-0 text-right">
-            <Link
-              href={accountHref(user.username)}
-              aria-label={`Open ${user.username}`}
-              className="inline-flex rounded-sm text-muted-foreground focus-ring hover:text-foreground"
-            >
-              <ArrowRight className="size-3.5" />
-            </Link>
-          </TableCell>
+          <span className="numeric font-mono">uid {user.uid}</span>
+          {user.comment && user.comment !== user.username && ` · ${user.comment}`}
         </>
+      }
+      trailing={
+        wide ? (
+          <span className="flex min-w-0 items-center gap-5 text-xs">
+            <span className="flex w-40 min-w-0">
+              <SignInReading user={user} />
+            </span>
+            <span className="flex w-56 min-w-0">
+              <RootReading user={user} none="None" />
+            </span>
+            <span data-slot="account-last" className="flex w-48 min-w-0">
+              {last}
+            </span>
+          </span>
+        ) : undefined
+      }
+      actions={
+        <DimActions>
+          <VerbMenu verbs={verbs} label={`More for ${user.username}`} />
+        </DimActions>
+      }
+    >
+      {!wide && (
+        <div className="grid min-w-0 gap-1 text-xs">
+          <div className="flex h-5 min-w-0 items-center justify-between gap-3">
+            <SignInReading user={user} />
+            <span className="shrink-0">{last}</span>
+          </div>
+          <div className="flex h-5 min-w-0 items-center">
+            <RootReading user={user} none="No root access" />
+          </div>
+        </div>
       )}
-    </TableRow>
+    </ChoiceRow>
   )
 }

@@ -139,16 +139,22 @@ test("the old Security addresses lead to the Network pages, keeping their questi
   await expect(page).toHaveURL(/\/network\/connections$/)
 })
 
-test("a device opens its sheet, and only what may change offers to", async ({ page }) => {
+test("a device opens its page, and only what may change offers to", async ({ page }) => {
   await mockNetwork(page)
   await page.goto("/network/interfaces")
-  await page.getByRole("button", { name: "Open ens3" }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("carries the default route")).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Set down" })).toBeDisabled()
+  await page.getByRole("link", { name: "Open ens3", exact: true }).click()
+  await expect(page).toHaveURL(/\/network\/interfaces\/ens3$/)
+  // The uplink is guarded: its line says so, and the menu holds Set down
+  // with the guard's own sentence under it.
+  await expect(page.getByRole("region", { name: "About ens3" })).toContainText("Guarded")
+  await page.getByRole("button", { name: "More for ens3" }).click()
+  await expect(page.getByRole("menuitem", { name: "Set down" })).toBeDisabled()
+  await expect(page.getByRole("menu").getByText("carries the default route")).toBeVisible()
   await page.keyboard.press("Escape")
-  await page.getByRole("button", { name: "Open jd-lab" }).click()
-  await expect(page.getByRole("dialog").getByRole("button", { name: "Delete" })).toBeEnabled()
+  await page.goBack()
+  await page.getByRole("link", { name: "Open jd-lab", exact: true }).click()
+  await page.getByRole("button", { name: "More for jd-lab" }).click()
+  await expect(page.getByRole("menuitem", { name: "Delete" })).toBeEnabled()
 })
 
 test("a new VLAN sends exactly what the create route takes", async ({ page }) => {
@@ -184,6 +190,7 @@ test("the routing page lights the rule that answers this browser", async ({ page
   await expect(page.getByText("5270 · your replies (inferred)")).toBeVisible()
   await expect(page.getByText("table 52 · answers you (inferred)")).toBeVisible()
   // Forwarding needed by something cannot be switched off from here.
+  await page.getByRole("tab", { name: "Forwarding" }).click()
   await expect(page.getByRole("switch", { name: "IPv4 forwarding" })).toBeDisabled()
 })
 

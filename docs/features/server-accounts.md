@@ -2,7 +2,7 @@
 
 The host itself and the people on it: packages, system users, roles, keys and the panel's own settings.
 
-<a href="../readme/system-users.png"><img src="../readme/system-users.png" alt="System users with how each can sign in, how far they reach and when they last did"></a>
+<a href="../readme/system-users.png"><img src="../readme/system-users.png" alt="System users: what to change, who can become root drawn as one picture, and each account with how it signs in, how far it reaches and when it last did"></a>
 
 <p align="center"><sub><b>System users</b> — who can get in, and how far they reach</sub></p>
 

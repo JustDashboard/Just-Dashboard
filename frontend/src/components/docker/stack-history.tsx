@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import type { StackDeployment } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { WIDE_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { useNow } from "@/components/deploy/vocabulary"
 import { AuthorMark } from "@/components/git/marks"
 import { ago } from "@/components/procs/units"
@@ -79,7 +80,7 @@ export function StackHistory({
   /** Puts a record's file in the editor, unsaved; absent where the reader may not write it. */
   onRestore?: (content: string, from: string) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useMediaQuery(WIDE_BESIDE_RAIL)
   const now = useNow(60_000)
   const { data, error, loading } = usePoll<StackDeployment[]>(
     (signal) =>

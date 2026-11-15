@@ -9,6 +9,7 @@ import {
   lastWords,
   reportOf,
   reportWords,
+  stepStates,
   upgradeJobKind,
   upgradeSteps,
 } from "./settings-version-model"
@@ -160,4 +161,20 @@ test("a reading in another shape is not taken for the route's", () => {
   expect(isUpgradeReading({ offered: false, targets: [], reason: "x" })).toBe(true)
   expect(isUpgradeReading([])).toBe(false)
   expect(isUpgradeReading({ offered: true })).toBe(false)
+})
+
+describe("the four steps on the picture", () => {
+  test("are all ahead while no upgrade runs", () => {
+    expect(stepStates("copy", false)).toEqual(["ahead", "ahead", "ahead", "ahead"])
+  })
+
+  test("follow the three phases the server names", () => {
+    expect(stepStates("prepare", true)).toEqual(["running", "running", "ahead", "ahead"])
+    expect(stepStates("copy", true)).toEqual(["done", "done", "running", "ahead"])
+    expect(stepStates("cutover", true)).toEqual(["done", "done", "done", "running"])
+  })
+
+  test("begin at the first while the phase has not been read", () => {
+    expect(stepStates(undefined, true)).toEqual(["running", "running", "ahead", "ahead"])
+  })
 })

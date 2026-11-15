@@ -71,12 +71,13 @@ ordinary managed-network preference (the Network overview's *Managed changes* ro
 or failed native cleanup remains a warning, including outside Network. Further journaled changes
 remain blocked; the applying owner can explicitly retry cleanup. The warning cannot be dismissed
 until cleanup succeeds. Read accounts do not request administrator-only native profiles.
-The route form exposes an optional preferred source and shows returned sources in the existing
+The route form exposes an optional preferred source and shows returned sources in the routes
 table. Policy rules include an outgoing-interface selector and validated note. The routing diagram selects
-IPv4 or IPv6 rules and family-specific table routes, starting with the browser path's family. Its
-highlighted policy rule is explicitly an inference. The target lookup asks the kernel through the
-read-only `/network/routing/lookup` endpoint with optional source and packet mark, without sending
-traffic or claiming end-to-end reachability. Tailscale subnet drafts clear only after a successful offer;
+IPv4 or IPv6 rules and family-specific table routes, starting with the browser path's family and
+following the family of an address asked about. Its highlighted policy rule is explicitly an inference.
+The diagram's target field asks the kernel through the read-only `/network/routing/lookup` endpoint
+with optional source and packet mark once the typing pauses on one literal address, and again every
+fifteen seconds, without sending traffic or claiming end-to-end reachability. Tailscale subnet drafts clear only after a successful offer;
 retry reads current preferences so an accepted offer with a lost response is not duplicated.
 Resolver fallback servers and cache modes are editable through the existing confirmed apply;
 managed values are preserved, and unset defaults stay unset until explicitly chosen. Endpoint validation retains
@@ -254,8 +255,9 @@ are dated evidence, not proof of current attachment ownership.
   working-session counts are the recorded active count minus the recorded waiting count, while live
   session filters use the current session list. SQLite has no activity chart or recording poll.
   Performance's Statement history (`components/database/ops/performance-history.tsx`) reads
-  `GET /databases/{id}/statements/history` every minute over the same per-connection range, and an
-  open statement's `/statements/history/{statement}` on the same cadence; both are the backend's
+  `GET /databases/{id}/statements/history` every minute over the same per-connection range, and a
+  statement's page (`performance-statement.tsx`) its `/statements/history/{statement}` on the same
+  cadence, for its History view and the trends beside its figures; both are the backend's
   store, which the recorder writes every five minutes. A point no reading falls in is a gap in a
   statement's charts, and a reset is a mark on their time axis.
 - The hub link is read in two places, both through `usePoll` (`hooks/use-hub-link.tsx`).

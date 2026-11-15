@@ -8,8 +8,8 @@ import { ArrowLeft, ChevronDown, ChevronUp, Layers, Pencil } from "@/components/
 import { notify } from "@/lib/toast"
 import { get, post, ApiError } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
-import { useSessionState, useViewState } from "@/lib/view-state"
-import type { ContainerDetail, PortRoute } from "@/lib/types"
+import { useViewState } from "@/lib/view-state"
+import type { Container, ContainerDetail, PortRoute } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { dockerSource, journalSource, stackSource } from "@/lib/log-sources"
@@ -25,6 +25,7 @@ import { Hint, Term } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { containerVerdict, exitWords, restartWords } from "@/components/docker/container"
 import { ContainerIdentity } from "@/components/docker/container-identity"
+import { ContainerRail, useContainerRail } from "@/components/docker/container-rail"
 import { ContainerReadings, useContainerFrames } from "@/components/docker/container-readings"
 import { ContainerPicture } from "@/components/docker/container-picture"
 import { ContainerCompany } from "@/components/docker/container-company"
@@ -74,16 +75,111 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
  * of how it is reached and what it keeps; the containers it runs beside, as a
  * live table; what just happened to it and how it runs; and its ports and
  * networks as tables. Where each old figure went is in `design-system.md` §15.
+ *
+ * The Containers table stays beside it from `xl` (`ContainerRail`), as the
+ * process table does beside a process: the table's own search, chips and
+ * order, the container on screen filled, Alt+↑ and Alt+↓ to walk it with the
+ * open view carried along. Until 0.8.7 the walk followed whatever list the
+ * container had been opened from, which nothing on the page showed.
  */
 export function ContainerPage() {
   const { id } = useParams<{ id: string }>()
-  const tab = useSearchParams().get("tab")
+  const requested = useSearchParams().get("tab")
+  const router = useRouter()
+  const [remembered] = useViewState("docker.container.tab", "overview")
+  // The panel is keyed on the container *and* the requested tab, so a link to
+  // the logs of the container already open still moves to the logs.
+  const seed = `${id}:${requested ?? ""}`
+  // The view the panel is on, said back by it, so the walk carries it along.
+  const [view, setView] = useState<{ seed: string; tab: string }>()
+  const tab = view?.seed === seed ? view.tab : (requested ?? remembered)
+  const onView = useCallback((next: string) => setView({ seed, tab: next }), [seed])
+  const refresh = useRef<() => void>(() => {})
+  const onRefresh = useCallback((run: () => void) => {
+    refresh.current = run
+  }, [])
+
+  const rail = useContainerRail()
+  const here = (container: Container) => container.id === id || container.name === id
+  const at = rail.rows.findIndex(here)
+  const open = useCallback(
+    (next: string) =>
+      router.push(`/docker/containers/${encodeURIComponent(next)}?tab=${encodeURIComponent(tab)}`),
+    [router, tab],
+  )
+  const adjacent = (direction: number) => {
+    const next = at >= 0 ? rail.rows[at + direction] : rail.rows[direction > 0 ? 0 : -1]
+    if (next) open(next.id)
+  }
+  const previous = { disabled: at <= 0, run: () => adjacent(-1) }
+  const next = {
+    disabled: rail.rows.length === 0 || at >= rail.rows.length - 1,
+    run: () => adjacent(1),
+  }
+
   return (
-    // Keyed on the container *and* the requested tab, so a link to the logs of
-    // the container already open still moves to the logs.
-    <ContainerDetailPanel key={`${id}:${tab ?? ""}`} containerId={id} focusTab={tab ?? undefined} />
+    <Workspace
+      name="Container"
+      stateKey={`container.${id}.${tab}`}
+      refresh={() => refresh.current()}
+      search={false}
+      rows={false}
+      commands={[
+        {
+          id: "previous",
+          label: "Previous container",
+          keys: "Alt+↑",
+          chord: "Alt+ArrowUp",
+          disabled: previous.disabled,
+          run: previous.run,
+        },
+        {
+          id: "next",
+          label: "Next container",
+          keys: "Alt+↓",
+          chord: "Alt+ArrowDown",
+          disabled: next.disabled,
+          run: next.run,
+        },
+      ]}
+    >
+      <Page fill className="gap-5 md:gap-5">
+        {/* The table stays beside the container from `xl`, as it does beside
+            a process and a service: the list holds still while a view
+            scrolls. Narrower, the page is the one pane. */}
+        <div className="flex min-h-0 min-w-0 flex-1 gap-6">
+          <ContainerRail
+            className="hidden w-72 shrink-0 xl:flex"
+            rows={rail.rows}
+            current={id}
+            currentRow={rail.all.find(here)}
+            loading={rail.loading}
+            stats={rail.stats}
+            oomKilled={rail.oomKilled}
+            query={rail.query}
+            onQuery={rail.setQuery}
+            filtered={rail.filtered}
+            onClearFilters={rail.clearFilters}
+            caption={rail.caption}
+            onOpen={open}
+            bindings={rail.bindings}
+          />
+          <ContainerDetailPanel
+            key={seed}
+            containerId={id}
+            focusTab={requested ?? undefined}
+            onView={onView}
+            onRefresh={onRefresh}
+            previous={previous}
+            next={next}
+          />
+        </div>
+      </Page>
+    </Workspace>
   )
 }
+
+type Step = { disabled: boolean; run: () => void }
 
 const BACK = (
   <Link
@@ -97,6 +193,10 @@ const BACK = (
 function ContainerDetailPanel({
   containerId,
   focusTab,
+  onView,
+  onRefresh,
+  previous,
+  next,
 }: {
   containerId: string
   /**
@@ -107,6 +207,12 @@ function ContainerDetailPanel({
    * merely selects a row never feels like a log button.
    */
   focusTab?: string
+  /** Says which view is on screen, for the page that walks to the next container on it. */
+  onView: (tab: string) => void
+  /** Hands the page what its refresh key reads again. */
+  onRefresh: (run: () => void) => void
+  previous: Step
+  next: Step
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -149,18 +255,6 @@ function ContainerDetailPanel({
     },
     [remember],
   )
-  const [navigation] = useSessionState<{ id: string; name: string }[]>(
-    "docker.containers.navigation",
-    [],
-  )
-  const at = navigation.findIndex((container) => container.id === containerId)
-  const adjacent = (direction: number) => {
-    const next = at >= 0 ? navigation[at + direction] : undefined
-    if (next)
-      router.push(
-        `/docker/containers/${encodeURIComponent(next.id)}?tab=${encodeURIComponent(tab)}`,
-      )
-  }
   // Where each published port is reached from — the picture's ways in and the
   // Ports table both draw it.
   const routes = usePoll<PortRoute[]>(
@@ -196,6 +290,8 @@ function ContainerDetailPanel({
     refreshDetail()
     refreshRoutes()
   }, [refreshDetail, refreshRoutes])
+  useEffect(() => onRefresh(changed), [onRefresh, changed])
+  useEffect(() => onView(tab), [onView, tab])
 
   const views = detail
     ? [
@@ -211,181 +307,145 @@ function ContainerDetailPanel({
     : []
 
   return (
-    <Workspace
-      name="Container"
-      stateKey={`container.${containerId}.${tab}`}
-      refresh={changed}
-      search={false}
-      rows={false}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous container",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: at <= 0,
-          run: () => adjacent(-1),
-        },
-        {
-          id: "next",
-          label: "Next container",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: at < 0 || at >= navigation.length - 1,
-          run: () => adjacent(1),
-        },
-      ]}
-    >
-      <Page fill className="gap-5 md:gap-5">
-        <div className="flex min-w-0 shrink-0 flex-col gap-5">
-          <PageContext
-            eyebrow={BACK}
-            title={detail?.name ?? "Container"}
-            actions={
-              detail && (
-                <>
-                  {/* Every verb the container has, the lifecycle as words and
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
+      <div className="flex min-w-0 shrink-0 flex-col gap-5">
+        <PageContext
+          eyebrow={BACK}
+          title={detail?.name ?? "Container"}
+          actions={
+            detail && (
+              <>
+                {/* Every verb the container has, the lifecycle as words and
                     the rest behind one menu — the page used to draw only the
                     first three, so pausing or removing the container it was
                     about meant going back to the list. */}
-                  <ContainerVerbs
-                    detail={detail}
-                    confirm={confirm}
-                    onOpenTab={setTab}
-                    onChanged={changed}
-                  />
-                  {/* The walk belongs beside the shortcuts that drive it. On a
+                <ContainerVerbs
+                  detail={detail}
+                  confirm={confirm}
+                  onOpenTab={setTab}
+                  onChanged={changed}
+                />
+                {/* The walk belongs beside the shortcuts that drive it. On a
                     phone the pair wrapped onto a line of its own under the
                     verbs, two bare chevrons with nothing to say what they
                     walked; there the way to another container is the back
                     arrow above and the list it leads to. */}
-                  <span className="flex items-center max-sm:hidden">
-                    <IconAction
-                      label="Previous container"
-                      disabled={at <= 0}
-                      onClick={() => adjacent(-1)}
-                    >
-                      <ChevronUp />
-                    </IconAction>
-                    <IconAction
-                      label="Next container"
-                      disabled={at < 0 || at >= navigation.length - 1}
-                      onClick={() => adjacent(1)}
-                    >
-                      <ChevronDown />
-                    </IconAction>
-                    <WorkspaceHelp />
-                  </span>
-                </>
-              )
-            }
-          />
-          {detail && verdict && <ContainerIdentity detail={detail} verdict={verdict} />}
-        </div>
+                <span className="flex items-center max-sm:hidden">
+                  <IconAction
+                    label="Previous container"
+                    disabled={previous.disabled}
+                    onClick={previous.run}
+                  >
+                    <ChevronUp />
+                  </IconAction>
+                  <IconAction label="Next container" disabled={next.disabled} onClick={next.run}>
+                    <ChevronDown />
+                  </IconAction>
+                  <WorkspaceHelp />
+                </span>
+              </>
+            )
+          }
+        />
+        {detail && verdict && <ContainerIdentity detail={detail} verdict={verdict} />}
+      </div>
 
-        {error && <ErrorState error={error} />}
-        {!detail && !error && <LoadingRows />}
+      {error && <ErrorState error={error} />}
+      {!detail && !error && <LoadingRows />}
 
-        {detail && verdict && (
-          <Tabs value={tab} onValueChange={(next) => setTab(next)} className="min-h-0 flex-1 gap-0">
-            {/* The underlined strip every switcher between views of one thing
+      {detail && verdict && (
+        <Tabs value={tab} onValueChange={(next) => setTab(next)} className="min-h-0 flex-1 gap-0">
+          {/* The underlined strip every switcher between views of one thing
               wears (`tabClasses`), with the two views that hold a list
               counting it. */}
-            <TabsPrimitive.List
-              aria-label={`Views of ${detail.name}`}
-              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-            >
-              {views.map((view) => (
-                <TabsPrimitive.Trigger
-                  key={view.key}
-                  value={view.key}
-                  className={tabClasses(tab === view.key, "h-10")}
-                >
-                  {view.label}
-                  {view.count !== undefined && view.count > 0 && (
-                    <ChipCount>{view.count}</ChipCount>
-                  )}
-                </TabsPrimitive.Trigger>
-              ))}
-            </TabsPrimitive.List>
+          <TabsPrimitive.List
+            aria-label={`Views of ${detail.name}`}
+            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
+          >
+            {views.map((view) => (
+              <TabsPrimitive.Trigger
+                key={view.key}
+                value={view.key}
+                className={tabClasses(tab === view.key, "h-10")}
+              >
+                {view.label}
+                {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
+              </TabsPrimitive.Trigger>
+            ))}
+          </TabsPrimitive.List>
 
-            <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto pt-6">
-              {/*
+          <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto pt-6">
+            {/*
                 Native usage, connections, neighboring containers, events and configuration
                 remain readable without a separate diagnosis.
               */}
-              <div className="flex min-w-0 flex-col gap-8 pb-4">
-                <ContainerReadings
-                  detail={detail}
-                  frames={frames}
-                  onUsage={() => setTab("usage")}
-                />
+            <div className="flex min-w-0 flex-col gap-8 pb-4">
+              <ContainerReadings detail={detail} frames={frames} onUsage={() => setTab("usage")} />
 
-                <ContainerPicture
-                  detail={detail}
-                  verdict={verdict}
-                  routes={routes.data}
-                  traffic={traffic}
-                  readings={
-                    running && frames.current
-                      ? {
-                          cpu: frames.current.cpuReady ? frames.current.cpuPercent : undefined,
-                          memory: frames.current.memUsage,
-                        }
-                      : undefined
-                  }
-                />
-                <ContainerCompany container={detail} tab="overview" />
-                <div className="grid gap-8 xl:grid-cols-2 [&>*]:min-w-0">
-                  <ContainerRecent detail={detail} onEvents={() => setTab("logs", "events")} />
-                  <HowItRuns detail={detail} />
-                </div>
-                <div className="grid items-start gap-6 2xl:grid-cols-2 [&>*]:min-w-0">
-                  <PortsTable detail={detail} routes={routes.data} />
-                  <NetworksTable detail={detail} />
-                </div>
+              <ContainerPicture
+                detail={detail}
+                verdict={verdict}
+                routes={routes.data}
+                traffic={traffic}
+                readings={
+                  running && frames.current
+                    ? {
+                        cpu: frames.current.cpuReady ? frames.current.cpuPercent : undefined,
+                        memory: frames.current.memUsage,
+                      }
+                    : undefined
+                }
+              />
+              <ContainerCompany container={detail} tab="overview" />
+              <div className="grid gap-8 min-[1600px]:grid-cols-2 [&>*]:min-w-0">
+                <ContainerRecent detail={detail} onEvents={() => setTab("logs", "events")} />
+                <HowItRuns detail={detail} />
               </div>
-            </TabsContent>
+              <div className="grid items-start gap-6 min-[1856px]:grid-cols-2 [&>*]:min-w-0">
+                <PortsTable detail={detail} routes={routes.data} />
+                <NetworksTable detail={detail} />
+              </div>
+            </div>
+          </TabsContent>
 
-            <TabsContent value="usage" className="min-h-0 flex-1 overflow-y-auto pt-6">
-              <ContainerUsageTab key={detail.id} detail={detail} onLimitsSaved={changed} />
-            </TabsContent>
+          <TabsContent value="usage" className="min-h-0 flex-1 overflow-y-auto pt-6">
+            <ContainerUsageTab key={detail.id} detail={detail} onLimitsSaved={changed} />
+          </TabsContent>
 
-            {/* Scrolls on a phone, where the readings and a pane worth reading
+          {/* Scrolls on a phone, where the readings and a pane worth reading
               are taller than what is left of the window under the facts. */}
-            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-4">
-              <ContainerLogs detail={detail} view={logView} />
-            </TabsContent>
+          <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-4">
+            <ContainerLogs detail={detail} view={logView} />
+          </TabsContent>
 
-            <TabsContent value="env" className="min-h-0 flex-1 overflow-y-auto pt-4">
-              <EnvironmentTable env={detail.env} />
-            </TabsContent>
+          <TabsContent value="env" className="min-h-0 flex-1 overflow-y-auto pt-4">
+            <EnvironmentTable env={detail.env} />
+          </TabsContent>
 
-            {/* The listing takes the tab's height and scrolls inside itself, so
+          {/* The listing takes the tab's height and scrolls inside itself, so
               the tab only scrolls once a writable-layer report outgrows it. */}
-            <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto pt-4">
-              <ContainerStorageTab detail={detail} />
-            </TabsContent>
+          <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto pt-4">
+            <ContainerStorageTab detail={detail} />
+          </TabsContent>
 
-            <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto pt-4">
-              {tab === "configure" && (
-                <ContainerConfiguration detail={detail} confirm={confirm} onChanged={changed} />
-              )}
-            </TabsContent>
-            <TabsContent value="inspect" className="min-h-0 flex-1 pt-4">
-              {tab === "inspect" && <ContainerInspectTab containerId={detail.id} />}
-            </TabsContent>
-
-            {shell && (
-              <TabsContent value="shell" className="min-h-0 flex-1 pt-4">
-                {tab === "shell" && <ContainerShellTab detail={detail} />}
-              </TabsContent>
+          <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto pt-4">
+            {tab === "configure" && (
+              <ContainerConfiguration detail={detail} confirm={confirm} onChanged={changed} />
             )}
-          </Tabs>
-        )}
-        {dialog}
-      </Page>
-    </Workspace>
+          </TabsContent>
+          <TabsContent value="inspect" className="min-h-0 flex-1 pt-4">
+            {tab === "inspect" && <ContainerInspectTab containerId={detail.id} />}
+          </TabsContent>
+
+          {shell && (
+            <TabsContent value="shell" className="min-h-0 flex-1 pt-4">
+              {tab === "shell" && <ContainerShellTab detail={detail} />}
+            </TabsContent>
+          )}
+        </Tabs>
+      )}
+      {dialog}
+    </div>
   )
 }
 

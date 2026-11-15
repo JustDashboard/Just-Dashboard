@@ -3,6 +3,7 @@
 import { Connection, Globe, Router, type Icon } from "@/components/icons"
 import type { Exposure } from "@/lib/types"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { Bone } from "@/components/bone"
 import { NetworkFact } from "@/components/client-mark"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -51,15 +52,27 @@ export function ExposureIdentity({
   exposure: Exposure | undefined
   aside?: React.ReactNode
 }) {
+  // Waiting, it is the line itself with bones for its words: a title and four
+  // facts, which wrap under the tile on a phone as the facts they stand for
+  // do. It was a tile beside two bones on one row at every width, a line of
+  // facts shorter than the loaded line at 390px, so what is under it moved
+  // down when the exposure landed.
   if (!exposure) {
     return (
-      <div className="flex min-w-0 items-center gap-4 border-b border-hairline pb-6">
-        <Skeleton className="size-12 rounded-xl" />
-        <div className="space-y-2">
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-4 w-72" />
-        </div>
-      </div>
+      <HostIdentity
+        logo={<Skeleton className="size-12 rounded-xl" />}
+        title={<Bone className="w-36" />}
+        facts={
+          <>
+            <Bone className="w-36" />
+            {/* The interfaces are tags, a pixel taller than the line's words. */}
+            <Bone className="h-[17px] w-24" />
+            <Bone className="w-40" />
+            <Bone className="w-32" />
+          </>
+        }
+        aside={aside}
+      />
     )
   }
   const grade = EXPOSURE_GRADE[exposure.grade]

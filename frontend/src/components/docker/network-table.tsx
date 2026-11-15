@@ -1,10 +1,11 @@
 "use client"
 
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Linked, Trash } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { RowLink } from "@/components/page"
 import { ProductLogos } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Tag } from "@/components/tag"
@@ -26,18 +27,17 @@ import type { Container, DockerNetwork } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { memberProducts, type NetworkRate } from "@/components/docker/network-band"
 import {
-  isDashboardOwn,
-  isSystem,
+  attachRefusal,
   isUnused,
+  networkHref,
   networkHue,
   networkOwner,
-  refusesAttach,
+  removeRefusal,
 } from "@/components/docker/networks"
 
 type RowsProps = {
   rates: Map<string, NetworkRate>
   containers: Map<string, Container>
-  onOpen: (network: DockerNetwork) => void
   onAttach: (network: DockerNetwork) => void
   onRemove: (network: DockerNetwork) => void
 }
@@ -50,13 +50,18 @@ type RowsProps = {
  * they run, and what its bridge is carrying now with its last two minutes.
  * Each network keeps its colour down the row's edge, the one its span of the
  * traffic bar, its blocks of the address pool and its chips in the containers
- * table carry. The name opens the network; so does the row.
+ * table carry. The name is the link to the network's own page; the row is the
+ * pointer's larger target for it.
  *
  * It was a column of cards since 2026-09-23, every one the same grey with the
  * same three facts in one line. Eleven networks are compared down their
  * columns — which is busy, which has nothing on it, which holds 172.20 — far
  * more than one is entered, as the containers table argued when it went back
  * to a table (§16). Below `xl` the same row is drawn down, nothing dropped.
+ *
+ * A row is one height in both, whatever it has: a network nothing is on and
+ * one carrying megabytes take the same lines, so the row under the pointer
+ * does not move when a bridge starts or stops carrying.
  */
 export function NetworkRows({ rows, ...rest }: RowsProps & { rows: DockerNetwork[] }) {
   const arrived = useArrivals(rows.map((n) => n.id))
@@ -102,15 +107,18 @@ export function NetworkRows({ rows, ...rest }: RowsProps & { rows: DockerNetwork
   )
 }
 
+/** Every cell of a row, at the one height a row has: two lines, whatever is in them. */
+const CELL = "h-16 py-0"
+
 function NetworkTableRow({
   network,
   arrived,
   rates,
   containers,
-  onOpen,
   onAttach,
   onRemove,
 }: RowsProps & { network: DockerNetwork; arrived: boolean }) {
+  const router = useRouter()
   const verbs = useNetworkVerbs({ network, onAttach, onRemove })
   return (
     <TableRow
@@ -121,22 +129,22 @@ function NetworkTableRow({
         arrived && "animate-rise",
         isUnused(network) && "text-muted-foreground",
       )}
-      onActivate={() => onOpen(network)}
+      onActivate={() => router.push(networkHref(network.name))}
     >
-      <TableCell className="relative py-2.5">
+      <TableCell className={cn("relative", CELL)}>
         <HueEdge network={network} />
-        <NetworkTitle network={network} onOpen={() => onOpen(network)} />
+        <NetworkTitle network={network} />
       </TableCell>
-      <TableCell className="py-2.5">
+      <TableCell className={CELL}>
         <SubnetReading network={network} />
       </TableCell>
-      <TableCell className="py-2.5">
+      <TableCell className={CELL}>
         <MembersReading network={network} containers={containers} />
       </TableCell>
-      <TableCell className="py-2.5">
+      <TableCell className={CELL}>
         <TrafficReading network={network} rate={rates.get(network.id)} />
       </TableCell>
-      <TableCell className="py-2.5">
+      <TableCell className={CELL}>
         <VerbActions dim verbs={verbs} className="justify-end" />
       </TableCell>
     </TableRow>
@@ -145,45 +153,59 @@ function NetworkTableRow({
 
 /**
  * A network drawn down rather than across. Still a row, not a card: no frame,
- * a hairline to the next, a wash under the pointer. The title is the real
- * button; the surrounding press is a convenience for the pointer that skips
- * any press landing on a control of its own.
+ * a hairline to the next, a wash under the pointer. Three lines on the left —
+ * its name, who made it, its subnet and how many are on it — and on the right
+ * its verbs over what its bridge carries, in a box of one height, so a
+ * network with traffic and one without are the same row. The name is the
+ * link; the surrounding press is a convenience for the pointer that skips any
+ * press landing on a control of its own.
  */
 function NetworkNarrowRow({
   network,
   arrived,
   rates,
   containers,
-  onOpen,
   onAttach,
   onRemove,
 }: RowsProps & { network: DockerNetwork; arrived: boolean }) {
+  const router = useRouter()
   const verbs = useNetworkVerbs({ network, onAttach, onRemove })
+  const rate = rates.get(network.id)
+  const carrying = network.bridge && rate && !(membersKnown(network) && network.usedBy.length === 0)
   return (
-    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link a keyboard opens it by
     <li
       data-workspace-item={network.id}
       data-workspace-name={network.name}
       className={cn(
-        "group relative flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
+        "group relative flex h-[5.5rem] min-w-0 items-center gap-3 transition-colors hover:bg-row-hover",
         ROW_BLEED,
         arrived && "animate-rise",
       )}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("a, button, [role='menuitem']")) return
-        onOpen(network)
+        router.push(networkHref(network.name))
       }}
     >
       <HueEdge network={network} />
-      <div className="min-w-0 flex-1 space-y-1.5 pl-3">
-        <NetworkTitle network={network} onOpen={() => onOpen(network)} />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-hint">
+      <div className="min-w-0 flex-1 pl-3">
+        <NetworkTitle network={network} />
+        <p className="mt-1 flex min-w-0 items-center gap-x-3 text-hint">
           <SubnetReading network={network} inline />
           <MembersReading network={network} containers={containers} inline />
-          <TrafficReading network={network} rate={rates.get(network.id)} inline />
-        </div>
+        </p>
       </div>
-      <VerbActions verbs={verbs} className="shrink-0" />
+      <div className="flex h-full shrink-0 flex-col items-end justify-center gap-1">
+        {verbs.length > 0 && <VerbActions verbs={verbs} />}
+        <span className="numeric grid h-7 content-center text-right font-mono text-micro leading-tight">
+          {carrying && (
+            <>
+              <span style={{ color: RX }}>↓ {formatRate(rate.rx)}</span>
+              <span style={{ color: TX }}>↑ {formatRate(rate.tx)}</span>
+            </>
+          )}
+        </span>
+      </div>
     </li>
   )
 }
@@ -207,7 +229,7 @@ function HueEdge({ network }: { network: DockerNetwork }) {
  * internet, IPv6 — and who made it: a compose project, this dashboard, Docker
  * itself, or nobody in particular.
  */
-function NetworkTitle({ network, onOpen }: { network: DockerNetwork; onOpen: () => void }) {
+function NetworkTitle({ network }: { network: DockerNetwork }) {
   const owner = networkOwner(network)
   const driver =
     network.driver === "bridge"
@@ -218,9 +240,17 @@ function NetworkTitle({ network, onOpen }: { network: DockerNetwork; onOpen: () 
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2">
-        <RowLink data-workspace-primary title={network.name} onClick={onOpen}>
+        <Link
+          data-workspace-primary
+          href={networkHref(network.name)}
+          title={network.name}
+          // The row's own press already opens it for the pointer; this is the
+          // link, and must not open it twice.
+          onClick={(event) => event.stopPropagation()}
+          className="max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring hover:underline"
+        >
           {network.name}
-        </RowLink>
+        </Link>
         {network.internal && (
           <Tag className="shrink-0" title="Containers on it reach each other and nothing beyond">
             no internet
@@ -258,7 +288,7 @@ function SubnetReading({ network, inline }: { network: DockerNetwork; inline?: b
       )}
     </span>
   )
-  if (inline) return subnet
+  if (inline) return <span className="min-w-0 shrink truncate">{subnet}</span>
   return (
     <div className="min-w-0">
       {subnet}
@@ -303,10 +333,15 @@ function MembersReading({
   ).length
   const products = memberProducts(network, containers)
   return (
-    <span className="flex min-w-0 items-center gap-2.5" title={network.usedBy.join(", ")}>
+    <span
+      className={cn("flex min-w-0 items-center gap-2.5", inline && "shrink-0")}
+      title={network.usedBy.join(", ")}
+    >
       {products.length > 0 && !inline && <ProductLogos ids={products} />}
       <span className="min-w-0">
-        <span className="numeric block text-body">{plural(count, "container")}</span>
+        <span className={cn("numeric block", inline ? "text-hint" : "text-body")}>
+          {plural(count, "container")}
+        </span>
         {!inline && containers.size > 0 && (
           <span
             className={cn(
@@ -328,17 +363,8 @@ function MembersReading({
  * of its own to read, and one with nothing attached carries nothing; both say
  * so with a dash rather than drawing a zero.
  */
-function TrafficReading({
-  network,
-  rate,
-  inline,
-}: {
-  network: DockerNetwork
-  rate?: NetworkRate
-  inline?: boolean
-}) {
+function TrafficReading({ network, rate }: { network: DockerNetwork; rate?: NetworkRate }) {
   if (!network.bridge || (membersKnown(network) && network.usedBy.length === 0) || !rate) {
-    if (inline) return null
     return (
       <p
         className="text-right text-hint text-muted-foreground"
@@ -352,14 +378,6 @@ function TrafficReading({
       >
         —
       </p>
-    )
-  }
-  if (inline) {
-    return (
-      <span className="numeric font-mono text-micro">
-        <span style={{ color: RX }}>↓ {formatRate(rate.rx)}</span>{" "}
-        <span style={{ color: TX }}>↑ {formatRate(rate.tx)}</span>
-      </span>
     )
   }
   return <RatePair rx={rate.rx} tx={rate.tx} points={rate.points} className="justify-end" />
@@ -381,38 +399,27 @@ function useNetworkVerbs({
   onRemove: (network: DockerNetwork) => void
 }): Verb[] {
   const { can } = useAuth()
-  const system = isSystem(network)
   const verbs: Verb[] = []
-  if (can("service.control") && !system && network.driver !== "host") {
-    const refused = isDashboardOwn(network)
-      ? "The dashboard's own private network takes no other containers"
-      : refusesAttach(network)
-        ? "A swarm network made without --attachable takes only services"
-        : undefined
+  const refusal = attachRefusal(network)
+  if (can("service.control") && !refusal?.hidden) {
     verbs.push({
       key: "attach",
-      label: refused ?? `Attach a container to ${network.name}`,
+      label: refusal?.reason ?? `Attach a container to ${network.name}`,
       icon: Linked,
       inline: true,
-      disabled: refused !== undefined,
+      disabled: refusal !== undefined,
       run: () => onAttach(network),
     })
   }
   if (can("destructive")) {
-    const removable = isUnused(network)
+    const blocked = removeRefusal(network)
     verbs.push({
       key: "remove",
-      label: system
-        ? "Docker's own network — cannot be removed"
-        : !membersKnown(network)
-          ? "Who uses it could not be read — cannot judge a removal"
-          : removable
-            ? `Remove ${network.name}`
-            : `In use by ${plural(network.usedBy.length, "container")} — cannot be removed while attached`,
+      label: blocked ?? `Remove ${network.name}`,
       icon: Trash,
       inline: true,
-      danger: removable,
-      disabled: !removable,
+      danger: !blocked,
+      disabled: blocked !== undefined,
       run: () => onRemove(network),
     })
   }

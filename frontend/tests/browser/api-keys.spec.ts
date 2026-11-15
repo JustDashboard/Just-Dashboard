@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test"
 import { keyTokens, mockKeys } from "./api-keys-fixture"
+import { risen } from "./risen"
 
-const rows = (page: Page) => page.locator("#keys [data-slot=row]")
+const rows = (page: Page) => page.locator("#keys [data-slot=choice-row]")
 async function action(page: Page, name: string, label: string) {
   await page.getByRole("button", { name: `More actions for ${name}` }).click()
   await page.getByRole("menuitem", { name: label, exact: true }).click()
@@ -31,7 +32,7 @@ test("search and usage filters narrow keys, including owner names and inactive p
   await page.getByRole("button", { name: "Clear filters" }).click()
   await page.getByRole("textbox", { name: "Search keys" }).fill("0000abcd")
   await expect(page.getByRole("button", { name: "Hide inactive keys" })).toBeVisible()
-  await expect(page.locator("[data-slot=row]", { hasText: "old-laptop" })).toBeVisible()
+  await expect(page.locator("[data-slot=choice-row]", { hasText: "old-laptop" })).toBeVisible()
 })
 
 test("history folds inactive keys and record deletion is distinct from revocation", async ({
@@ -39,7 +40,7 @@ test("history folds inactive keys and record deletion is distinct from revocatio
 }) => {
   const { calls } = await mockKeys(page)
   await page.goto("/account/keys")
-  await expect(page.locator("[data-slot=row]", { hasText: "old-laptop" })).toHaveCount(0)
+  await expect(page.locator("[data-slot=choice-row]", { hasText: "old-laptop" })).toHaveCount(0)
   await page.getByRole("button", { name: "Show inactive keys" }).click()
   await action(page, "old-laptop", "Delete record")
   const dialog = page.getByRole("dialog", { name: "Delete key record" })
@@ -48,13 +49,13 @@ test("history folds inactive keys and record deletion is distinct from revocatio
   expect(calls).toHaveLength(0)
   await action(page, "old-laptop", "Delete record")
   await page.getByRole("dialog").getByRole("button", { name: "Delete record", exact: true }).click()
-  await expect(page.locator("[data-slot=row]", { hasText: "old-laptop" })).toHaveCount(0)
+  await expect(page.locator("[data-slot=choice-row]", { hasText: "old-laptop" })).toHaveCount(0)
   expect(calls).toEqual([{ method: "DELETE", path: "/tokens/4/record", body: undefined }])
   await action(page, "github-actions", "Revoke key")
   await expect(page.getByRole("dialog")).toContainText("Its record stays in history")
   await page.getByRole("dialog").getByRole("button", { name: "Revoke", exact: true }).click()
   await expect(rows(page)).toHaveCount(3)
-  await expect(page.locator("[data-slot=row]", { hasText: "github-actions" })).toContainText(
+  await expect(page.locator("[data-slot=choice-row]", { hasText: "github-actions" })).toContainText(
     "revoked",
   )
   expect(calls.at(-1)?.path).toBe("/tokens/1")
@@ -486,7 +487,7 @@ test("a failed record deletion leaves the record and confirmation available", as
   await page.getByRole("dialog").getByRole("button", { name: "Delete record", exact: true }).click()
   await expect(page.getByRole("dialog", { name: "Delete key record" })).toBeVisible()
   await expect(page.getByText("Delete key record failed", { exact: true })).toBeVisible()
-  await expect(page.locator("[data-slot=row]", { hasText: "old-laptop" })).toBeAttached()
+  await expect(page.locator("[data-slot=choice-row]", { hasText: "old-laptop" })).toBeAttached()
 })
 
 for (const width of [390, 1280, 1720]) {
@@ -577,4 +578,108 @@ test("closing a dialog hands the keyboard back to what opened it", async ({ page
   await confirmation.getByRole("button", { name: "Cancel" }).click()
   await expect(confirmation).toHaveCount(0)
   await expect.poll(focused).toBe("More actions for github-actions")
+})
+
+/**
+ * The 0.8.7 pass: the page opens on a line that counts the keys, and each key is a card of one
+ * height, as the Users page draws an account.
+ */
+for (const width of [1280, 390]) {
+  test(`keys are cards of one height under the line that counts them at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockKeys(page)
+    await page.goto("/account/keys")
+    await expect(rows(page)).toHaveCount(4)
+    await risen(page)
+    await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+
+    const line = page.locator("[data-slot=host-identity]")
+    await expect(line).toHaveAttribute("data-layout", "project")
+    await expect(line).toContainText("4 keys")
+    await expect(line).toContainText("2 limited")
+    await expect(line).toContainText("2 read-only")
+    await expect(line).toContainText("2 revoked or expired")
+    await expect(page.getByRole("button", { name: "New key" })).toHaveCount(1)
+    await expect(line.getByRole("button", { name: "New key" })).toBeVisible()
+
+    // A key somebody else holds carries their face, one never used says so, and each is as
+    // tall as the next: the list is read down its edges.
+    const boxes = await rows(page).evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return { y: box.y, height: Math.round(box.height) }
+      }),
+    )
+    expect(new Set(boxes.map((box) => box.height)).size).toBe(1)
+    const pitch = boxes[1].y - boxes[0].y
+    for (let index = 2; index < boxes.length; index += 1) {
+      expect(boxes[index].y - boxes[index - 1].y).toBe(pitch)
+    }
+    // A card opens nothing: it carries no arrow and no control of its own but its menu.
+    const first = rows(page).first()
+    await expect(first.getByRole("button")).toHaveCount(1)
+    await expect(first.getByRole("button", { name: /^More actions for / })).toBeVisible()
+
+    // The history's cards are the same cards.
+    await page.getByRole("button", { name: "Show inactive keys" }).click()
+    const spent = page.locator("[data-slot=choice-row]", { hasText: "old-laptop" })
+    await expect(spent).toBeVisible()
+    expect(Math.round((await spent.boundingBox())!.height)).toBe(boxes[0].height)
+
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      ),
+    ).toBe(false)
+  })
+}
+
+test("the keys page stands where it will while the keys are read, and says so when they cannot be", async ({
+  page,
+}) => {
+  await mockKeys(page)
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  let fail = true
+  await page.route("**/api/v1/tokens/", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await held
+    if (fail)
+      return route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "internal", message: "the store is locked" } }),
+      })
+    return route.fallback()
+  })
+  await page.goto("/account/keys")
+  const line = page.locator("[data-slot=host-identity]")
+  await expect(line).toContainText("reading")
+  await risen(page)
+  const waiting = await line.boundingBox()
+  release()
+  // Failed: the line stays, the reason is said, and nothing is offered but another try.
+  await expect(page.locator("[data-slot=error-state]")).toContainText(/the store is locked/i)
+  expect((await line.boundingBox())!.y).toBe(waiting!.y)
+  await expect(page.getByRole("button", { name: "New key" })).toHaveCount(0)
+  fail = false
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(rows(page)).toHaveCount(4)
+  await risen(page)
+  expect((await line.boundingBox())!.y).toBe(waiting!.y)
+  expect(Math.round((await line.boundingBox())!.height)).toBe(Math.round(waiting!.height))
+})
+
+test("with no key at all the line says so and the one New key is the empty state's", async ({
+  page,
+}) => {
+  await mockKeys(page, "admin", [])
+  await page.goto("/account/keys")
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("none in use")
+  await expect(page.getByText("No API keys yet")).toBeVisible()
+  await expect(page.getByRole("button", { name: "New key" })).toHaveCount(1)
+  await page.getByRole("button", { name: "New key" }).click()
+  await expect(page.getByRole("dialog")).toBeVisible()
 })

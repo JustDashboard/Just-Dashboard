@@ -51,7 +51,9 @@ with the scene as Excalidraw first restored it, so opening, panning, zooming or 
 bumps the revision. The whole scene is serialized only when it is saved. The name is saved trimmed; a blank name
 is never sent and is restored to the saved name when the field loses focus. The UI debounces saves,
 saves at once on Ctrl/Cmd+S (Excalidraw's own save-to-file shortcut is disabled), and shows pending,
-saving, saved, failed, unnamed, conflict and deleted states. When changes cannot be saved, Back and
+saving, saved, failed, unnamed, conflict and deleted states as a dot and words in the head bar. Save
+now is in the bar's menu, a failed save offers Try again beside its words, and a conflict puts Reload
+in the place of the bar's one command. When changes cannot be saved, Back and
 in-board links ask before leaving without saving instead of doing nothing.
 
 A flush waits for every edit, including changes made while an earlier request was in flight.

@@ -9,7 +9,8 @@ import type { Passkey } from "@/lib/types"
 import { registerPasskey, suggestedPasskeyName, useHostname, usePasskeyPlace } from "@/lib/passkeys"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { Field, FormNote, FormSection } from "@/components/form"
+import { Field, FormNote } from "@/components/form"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
 import { Modal } from "@/components/modal"
 import { Row, RowList } from "@/components/row-list"
 import { ErrorState, LoadingRows } from "@/components/state"
@@ -25,9 +26,11 @@ import { VerbActions, type Verb } from "@/components/verbs"
  * keeps it synced, and — for one made at another name of this dashboard —
  * where it works, since a browser offers a passkey only at the name it was
  * made at. Adding one asks for the password and the code again; a passkey
- * never stands in for the code.
+ * never stands in for the code. A section of the account's settings column:
+ * how many there are and what one replaces are the head's line of facts, and
+ * *Add a passkey* is on the title line.
  */
-export function PasskeysSection({ className }: { className?: string }) {
+export function PasskeysSection() {
   const { status } = useAuth()
   const keys = usePoll((signal) => get<Passkey[]>("/account/passkeys", undefined, signal), 30000)
   const place = usePasskeyPlace()
@@ -60,12 +63,10 @@ export function PasskeysSection({ className }: { className?: string }) {
   ]
 
   return (
-    <FormSection
-      aside
-      className={className}
+    <SettingSection
       title="Passkeys"
-      hint={
-        <span className="flex flex-col items-start gap-1.5">
+      state={
+        <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           {/* "none" is an answer, so it waits for one: an unread list may hold
               the only way this account signs in without a password. */}
           {keys.data ? (
@@ -78,10 +79,20 @@ export function PasskeysSection({ className }: { className?: string }) {
           )}
           <span>
             {totp
-              ? "In place of the password. The code is still asked for."
-              : "In place of the password."}
+              ? "in place of the password · the code is still asked for"
+              : "in place of the password"}
           </span>
         </span>
+      }
+      // The section's one verb, on its title line; where a passkey cannot be
+      // made, the reason stands in the section instead.
+      actions={
+        (!place || place.usable) && (
+          <Button size="sm" variant="outline" disabled={!place} onClick={() => setAdding(true)}>
+            <Plus className="size-3.5" />
+            Add a passkey
+          </Button>
+        )
       }
     >
       {keys.error && !keys.data && (
@@ -93,6 +104,8 @@ export function PasskeysSection({ className }: { className?: string }) {
           {list.map((key) => (
             <Row
               key={key.id}
+              // On the column's own edge, as the sessions under it are.
+              className="px-0"
               leading={<Fingerprint aria-hidden className="size-4 text-muted-foreground" />}
               title={key.name}
               subtitle={passkeyLine(key, hostname)}
@@ -103,16 +116,7 @@ export function PasskeysSection({ className }: { className?: string }) {
           ))}
         </RowList>
       )}
-      {place && !place.usable ? (
-        <FormNote>{place.reason}</FormNote>
-      ) : (
-        <div>
-          <Button size="sm" variant="outline" disabled={!place} onClick={() => setAdding(true)}>
-            <Plus className="size-3.5" />
-            Add a passkey
-          </Button>
-        </div>
-      )}
+      {place && !place.usable && <FormNote>{place.reason}</FormNote>}
       {/* Mounted only while open, so each opening starts from a clean form. */}
       {adding && (
         <AddPasskey
@@ -135,7 +139,7 @@ export function PasskeysSection({ className }: { className?: string }) {
         />
       )}
       {dialog}
-    </FormSection>
+    </SettingSection>
   )
 }
 
@@ -211,7 +215,7 @@ function AddPasskey({
       }
     >
       <form id="add-passkey" onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="Name" htmlFor="passkey-name" hint="How it is listed here.">
+        <Field label="Name" htmlFor="passkey-name" info="How it is listed here.">
           <Input
             id="passkey-name"
             value={name}

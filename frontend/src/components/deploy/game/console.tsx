@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { Copy, Download, Logs, Slash, Trash } from "@/components/icons"
+import { Copy, Download, Logs, Trash } from "@/components/icons"
 import { post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { clock, plural } from "@/lib/format"
@@ -12,11 +12,11 @@ import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import type { GameConsoleResult } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { FormNote } from "@/components/form"
+import { FormNote, InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { LogText } from "@/components/logs/log-text"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipStrip, FilterChip } from "@/components/tabs"
 import { BorderBeam } from "@/components/ui/border-beam"
@@ -28,8 +28,22 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "@/components/ui/input-group"
+import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { GameIdentity, useGameOverview } from "@/components/deploy/game/identity"
+import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
+import {
+  GameIdentity,
+  GameIdentitySkeleton,
+  useGameOverview,
+} from "@/components/deploy/game/identity"
+
+/**
+ * The console's height: the window below the project's header and this page's
+ * identity line, so the composer and the footer under it are on screen on a
+ * laptop without scrolling the page. Its outline while loading and the page
+ * that stands in for it when nothing is running take the same.
+ */
+const GAME_CONSOLE_HEIGHT = "h-[clamp(20rem,calc(100dvh-19.5rem),40rem)]"
 
 type ConsoleLine = {
   id: number
@@ -137,20 +151,35 @@ export function GameConsole({ projectId }: { projectId: number }) {
   const data = overview.data
   return (
     <div className="space-y-6">
-      {data && <GameIdentity overview={data} projectId={projectId} onChanged={overview.refresh} />}
-      {overview.error ? (
-        <ErrorState error={overview.error} />
-      ) : !data ? (
-        <LoadingRows rows={3} />
-      ) : data.status !== "available" ? (
-        <Notice title="Console unavailable" icon={Slash}>
-          {data.reason ?? "This game server has no running container to send commands to."}
-        </Notice>
+      {data ? (
+        <GameIdentity overview={data} projectId={projectId} onChanged={overview.refresh} />
       ) : (
-        // Sized to the window below the project's header and this page's
-        // identity line, so the composer and the footer under it are on
-        // screen on a laptop without scrolling the page.
-        <Pane className="relative h-[clamp(20rem,calc(100dvh-19.5rem),40rem)]">
+        !overview.error && <GameIdentitySkeleton />
+      )}
+      {/* Only while there is nothing to show: a poll that fails once the
+          console is up must not take the transcript off the page. */}
+      {overview.error && !data ? (
+        <ErrorState error={overview.error} onRetry={overview.refresh} />
+      ) : !data ? (
+        // The pane's own outline, so the console lands where it was drawn.
+        <Pane aria-hidden className={GAME_CONSOLE_HEIGHT}>
+          <PaneHeader className="py-2">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-14" />
+          </PaneHeader>
+          <div className="min-h-0 flex-1 bg-surface-sunken" />
+        </Pane>
+      ) : data.status !== "available" ? (
+        <ProjectEmpty
+          className={GAME_CONSOLE_HEIGHT}
+          title="No running server to send commands to"
+          reason={data.reason}
+        >
+          <EmptyStep href={`/deploy/${projectId}/runtime`}>Runtime</EmptyStep>
+          <EmptyStep href={`/deploy/${projectId}/logs`}>Logs</EmptyStep>
+        </ProjectEmpty>
+      ) : (
+        <Pane className={cn("relative", GAME_CONSOLE_HEIGHT)}>
           {busy && <BorderBeam size={96} duration={4} />}
           <PaneHeader className="flex-wrap gap-2 py-2">
             <span className="text-xs font-medium">Game console</span>
@@ -312,9 +341,11 @@ export function GameConsole({ projectId }: { projectId: number }) {
               {failed > 0 && <span className="text-warning"> · {failed} failed</span>}
             </span>
             {data.console && (
-              <span className="min-w-0">
-                Only plain game commands are accepted. Anything carrying a shell character is
-                refused before it reaches the container.
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="min-w-0 truncate">Plain game commands only</span>
+                <InfoTip label="What the console accepts">
+                  Anything carrying a shell character is refused before it reaches the container.
+                </InfoTip>
               </span>
             )}
           </PaneFooter>
