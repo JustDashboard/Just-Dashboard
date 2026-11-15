@@ -119,6 +119,7 @@ import {
   HeaderListField,
 } from "@/components/proxy/site-form"
 import { ListField } from "@/components/list-field"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
 import { siteHref } from "@/components/proxy/site-tabs"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -859,6 +860,16 @@ function DomainRow({
   const passwordHeld = gated && !protection
   const tunnelHeld = !tunnel && (wildcard || fenced)
   const typedProblem = passwordProblem(password)
+  // The sign-in's fields open by themselves when Password is turned on, since
+  // that press is a request to set them; after that the row's fact opens them.
+  const [asking, setAsking] = useState(false)
+  const signInIncomplete = Boolean(
+    protection &&
+      (!protection.username ||
+        protectionUserProblem(protection.username) ||
+        (!protection.hash && !password) ||
+        (password && typedProblem)),
+  )
 
   return (
     <li className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-3 first:pt-0 @min-[44rem]:grid-cols-[2rem_minmax(0,1fr)_auto_auto_auto]">
@@ -942,6 +953,80 @@ function DomainRow({
                 )}
             </span>
           )}
+          {/* The sign-in is a fact of the row and its two fields a layer over
+              it, so the list never grows under a row (PGD-26). */}
+          {protection && (
+            <Popover open={asking} onOpenChange={setAsking}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "inline-flex min-w-0 animate-rise items-center gap-1 rounded-sm focus-ring hover:underline",
+                    signInIncomplete ? "text-warning" : "text-muted-foreground",
+                  )}
+                >
+                  <Key aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">
+                    Password · {protection.username || "no user name"}
+                  </span>
+                  <span className="sr-only"> on {host}</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 space-y-4">
+                <Field
+                  label="User name"
+                  htmlFor={`domain-user-${index}`}
+                  error={protectionUserProblem(protection.username)}
+                  hint={!protection.username && <FieldCheck met={false}>Required</FieldCheck>}
+                >
+                  <Input
+                    id={`domain-user-${index}`}
+                    value={protection.username}
+                    readOnly={!canAdmin}
+                    autoComplete="off"
+                    className="font-mono"
+                    onChange={(event) => setProtection({ username: event.target.value })}
+                  />
+                </Field>
+                {/* The rule is what is needed while typing, lit as it is met;
+                    that an empty field keeps the saved one is the placeholder's
+                    "Unchanged", and the rest is behind ⓘ. A password already
+                    saved has met it, so nothing is left to light. */}
+                <Field
+                  label="Password"
+                  htmlFor={`domain-password-${index}`}
+                  info="Asked before every name this environment serves, whichever one it is set on; the application never sees it. Left empty, a saved password stays as it is."
+                  hint={
+                    (password || !protection.hash) && (
+                      <FieldChecks>
+                        <FieldCheck met={password.length > 0 && !typedProblem}>
+                          {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
+                        </FieldCheck>
+                      </FieldChecks>
+                    )
+                  }
+                >
+                  <Input
+                    id={`domain-password-${index}`}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    readOnly={!canAdmin}
+                    className="font-mono"
+                    placeholder={protection.hash ? "Unchanged" : ""}
+                    onChange={(event) => onPassword(event.target.value)}
+                  />
+                </Field>
+                {sharedWith.length > 0 && (
+                  <FormNote tone="warning">
+                    {sharedWith.join(", ")} {sharedWith.length === 1 ? "has" : "have"} this user
+                    name with another password, and the route keeps one password per user. Give
+                    each its own user name, or the same password.
+                  </FormNote>
+                )}
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
       </div>
       <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2 pl-11 @min-[44rem]:contents">
@@ -963,7 +1048,11 @@ function DomainRow({
               protection: guarded ? (protection ?? savedProtection ?? { username: "" }) : undefined,
               tunnel: through || undefined,
             })
-            if (!guarded) onPassword("")
+            if (guarded && !protection) setAsking(true)
+            if (!guarded) {
+              onPassword("")
+              setAsking(false)
+            }
           }}
           disabled={!canAdmin}
           className="shrink-0"
@@ -1039,66 +1128,6 @@ function DomainRow({
       <div className="col-start-3 row-start-1 flex justify-end @min-[44rem]:col-start-5">
         {verbs.length > 0 && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${host}`} />}
       </div>
-      {protection && (
-        <div className="col-span-full min-w-0 animate-rise pl-11">
-          <div className="ml-1 border-l border-hairline pl-4">
-            <FieldRow>
-              <Field
-                label="User name"
-                htmlFor={`domain-user-${index}`}
-                error={protectionUserProblem(protection.username)}
-                hint={!protection.username && <FieldCheck met={false}>Required</FieldCheck>}
-              >
-                <Input
-                  id={`domain-user-${index}`}
-                  value={protection.username}
-                  readOnly={!canAdmin}
-                  autoComplete="off"
-                  aria-invalid={Boolean(protectionUserProblem(protection.username))}
-                  className="font-mono"
-                  onChange={(event) => setProtection({ username: event.target.value })}
-                />
-              </Field>
-              {/* The rule is what is needed while typing, lit as it is met;
-                  that an empty field keeps the saved one is the placeholder's
-                  "Unchanged", and the rest is behind ⓘ. A password already
-                  saved has met it, so nothing is left to light. */}
-              <Field
-                label="Password"
-                htmlFor={`domain-password-${index}`}
-                info="Asked before every name this environment serves, whichever one it is set on; the application never sees it. Left empty, a saved password stays as it is."
-                hint={
-                  (password || !protection.hash) && (
-                    <FieldChecks>
-                      <FieldCheck met={password.length > 0 && !typedProblem}>
-                        {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
-                      </FieldCheck>
-                    </FieldChecks>
-                  )
-                }
-              >
-                <Input
-                  id={`domain-password-${index}`}
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  readOnly={!canAdmin}
-                  className="font-mono"
-                  placeholder={protection.hash ? "Unchanged" : ""}
-                  onChange={(event) => onPassword(event.target.value)}
-                />
-              </Field>
-            </FieldRow>
-            {sharedWith.length > 0 && (
-              <FormNote tone="warning" className="mt-3">
-                {sharedWith.join(", ")} {sharedWith.length === 1 ? "has" : "have"} this user name
-                with another password, and the route keeps one password per user. Give each its own
-                user name, or the same password.
-              </FormNote>
-            )}
-          </div>
-        </div>
-      )}
       {domain.redirectTo && (
         <div className="col-span-full min-w-0 animate-rise pl-11">
           <div className="ml-1 border-l border-hairline pl-4">

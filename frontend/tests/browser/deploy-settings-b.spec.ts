@@ -2252,8 +2252,14 @@ test.describe("Password protection", () => {
     // sends no password.
     await page.goto("/deploy/7/settings/domains")
     await expect(password).toHaveAttribute("aria-pressed", "true")
+    // The row says who signs in; its two fields are a layer over it, so the
+    // list keeps one height per row.
+    const signIn = page.getByRole("button", { name: "Password · team on api.example.test" })
+    await expect(page.getByLabel("User name")).toHaveCount(0)
+    await signIn.click()
     await expect(page.getByLabel("User name")).toHaveValue("team")
     await expect(page.locator("#domain-password-0")).toHaveAttribute("placeholder", "Unchanged")
+    await page.keyboard.press("Escape")
     await https.click()
     await saveSettings(page)
     await expectSaved(page)
@@ -2272,6 +2278,7 @@ test.describe("Password protection", () => {
 
     // Turning it off sends no protection at all.
     await password.click()
+    await expect(signIn).toHaveCount(0)
     await expect(page.getByLabel("User name")).toHaveCount(0)
     await saveSettings(page)
     await expect.poll(() => puts.length).toBe(3)
