@@ -460,24 +460,60 @@ function naturalWidth(element: HTMLElement) {
  * its icon alone; from `sm`, where the words are on the button, it never
  * opens. Its own box is `contents` from `sm`, so the line is laid out there
  * exactly as it was without it.
+ *
+ * The tooltip stands beside the command, never around it. A command is often
+ * a popover (Connect), and React carries an event from a portal's content up
+ * the tree it was rendered in, not the page's: wrapped in a `TooltipTrigger`
+ * and its provider, every pointer move and press inside the open popover
+ * reached this tip's trigger as if it were on the command, which put the
+ * provider in its skip-delay state, so a tooltip inside the popover ("Show
+ * the password") opened at once on a press and, as the topmost layer, took
+ * the Escape meant for the popover, which stayed open. So the tip listens on
+ * the command's own box in the page, where nothing in a portal reaches, and
+ * its trigger is a box with nothing in it laid over the command, an anchor
+ * that takes no pointer and no focus.
  */
 function CommandTip({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null)
   const [words, setWords] = useState<string | null>(null)
+  useEffect(() => {
+    const box = ref.current
+    if (!box) return
+    const hide = () => setWords(null)
+    // A mouse resting on it, or a keyboard landing on it; a finger never
+    // opens a tooltip, since the tap that would is a press.
+    const enter = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") setWords(iconWords(box))
+    }
+    const focus = (event: FocusEvent) => {
+      if (event.target instanceof Element && event.target.matches(":focus-visible"))
+        setWords(iconWords(box))
+    }
+    const listeners = [
+      ["pointerenter", enter],
+      ["pointerleave", hide],
+      ["pointerdown", hide],
+      ["focusin", focus],
+      ["focusout", hide],
+    ] as const
+    for (const [type, listener] of listeners) box.addEventListener(type, listener as EventListener)
+    return () => {
+      for (const [type, listener] of listeners)
+        box.removeEventListener(type, listener as EventListener)
+    }
+  }, [])
   return (
-    <TooltipProvider>
-      <Tooltip
-        open={words !== null}
-        onOpenChange={(open) => setWords(open ? iconWords(ref.current) : null)}
-      >
-        <TooltipTrigger asChild>
-          <span ref={ref} className="flex shrink-0 items-center gap-3 sm:contents">
-            {children}
-          </span>
-        </TooltipTrigger>
-        {words !== null && <TooltipContent>{words}</TooltipContent>}
-      </Tooltip>
-    </TooltipProvider>
+    <span ref={ref} className="relative flex shrink-0 items-center gap-3 sm:contents">
+      {children}
+      <TooltipProvider>
+        <Tooltip open={words !== null} onOpenChange={(open) => !open && setWords(null)}>
+          <TooltipTrigger asChild>
+            <span aria-hidden className="pointer-events-none absolute inset-0 sm:hidden" />
+          </TooltipTrigger>
+          {words !== null && <TooltipContent>{words}</TooltipContent>}
+        </Tooltip>
+      </TooltipProvider>
+    </span>
   )
 }
 

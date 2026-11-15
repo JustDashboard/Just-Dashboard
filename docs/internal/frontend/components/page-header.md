@@ -157,7 +157,10 @@ shape while it loads and nothing under the line moves when the words land (D11).
   that name.
 - The dots between facts are `aria-hidden`; the facts are read as words.
 - On a phone the command is drawn as its icon, and its words stay in the button as its accessible
-  name and come up in a tooltip on hover and focus; `⋯`'s name says whose actions it holds.
+  name and come up in a tooltip on hover and focus; `⋯`'s name says whose actions it holds. The
+  tooltip stands beside the command, never around it, and listens on the command's own box in the
+  page: a command that is a popover (Connect) opens, closes on Escape and returns the focus exactly
+  as it does anywhere else, and nothing pressed inside the popover reaches the tooltip.
 
 ## What enforces it
 
