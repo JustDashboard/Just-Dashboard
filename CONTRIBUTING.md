@@ -60,7 +60,10 @@ as described under [Security issues](#security-issues).
 
 New to the tree? [`docs/internal/reference/finding-things.md`](docs/internal/reference/finding-things.md)
 says which route, components, handler files, package, specs and document belong to each page, and
-`backend/`, `frontend/`, `scripts/` and `docs/` each open on a short README.
+`backend/`, `frontend/`, `scripts/` and `docs/` each open on a short README. A frontend page is built
+from [`docs/internal/frontend/README.md`](docs/internal/frontend/README.md) and held to
+[`standard.md`](docs/internal/frontend/standard.md); a shared component is added, documented and
+retired as [`contributing-a-component.md`](docs/internal/frontend/contributing-a-component.md) says.
 
 Keep the PR focused and use the template to explain what changed, why, and how you verified it. Link
 related issues and include before/after screenshots for visual changes or a recording for interaction
