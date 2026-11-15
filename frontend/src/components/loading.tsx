@@ -5,27 +5,60 @@ import { LoaderCircle } from "@/components/icons"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
-export function Spinner({ className }: { className?: string }) {
-  return <LoaderCircle aria-hidden className={cn("size-4 animate-spin", className)} />
+/**
+ * The spinning ring. Inside a pending `Button` it is decoration: the button
+ * sets `aria-busy` and keeps its label. Standing alone it says nothing to a
+ * screen reader unless it is given `label`, which it then speaks once, as a
+ * status ("Loading the containers").
+ */
+export function Spinner({ className, label }: { className?: string; label?: string }) {
+  const ring = <LoaderCircle aria-hidden className={cn("size-4 animate-spin", className)} />
+  if (!label) return ring
+  return (
+    <>
+      {ring}
+      <Said label={label} />
+    </>
+  )
+}
+
+/** What a skeleton stands for, said once to a screen reader and not drawn. */
+function Said({ label }: { label: string }) {
+  return (
+    <span role="status" data-slot="loading-label" className="sr-only">
+      {label}
+    </span>
+  )
 }
 
 /**
  * Rows of skeleton. `hold` keeps what is written under them, and the blocks of
  * the page under the one they are in, off the page while they stand (`Hold`):
  * for a block with blocks under it whose answer is not the skeleton's height.
+ *
+ * `label` is what is being read, said to a screen reader as a status while
+ * the rows stand ("Loading the accounts"): grey bars are silent, and a reader
+ * who cannot see them heard an empty page.
  */
 export function LoadingRows({
   rows = 5,
   className,
   hold,
+  label,
 }: {
   rows?: number
   className?: string
   hold?: boolean
+  label?: string
 }) {
   return (
     <>
-      <div className={cn("space-y-2", className)}>
+      <div
+        data-slot="loading-rows"
+        aria-busy={label ? true : undefined}
+        className={cn("space-y-2", className)}
+      >
+        {label && <Said label={label} />}
         {Array.from({ length: rows }).map((_, i) => (
           <Skeleton key={i} className="h-9 w-full rounded-md" />
         ))}
@@ -34,6 +67,72 @@ export function LoadingRows({
     </>
   )
 }
+
+/**
+ * The bar for work whose progress cannot be known: a third of the track
+ * crossing it (`animate-sweep`), for a pull, a prune, a query that has not
+ * answered. It was copied seventeen times with three fills and three answers
+ * to reduced motion — the whole track, nothing, or a third frozen at the left
+ * edge, which reads as a third done.
+ *
+ * Reduced motion has one answer now, the same whether it was asked for in the
+ * system or by the product's own "Pause animations" (`data-motion="paused"`):
+ * the bar stops and fills the track in the faint ink, a line that says "under
+ * way" without moving and without claiming a fraction.
+ *
+ * The caller places it with `className` (`absolute inset-x-0 bottom-0 h-px`
+ * under a pane's head, `h-0.5 w-24` under a splash). `track` draws the
+ * channel the bar runs in; `quiet` is the foreground fill for a bar drawn over
+ * a reading that is already coloured. With `label` it is a `progressbar` of
+ * that name with no value, which is how an indeterminate one is announced;
+ * without, it is decoration beside words that say what is happening.
+ */
+export function Sweep({
+  tone = "brand",
+  rounded,
+  track = true,
+  label,
+  className,
+}: {
+  tone?: "brand" | "quiet"
+  rounded?: boolean
+  track?: boolean
+  label?: string
+  className?: string
+}) {
+  return (
+    <div
+      data-slot="sweep"
+      role={label ? "progressbar" : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      className={cn(
+        "relative overflow-hidden",
+        track && "bg-meter-track",
+        rounded && "rounded-full",
+        className,
+      )}
+    >
+      <span
+        className={cn(
+          "absolute inset-y-0 left-0 block w-1/3 animate-sweep",
+          tone === "brand" ? "bg-brand" : "bg-foreground/20",
+          rounded && "rounded-full",
+          SWEEP_STILL,
+        )}
+      />
+    </div>
+  )
+}
+
+/**
+ * Sweep's one reduced-motion rule, for both ways of asking: the bar stops and
+ * fills the track in the faint ink. Exported for the unit test that holds it.
+ */
+export const SWEEP_STILL = [
+  "motion-reduce:w-full motion-reduce:animate-none motion-reduce:bg-faint",
+  "[:root[data-motion=paused]_&]:w-full [:root[data-motion=paused]_&]:animate-none [:root[data-motion=paused]_&]:bg-faint",
+].join(" ")
 
 /** How long a block is held for the read above it: past this the page shows what it has. */
 export const HOLD_AT_MOST_MS = 4000
@@ -87,25 +186,31 @@ export function Hold({ until, children }: { until: boolean; children?: ReactNode
  * jump this placeholder exists to prevent, one edge later. Its title and rows
  * start on the page's own edge, where the plain block's will.
  *
- * `hold` is `LoadingRows`' own: what is under the panel waits for it.
+ * `hold` and `label` are `LoadingRows`' own: what is under the panel waits for
+ * it, and what it stands for is said to a screen reader.
  */
 export function LoadingPanel({
   rows = 6,
   plain,
   className,
   hold,
+  label,
 }: {
   rows?: number
   plain?: boolean
   className?: string
   hold?: boolean
+  label?: string
 }) {
   const gutter = plain ? "px-0" : "px-5"
   return (
     <>
       <div
+        data-slot="loading-panel"
+        aria-busy={label ? true : undefined}
         className={cn("min-w-0 overflow-hidden", !plain && "rounded-xl border bg-card", className)}
       >
+        {label && <Said label={label} />}
         <div className={cn("flex min-h-12 items-center border-b border-hairline py-3", gutter)}>
           <Skeleton className="h-4 w-40" />
         </div>
