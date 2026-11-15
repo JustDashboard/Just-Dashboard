@@ -46,7 +46,7 @@ const buttonVariants = cva(
         //
         // The danger face has the same three steps as opaque colours. At rest
         // it is the red a sixth of the way to black, because white on the
-        // token itself is 3.9:1 and the label is 13px; hover lifts it to the
+        // token itself is 3.8:1 and the label is 13px; hover lifts it to the
         // token, press settles it past rest. The `var()` names are the tokens
         // globals.css takes over (handoff to WP-01); the fallbacks are the
         // same colours, so the face is right before and after.
@@ -54,7 +54,10 @@ const buttonVariants = cva(
           "bg-[var(--destructive-face,color-mix(in_oklab,var(--destructive)_85%,#000))] text-destructive-foreground hover:bg-destructive active:bg-[var(--destructive-active,color-mix(in_oklab,var(--destructive)_70%,#000))]",
         outline:
           "border border-input bg-control hover:bg-control-hover hover:text-accent-foreground active:bg-control-active",
-        /** @deprecated one caller (xterm-pane.tsx); use `outline`. Kept on the control steps until it moves. */
+        /**
+         * @deprecated one caller (xterm-pane.tsx); use `outline`. Kept on the
+         * control steps until it moves.
+         */
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-control-hover active:bg-control-active",
         ghost: "hover:bg-accent hover:text-accent-foreground active:bg-menu-hover",

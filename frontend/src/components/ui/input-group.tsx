@@ -109,8 +109,8 @@ function InputGroupAddon({
 
 /**
  * The field. Borderless, groundless and ringless — the group draws all three —
- * and it keeps `Input`'s 16px size under a finger and below `sm`, because the iOS zoom that rule
- * exists for does not care which element owns the border.
+ * and it keeps `Input`'s 16px size under a finger and below `sm`, because the
+ * iOS zoom that rule exists for does not care which element owns the border.
  */
 function InputGroupInput({ className, ...props }: React.ComponentProps<"input">) {
   return (
