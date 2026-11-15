@@ -1,10 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import Link from "next/link"
-import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/search-input"
-import { LoadingRows } from "@/components/loading"
+import { Rail, RailLine, RailName, RailRow } from "@/components/rail"
 
 export type RailItem = {
   id: string
@@ -20,15 +16,17 @@ export type RailItem = {
 
 /**
  * The list a capture or a saved run was opened from, folded into a column
- * beside it (the process page's rail, `procs/process-rail.tsx`): the list's
- * own search and chips, the item on screen filled, each row a link carrying
- * the view that is open. From `xl` only; narrower, the page is one pane.
+ * beside it: the list's own search and chips, the item on screen filled, each
+ * row a link carrying the view that is open. The column is the shared `Rail`;
+ * a page hands it its rows already worded.
  */
 export function ItemRail({
   label,
   items,
   current,
   loading,
+  error,
+  onRetry,
   query,
   onQuery,
   placeholder,
@@ -40,6 +38,9 @@ export function ItemRail({
   items: RailItem[]
   current: string
   loading: boolean
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
   query: string
   onQuery: (value: string) => void
   placeholder: string
@@ -48,70 +49,34 @@ export function ItemRail({
   filters?: React.ReactNode
   className?: string
 }) {
-  const list = useRef<HTMLOListElement>(null)
-  // The item on screen is kept in view, opened from a link or walked to with
-  // Alt+↓ past the column's edge.
-  useEffect(() => {
-    list.current
-      ?.querySelector<HTMLElement>("[aria-current='page']")
-      ?.scrollIntoView({ block: "nearest" })
-  }, [current])
   return (
-    <nav
-      aria-label={label}
-      data-slot="item-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder={placeholder}
-          aria-label={`Search ${label.toLowerCase()}`}
-          containerClassName="sm:w-full"
-        />
-        {filters}
-        <p className="truncate text-hint text-muted-foreground">{caption}</p>
-      </div>
-      <ol
-        ref={list}
-        aria-label={`${label} to open`}
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {items.map((item) => {
-          const on = item.id === current
-          return (
-            <li key={item.id} className="min-w-0">
-              <Link
-                href={item.href}
-                aria-current={on ? "page" : undefined}
-                aria-label={item.label}
-                className={cn(
-                  "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-                  on ? "bg-accent" : "hover:bg-row-hover",
-                )}
-              >
-                {item.mark}
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={cn("block truncate text-body", on ? "font-semibold" : "font-medium")}
-                  >
-                    {item.title}
-                  </span>
-                  <span className="block truncate font-mono text-micro text-muted-foreground">
-                    {item.line}
-                  </span>
-                </span>
-                {item.end && <span className="shrink-0">{item.end}</span>}
-              </Link>
-            </li>
-          )
-        })}
-        {loading && items.length === 0 && <LoadingRows rows={6} />}
-        {!loading && items.length === 0 && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">Nothing matches.</li>
-        )}
-      </ol>
-    </nav>
+    <Rail
+      slot="item-rail"
+      label={label}
+      search={{ placeholder, query, onQuery }}
+      filters={filters}
+      caption={caption}
+      rows={items}
+      keyOf={(item) => item.id}
+      current={(item) => item.id === current}
+      row={(item, on) => (
+        <RailRow
+          item={item.id}
+          name={item.label}
+          current={on}
+          href={item.href}
+          mark={item.mark}
+          end={item.end && <span className="shrink-0">{item.end}</span>}
+        >
+          <RailName current={on}>{item.title}</RailName>
+          <RailLine className="font-mono">{item.line}</RailLine>
+        </RailRow>
+      )}
+      loading={loading}
+      error={error}
+      onRetry={onRetry}
+      empty="Nothing matches."
+      className={className}
+    />
   )
 }

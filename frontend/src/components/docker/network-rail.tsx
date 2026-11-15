@@ -1,13 +1,14 @@
 "use client"
 
+import { useSearchParams } from "next/navigation"
 import { membersKnown } from "@/lib/docker-networks"
 import type { Container, DockerNetwork } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
 import { linkGlyph } from "@/components/network/marks"
-import { DockerRail, DockerRailRow } from "@/components/docker/item-rail"
+import { Rail, RailFigure, RailLine, RailName, RailRow } from "@/components/rail"
 import { HueKey, memberProducts } from "@/components/docker/network-band"
-import { isUnused, networkHue, networkOwner } from "@/components/docker/networks"
+import { isUnused, networkHref, networkHue, networkOwner } from "@/components/docker/networks"
 
 /**
  * The Networks table, folded into a column beside the network it opened: its
@@ -16,8 +17,7 @@ import { isUnused, networkHue, networkOwner } from "@/components/docker/networks
  * of its members run, with who made it and how many are on it; the one on
  * screen is filled.
  *
- * The column itself is the one every Docker item's page has (`item-rail.tsx`);
- * this file is the network's row.
+ * The column is the shared `Rail`; this file is the network's row.
  */
 export function NetworkRail({
   networks,
@@ -45,25 +45,31 @@ export function NetworkRail({
   filtered: boolean
   onClearFilters: () => void
   caption: string
-  onOpen: (name: string) => void
+  /** Opens a network carrying the page's view; the row's link does the same without it. */
+  onOpen?: (name: string) => void
   className?: string
 }) {
+  const tab = useSearchParams().get("tab") ?? undefined
   return (
-    <DockerRail
+    <Rail
       slot="network-rail"
       label="Networks"
-      search={{ label: "Find networks", placeholder: "Network, subnet or container" }}
+      search={{ placeholder: "Network, subnet or container", query, onQuery }}
       rows={networks}
       keyOf={(network) => network.id}
       current={(network) => network.name === current}
       pinned={currentNetwork}
       row={(network, on) => (
-        <RailRow network={network} current={on} containers={containers} onOpen={onOpen} />
+        <NetworkRow
+          network={network}
+          current={on}
+          containers={containers}
+          href={networkHref(network.name, tab)}
+          onOpen={onOpen}
+        />
       )}
       loading={loading}
       empty="No network matches."
-      query={query}
-      onQuery={onQuery}
       filtered={filtered}
       onClearFilters={onClearFilters}
       caption={caption}
@@ -72,62 +78,53 @@ export function NetworkRail({
   )
 }
 
-function RailRow({
+function NetworkRow({
   network,
   current,
   containers,
+  href,
   onOpen,
 }: {
   network: DockerNetwork
   current: boolean
   containers: Map<string, Container>
-  onOpen: (name: string) => void
+  href: string
+  onOpen?: (name: string) => void
 }) {
   const unused = isUnused(network)
   const unread = !membersKnown(network)
   const count = network.usedBy.length
   const bridged = network.driver === "bridge" || network.driver === "overlay"
   return (
-    <DockerRailRow
+    <RailRow
       item={network.id}
       name={network.name}
       title={network.name}
       current={current}
-      onOpen={() => onOpen(network.name)}
+      href={href}
+      onOpen={onOpen && (() => onOpen(network.name))}
+      quiet={unused}
       mark={
         <ProductLogo
           id={memberProducts(network, containers)[0] ?? (bridged ? "docker" : undefined)}
           size="sm"
           fallback={linkGlyph(network.driver)}
-          className={cn("size-7 rounded-md [&_img]:size-4 [&_svg]:size-4", unused && "opacity-60")}
+          className="size-7 rounded-md [&_img]:size-4 [&_svg]:size-4"
         />
       }
       end={
-        <span
-          className={cn(
-            "numeric shrink-0 text-hint",
-            unused || unread ? "text-warning" : "text-muted-foreground",
-          )}
-        >
+        <RailFigure mono={false} ink={unused || unread ? "text-warning" : undefined}>
           {unread ? "unread" : unused ? "unused" : count === 0 ? "—" : count}
-        </span>
+        </RailFigure>
       }
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <HueKey color={networkHue(network.name)} />
-        <span
-          className={cn(
-            "truncate text-body",
-            current ? "font-semibold" : "font-medium",
-            unused && "text-muted-foreground",
-          )}
-        >
+        <RailName current={current} className={cn("min-w-0", unused && "text-muted-foreground")}>
           {network.name}
-        </span>
+        </RailName>
       </span>
-      <span className="block truncate text-hint text-muted-foreground">
-        {networkOwner(network).label}
-      </span>
-    </DockerRailRow>
+      <RailLine>{networkOwner(network).label}</RailLine>
+    </RailRow>
   )
 }

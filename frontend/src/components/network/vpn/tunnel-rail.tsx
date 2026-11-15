@@ -1,9 +1,11 @@
 "use client"
 
-import { cn } from "@/lib/utils"
+import { useSearchParams } from "next/navigation"
+import { plural } from "@/lib/format"
 import { ProductLogo } from "@/components/product-logo"
-import { LoadingRows } from "@/components/loading"
+import { Rail, RailLine, RailName, RailRow } from "@/components/rail"
 import { StatusDot, type DotTone } from "@/components/status-dot"
+import { tunnelHref } from "./tunnel-reading"
 
 export type RailTunnel = { name: string; line: string; tone: DotTone; archived: boolean }
 
@@ -11,86 +13,63 @@ export type RailTunnel = { name: string; line: string; tone: DotTone; archived: 
  * The tunnels, beside the one that is open: the live ones with who is online,
  * then the removed ones whose record is still kept, so the next tunnel is one
  * press away and Alt+↑ and Alt+↓ walk the list. The VPN page's list has no
- * filter, so neither has this.
+ * filter, so neither has this. Each row is a link to the tunnel on the view on
+ * screen; a removed tunnel's words are in the muted ink.
  */
 export function TunnelRail({
   tunnels,
   current,
   loading,
+  error,
+  onRetry,
   onOpen,
   className,
 }: {
   tunnels: RailTunnel[]
   current: string
   loading: boolean
-  onOpen: (name: string) => void
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
+  /** Opens a tunnel carrying the page's view; the row's link does the same without it. */
+  onOpen?: (name: string) => void
   className?: string
 }) {
+  const tab = useSearchParams().get("tab") ?? undefined
   return (
-    <nav
-      aria-label="Tunnels"
-      data-slot="tunnel-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <p className="flex shrink-0 items-center justify-between gap-2 pb-3 text-hint text-muted-foreground">
-        <span>Tunnels</span>
-        <span className="numeric">{tunnels.length || ""}</span>
-      </p>
-      <ol
-        aria-label="Tunnels to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {tunnels.map((tunnel) => {
-          const open = tunnel.name === current
-          return (
-            <li key={tunnel.name} className="min-w-0">
-              <button
-                type="button"
-                data-workspace-item={tunnel.name}
-                data-workspace-name={tunnel.name}
-                aria-current={open ? "page" : undefined}
-                aria-label={tunnel.name}
-                onClick={() => onOpen(tunnel.name)}
-                className={cn(
-                  "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-                  open ? "bg-accent" : "hover:bg-row-hover",
-                )}
-              >
-                <span className="relative flex shrink-0">
-                  <ProductLogo
-                    id="wireguard"
-                    size="sm"
-                    className={cn(
-                      "size-7 rounded-md [&_img]:size-4",
-                      tunnel.archived && "opacity-60",
-                    )}
-                  />
-                  <span
-                    aria-hidden
-                    className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-                  >
-                    <StatusDot tone={tunnel.tone} className="size-1.5" />
-                  </span>
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={cn(
-                      "block truncate font-mono text-body",
-                      open ? "font-semibold" : "font-medium",
-                    )}
-                  >
-                    {tunnel.name}
-                  </span>
-                  <span className="numeric block truncate text-hint text-muted-foreground">
-                    {tunnel.line}
-                  </span>
-                </span>
-              </button>
-            </li>
-          )
-        })}
-        {loading && tunnels.length === 0 && <LoadingRows rows={3} />}
-      </ol>
-    </nav>
+    <Rail
+      slot="tunnel-rail"
+      label="Tunnels"
+      caption={
+        loading && tunnels.length === 0 ? "Reading the tunnels…" : plural(tunnels.length, "tunnel")
+      }
+      rows={tunnels}
+      keyOf={(tunnel) => tunnel.name}
+      current={(tunnel) => tunnel.name === current}
+      row={(tunnel, open) => (
+        <RailRow
+          item={tunnel.name}
+          name={tunnel.name}
+          current={open}
+          href={tunnelHref(tunnel.name, tab)}
+          onOpen={onOpen && (() => onOpen(tunnel.name))}
+          quiet={tunnel.archived}
+          mark={
+            <ProductLogo id="wireguard" size="sm" className="size-7 rounded-md [&_img]:size-4" />
+          }
+          dot={<StatusDot tone={tunnel.tone} className="size-1.5" />}
+        >
+          <RailName current={open} mono>
+            {tunnel.name}
+          </RailName>
+          <RailLine className="numeric">{tunnel.line}</RailLine>
+        </RailRow>
+      )}
+      loading={loading}
+      loadingRows={3}
+      error={error}
+      onRetry={onRetry}
+      className={className}
+    />
   )
 }

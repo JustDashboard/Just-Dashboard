@@ -1,14 +1,10 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import Link from "next/link"
-import { cn } from "@/lib/utils"
 import type { Listener, VHost } from "@/lib/types"
 import { Box, CornerUpRight, FileText, FolderOpen } from "@/components/icons"
-import { SearchInput } from "@/components/search-input"
 import { ProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
-import { LoadingRows } from "@/components/loading"
+import { Rail, RailLine, RailName, RailRow, railInk } from "@/components/rail"
 import { siteProduct } from "@/components/proxy/marks"
 import { siteApp } from "@/components/proxy/site-apps"
 import { upstreamTargets } from "@/components/proxy/site-details"
@@ -52,13 +48,15 @@ const railKey = (v: VHost) => `${v.kind}:${v.layout ?? ""}:${v.name}`
  * and the view on screen goes with it. Each row is the site as what it fronts
  * over the engine serving it, its state in the tile's corner, its name, and
  * where its requests go — or, for one that is not serving, why. The one on
- * screen is filled.
+ * screen is filled; a disabled site's words are in the muted ink.
  */
 export function SiteRail({
   sites,
   current,
   tab,
   loading,
+  error,
+  onRetry,
   listeners,
   query,
   onQuery,
@@ -72,6 +70,9 @@ export function SiteRail({
   /** The view on screen, carried to the next site. */
   tab: SiteTab
   loading: boolean
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
   /** The host's sockets, for the application a site fronts. */
   listeners: Listener[] | undefined
   query: string
@@ -82,112 +83,55 @@ export function SiteRail({
   caption: string
   className?: string
 }) {
-  const list = useRef<HTMLOListElement>(null)
-  // The site on screen is kept in view: opened by Alt+↓ past the column's
-  // edge, it would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current])
-
   return (
-    <nav
-      aria-label="Sites"
-      data-slot="site-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Name, domain, upstream or port"
-          aria-label="Search the sites"
-          containerClassName="sm:w-full"
-        />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{caption}</span>
-          {filtered && (
-            <button
-              type="button"
-              onClick={onClearFilter}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
+    <Rail
+      slot="site-rail"
+      label="Sites"
+      search={{ placeholder: "Name, domain, upstream or port", query, onQuery }}
+      rows={sites}
+      keyOf={railKey}
+      current={(vhost) => vhost.name === current}
+      row={(vhost, here) => {
+        const state = railState(vhost)
+        const destination = siteDestination(vhost)
+        return (
+          <RailRow
+            item={railKey(vhost)}
+            name={vhost.name}
+            current={here}
+            href={siteHref(vhost.name, tab === "settings" ? "overview" : tab)}
+            quiet={!vhost.enabled}
+            // One tile on every row, so the names stand on one edge: the
+            // application where the host can name it, the kind of thing the
+            // site serves otherwise, the engine failing both.
+            mark={
+              <ProductLogo
+                id={siteApp(vhost, listeners, [])?.product ?? siteProduct(vhost)}
+                size="sm"
+                fallback={kindGlyph(vhost)}
+                className="size-7 rounded-md [&_img]:size-4"
+              />
+            }
+            dot={<StatusDot tone={state.tone} className="size-1.5" />}
+          >
+            <RailName current={here}>{vhost.name}</RailName>
+            <RailLine
+              ink={state.word ? railInk(state.tone) : undefined}
+              className={state.word ? undefined : "font-mono"}
             >
-              Clear filter
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Sites to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {sites.map((vhost) => {
-          const here = vhost.name === current
-          const state = railState(vhost)
-          const destination = siteDestination(vhost)
-          return (
-            <li key={railKey(vhost)} className="min-w-0">
-              <Link
-                href={siteHref(vhost.name, tab === "settings" ? "overview" : tab)}
-                aria-current={here ? "page" : undefined}
-                aria-label={vhost.name}
-                className={cn(
-                  "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-                  here ? "bg-accent" : "hover:bg-row-hover",
-                  !vhost.enabled && "opacity-80",
-                )}
-              >
-                <span className="relative flex shrink-0">
-                  {/* One tile on every row, so the names stand on one edge:
-                      the application where the host can name it, the kind of
-                      thing the site serves otherwise, the engine failing both. */}
-                  <ProductLogo
-                    id={siteApp(vhost, listeners, [])?.product ?? siteProduct(vhost)}
-                    size="sm"
-                    fallback={kindGlyph(vhost)}
-                    className="size-7 rounded-md [&_img]:size-4"
-                  />
-                  <span
-                    aria-hidden
-                    className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-                  >
-                    <StatusDot tone={state.tone} className="size-1.5" />
-                  </span>
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={cn(
-                      "block truncate text-body",
-                      here ? "font-semibold" : "font-medium",
-                    )}
-                  >
-                    {vhost.name}
-                  </span>
-                  <span
-                    className={cn(
-                      "block truncate text-hint",
-                      state.word
-                        ? state.tone === "danger"
-                          ? "text-destructive"
-                          : state.tone === "warning"
-                            ? "text-warning"
-                            : "text-muted-foreground"
-                        : "font-mono text-muted-foreground",
-                    )}
-                  >
-                    {state.word ?? (destination ? `→ ${destination}` : "served by configuration")}
-                  </span>
-                </span>
-              </Link>
-            </li>
-          )
-        })}
-        {loading && sites.length === 0 && <LoadingRows rows={6} />}
-        {!loading && sites.length === 0 && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No site matches.</li>
-        )}
-      </ol>
-    </nav>
+              {state.word ?? (destination ? `→ ${destination}` : "served by configuration")}
+            </RailLine>
+          </RailRow>
+        )
+      }}
+      loading={loading}
+      error={error}
+      onRetry={onRetry}
+      empty="No site matches."
+      filtered={filtered}
+      onClearFilters={onClearFilter}
+      caption={caption}
+      className={className}
+    />
   )
 }

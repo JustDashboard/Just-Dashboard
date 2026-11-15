@@ -1,14 +1,12 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useSearchParams } from "next/navigation"
 import { ChartActivity } from "@/components/icons"
 import { bytes, percent } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/search-input"
 import { ProductLogo, pm2Product } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { LoadingRows } from "@/components/loading"
-import { pm2AppState, pm2ModeWords } from "@/components/procs/pm2-facts"
+import { Rail, RailFigures, RailLine, RailName, RailRow, railInk } from "@/components/rail"
+import { pm2AppHref, pm2AppState, pm2ModeWords } from "@/components/procs/pm2-facts"
 import { pm2Failing, type PM2App } from "@/components/procs/pm2-shared"
 import { cpuTone } from "@/components/procs/shared"
 
@@ -30,6 +28,8 @@ export function PM2AppRail({
   current,
   several,
   loading,
+  error,
+  onRetry,
   query,
   onQuery,
   filtered,
@@ -45,71 +45,56 @@ export function PM2AppRail({
   /** More than one account runs PM2, so each row says whose it is. */
   several: boolean
   loading: boolean
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
   query: string
   onQuery: (value: string) => void
   filtered: boolean
   onClearFilters: () => void
   caption: string
-  onOpen: (app: PM2App) => void
+  /** Opens an application carrying the page's view; the row's link does the same without it. */
+  onOpen?: (app: PM2App) => void
   bindings: React.HTMLAttributes<HTMLElement>
   className?: string
 }) {
-  const list = useRef<HTMLOListElement>(null)
-  // The application on screen is kept in view: opened from a link or by
-  // Alt+↓ past the column's edge, it would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current])
-
+  const tab = useSearchParams().get("tab") ?? undefined
+  // The account is in the address only where the name alone would not say which.
+  const shared = (app: PM2App) =>
+    apps.some((other) => other.name === app.name && other.daemonId !== app.daemonId)
   return (
-    <nav
-      aria-label="PM2 applications"
-      data-slot="pm2-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Name, script or account"
-          aria-label="Search the applications"
-          containerClassName="sm:w-full"
+    <Rail
+      slot="pm2-rail"
+      label="PM2 applications"
+      listLabel="Applications to open"
+      search={{
+        label: "Search the applications",
+        placeholder: "Name, script or account",
+        query,
+        onQuery,
+      }}
+      rows={apps}
+      keyOf={(app) => app.key}
+      current={(app) => app.key === current}
+      row={(app, on) => (
+        <PM2Row
+          app={app}
+          current={on}
+          several={several}
+          href={pm2AppHref(app, { tab, account: shared(app) })}
+          onOpen={onOpen}
         />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{caption}</span>
-          {filtered && (
-            <button
-              type="button"
-              onClick={onClearFilters}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
-            >
-              Clear filters
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Applications to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-        {...bindings}
-      >
-        {apps.map((app) => (
-          <RailRow
-            key={app.key}
-            app={app}
-            current={app.key === current}
-            several={several}
-            onOpen={onOpen}
-          />
-        ))}
-        {loading && apps.length === 0 && <LoadingRows rows={6} />}
-        {!loading && apps.length === 0 && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No application matches.</li>
-        )}
-      </ol>
-    </nav>
+      )}
+      loading={loading}
+      error={error}
+      onRetry={onRetry}
+      empty="No application matches."
+      filtered={filtered}
+      onClearFilters={onClearFilters}
+      caption={caption}
+      bindings={bindings}
+      className={className}
+    />
   )
 }
 
@@ -129,91 +114,59 @@ function railLine(app: PM2App, several: boolean): { text: string; tone?: "danger
   return { text: `${whose}${pm2ModeWords(app)}` }
 }
 
-function RailRow({
+function PM2Row({
   app,
   current,
   several,
+  href,
   onOpen,
 }: {
   app: PM2App
   current: boolean
   several: boolean
-  onOpen: (app: PM2App) => void
+  href: string
+  onOpen?: (app: PM2App) => void
 }) {
   const line = railLine(app, several)
   const state = pm2AppState(app)
   const tone = cpuTone(app.cpu)
   return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        data-workspace-item={app.key}
-        data-workspace-name={app.name}
-        aria-current={current ? "page" : undefined}
-        aria-label={several ? `${app.name}, ${app.daemonId}` : app.name}
-        onClick={() => onOpen(app)}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <span className="relative flex shrink-0">
-          <ProductLogo
-            id={pm2Product(app.interpreter)}
-            size="sm"
-            fallback={ChartActivity}
-            className="size-7 rounded-md [&_img]:size-4"
+    <RailRow
+      item={app.key}
+      name={app.name}
+      label={several ? `${app.name}, ${app.daemonId}` : app.name}
+      current={current}
+      href={href}
+      onOpen={onOpen && (() => onOpen(app))}
+      mark={
+        <ProductLogo
+          id={pm2Product(app.interpreter)}
+          size="sm"
+          fallback={ChartActivity}
+          className="size-7 rounded-md [&_img]:size-4"
+        />
+      }
+      dot={
+        state.partial ? (
+          <StatusDot tone="warning" className="size-1.5" />
+        ) : (
+          <StatusDot state={state.status} className="size-1.5" />
+        )
+      }
+      end={
+        app.online > 0 && (
+          <RailFigures
+            top={percent(app.cpu)}
+            bottom={bytes(app.memory)}
+            ink={tone === "danger" ? "font-medium text-destructive" : railInk(tone)}
           />
-          <span
-            aria-hidden
-            className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-          >
-            {state.partial ? (
-              <StatusDot tone="warning" className="size-1.5" />
-            ) : (
-              <StatusDot state={state.status} className="size-1.5" />
-            )}
-          </span>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}
-          >
-            {app.name}
-          </span>
-          <span
-            className={cn(
-              "numeric block truncate text-hint",
-              line.tone === "danger"
-                ? "text-destructive"
-                : line.tone === "warning"
-                  ? "text-warning"
-                  : "text-muted-foreground",
-            )}
-          >
-            {line.text}
-          </span>
-        </span>
-        {app.online > 0 && (
-          <span className="flex shrink-0 flex-col items-end">
-            <span
-              className={cn(
-                "numeric font-mono text-hint",
-                tone === "danger"
-                  ? "font-medium text-destructive"
-                  : tone === "warning"
-                    ? "text-warning"
-                    : "text-muted-foreground",
-              )}
-            >
-              {percent(app.cpu)}
-            </span>
-            <span className="numeric font-mono text-micro text-muted-foreground">
-              {bytes(app.memory)}
-            </span>
-          </span>
-        )}
-      </button>
-    </li>
+        )
+      }
+    >
+      <RailName current={current}>{app.name}</RailName>
+      <RailLine className="numeric" ink={railInk(line.tone)}>
+        {line.text}
+      </RailLine>
+    </RailRow>
   )
 }
