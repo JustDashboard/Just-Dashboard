@@ -167,7 +167,7 @@ export function CodeBlock({
         {mark}
         <span className="truncate font-medium text-foreground">{title}</span>
         {lines !== undefined && <span className="numeric">{plural(lines, "line")}</span>}
-        <CopyAction text={copy} label={`Copy ${title.toLowerCase()}`} className="-my-1 ml-auto" />
+        <CopyAction text={copy} label={`Copy ${title.toLowerCase()}`} className="ml-auto size-6" />
       </figcaption>
       <pre className="max-h-96 overflow-auto p-3 font-mono text-xs leading-relaxed">
         <code>{children}</code>
@@ -185,7 +185,7 @@ export function Digest({ value, label }: { value: string; label: string }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1 font-mono text-xs" title={value}>
       <span className={tokenClass("id")}>{shortDigest(value)}</span>
-      <CopyAction text={value} label={`Copy ${label.toLowerCase()}`} className="-my-1" />
+      <CopyAction text={value} label={`Copy ${label.toLowerCase()}`} className="size-5" />
     </span>
   )
 }

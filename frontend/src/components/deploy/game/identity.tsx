@@ -124,7 +124,11 @@ function GameIdentityLine({ overview, aside }: { overview: GameOverview; aside: 
           <Fact>
             <span className="inline-flex min-w-0 items-center gap-0.5">
               <span className="truncate font-mono text-foreground">{overview.address}</span>
-              <CopyAction text={overview.address} label="Copy the join address" />
+              <CopyAction
+                text={overview.address}
+                label="Copy the join address"
+                className="size-6"
+              />
             </span>
           </Fact>
         )}
