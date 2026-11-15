@@ -105,7 +105,7 @@ Four DOMPurify advisories remain in Monaco 0.56.0's bundled sanitizer. Monaco's 
 DOMPurify 3.4.8, so an npm override would not update the executed code. The inspected wrapper does not
 enable the configurations required by those advisories; no exploitable application XSS was established.
 This is an explicit dependency residual, awaiting a patched Monaco bundle. Details and primary advisory
-links are in [the editor documentation](../../internal/frontend/shell-design.md#bundled-sanitizer-advisory-review-2026-09-15).
+links are in [the editor documentation](../../internal/frontend/shell.md#bundled-sanitizer-advisory-review-2026-09-15).
 
 ## Verification
 

@@ -58,10 +58,11 @@ alone
 
 **Implementation:** dashboard root page plus `components/overview/` (`shortcuts.tsx`,
 `workspace.tsx`, `data.tsx`, `resources.tsx`, `services.tsx` with `service-words.ts`,
-`section-link.tsx`, the unit-tested orders in `order.ts`, `activity.tsx` and `activity-event.ts`
+the unit-tested orders in `order.ts`, `activity.tsx` and `activity-event.ts`
 (unit-tested), `readings.tsx` and `storage.tsx`,
 `health-notice.tsx` with its unit-tested wording in `lib/dashboard-health.ts`),
-`components/metrics/` (`host-identity.tsx`, `top-processes.tsx`),
+`components/section-link.tsx`, `components/identity-header.tsx`,
+`components/metrics/top-processes.tsx`,
 `components/deploy/fleet-card.tsx`, `components/database/fleet/read.ts`,
 `components/product-logo.tsx`
 

@@ -28,7 +28,9 @@ a wire. `animate-pulse` is a skeleton's and nothing else's.
 transition under `prefers-reduced-motion: reduce`, and the same rule applies under
 `:root[data-motion="paused"]` (T2, adopted 15 Nov 2026). That one attribute on `<html>` pauses
 every beam, breathe, sweep and shimmer for anyone, and the shell carries the control that sets it
-(WP-31). Components that animate in JavaScript read the same two answers. `Sweep` owns the one
+(WP-31). Components that animate in JavaScript read the same two answers. Tailwind's
+`motion-reduce:` and `motion-safe:` variants and motion's `useReducedMotion` answer only to the
+media query today; WP-31 makes them follow the attribute when it adds the control. `Sweep` owns the one
 reduced-motion face of an indeterminate bar once it lands: a still track in the faint ink.
 
 | Rule | Held by |
@@ -36,7 +38,7 @@ reduced-motion face of an indeterminate bar once it lands: a still track in the 
 | Reduced motion is honoured globally. | spec `design-system.spec.ts` (*reduced motion is honoured globally*) |
 | A wire pulses as the browser's animation, and its page asks for no frames. | spec `design-system.spec.ts` (*a wire pulses …*) |
 | No hand-written `ease-[cubic-bezier(…)]` or `duration-[…]`. | convention; coming: WP-39 |
-| `data-motion="paused"` pauses what reduced motion pauses. | coming: WP-01 (the rule), WP-31 (the control) |
+| `data-motion="paused"` pauses what reduced motion pauses. | `globals.css` (the rule, beside the reduced-motion one); coming: the control (WP-31) |
 
 ## 11. Motion says one of four things
 

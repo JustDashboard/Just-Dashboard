@@ -2,7 +2,7 @@
 
 Fields, options, settings sections, the save bar and the pending strip (D8).
 
-**Members:** `Field`, `FieldRow`, `FieldCheck`, `FormSection`, `FormSections`, `OptionList`,
+**Members:** `Field`, `FieldRow`, `FieldCheck`, `FieldChecks`, `useFieldControl`, `FormSection`, `FormSections`, `OptionList`,
 `OptionRow`, `FormFacts`, `FormNote`, `Statement`, `SettingsColumn`, `SwitchRows`, `SwitchRow`,
 `EditedTag`, `NoticeLine`, `SettingSection`, `SaveBar`, `PendingStrip`, `Segments`, `Disclosure`,
 `ui/input-group`.
@@ -20,6 +20,12 @@ three side by side; `FormSection` opens a part of a longer form with a title and
 to guess what an error stops; `FormFacts` states what the form operates on as data under the title;
 `Disclosure` is the part of a form that is folded away; and `Statement` shows the SQL a
 schema-editing form is about to run, nearest the button that runs it.
+A `Field` wires itself to its control: it makes the ids of its label, hint, error and checks and
+hands them, with `aria-invalid` while there is an error, through a context that `Input`,
+`Textarea` and `SelectTrigger` read (`useFieldControl`), so tabbing back to a field reads its hint
+or its error and the red edge follows the error without the caller setting `aria-invalid`. Give
+`htmlFor` only when the control has an id of its own; one control per `Field`. The error line
+carries a warning glyph, so it is not told by colour alone.
 The databases section's dialogs had assembled their own forms out of `Label`, `Input` and a
 `space-y-1.5` div and arrived at three label sizes, two input heights and no way to write an error
 beside the field that caused it. They are built from these now, and the statement in one is the
@@ -84,11 +90,11 @@ Save waits on the confirmation, and a cancelled or refused change leaves the dra
 **The deployment settings are that shape, and they were the last pages in the product that were
 all containers.** Each of the nine was a stack of framed cards — a title strip, the form, a footer
 holding Save — on the argument that things filled in one at a time read best as bordered boxes,
-which is the wrong shape for a page that *is* a form. `settings/setting-card.tsx` draws them now.
+which is the wrong shape for a page that *is* a form. `components/settings/setting-card.tsx` draws them now.
 `SettingsPage` reads the configuration, then draws what is saved but not live yet (a strip with no
 button: the project context row already carries the one "Deploy changes", and a second brand face a
 hundred and fifty pixels under it was two commands on one surface; `PendingStrip` in
-`settings/pending-strip.tsx` draws it from a headline and a list of items — a mark, a name, a word for
+`components/settings/pending-strip.tsx` draws it from a headline and a list of items — a mark, a name, a word for
 what happened to it, where it is changed — and `pending-changes.tsx` feeds it the deployment's, so any
 settings form can say what it holds that is not in force yet), the page's readings, and its
 forms in one run of sections. `SettingForm` is one `<form>` and one write, and may span several
@@ -98,7 +104,7 @@ from, the port it answers on) and, at its far end, at most one `settingStatus`: 
 *Unsaved changes* or *Saved · not live yet*. A form draws no Save of its own. Each one ended on
 its own button at the fields' right edge, so a page of three forms carried three Saves in three
 places and none of them was where the eye was after an edit two screens up. The page has one Save
-instead (`settings/save-bar.tsx`): `SettingsPage` mounts a `SaveBarProvider`, every `SettingForm`
+instead (`components/settings/save-bar.tsx`): `SettingsPage` mounts a `SaveBarProvider`, every `SettingForm`
 puts itself on it with its dirty state, its count and its `onSave` (which resolves true when the
 write went through), and while any form holds an edit a bar floats at the foot of the content area,
 centred on the column it saves. It is the one thing on a settings page that floats, so it takes a
@@ -111,7 +117,7 @@ that owns only a field of a part (Build's release tasks are a field of `build`) 
 of the latest copy. A refused form keeps its edits and says why under the field, and the bar stays
 with what is left; when everything went through it says *Saved* and when it applies, then leaves —
 so the forms no longer toast their own success. What the bar says is one rule
-(`settings/save-bar-words.ts`): a form's `applies` is one of four kinds (at once, when nginx next
+(`components/settings/save-bar-words.ts`): a form's `applies` is one of four kinds (at once, when nginx next
 reloads, when the server restarts, on the next deployment), a page holding several is told which is
 soonest and what the rest wait for, a form whose save does something none of them says gives the
 line and the command in its own words (`note`, `verb`; the note is also where it says why it cannot
@@ -140,9 +146,9 @@ reads *On* or *Off* in the switch's place.
 switches on Runtime, Build and Domains each carried three or four lines under their name (what
 traffic replay sends and withholds, what sleeping keeps, how a rehearsal restores its copy), read
 again on every visit. An `OptionRow`'s hint is one clause now, the section's facts line still says
-what the section currently is, and the paragraph a reader wants once is an `InfoTip` at the end of
-that line (`settings/facts-line.tsx`, `FactsLine`; a tooltip a keyboard opened stays open while the
-page scrolls to its mark, `ui/tooltip.tsx`): there rather than on a field the switch reveals,
+what the section currently is, and the paragraph a reader wants once is an `Explain` at the end of
+that line (`components/settings/facts-line.tsx`, `FactsLine`; `components/explain.tsx`, which a
+hover, a keyboard's focus or a press opens, and a tap on a phone): there rather than on a field the switch reveals,
 because those fields are not on the page while the switch is off, which is when the question is
 asked. **A list inside a settings form is one line per thing, and the line opens its small form.**
 Health checks and release tasks were framed boxes of fields, open all the time, so two of either
@@ -230,7 +236,7 @@ adding its own `border-l` to the button it puts there gets two pixels where §2 
 is what the environment rows shipped with while the hostname field a section above them drew the
 same divider correctly.
 
-**A closed set of short words is one segmented control.** `settings/segments.tsx` is a single
+**A closed set of short words is one segmented control.** `components/segments.tsx` is a single
 `ToggleGroup` for two to five words — a Python release, the stage a variable reaches, a health
 check's kind and phase, an HTTP method — which the settings had drawn as a `Select` (a closed set
 asked for as if it were open, behind a press that hid the other answers) or as free text that
@@ -249,10 +255,19 @@ field while masked because Chrome remembers a field that has ever been a passwor
 **A rule a value has to meet is lit as it is met.** `FieldCheck` (`form.tsx`) sits under the field
 it belongs to — a credential's name rules, a Telegram channel's token and chat id, a password's
 length and mix — so an error is
-never the first the reader hears of a rule; a run of them is `aria-live="polite"`, never
-`role="alert"`, because a rule being met is news rather than an interruption.
+never the first the reader hears of a rule; a run of them is a `FieldChecks`, the polite live
+region (never `role="alert"`, because a rule being met is news rather than an interruption), and
+each check says "met" or "not yet" to a screen reader.
 
-**A run of filter chips is a `ChipStrip`** (`tabs.tsx`). On a phone it scrolls sideways and bleeds
+**An explanation one step from a thing is an `Explain`** (`components/explain.tsx`): an ⓘ after a
+label or a fact (`face="icon"`, the default; `Field`'s `info` draws one), a dotted term inside a
+sentence (`face="term"`), or the consequence behind a control that already does something
+(`face="wrap"`). A resting mouse opens it and can move onto it, the keyboard's focus opens it, and
+a press, a tap or Enter pins it until Escape or a press outside, so it opens on a phone. Its press
+box is 24px, 44 on a touch screen, without the glyph growing. A `Tooltip` is only the name of an
+icon control, and a `HoverCard` only a decorative preview: neither opens for a finger.
+
+**A run of filter chips is a `ChipStrip`** (`chips.tsx`). On a phone it scrolls sideways and bleeds
 to the page's gutter, so the chip cut off at the edge is the cue that there are more; wrapped, a
 strip of five broke into ragged lines with the last chip alone and pushed the list it filters a
 screen down. From `sm` it wraps as chips always have. **A chip has an edge at rest** — `--input`, the

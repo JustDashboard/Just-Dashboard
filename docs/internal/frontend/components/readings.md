@@ -2,7 +2,7 @@
 
 A reading in words, a figure that moves, a band, a rank and a chart (D4, D10).
 
-**Members:** `ReadingLine`, `StatTile`, `StatGrid`, `StatLink`, `StatButton`, `Meter`, `BarReading`,
+**Members:** `ReadingLine`, `StatTile`, `StatGrid`, `StatButton`, `Meter`, `BarReading`,
 `RankList`, `SplitBar`, `RankSkeleton`, `Sparkline`, `TileTrend`, `ChartPanel`, `LiveFigure`.
 
 **Status: moved text.** WP-17 rewrites this page in wave 1 as purpose, anatomy, use when and when

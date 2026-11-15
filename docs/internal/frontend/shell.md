@@ -137,8 +137,8 @@ pages (Monitoring → Processes → PM2; Administration → Proxy & TLS → Site
 
 `components/shell/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
 `PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `navCurrent`, `sectionsFor`, `navLocation`, and for the sections an
-account hides `shownFor`, `hideableSections` and `sectionEntry` — so `app-sidebar.tsx` and
-`command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
+account hides `shownFor`, `hideableSections` and `sectionEntry` — so `shell/app-sidebar.tsx` and
+`shell/command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
 may carry a `capability`, and every reader hides what the role cannot use. ⌘K covers every page and is
 the one surface that still sees them all at once.
 
@@ -464,7 +464,7 @@ retains the compact mark radius used in commit lines and forge faces.
 
 ### Global command search
 
-`command-palette.tsx` opens with Ctrl/Cmd+K, the rail's search field (drawn as a framed field with
+`components/shell/command-palette.tsx` opens with Ctrl/Cmd+K, the rail's search field (drawn as a framed field with
 the shortcut in keycaps for the reader's platform — ⌘K on Apple keyboards, Ctrl K elsewhere, via
 `lib/platform.ts`), or the search button in the top strip a phone gets in place of the rail. An
 empty search puts the

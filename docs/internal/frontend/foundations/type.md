@@ -41,7 +41,7 @@ cells. `tracking-code` spaces a one-time code.
 | Rule | Held by |
 | --- | --- |
 | Only the steps above; no `text-[Npx]`. | lint `type-scale`; coming: `text-lg`, `text-xl` refused outside their role (WP-39) |
-| A field is 16px on a touch screen whatever its caller passes (iOS zooms on a smaller one). | coming: spec `touch-targets.spec.ts` (WP-02) |
+| A field is 16px on a touch screen whatever its caller passes (iOS zooms on a smaller one). | spec `touch-targets.spec.ts` |
 | No text ink faded with opacity. | coming: lint `ink-opacity` (WP-39) |
 | No sentence under a title. | type |
 
@@ -129,9 +129,11 @@ Managed, Linked and (where supported) Observed in the menu. Its button shows the
 the selected removal consequence stays beside it and is connected with `aria-describedby`.
 Search scope and database activity history also use the shared select, rather than native controls.
 
-**A field is 16px on a phone.** `Input` has always gone to 16px below `sm`, because iOS zooms the
-page into any smaller field that takes focus, and `SelectTrigger` and `SearchInput` now follow it —
-the search box had pinned `text-body` over it. From `sm` the select's text is `text-body`, where it
+**A field is 16px on a phone and under a finger.** `Input`, `Textarea` and `SelectTrigger` write
+`max-sm:text-base pointer-coarse:text-base` after the caller's classes, so a caller's
+`font-mono text-xs` or `text-body` sizes the field only under a mouse from `sm`: iOS zooms the
+page into any field under 16px that takes focus and does not zoom back out. `SearchInput`
+follows it — the search box had pinned `text-body` over it. From `sm` the select's text is `text-body`, where it
 was 14px throughout, so an `Input` and a `Select` in one `FieldRow` read at one size. The search box
 is 40px on a phone, beside the 40px compact `Select` it usually shares a toolbar with, and takes a
 wrapping toolbar's first line to itself: a call site's `flex-1` had squeezed the projects search to
@@ -182,7 +184,7 @@ A wrapper around an inline status is a flex box (`flex`, or `flex flex-col items
 over its detail), or it carries its content's own type size. A glyph beside a title is nudged by
 the title's line box, not by habit: `mt-0.5` centres a 16px glyph on a 20px line and drops it two
 pixels below a `leading-tight` one. A field and its button in one row are `items-center`, since the
-field is 44px on a phone and the button is not. A view strip's tabs carry `pt-0.5` against their
+field is 44px on a phone and a compact button is 40. A view strip's tabs carry `pt-0.5` against their
 2px underline, so their labels sit on the strip's centre line with whatever shares the strip.
 `design-system.spec.ts` checks the first of these on every surface it opens.
 
@@ -191,7 +193,7 @@ any figure meant to be compared with the one above it — tabular digits stop a 
 shimmering.
 
 **`cn` has to be told about these names, and `lib/utils.ts` is where that happens.** tailwind-merge
-resolves conflicts by looking each class up in a table of groups built from stock Tailwind. The six
+resolves conflicts by looking each class up in a table of groups built from stock Tailwind. The four
 custom steps are not in it, so `text-micro` fell through to the generic `text-{colour}` matcher and
 was treated as a colour — which meant any element carrying both a size and a colour silently lost the
 size and rendered at the browser's default 16px. Every `Tag` in the product did exactly that, which is

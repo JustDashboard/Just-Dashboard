@@ -5,15 +5,16 @@
 | Rule | Held by |
 | --- | --- |
 | Dark only. No light palette, no theme switch. | convention |
-| Text has three inks: `text-foreground`, `text-muted-foreground`, `text-faint`. Faint keeps 4.5:1 on every ground text is set on, the selection ground included. | spec `design-system.spec.ts` (*faded secondary text keeps 4.5:1*); coming: a contrast unit test (WP-01) |
+| Text has three inks: `text-foreground`, `text-muted-foreground`, `text-faint`. Faint keeps 4.5:1 on every ground text is set on, the selection ground included. | spec `design-system.spec.ts` (*faded secondary text keeps 4.5:1*, the selection ground included); unit `lib/utils.test.js` (every ink on every ground) |
 | No `/NN` on a text ink. A fainter word is `text-faint`, never `text-muted-foreground/60`. | coming: lint `ink-opacity` (WP-39) |
 | Every colour is a token in `globals.css`. No Tailwind palette, no hand-mixed tint, no `[var(--…)]` for a registered colour. | lint `hardcoded-palette`, `tone-tint`; coming: lint `colour-var` (WP-39) |
 | The brand blue does three jobs: a command's face, where you are, a location mark. | convention |
 | Status hues (`--success`, `--warning`, `--destructive`) arrive only attached to a reading: a figure's `tone`, a `Status` dot and word, a `Notice`. | convention |
 | Selection is `bg-accent`, a neutral ground, never a hue. | spec `design-system.spec.ts` (*hover, selection and focus are three different marks*) |
 | Tints come from `bg-plot-*`, `bg-wash-*` and `border-rule-*`. | lint `tone-tint` |
-| A control (input, select, checkbox, switch) draws its edge in `--control-edge`, at 3:1 against the field and the page ground. Hairlines and card borders keep their tokens (T3). | coming: contrast unit test (WP-01), applied by WP-02 |
-| `--chart-5`, the RX colour of every in/out pair, sits near hue 200, off the success hue (T9). | coming: WP-01 |
+| A control (input, select, checkbox, switch) draws its edge in `--control-edge`, at 3:1 against the field and the page ground. Hairlines and card borders keep their tokens (T3). | unit `lib/utils.test.js` (3:1 on the page, a card, a popover and a control face); `border-control-edge` in `Input`, `Textarea`, `SelectTrigger`, `InputGroup`, `Checkbox` and the `Switch` track |
+| `--chart-5`, the RX colour of every in/out pair, sits near hue 200, off the success hue (T9). | unit `lib/utils.test.js` (more than 25° from `--success`, 3:1 on the page and a card) |
+| The danger button has three opaque steps: `--destructive-face` at rest, `--destructive` on hover, `--destructive-active` pressed, with `--destructive-foreground` on them. White on the bare token is 3.8:1, so the token is never the resting face. | unit `ui/button.test.js` (no face keeps an opacity step) |
 | A kind is coloured from the categorical ramp (`--tag-*`); git and pull-request states alias onto it. | convention |
 
 The token families are in [`tokens.md`](tokens.md).
@@ -32,7 +33,10 @@ from anyone upgrading. The theme hook and `/appearance` are gone.
 secondary text (7.6:1 on the page), and `text-faint` (`--faint`) for what sits behind that: a count, a
 timestamp, a line number, a unit. `--faint` is the dimmest lightness of the muted hue that keeps WCAG
 AA's 4.5:1 on every ground text is set on: 5.3:1 on the page, 5.1 on a card, 4.9 on a popover, 4.8 on
-`--muted`. On `--accent` (a chosen row) it is 4.0:1; set `text-muted-foreground` there. **Do not fade
+`--muted`. On `--accent` (a chosen row) it is 4.7:1, and red 4.6:1: 0.9.0 moved the selection
+ground from L 0.278 to 0.22, the current nav entry's step, because faint text measured 4.0:1 and
+red 3.9:1 on the old one. A selected row is that much nearer the hover wash (1.08:1 against a
+card), and still reads as chosen. **Do not fade
 text with an opacity.** `text-muted-foreground/60` measured 3.4:1 and `/40` 2.1:1 at 10 to 12 px, on
 about two hundred call sites. Those spellings (`/70` and fainter) now draw the faint ink through one
 rule in `globals.css`, which leaves an `svg` its fade (a glyph needs 3:1 where it carries meaning) and

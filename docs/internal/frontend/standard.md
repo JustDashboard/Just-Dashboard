@@ -86,8 +86,8 @@ Each is a best-practice change that touches a decision above. The operator answe
 ## What the linter refuses today
 
 There is one checkbox and one spinner: `Checkbox` (`components/ui/checkbox`) and `Spinner`
-(`components/state.tsx`). `design-system/primitives` refuses a native `<input type="checkbox">`
-and a hand-spun `LoaderCircle` outside `components/ui`, `state.tsx` and `icons.tsx`, and an import
+(`components/loading.tsx`). `design-system/primitives` refuses a native `<input type="checkbox">`
+and a hand-spun `LoaderCircle` outside `components/ui`, `state.tsx`, `loading.tsx` and `icons.tsx`, and an import
 of `BarList` anywhere but the Query page's Chart view. `design-system/tokens` refuses
 `type-scale` (a `text-[Npx]`), `tone-tint`, `radius-bare`, `radius-scale`, `focus-ring` (a
 hand-written focus ring), `row-reveal` (a hand-written hover reveal) and `hardcoded-palette`.

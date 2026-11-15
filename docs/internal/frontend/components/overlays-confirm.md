@@ -3,7 +3,15 @@
 Dialogs, sheets, popovers and the confirmation that names its subject.
 
 **Members:** `Modal`, `PaletteModal`, `SidePanel`, `ConfirmDialog`, `ui/popover`, `ui/hover-card`,
-`ui/tooltip`, and `Explain` (coming in WP-03).
+`ui/tooltip`, and `Explain` (`components/explain.tsx`).
+
+**Tooltips, hover cards and explanations.** A `Tooltip` is the name of an icon control, and it is
+hoverable (WCAG 1.4.13): the pointer can move onto the bubble. A strip the pointer scrubs, such as
+the deploy insights day strip, passes `disableHoverableContent`, or the last bar's bubble holds
+while the pointer crosses to the next. A `HoverCard` is a decorative preview only. Neither opens
+for a finger, so anything a reader needs explained is an `Explain` ([`forms.md`](forms.md)):
+opened by hover or focus it is a `tooltip` describing its mark; pinned by a press or a tap it is a
+small `dialog` named by its label.
 
 **The rule (D9).** An item's detail is a page, not a sheet: a route of its own, its views named in
 `?tab=`, and from `xl` a rail of its siblings

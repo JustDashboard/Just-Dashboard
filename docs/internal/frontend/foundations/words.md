@@ -34,7 +34,7 @@ labels, counts and numbered steps remain subject to it.
   otherwise and which small caps would corrupt.
 - Anything longer than three words is **prose**, and belongs in the row's secondary line or a `Notice`.
 - A **choice** is a `ChoiceCard` or a `ChoiceRow`, from `components/choice-card.tsx` and
-  `components/flow.tsx`. Two shapes, one look: a choice that is *a name* is the whole card, and a
+  `components/choice-row.tsx`. Two shapes, one look: a choice that is *a name* is the whole card, and a
   choice carrying *a sentence* puts the control on its title and takes a `verb` — an ARIA button
   names itself from everything inside it, so a card holding a title, a paragraph and three tags
   announces all of it as the name of one control (§12). A run of the same *kind* of thing is rows;

@@ -2727,7 +2727,7 @@ Console keep their contracts ([request observability](request-observability.md) 
 Logs offers the activation window of the live run when the run's log handoff names one.
 
 Settings are nine pages — General, Build, Runtime, Environment variables, Domains, Storage, Databases
-& backups, Automation, Danger zone — drawn in one frame (`settings/setting-card.tsx`): what is saved
+& backups, Automation, Danger zone — drawn in one frame (`components/settings/setting-card.tsx`): what is saved
 but not live yet at the top, as a strip that names each change and links to its page but carries no
 command (the header's is the one), then, on the page that holds it, the newest failed deployment's
 fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings,

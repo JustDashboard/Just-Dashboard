@@ -4,7 +4,7 @@
 > opens the answer — the server wired to each purpose, filling the screen — with one centred *Go to
 > dashboard*. The sections screen is gone from the first sign-in (Account → Workspace keeps it), and
 > Workspace's rail preview lost its label. This audit describes 0.7.3; the current design is in
-> [`shell-design.md`](../../internal/frontend/shell-design.md#the-first-run-question). Screenshots:
+> [`shell-design.md`](../../internal/frontend/shell.md#the-first-run-question). Screenshots:
 > [question at 1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-question-1280.png), [at 390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-question-390.png),
 > [answer at 1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-answer-1280.png), [1720 with three](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-answer-1720.png),
 > [390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-answer-390.png), [Workspace](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-workspace-1280.png); the walk as

@@ -13,7 +13,7 @@ outside its role's column is noise: fold it into the nearest role when the page 
 | Surface | gutter | 20 | `px-5` | `Panel`, `Row`, `StatTile` |
 | Surface | overlay padding | 16 | `p-4` | sheet, popover, a modal's body, a pane |
 | Surface | dialog padding | 24 | `p-6` | `ui/dialog.tsx` |
-| Row | height | 44 (`py-3` with a 20 line) | `Row`, `ChoiceRow` | `components/row-list.tsx`, `components/flow.tsx` |
+| Row | height | 44 (`py-3` with a 20 line) | `Row`, `ChoiceRow` | `components/row-list.tsx`, `components/choice-row.tsx` |
 | Row | internal gap | 12 | `gap-3` | `components/row-list.tsx` |
 | Row | bleed in a plain panel | 12 | `ROW_BLEED` | `components/row-list.tsx` |
 | Table | bleed in a plain panel | the surface gutter | `TABLE_BLEED` (coming, beside `ROW_BLEED`), not `-mx-4`, `-mx-3` or `-mx-2` by hand | `components/row-list.tsx` |

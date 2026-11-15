@@ -8,7 +8,7 @@ workflows package of the feature-by-feature maturity work, branch
 [download SQM](../../../internal/backend/network-sqm.md), [socket history](../../../internal/backend/network-flow-accounting.md),
 [the kernel observer](../../../internal/backend/network-flow-observer.md),
 [the firewall](../../../internal/backend/observability-security.md#firewall-one-page-three-backends) and
-[the Connections page](../../../internal/frontend/features-terminal.md). P14 (true download SQM:
+[the Connections page](../../../internal/frontend/features/network.md). P14 (true download SQM:
 reboot, provider queues, offload and production performance) and P8 (complete flow accounting) are
 separate projects; the parts of C078, C081, C083 and C084 that belong to them stay open. This
 evidence changes no ledger status; proposed statuses are listed at the end.

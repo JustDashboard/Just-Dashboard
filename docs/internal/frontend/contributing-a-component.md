@@ -54,3 +54,8 @@ In steps, so no pull request has to change every call site at once:
 3. Move the call sites, area by area, in the page passes.
 4. Delete the old name, and add a lint rule that refuses it, so it cannot come back. The catalogue
    row goes, and the story of why moves to [`decisions/`](decisions/README.md).
+
+**Codemods.** The mechanical part of a migration is `frontend/scripts/codemods/run.ts`. Run it on
+the paths you own, in the order its README gives: `--dry-run` first, then a write, then `--check`
+before you hand in. It rewrites only spellings with one right answer and lists the rest as review
+lines. Each one waits until its foundation has landed.

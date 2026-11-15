@@ -47,9 +47,10 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
 - `components/page.tsx` — `Page` (one measure, gutter and rhythm; `fill` for terminal and logs, whose
   content *is* the viewport), `PageContext` (an accessible page name, plus a linked parent and verbs
   on detail pages, with no visual page title; list commands live in their section or workbench),
-  `PageState`, `Section`, `Toolbar`, `SearchInput`,
-  `Metric`/`MetricStrip`, `DetailList`/`Detail`, `RowLink` (`SearchInput` is 40px and a line of its
-  own below `sm`; `MetricStrip` is two-up on a phone — §8). **None of the heading primitives takes a
+  `PageState`; and beside it, each in a file named after it, `section.tsx` (`Section`),
+  `toolbar.tsx` (`Toolbar`), `search-input.tsx` (`SearchInput`), `detail-list.tsx`
+  (`Metric`/`MetricStrip`, `DetailList`/`Detail`) and `row-link.tsx` (`RowLink`) (`SearchInput` is
+  40px and a line of its own below `sm`; `MetricStrip` is two-up on a phone — §8). **None of the heading primitives takes a
   `description`** — see rule 5 in [`design-system.md`](../design-system.md).
 - `components/panel.tsx` — `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`; `Pane`,
   `PaneHeader`, `PaneFooter`; `Well`. A **panel** is *the* content block: a framed surface with a header
@@ -64,7 +65,7 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
 - `components/row-list.tsx` — `RowList` and `Row`: the list-of-rows you *read*. A leading mark, a
   title, an optional second line and whatever sits at the right edge; a row with `href` is a link
   with a revealed arrow, with `onClick` a button, with neither inert.
-  Its counterpart is `ChoiceList`/`ChoiceRow` in `components/flow.tsx`, for a row you *take* — a
+  Its counterpart is `ChoiceList`/`ChoiceRow` in `components/choice-row.tsx`, for a row you *take* — a
   project to enter, a site to open, a stack to look inside. Same anatomy, plus an arrow that is
   always drawn and a border that lights under the pointer. Which one a list gets is decided by
   whether its rows are destinations, not by which register the page is in: see §15 pass 3 and the
@@ -117,7 +118,7 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
 - `components/tabs.tsx` — the switchers that remain, all of which switch between *views of one page*:
   `tabClasses` (the underlined tab, for a log pane's Live, History and Insights and the page's own
   views beside them, the packages page's installed, updates, search and log, the deploy wizard's source
-  kinds), `FilterChip`, `ChipCount` and
+  kinds); beside it, `components/chips.tsx` holds `FilterChip`, `ChipCount` and
   `ChipStrip`, the run every set of chips sits in (sideways-scrolling on a phone, wrapping from `sm`).
   The route-level strips were deleted in 0.6.7 when the rail started
   drilling into sections; do not reintroduce a strip that changes the URL.
@@ -125,17 +126,21 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
   it — a hint, or the error while there is one), `FieldRow`, `FormSection` (an eyebrow and a hairline
   opening part of a longer form), `FormSections` (a run of `FormSection aside`s, each head over its
   fields, held with the hairlines between them to the fields' 48rem),
-  `FieldCheck` (one rule a value has to meet, lit as it is met — a run of them in an
-  `aria-live="polite"` wrapper), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
+  `FieldCheck` (one rule a value has to meet, lit as it is met and saying "met" or "not yet" to a
+  screen reader) and `FieldChecks` (the polite live region a run of them sits in),
+  `useFieldControl` (what a control reads from the `Field` it sits in), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
   (what the form operates on, as data under the title), `Statement` (the SQL a schema-editing form is
   about to run, with a copy) and `FormNote`. The databases section's dialogs are built from these and
   nothing else, and the statement one shows is the server's own plan of the change (`?preview=1`),
   never a page's approximation of it.
+- `components/explain.tsx` — `Explain`, the one toggletip for an explanation (ⓘ, dotted term, or
+  wrapped control), opened by hover, focus, press or tap. `InfoTip` in `form.tsx` is a deprecated
+  alias of it.
 - `components/stat-tile.tsx` — `StatTile` (a small name over a 24px figure, an optional meter and one
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
   around them, every tile the same inset and a lone last tile taking its row. `framed` restores the
-  box. `StatLink` wraps a
-  tile that is also a destination — the Services row on the host overview — with the revealed arrow that says so on touch; `StatButton` wraps one whose press
+  box. A tile that is also a destination is a `Link` around a `StatTile` (`StatLink`, which did
+  that, had no caller left and went in 0.9.0); `StatButton` wraps one whose press
   narrows what is under it (a lens's readings wherever a page draws them, a site's request figures)
   with a revealed funnel and `aria-pressed`. `dense` sets the tiles two to a row on a phone.
 - `components/outcome-strip.tsx` — `OutcomeStrip`, the last few attempts at something as a square per
@@ -162,9 +167,10 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
   represent saved changes. Operational error messages and diagnostic evidence remain visible.
 
 **Reach for `Panel`/`Pane`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a
-feature page — before these existed, fourteen pages read as fourteen products. `components/state.tsx`
-does the same for the non-happy paths (`Spinner`, `LoadingRows`, `LoadingPanel`, `EmptyState`,
-`EmptyNote`, `ErrorState`, `Notice`); `LoadingPanel plain` is the same silhouette unframed, for a page
+feature page — before these existed, fourteen pages read as fourteen products.
+`components/loading.tsx` (`Spinner`, `LoadingRows`, `LoadingPanel`, `Hold`) and
+`components/state.tsx` (`EmptyState`, `EmptyNote`, `ErrorState`, `Notice`) do the same for the
+non-happy paths; `LoadingPanel plain` is the same silhouette unframed, for a page
 whose blocks arrive plain, and `EmptyState`'s `mark` draws what the list would hold (`ProductLogos`) in
 place of the glyph. `min-w-0` on the frame and its children is load-bearing: a wide
 table's intrinsic width would otherwise widen the flex column and take the whole shell sideways instead
@@ -172,7 +178,7 @@ of scrolling inside its panel.
 
 **A page arrives from the top.** A block whose answer is taller than its skeleton, or that is not on
 the page until its read answers, pushes everything under it down when it lands; eight pages moved that
-way while they loaded, past a quarter of the window on Certificates. `Hold` (also in `state.tsx`) is the
+way while they loaded, past a quarter of the window on Certificates. `Hold` (in `loading.tsx`) is the
 answer where the loaded height cannot be reserved: `<Hold until={!read.loading} />` after the block
 leaves a marker until the read's first answer, and a rule in `globals.css` keeps what follows the marker,
 and every block of the `Page` under the one the marker is in, off the page until then. What is held is

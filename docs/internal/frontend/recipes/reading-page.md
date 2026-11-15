@@ -66,8 +66,8 @@ The passes, in order. Each one is a diff you can review on its own.
    A `StatTile` stays only where a run of figures is read as a table (Metrics' five readings, the
    Docker overview's), and there each tile carries a sparkline or a strip and its tone: a `StatGrid`
    with hairlines between, nothing around, every tile the same inset. A tile that is a destination
-   is wrapped in `StatLink` and takes `className="h-full transition-colors group-hover:bg-row-hover"`;
-   the arrow is the link's, not yours. A tile whose figure is a question about what is under it — a
+   is a `Link` around the `StatTile` (`StatLink`, which drew that, went in 0.9.0 with no caller
+   left), and the tile takes `className="h-full transition-colors group-hover:bg-row-hover"`. A tile whose figure is a question about what is under it — a
    log's "Auth failures 12" — is a `StatButton` instead: a press narrows the pane below rather than
    leaving the page, its revealed mark is the funnel every "only lines like this" carries, and
    `pressed` says the figure's filter is the one on screen (pressing it again lets it go). The figure

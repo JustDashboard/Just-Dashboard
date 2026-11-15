@@ -75,7 +75,7 @@ column beside the project's navigation is about 968px, which left a service's na
 five readings, so the wide shape of the Overview's runs-beside-previews starts at `2xl`, as does
 the build console's rail of stages beside the transcript. Inside a settings page the column is
 narrower still, because the fields are held to 48rem however wide the window is, so there the
-window is the wrong thing to ask at all: `settings/use-column-width.ts` measures the column a list
+window is the wrong thing to ask at all: `hooks/use-column-width.ts` measures the column a list
 is drawn in, before its first paint, and the variables and linked databases (from 600px), the
 storage page's mounts (from 480px) and Automation's webhooks, schedules, approvals and previews
 (from 560px) choose beside-or-under from that — still once, still drawn once.
