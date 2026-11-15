@@ -14,7 +14,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { shortDigest } from "@/lib/format"
+import { duration, shortDigest } from "@/lib/format"
 import type { GitTone } from "@/lib/git-status"
 import { Status, StatusDot, type DotTone, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -404,16 +404,15 @@ export function runDurationSeconds(
 }
 
 /** "42s", "1m 12s", "1h 03m" — the shape a build time is read in. */
+/**
+ * A run's time, on the one duration ladder the product reads ages and
+ * uptimes on: "45s", "1m 35s", "1m", "1h 3m", "2d 4h".
+ *
+ * @deprecated use `duration` from `@/lib/format`.
+ */
 export function formatDuration(seconds: number | undefined) {
   if (seconds === undefined) return "—"
-  const total = Math.max(0, Math.round(seconds))
-  if (total < 60) return `${total}s`
-  const minutes = Math.floor(total / 60)
-  if (minutes < 60) return `${minutes}m ${total % 60}s`
-  const hours = Math.floor(minutes / 60)
-  // Past two days, hours beside a relative time in days read as two units for one span.
-  if (hours >= 48) return `${Math.floor(hours / 24)}d ${hours % 24}h`
-  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`
+  return duration(Math.max(0, Math.round(seconds)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1251,7 +1250,7 @@ export function ChangeTag({
 }) {
   const tone = CHANGE_TONE[change]
   return (
-    <Tag className={className} style={tone ? { color: `var(--git-${tone})` } : undefined}>
+    <Tag className={className} hue={tone ? `var(--git-${tone})` : undefined}>
       {change}
     </Tag>
   )

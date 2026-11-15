@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { Fragment, useEffect, useRef } from "react"
 import type {
   DeploymentBuildMethod,
@@ -390,7 +391,7 @@ export function StepProject({
                   lfsFiles === undefined
                     ? `The repository keeps ${requirements.lfsFiles} files in LFS, more than detection lists; some may be under the build root. The server needs git-lfs installed.`
                     : lfsFiles > 0
-                      ? `${lfsFiles} file${lfsFiles === 1 ? "" : "s"} under the build root ${
+                      ? `${plural(lfsFiles, "file")} under the build root ${
                           lfsFiles === 1 ? "is" : "are"
                         } stored in LFS. The server needs git-lfs installed.`
                       : "No file under the build root is stored in LFS."
