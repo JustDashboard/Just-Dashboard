@@ -89,22 +89,23 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `useViewTab`, `pickView`, `viewSearch`, `ViewTabOptions` (type) | [Tabs, chips, segments](tabs-chips-segments.md) | `hooks/use-view-tab.ts` | The view a page shows, held in `?tab=`; `pickView` and `viewSearch` are its rules as pure steps. | new (WP-08) |
 | `Bone` | [States](states.md) | `components/bone.tsx` | A bone in a line of words that keeps the height the words will give it. | keep |
 | `Spinner` | [States](states.md) | `components/loading.tsx` | A small turning mark for a wait too short for a skeleton. | keep |
-| `LoadingRows`, `LoadingPanel` | [States](states.md) | `components/loading.tsx` | Skeleton rows, and a panel's skeleton at the panel's height. | keep |
+| `LoadingRows`, `LoadingPanel` | [States](states.md) | `components/loading.tsx` | Skeleton rows for a list whose shape is not known yet, and a panel's skeleton at the panel's height. | keep |
 | `Hold`, `HOLD_AT_MOST_MS` | [States](states.md) | `components/loading.tsx` | Keeps what is under a block off the page until the read above it answers, so nothing moves. | keep |
 | `nearestPage`, `addressTail`, `NearestPage` (type) | [States](states.md) | `components/missing-page-model.ts` | The not-found page's nearest page and the address as its picture says it. | keep |
 | `MissingPage` | [States](states.md) | `components/missing-page.tsx` | An address no page claims, as a picture of the address and the pages that are there. | keep |
-| `noSystemd`, `moduleOff`, `missingFromError`, `unreadLine`, `saysDockerUnreachable`, `logKindMissing`, `SYSTEMD_RUN_DIR`, `SYSTEMD_MOUNT`, `MissingStep` (type), `Missing` (type), `MissingReason` (type), `SystemdReader` (type), `Refusal` (type), `MissingLineWords` (type) | [States](states.md) | `components/missing-thing-model.ts` | The words of every absence, so a missing systemd or a module switched off reads the same everywhere. | keep |
+| `noSystemd`, `moduleOff`, `missingFromError`, `absentFromError`, `unreadLine`, `saysDockerUnreachable`, `logKindMissing`, `SYSTEMD_RUN_DIR`, `SYSTEMD_MOUNT`, `MissingStep` (type), `Missing` (type), `MissingReason` (type), `SystemdReader` (type), `Refusal` (type), `MissingLineWords` (type) | [States](states.md) | `components/missing-thing-model.ts` | The words of every absence, so a missing systemd or a module switched off reads the same everywhere. | keep |
 | `MissingThing`, `MissingScreen`, `MissingOrError`, `MissingLine`, `MissingGain` (type) | [States](states.md) | `components/missing-thing.tsx` | A thing that is not there, drawn as itself with the next step; whole, from a model, from an error, or as one line. | keep |
 | `PageState` | [States](states.md) | `components/page.tsx` | A page that has not got its data yet, or cannot get it, in the shell's frame. | keep |
-| `Stale` | [States](states.md) | `components/stale.tsx` | A reading that stopped updating: a mark beside it or a strip with Try again. | new (WP-12) |
+| `InstallHandoff`, `InstallFollowUp`, `HandoffPhases`, `usePackageKnown`, `PackageKnown` (type) | [States](states.md) | `components/install-handoff.tsx` | A section whose tool is not installed: what it would do, drawn through `MissingThing`, its install streaming under the button, and the phases after. | new (WP-12) |
+| `Stale`, `agoFrom` | [States](states.md) | `components/stale.tsx` | A reading that stopped updating: a mark beside it or a strip with Try again; `agoFrom` says how long ago. | new (WP-12) |
+| `StaleNotice` | [States](states.md) | `components/stale.tsx` | The last good reading's age and a refresh, over a page whose read now fails. | new (WP-12) |
 | `StandaloneState`, `RenderFailure` | [States](states.md) | `components/standalone-state.tsx` | A whole window with no shell: sign-in's failures and a render error above the shell. | keep |
 | `EmptyState` | [States](states.md) | `components/state.tsx` | An empty list, drawn as what it would hold, with the next step. | keep |
 | `EmptyNote` | [States](states.md) | `components/state.tsx` | "Nothing here" inside something already: a rail, a filtered body; gains `action` and `dense` (WP-12). | keep |
 | `ErrorState` | [States](states.md) | `components/state.tsx` | A failed read, said calmly when it is an absence; gains `what`, `every` and a pending retry (WP-12). | keep |
 | `Notice` | [States](states.md) | `components/state.tsx` | A short banner for a fact the reader needs before acting on the page. | keep |
-| `StaleNotice` | [States](states.md) | `components/state.tsx` | The last good reading's age and a refresh, over a page whose read now fails. | new (WP-12) |
-| `NeedsAdmin` | [States](states.md) | `components/state.tsx` | The closed door under a page's identity line for a page only an administrator opens. | new (WP-12) |
-| `Sweep` | [States](states.md) | `components/state.tsx` | The one indeterminate bar: a third of a track sweeping across. | new (WP-12) |
+| `NeedsAdmin`, `needsVerb` | [States](states.md) | `components/state.tsx` | The closed door under a page's identity line for a page only an administrator opens. | new (WP-12) |
+| `Sweep`, `SWEEP_STILL` | [States](states.md) | `components/loading.tsx` | The one indeterminate bar: a third of a track sweeping across, and the one way it holds still. | new (WP-12) |
 | `Skeleton` | [States](states.md) | `components/ui/skeleton.tsx` | The one skeleton fill. | keep |
 | `OutcomeStrip`, `OUTCOME_FILL`, `OutcomeTone` (type), `Outcome` (type) | [Status and tags](status-tag.md) | `components/outcome-strip.tsx` | The last few attempts at something as a square each in how it ended, oldest first. | keep |
 | `StateMark`, `StateCorner` | [Status and tags](status-tag.md) | `components/product-logo.tsx` | A product's tile with its status dot in the corner, on one size ladder. | new (WP-13) |
