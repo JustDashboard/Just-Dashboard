@@ -64,8 +64,17 @@ const SKIPPED_DIRS = new Set([
   "playwright-report",
   "public",
 ])
-/** The script and its table are not rewritten by themselves. */
-const SELF = new Set(["scripts/move-files.ts", "scripts/moves.json", "scripts/move-files.test.js"])
+/**
+ * The script and its table are not rewritten by themselves, and neither is the imports codemod,
+ * which reads the same table and names the old paths in its test on purpose.
+ */
+const SELF = new Set([
+  "scripts/move-files.ts",
+  "scripts/moves.json",
+  "scripts/move-files.test.js",
+  "scripts/codemods/imports.ts",
+  "scripts/codemods/imports.test.js",
+])
 const SUFFIXES = [
   "",
   ".ts",
