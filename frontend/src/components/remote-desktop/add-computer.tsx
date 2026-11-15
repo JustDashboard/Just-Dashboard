@@ -13,7 +13,7 @@ import {
 } from "@/components/flow"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow } from "@/components/form"
-import { ArrowLeft, ArrowRight, Check, Globe } from "@/components/icons"
+import { ArrowRight, Check, Globe } from "@/components/icons"
 import { Page } from "@/components/page"
 import { ProductGlyph, ProductLogos } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
@@ -179,15 +179,7 @@ export function AddComputer({ peer: first }: { peer?: string }) {
     }
   }
 
-  const eyebrow = (
-    <Link
-      href={REMOTE_DESKTOP_HREF}
-      className="inline-flex items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
-    >
-      <ArrowLeft aria-hidden className="size-3" />
-      Remote Desktop
-    </Link>
-  )
+  const back = { href: REMOTE_DESKTOP_HREF, label: "Remote Desktop" }
   const questions = [
     "Which computer do you want to reach?",
     `Turn on ${protocolLabel(draft.protocol, draft.os)} on ${draft.name || "the computer"}`,
@@ -195,9 +187,9 @@ export function AddComputer({ peer: first }: { peer?: string }) {
   ]
 
   return (
-    <Page register="flow" className="animate-rise">
+    <Page register="flow" rise>
       <FlowHeader
-        eyebrow={eyebrow}
+        back={back}
         question={questions[step]}
         steps={<FlowSteps steps={STEPS} current={step} />}
       />
@@ -341,20 +333,27 @@ function ChooseComputer({
           </p>
         </Notice>
       )}
-      <FlowPanel>
-        <FlowPanelHeader
-          title="On your tailnet"
-          actions={<ProductGlyph id="tailscale" className="size-4" />}
-        />
-        <FlowPanelBody flush>
+      {/* A section, not a framed panel: the rows are the cards you open, and
+          a card inside a box is one frame too many (PGW-24). */}
+      <section aria-labelledby="tailnet-title" className="flex min-w-0 flex-col">
+        <div className="flex min-w-0 items-center justify-between gap-4 border-b border-hairline pb-3">
+          <h2
+            id="tailnet-title"
+            className="min-w-0 truncate text-title font-semibold tracking-tight"
+          >
+            On your tailnet
+          </h2>
+          <ProductGlyph id="tailscale" className="size-4" />
+        </div>
+        <div className="min-w-0">
           {offered.length === 0 ? (
-            <p className="p-4 text-body text-muted-foreground">
+            <p className="py-4 text-body text-muted-foreground">
               {tailnet
                 ? "Every Windows, Mac and Linux device on the tailnet is added already. Install Tailscale on another computer and sign in with the same account, and it appears here."
                 : "No tailnet to read."}
             </p>
           ) : (
-            <ChoiceList className="p-2">
+            <ChoiceList className="py-3">
               {offered.map((peer, index) => {
                 const os = peerOS(peer.os)!
                 return (
@@ -392,14 +391,17 @@ function ChooseComputer({
               })}
             </ChoiceList>
           )}
-        </FlowPanelBody>
-        <FlowActions note="A computer this server reaches another way can be added by its address.">
+        </div>
+        <FlowActions
+          className="px-0"
+          note="A computer this server reaches another way can be added by its address."
+        >
           <Button variant="outline" className="h-11 sm:h-9" onClick={onManual}>
             <Globe className="size-4" />
             Somewhere else
           </Button>
         </FlowActions>
-      </FlowPanel>
+      </section>
     </div>
   )
 }

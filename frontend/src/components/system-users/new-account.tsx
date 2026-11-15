@@ -1,10 +1,8 @@
 "use client"
 
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 import {
-  ArrowLeft,
   Copy,
   Key,
   LockClosed,
@@ -240,14 +238,7 @@ export function NewAccount() {
   return (
     <Page register="flow">
       <FlowHeader
-        eyebrow={
-          <Link
-            href="/system-users"
-            className="inline-flex items-center gap-1 rounded-sm normal-case focus-ring hover:underline"
-          >
-            <ArrowLeft className="size-3" /> System users
-          </Link>
-        }
+        back={{ href: "/system-users", label: "System users" }}
         question="Who is this account for?"
       />
       <ChoiceGrid columns="compact">
