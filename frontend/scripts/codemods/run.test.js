@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { TRANSFORMS, unmet } from "./run.ts"
+import { changedLines, TRANSFORMS, unmet } from "./run.ts"
 import { cli } from "./test-kit.js"
 
 describe("run.ts", () => {
@@ -24,6 +24,20 @@ describe("run.ts", () => {
     const order = TRANSFORMS.map((t) => readme.indexOf(`| \`${t.name}\``))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
+  })
+
+  test("a dry run shows each changed line, not the stretch between the first and the last", () => {
+    const before = ["a", "b z-10", "c", "d", "e", "f z-20", "g"].join("\n")
+    const after = ["a", "b z-raised", "c", "d", "e", "f z-sticky", "new", "g"].join("\n")
+    expect(changedLines(before, after).split("\n")).toEqual([
+      "@@ line 2",
+      "- b z-10",
+      "+ b z-raised",
+      "@@ line 6",
+      "- f z-20",
+      "+ f z-sticky",
+      "+ new",
+    ])
   })
 
   test("paths are required, and an unknown transform or flag is refused", () => {

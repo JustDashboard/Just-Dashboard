@@ -137,9 +137,11 @@ function describe(f: Finding) {
   return `${where}  ${f.kind === "rewrite" ? "rewrite" : "review "}  ${f.transform}  ${what}${f.note ? `  (${f.note})` : ""}`
 }
 
-function changedLines(before: string, after: string) {
+/** The changed lines as hunks, from a longest common subsequence of the two files' lines. */
+export function changedLines(before: string, after: string) {
   const a = before.split("\n")
   const b = after.split("\n")
+  // Trim the common ends first: the table is then only as big as the region that changed.
   let head = 0
   while (head < a.length && head < b.length && a[head] === b[head]) head++
   let tail = 0
@@ -149,11 +151,30 @@ function changedLines(before: string, after: string) {
     a[a.length - 1 - tail] === b[b.length - 1 - tail]
   )
     tail++
-  return [
-    `@@ line ${head + 1}`,
-    ...a.slice(head, a.length - tail).map((l) => `- ${l}`),
-    ...b.slice(head, b.length - tail).map((l) => `+ ${l}`),
-  ].join("\n")
+  const x = a.slice(head, a.length - tail)
+  const y = b.slice(head, b.length - tail)
+  const keep = Array.from({ length: x.length + 1 }, () => new Uint32Array(y.length + 1))
+  for (let i = x.length - 1; i >= 0; i--)
+    for (let j = y.length - 1; j >= 0; j--)
+      keep[i][j] = x[i] === y[j] ? keep[i + 1][j + 1] + 1 : Math.max(keep[i + 1][j], keep[i][j + 1])
+  const out: string[] = []
+  let i = 0
+  let j = 0
+  let open = false
+  while (i < x.length || j < y.length) {
+    if (i < x.length && j < y.length && x[i] === y[j]) {
+      i++
+      j++
+      open = false
+      continue
+    }
+    if (!open) out.push(`@@ line ${head + i + 1}`)
+    open = true
+    if (i < x.length && (j === y.length || keep[i + 1][j] >= keep[i][j + 1]))
+      out.push(`- ${x[i++]}`)
+    else out.push(`+ ${y[j++]}`)
+  }
+  return out.join("\n")
 }
 
 export function main(argv: string[]): number {
