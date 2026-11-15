@@ -8,9 +8,7 @@ const css = readFileSync(join(import.meta.dir, "..", "app", "globals.css"), "utf
 /** Every name a theme namespace adds, read from globals.css rather than listed twice. */
 function themeNames(namespace) {
   const re = new RegExp(`--${namespace}-([a-z0-9-]+?):`, "g")
-  return [...new Set([...css.matchAll(re)].map((m) => m[1]))].filter(
-    (name) => !name.includes("--"),
-  )
+  return [...new Set([...css.matchAll(re)].map((m) => m[1]))].filter((name) => !name.includes("--"))
 }
 
 describe("cn knows the theme's own names", () => {
@@ -44,7 +42,8 @@ describe("cn knows the theme's own names", () => {
   test("motion lengths and curves are durations and easings", () => {
     const lengths = themeNames("transition-duration")
     expect(lengths).toEqual(["fast", "base", "slow", "fill"])
-    for (const name of lengths) expect(cn("duration-200", `duration-${name}`)).toBe(`duration-${name}`)
+    for (const name of lengths)
+      expect(cn("duration-200", `duration-${name}`)).toBe(`duration-${name}`)
     expect(cn("ease-out", "ease-arrive")).toBe("ease-arrive")
     expect(cn("ease-arrive", "ease-standard")).toBe("ease-standard")
     expect(cn("transition-colors", "transition-fill")).toBe("transition-fill")

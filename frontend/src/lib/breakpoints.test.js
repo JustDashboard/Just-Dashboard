@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { createElement } from "react"
 import { renderToString } from "react-dom/server"
-import { BREAKPOINTS, breakpointQuery, mediaQueryStore, useBelow, useBreakpoint } from "./breakpoints"
+import {
+  BREAKPOINTS,
+  breakpointQuery,
+  mediaQueryStore,
+  useBelow,
+  useBreakpoint,
+} from "./breakpoints"
 
 const css = readFileSync(join(import.meta.dir, "..", "app", "globals.css"), "utf8")
 
@@ -70,8 +76,7 @@ describe("following a media query", () => {
   })
 
   test("useBreakpoint('lg') and useBelow('sm') render on the server with that answer", () => {
-    const Probe = () =>
-      createElement("i", null, `${useBreakpoint("lg")} ${useBelow("sm")}`)
+    const Probe = () => createElement("i", null, `${useBreakpoint("lg")} ${useBelow("sm")}`)
     expect(renderToString(createElement(Probe))).toBe("<i>false false</i>")
   })
 })

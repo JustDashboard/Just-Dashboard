@@ -229,4 +229,3 @@ function ReadingRow({
     </tr>
   )
 }
-
