@@ -197,12 +197,13 @@ test("each reading is a sentence that carries its last hour", async ({ page }) =
   await expect(cpu.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
 
   const lines = page.locator("[data-slot=resources] [data-slot=reading-line]")
+  // A live figure keeps its unit with a no-break space (`\s` matches it).
   await expect(lines).toHaveText([
     /CPU.*23\.4% busy/,
-    /Memory.*6\.5 GB free.*56% used · 4\.0 GB cached/,
+    /Memory.*6\.5\sGB free.*56% used · 4\.0 GB cached/,
     /Load.*0\.92, 0\.23 a core.*0\.71 · 0\.60 over 5 and 15 min/,
-    /Network.*2\.3 MB\/s in.*420\.0 KB\/s out · 312 TCP sockets/,
-    /Disk I\/O.*5\.1 MB\/s.*1\.2 MB\/s read · 3\.9 MB\/s write/,
+    /Network.*2\.3\sMB\/s in.*420\.0 KB\/s out · 312 TCP sockets/,
+    /Disk I\/O.*5\.1\sMB\/s.*1\.2 MB\/s read · 3\.9 MB\/s write/,
   ])
   // Every line is one height, and each is a way to the page that records it.
   await risen(page)
