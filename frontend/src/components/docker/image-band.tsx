@@ -481,6 +481,9 @@ function RegistryShare({
   return (
     <BarReading
       title="Registry"
+      // A container, so the strip says each answer in words where it has
+      // the room (PGH-20) and keeps to its dots and counts where it has not.
+      className="@container/reading"
       label="What the registries say"
       list="Registry answers"
       fixed
@@ -545,10 +548,23 @@ function RegistryShare({
   )
 }
 
+/** An answer in the strip's one word, after its count: "2 update", "4 current". */
+const ANSWER_WORD: Record<Freshness, string> = {
+  outdated: "update",
+  current: "current",
+  pinned: "pinned",
+  local: "built here",
+  unknown: "unchecked",
+  unused: "unused",
+  untagged: "untagged",
+}
+
 /**
- * An answer's mark in the strip: its dot in the span's own colour, then how
- * many images gave it. The three muted answers are tints too faint to read
- * at a dot's size, so theirs is ringed.
+ * An answer's mark in the strip: its dot in the span's own colour, how many
+ * images gave it, and the answer in a word where the reading has the room.
+ * A strip of dots and bare counts ("● 2 ● 4 ● 1") left the colour alone to
+ * say which answer was which (PGH-20). The three muted answers are tints too
+ * faint to read at a dot's size, so theirs is ringed.
  */
 function AnswerMark({ state, count }: { state: Freshness; count: number }) {
   const faint = state === "unknown" || state === "unused" || state === "untagged"
@@ -559,7 +575,13 @@ function AnswerMark({ state, count }: { state: Freshness; count: number }) {
         className={cn("size-1.5 shrink-0 rounded-full", faint && "ring-1 ring-muted-foreground/50")}
         style={{ background: FRESHNESS_COLOR[state] }}
       />
-      <span className="numeric text-hint font-medium">{count}</span>
+      <span className="numeric text-hint font-medium whitespace-nowrap">
+        {count}
+        <span className="hidden font-normal text-muted-foreground @sm/reading:inline">
+          {" "}
+          {ANSWER_WORD[state]}
+        </span>
+      </span>
     </span>
   )
 }
