@@ -268,7 +268,8 @@ export function DecisionMapWaiting({ rules, tables }: { rules: number; tables: n
           <Bar className="h-7 w-12 rounded-md" />
           <Bar className="h-7 w-12 rounded-md" />
         </div>
-        <Bar className="h-10 w-full rounded-md sm:h-8 sm:w-[22.375rem]" />
+        {/* The lookup field's own heights: 44px on a phone and under a finger. */}
+        <Bar className="h-11 w-full rounded-md sm:h-8 sm:w-[22.375rem] pointer-coarse:h-11" />
       </div>
       <p className="flex min-h-10 items-start text-xs sm:min-h-5">
         <Bar className="mt-1 h-2.5 w-72 max-w-full" />
