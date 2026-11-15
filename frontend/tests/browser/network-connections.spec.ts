@@ -184,12 +184,14 @@ for (const width of [1280, 390]) {
       const tall = lines.map((line) => line.height)
       expect(Math.max(...tall) - Math.min(...tall)).toBeLessThanOrEqual(1)
       expect(lines.every((line) => line.inside)).toBe(true)
-      // The command stands beside the address, never over it.
+      // The command never stands over the address: beside it on a wide
+      // screen, and on a phone on the verbs' own row under it.
       const name = await identity.getByText("198.51.100.23", { exact: true }).boundingBox()
       const command = await page
         .getByRole("button", { name: "Block at the firewall" })
         .boundingBox()
-      expect(name!.x + name!.width).toBeLessThanOrEqual(command!.x)
+      if (width === 390) expect(command!.y).toBeGreaterThanOrEqual(name!.y + name!.height)
+      else expect(name!.x + name!.width).toBeLessThanOrEqual(command!.x)
     })
 
     test(`an address's line opens in the same place before its reads land, at ${width}`, async ({
@@ -559,10 +561,12 @@ test("an IPv6 address has a page, and narrow columns keep both of its ends", asy
   const identity = page.locator("[data-slot=host-identity]").first()
   await expect(identity).toContainText(v6)
   await expect.poll(() => asked).toContain(`/api/v1/connections/${encodeURIComponent(v6)}`)
-  // The whole address, broken over two lines rather than run under the command.
+  // The whole address, broken over two lines rather than run under the
+  // command, which has the verbs' own row under it on a phone.
   const name = await identity.getByText(v6, { exact: true }).boundingBox()
   const command = await page.getByRole("button", { name: "Block at the firewall" }).boundingBox()
-  expect(name!.x + name!.width).toBeLessThanOrEqual(command!.x)
+  expect(command!.y).toBeGreaterThanOrEqual(name!.y + name!.height)
+  expect(name!.x + name!.width).toBeLessThanOrEqual(390)
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
