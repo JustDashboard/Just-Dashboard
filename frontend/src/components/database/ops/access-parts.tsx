@@ -1,27 +1,20 @@
 "use client"
 
 import { createRef, useMemo, useRef, useState } from "react"
-import { Copy, Eye, Sparkles } from "@/components/icons"
+import { Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { InitialsMark } from "@/components/user-avatar"
 import { SettingPicture } from "@/components/settings/setting-picture"
 import { WireMark, WireNode } from "@/components/wire/wire"
-import { Field, FormNote } from "@/components/form"
+import { FormNote } from "@/components/form"
+import { SecretField as SharedSecretField } from "@/components/secret-field"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { ChipStrip, FilterChip } from "@/components/chips"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-  InputGroupToggle,
-} from "@/components/ui/input-group"
-import { generatePassword } from "@/components/database/connect/rules"
 import { nameHue } from "@/components/database/home/kinds"
 import { EngineGlyph } from "@/components/database/kit/engine-mark"
 import { connectFormats, connectSnippet } from "@/components/database/shell/connection-string"
@@ -199,66 +192,8 @@ export function SignInPicture({
   )
 }
 
-/**
- * A password the dashboard makes or the reader types: shown or hidden,
- * generated again, copied. It is one box with its controls inside it.
- */
-export function SecretField({
-  id,
-  label,
-  hint,
-  value,
-  onChange,
-  error,
-}: {
-  id: string
-  label: string
-  hint?: React.ReactNode
-  value: string
-  onChange: (value: string) => void
-  error?: string
-}) {
-  const [shown, setShown] = useState(true)
-  return (
-    <Field label={label} htmlFor={id} hint={hint} error={error}>
-      <InputGroup>
-        <InputGroupInput
-          id={id}
-          type={shown ? "text" : "password"}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          autoComplete="new-password"
-          spellCheck={false}
-          className="font-mono"
-        />
-        <InputGroupAddon align="inline-end" className="gap-0 p-0">
-          <InputGroupToggle
-            icon={Eye}
-            label="Show"
-            aria-label="Show the password"
-            pressed={shown}
-            onPressedChange={setShown}
-          />
-          <InputGroupButton
-            aria-label="Generate another password"
-            onClick={() => onChange(generatePassword())}
-          >
-            <Sparkles className="size-3.5" />
-            <span className="max-sm:hidden">Generate</span>
-          </InputGroupButton>
-          <InputGroupButton
-            aria-label="Copy the password"
-            disabled={!value}
-            onClick={() => void copyText(value, "Password copied")}
-          >
-            <Copy className="size-3.5" />
-            <span className="max-sm:hidden">Copy</span>
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-    </Field>
-  )
-}
+/** @deprecated use `SecretField` from `@/components/secret-field`. */
+export const SecretField = SharedSecretField
 
 /**
  * How a program connects as one account: the string in the shapes the

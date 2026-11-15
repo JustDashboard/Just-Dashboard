@@ -12,3 +12,21 @@ export function passwordChecks(password: string) {
   ).length
   return { long, classes, mixed: classes >= 3, ok: long && classes >= 3 }
 }
+
+/**
+ * The characters a made password is drawn from: letters and digits every
+ * engine, shell and `htpasswd` line takes unquoted, without the pairs a reader
+ * copying one by eye confuses (I and l, O and 0, 1).
+ */
+export const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+
+/**
+ * A password for an account the dashboard makes — a database's, a system
+ * user's, a proxy login's: thirty characters by default, drawn with the
+ * browser's own generator. One generator, so every "Generate" in the product
+ * makes the same kind of password.
+ */
+export function generatePassword(length = 30): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(length))
+  return Array.from(bytes, (byte) => PASSWORD_ALPHABET[byte % PASSWORD_ALPHABET.length]).join("")
+}
