@@ -240,7 +240,7 @@ export function DeviceIdentity({
   )
 }
 
-/** The line while the devices are being read: the same line, its name known, the rest bones. */
+/** The line while the devices are being read: the same line, its name known, "Reading…" for its state, the rest bones. */
 export function DeviceIdentityLoading({ name }: { name: string }) {
   return (
     <HostIdentity
@@ -248,7 +248,8 @@ export function DeviceIdentityLoading({ name }: { name: string }) {
       slot="device-identity"
       className="border-b-0 pb-0"
       title={<span className="truncate font-mono">{name}</span>}
-      state
+      // What the line is doing is said, as a state word, until it has one.
+      state={<TextShimmer className="text-xs font-medium">Reading…</TextShimmer>}
       // The device's verbs are the line's foot on a phone; their place is kept.
       menu={false}
     />
