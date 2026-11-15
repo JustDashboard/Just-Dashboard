@@ -20,6 +20,8 @@ import { ProductGlyph, containerProduct, hasProductLogo } from "@/components/pro
 import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { WireLane } from "@/components/wire/wire-lane"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
 import { looksLikeDatabase } from "@/components/docker/shared"
 import { portRows, reachWords, type Verdict } from "@/components/docker/container"
 import { volumeHref } from "@/components/docker/volumes"
@@ -77,6 +79,7 @@ export function ContainerPicture({
 }) {
   const container = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
+  const held = useMotionHeld()
   const running = detail.state === "running"
   const flowing = running && (traffic ?? 0) > CARRYING
 
@@ -119,7 +122,7 @@ export function ContainerPicture({
             shape="s"
             startXOffset={port}
             endXOffset={-port - 4}
-            still={!node.wire.carries}
+            still={!node.wire.carries || held}
             dashed={node.wire.dashed}
             tone={node.wire.tone}
             duration={2.4}
@@ -136,7 +139,7 @@ export function ContainerPicture({
             shape="s"
             startXOffset={port + 4}
             endXOffset={-port}
-            still={!node.wire.carries}
+            still={!node.wire.carries || held}
             dashed={node.wire.dashed}
             tone={node.wire.tone}
             duration={3.2}
@@ -146,7 +149,7 @@ export function ContainerPicture({
         ))}
 
         <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(2.5rem,5vw,5rem)_minmax(0,0.8fr)_clamp(2.5rem,5vw,5rem)_minmax(0,1fr)] lg:items-center">
-          <Lane title="Reached at" count={ways.length} className="lg:text-right">
+          <WireLane title="Reached at" count={ways.length} align="end">
             {ways.length === 0 ? (
               <li>
                 <WireNode
@@ -181,7 +184,7 @@ export function ContainerPicture({
                 </li>
               ))
             )}
-          </Lane>
+          </WireLane>
 
           <div aria-hidden className="hidden lg:block" />
 
@@ -227,7 +230,7 @@ export function ContainerPicture({
 
           <div aria-hidden className="hidden lg:block" />
 
-          <Lane title="Keeps" count={keeps.length}>
+          <WireLane title="Keeps" count={keeps.length}>
             {keeps.length === 0 ? (
               <li>
                 <WireNode
@@ -260,37 +263,9 @@ export function ContainerPicture({
                 </li>
               ))
             )}
-          </Lane>
+          </WireLane>
         </div>
       </div>
-    </div>
-  )
-}
-
-function Lane({
-  title,
-  count,
-  className,
-  children,
-}: {
-  title: string
-  count: number
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center">
-      <p className={cn("eyebrow mb-4", className)}>
-        {title}
-        {count > 0 && (
-          <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-            {count}
-          </span>
-        )}
-      </p>
-      <ol className="flex flex-col gap-5" aria-label={title}>
-        {children}
-      </ol>
     </div>
   )
 }

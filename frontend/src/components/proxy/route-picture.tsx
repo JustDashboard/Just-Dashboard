@@ -17,6 +17,8 @@ import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { WireLane } from "@/components/wire/wire-lane"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
 import { ProjectFavicon } from "@/components/project-mark"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { compactCount, errorRateTone, share } from "@/components/proxy/site-traffic"
@@ -78,6 +80,7 @@ export function RoutePicture({
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
+  const held = useMotionHeld()
   const apps = useMemo(() => new Map(map.apps.map((a) => [a.id, a])), [map.apps])
 
   const edges: Edge[] = []
@@ -157,7 +160,7 @@ export function RoutePicture({
               shape="s"
               startXOffset={into ? domainPort : 30}
               endXOffset={into ? -30 : -appPort}
-              still={edge.carries === undefined}
+              still={edge.carries === undefined || held}
               dashed={edge.dashed}
               tone={edge.tone}
               duration={requestPulse(edge.carries ?? 0)}
@@ -168,7 +171,7 @@ export function RoutePicture({
         })}
 
         <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(2.5rem,6vw,6rem)_minmax(0,0.7fr)_clamp(2.5rem,6vw,6rem)_minmax(0,1fr)] lg:items-center">
-          <Lane title="Domains" count={map.total} className="lg:text-right">
+          <WireLane title="Domains" count={map.total} align="end" float>
             {map.domains.map((domain) => (
               <li
                 key={domain.id}
@@ -205,7 +208,7 @@ export function RoutePicture({
                 />
               </li>
             )}
-          </Lane>
+          </WireLane>
 
           <div aria-hidden className="max-lg:hidden" />
 
@@ -235,7 +238,7 @@ export function RoutePicture({
 
           <div aria-hidden className="max-lg:hidden" />
 
-          <Lane title="Applications" count={map.apps.length}>
+          <WireLane title="Applications" count={map.apps.length} float>
             {map.apps.map((app) => (
               <li
                 key={app.id}
@@ -245,7 +248,7 @@ export function RoutePicture({
                 <AppNode app={app} nodeRef={refs.get(`a:${app.id}`)} />
               </li>
             ))}
-          </Lane>
+          </WireLane>
         </div>
       </div>
     </div>
@@ -392,38 +395,5 @@ function AppNode({ app, nodeRef }: { app: MapApp; nodeRef?: RefObject<HTMLSpanEl
         </span>
       }
     />
-  )
-}
-
-function Lane({
-  title,
-  count,
-  className,
-  children,
-}: {
-  title: string
-  count: number
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    // Wide, the heading hangs above the list rather than sharing its box: in
-    // the box it pushed the marks half its height below the engine's, and
-    // every wire bent to meet them.
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center lg:py-8">
-      <div className="lg:relative">
-        <p className={cn("eyebrow mb-4 lg:absolute lg:inset-x-0 lg:bottom-full", className)}>
-          {title}
-          {count > 0 && (
-            <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-              {count}
-            </span>
-          )}
-        </p>
-        <ol className="flex flex-col gap-4" aria-label={title}>
-          {children}
-        </ol>
-      </div>
-    </div>
   )
 }

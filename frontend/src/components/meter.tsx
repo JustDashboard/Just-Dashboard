@@ -31,16 +31,27 @@ const FILL: Record<Tone, string> = {
 export function Meter({
   value,
   tone = "default",
+  color,
   size = "default",
   mark,
   label,
+  decorative = false,
   className,
 }: {
   /** 0–100. Clamped, because a percentage computed from a stale total can exceed it. */
   value: number
   tone?: Tone
-  /** `thin` for a bar under a figure in a tile; `default` inside a table row. */
-  size?: "thin" | "default"
+  /**
+   * A measure's own hue (`HUE.cpu`) in place of the tone's fill, for a bar that
+   * says which reading it is rather than how worried to be. A caller that
+   * wants both passes the tone's colour once the reading is past a line.
+   */
+  color?: string
+  /**
+   * `thin` for a bar under a figure in a tile; `default` inside a table row;
+   * `cell` a 32px bar beside a figure in a table cell (the process table's).
+   */
+  size?: "thin" | "default" | "cell"
   /**
    * 0–100: a line across the track where the reading would matter — the
    * threshold an alert fires at, drawn against the reading it watches, so
@@ -52,30 +63,47 @@ export function Meter({
    * screen reader; with one it is the same reading everyone else gets.
    */
   label?: string
+  /**
+   * The figure beside it already says the reading, so the bar is hidden from a
+   * screen reader rather than read twice: a table cell's bar.
+   */
+  decorative?: boolean
   className?: string
 }) {
   const pct = Math.max(0, Math.min(value, 100))
+  const reading = decorative
+    ? { "aria-hidden": true as const }
+    : {
+        role: "meter",
+        "aria-valuenow": Math.round(pct),
+        "aria-valuemin": 0,
+        "aria-valuemax": 100,
+        "aria-label": label,
+      }
   return (
     <div
-      role="meter"
-      aria-valuenow={Math.round(pct)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-label={label}
+      {...reading}
+      data-slot="meter"
       className={cn(
-        "relative w-full overflow-hidden rounded-full bg-meter-track",
-        size === "thin" ? "h-1" : "h-1.5",
+        "relative overflow-hidden rounded-full bg-meter-track",
+        size === "cell" ? "h-1 w-8 shrink-0" : "w-full",
+        size === "thin" ? "h-1" : size === "default" && "h-1.5",
         className,
       )}
     >
       <div
-        className={cn("h-full rounded-full transition-[width]", FILL[tone])}
-        style={{ width: `${pct}%` }}
+        className={cn(
+          "h-full rounded-full transition-[width] duration-700 ease-out",
+          !color && FILL[tone],
+        )}
+        style={{ width: `${pct}%`, backgroundColor: color }}
       />
       {mark !== undefined && (
         <span
           aria-hidden
-          className="absolute inset-y-0 w-px bg-foreground/60"
+          // The muted ink, solid: a line faded to 60% of the foreground was a
+          // second grey the palette does not have.
+          className="absolute inset-y-0 w-px bg-muted-foreground"
           // Held inside the track at 100, where `left: 100%` would put the
           // line just past the edge that clips it.
           style={{ left: `min(${Math.max(0, mark)}%, calc(100% - 1px))` }}

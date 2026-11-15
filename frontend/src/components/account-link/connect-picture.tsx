@@ -1,16 +1,14 @@
 "use client"
 
-import { createRef, useMemo, useRef } from "react"
 import { Archive, Gauge, type Icon } from "@/components/icons"
 import { heartbeatStale, siteHost } from "@/lib/account-link"
 import { relativeTime } from "@/lib/format"
 import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
 import { useNow } from "@/hooks/use-now"
-import { WireHost, WireMark, WireNode } from "@/components/wire/wire"
-import { SettingPicture } from "@/components/settings/setting-picture"
+import { WireHost, WireMark } from "@/components/wire/wire"
+import { WireFlow } from "@/components/wire/wire-flow"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph, hasProductLogo, platformProduct } from "@/components/product-logo"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 
 type Snapshot = Record<string, unknown>
@@ -28,8 +26,6 @@ type Kind = {
   hue?: string
   detail: string
 }
-
-const KINDS = ["system", "metrics", "containers", "backups"] as const
 
 /**
  * The four kinds of thing the heartbeat carries, each drawn as what it is read from. Once there
@@ -149,6 +145,10 @@ export function ConnectPicture({
  * reports to — just-dashboard.com and an account on Settings → Connect, a Just Hub on
  * Settings → Hub. The snapshot is the same bytes to both, so the left half is the same drawing;
  * the caller says who the peer is and how the link to it reads.
+ *
+ * A `WireFlow`, as every picture through one hub is: it drew its own row on Settings' picture
+ * with the lines laid by hand, and down a phone ran them through a column of every word. It
+ * stacks there now as the other pictures do, each side under its heading.
  */
 export function LinkPicture({
   label,
@@ -172,78 +172,48 @@ export function LinkPicture({
   cadence: string
   peer: { eyebrow: string; title: React.ReactNode; hint: React.ReactNode }
 }) {
-  const container = useRef<HTMLDivElement>(null)
-  const serverMark = useRef<HTMLDivElement>(null)
-  const siteMark = useRef<HTMLDivElement>(null)
-  // One ref per kind; the set of kinds never changes, so they are made once.
-  const kindMarks = useMemo(() => KINDS.map(() => createRef<HTMLDivElement>()), [])
-
   const sending = linked && !quiet
   const server = record(snapshot?.server)
   const access = record(snapshot?.access)
 
   return (
-    <SettingPicture
-      label={label}
-      containerRef={container}
-      className="py-4"
-      lines={
-        <>
-          {kindMarks.map((mark, index) => (
-            <AnimatedBeam
-              key={index}
-              containerRef={container}
-              fromRef={mark}
-              toRef={serverMark}
-              still={!sending}
-              dashed={!linked}
-              duration={2.6}
-              delay={index * 0.4}
-            />
-          ))}
-          <AnimatedBeam
-            containerRef={container}
-            fromRef={serverMark}
-            toRef={siteMark}
-            still={!sending && !pending}
-            dashed={!linked && !pending}
-            tone={quiet ? "warning" : "default"}
-            duration={pending ? 3.4 : 2.2}
-            delay={sending ? 1.2 : 0}
-          />
-        </>
-      }
-      start={kinds(scope, snapshot).map((kind, index) => (
-        <WireNode
-          key={kind.key}
-          nodeRef={kindMarks[index]}
-          align="end"
-          mark={
-            <WireMark tone="logo" size="md">
-              {kind.product && hasProductLogo(kind.product) ? (
-                <ProductGlyph id={kind.product} />
-              ) : (
-                kind.glyph && <kind.glyph aria-hidden style={{ color: kind.hue }} />
-              )}
-            </WireMark>
-          }
-          title={kind.label}
-          hint={
-            // A new reading arrives rather than being repainted (§11).
-            <span key={kind.detail} className="block animate-rise truncate">
-              {kind.detail}
-            </span>
-          }
-        />
-      ))}
-      middle={
-        <WireNode
-          nodeRef={serverMark}
-          align="center"
-          mark={<WireHost size="lg" />}
-          eyebrow="This server"
-          title={text(server.name) ?? "This server"}
-          hint={
+    <div role="group" aria-label={label} className="animate-rise">
+      <WireFlow
+        start={{
+          title: "What it reads",
+          nodes: kinds(scope, snapshot).map((kind, index) => ({
+            id: kind.key,
+            mark: (size) => (
+              <WireMark tone="logo" size={size}>
+                {kind.product && hasProductLogo(kind.product) ? (
+                  <ProductGlyph id={kind.product} />
+                ) : (
+                  kind.glyph && <kind.glyph aria-hidden style={{ color: kind.hue }} />
+                )}
+              </WireMark>
+            ),
+            title: kind.label,
+            hint: (
+              // A new reading arrives rather than being repainted (§11).
+              <span key={kind.detail} className="block animate-rise truncate">
+                {kind.detail}
+              </span>
+            ),
+            name: kind.label,
+            line: {
+              state: "up",
+              moving: sending,
+              dashed: !linked,
+              duration: 2.6,
+              delay: index * 0.4,
+            },
+          })),
+        }}
+        hub={{
+          mark: <WireHost size="lg" />,
+          eyebrow: "This server",
+          title: text(server.name) ?? "This server",
+          hint:
             access.kind === "tailscale" ? (
               <span className="inline-flex items-center gap-1">
                 <ProductGlyph id="tailscale" />
@@ -252,24 +222,33 @@ export function LinkPicture({
             ) : (
               // The fingerprint is the identity line's; said here it would be said twice.
               linked && cadence
-            )
-          }
-        />
-      }
-      end={
-        <WireNode
-          nodeRef={siteMark}
-          align="start"
-          mark={
-            <WireMark tone="logo" size="lg">
-              <LogoGlyph className="text-brand" />
-            </WireMark>
-          }
-          eyebrow={peer.eyebrow}
-          title={peer.title}
-          hint={peer.hint}
-        />
-      }
-    />
+            ),
+        }}
+        end={{
+          title: "Reports to",
+          nodes: [
+            {
+              id: "peer",
+              mark: (size) => (
+                <WireMark tone="logo" size={size}>
+                  <LogoGlyph className="text-brand" />
+                </WireMark>
+              ),
+              eyebrow: peer.eyebrow,
+              title: peer.title,
+              hint: peer.hint,
+              name: peer.eyebrow,
+              line: {
+                state: quiet ? "warning" : "up",
+                moving: sending || pending,
+                dashed: !linked && !pending,
+                duration: pending ? 3.4 : 2.2,
+                delay: sending ? 1.2 : 0,
+              },
+            },
+          ],
+        }}
+      />
+    </div>
   )
 }

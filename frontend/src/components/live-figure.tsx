@@ -40,6 +40,11 @@ export function LandedFigures({ children }: { children: React.ReactNode }) {
  * The unit stays outside the count: 980 KB/s becoming 1.0 MB/s is a new scale,
  * not a count from 980 down to 1, so a change of unit swaps the figure for the
  * new value without counting.
+ *
+ * The space before a unit is a no-break space in the unit's own span. As a
+ * plain " GB" text node it became an anonymous item of a flex parent, whose
+ * leading space collapses, and a volume's band read "Held by 31.4GB" beside a
+ * header saying "31.4 GB"; it also keeps the figure and its unit on one line.
  */
 export function LiveFigure({
   value,
@@ -59,7 +64,7 @@ export function LiveFigure({
   return (
     <>
       <NumberTicker key={unit} value={value} startValue={scale.from} decimalPlaces={decimals} />
-      {unit}
+      {unit && <span data-slot="unit">{unit.replace(/^ /, "\u00a0")}</span>}
     </>
   )
 }

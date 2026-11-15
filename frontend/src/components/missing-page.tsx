@@ -25,6 +25,8 @@ export function MissingPage() {
   const pathname = usePathname()
   const { can } = useAuth()
   const nearest = nearestPage(pathname, can)
+  // Only the last part is drawn, so a deeper address says it has more before it.
+  const deeper = pathname.split("/").filter(Boolean).length > 1
   const Nearest = nearest?.icon
 
   const there: WireFlowNode[] = [
@@ -86,9 +88,17 @@ export function MissingPage() {
                 </WirePlaceholder>
               ),
               eyebrow: "Asked for",
+              // One line, cut once by its width: cut to a count of letters
+              // first, the tail still wrapped in the narrow column and was
+              // cut again ("/this-page-does-not-" over "exi…"). The whole
+              // address is in the sentence under the picture.
               title: (
-                <span className="font-mono font-normal text-muted-foreground">
-                  {addressTail(pathname)}
+                <span
+                  title={pathname}
+                  className="block truncate font-mono font-normal text-muted-foreground"
+                >
+                  {deeper ? "…" : ""}
+                  {addressTail(pathname, Infinity)}
                 </span>
               ),
               hint: "no page here",

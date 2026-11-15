@@ -160,41 +160,169 @@ export function percent(share: number) {
   return `${whole}%`
 }
 
+export type SplitPart = {
+  key: string
+  count: number
+  color: string
+  /** The part's name in the legend under the bar. */
+  label?: React.ReactNode
+  /** What the part weighs as the reader sees it: "1.2 MB", "2,053". */
+  figure?: React.ReactNode
+  /** Quieter words after the figure: its share, "about 400 keys". */
+  note?: React.ReactNode
+  /** Drawn before the name in place of the dot in the part's colour: a kind's own mark. */
+  mark?: React.ReactNode
+  /** What pressing the part's legend entry does, as its accessible name. */
+  pickLabel?: string
+}
+
+/**
+ * Each part's width along the bar, in percent, in the order given; a part
+ * with nothing in it is left out. `total` scales the parts against a larger
+ * whole (the busiest interface), so the track shows past them; by default
+ * they fill it. A part above zero is never narrower than `minShare` of the
+ * bar, so the one key type of a hundred or a trickle against the busiest
+ * still shows, and the floors are taken back out of the others rather than
+ * pushing the last part off the end.
+ */
+export function splitWidths(
+  parts: Pick<SplitPart, "key" | "count">[],
+  { total, minShare = 0.01 }: { total?: number; minShare?: number } = {},
+): { key: string; width: number }[] {
+  const held = parts.filter((part) => part.count > 0)
+  const sum = held.reduce((n, part) => n + part.count, 0)
+  const scale = Math.max(sum, total ?? 0)
+  if (scale <= 0) return []
+  const floored = held.map((part) => Math.max(part.count / scale, minShare))
+  const over = floored.reduce((n, share) => n + share, 0)
+  const fit = over > 1 ? 1 / over : 1
+  return held.map((part, index) => ({ key: part.key, width: floored[index] * fit * 100 }))
+}
+
 /**
  * One whole as one strip, its parts side by side in their colours. It stays
  * the block's width whatever the figures are, so nothing on the page grows
  * when the window changes: only the join between the parts moves.
+ *
+ * It is every bar of coloured parts in the product: what a table's bytes are
+ * made of, a database's keys by type, traffic by country, in and out against
+ * the busiest interface (`total`). Four of them were drawn by hand beside this
+ * one, with three gaps between the parts and three legends under them; there
+ * is one gap now, two pixels, and one legend.
+ *
+ * `legend="static"` names the parts under the bar: a dot in the part's colour
+ * (or its own `mark`), its name, its figure and a quieter note. `"pick"` makes
+ * each entry a button that narrows the page to that part (`onPick`), pressed
+ * while it is the one `picked`; pressing it again is the caller's to clear.
+ * Without a legend the bar is the reading's picture and a `RankList` or the
+ * sentence beside it names the parts.
  */
 export function SplitBar({
   parts,
   label,
+  legend = "none",
+  picked,
+  onPick,
+  total,
+  minShare,
+  size = "md",
+  gap = true,
   className,
 }: {
-  parts: { key: string; count: number; color: string }[]
+  parts: SplitPart[]
+  /** The bar as a screen reader hears it: what it divides and how. */
   label: string
+  legend?: "none" | "static" | "pick"
+  /** The part the page is narrowed to, under `legend="pick"`. */
+  picked?: string
+  onPick?: (key: string) => void
+  /** Scale the parts against this rather than their sum. */
+  total?: number
+  /** The narrowest a part above zero is drawn, 0–1 of the bar. 1% by default. */
+  minShare?: number
+  /** `sm` is 4px, for a bar in a table cell; `md` 8px. */
+  size?: "sm" | "md"
+  /** The two-pixel join between parts; off for a bar too small to show it. */
+  gap?: boolean
   className?: string
 }) {
-  const total = parts.reduce((n, part) => n + part.count, 0)
-  return (
+  const widths = splitWidths(parts, { total, minShare })
+  const color = new Map(parts.map((part) => [part.key, part.color]))
+  const filled = widths.reduce((n, part) => n + part.width, 0)
+  const bar = (
     <span
       role="img"
       aria-label={label}
       data-slot="split-bar"
-      className={cn("flex h-2 w-full gap-0.5 overflow-hidden rounded-full", className)}
-    >
-      {total === 0 ? (
-        <span className="h-full w-full bg-meter-track" />
-      ) : (
-        parts
-          .filter((part) => part.count > 0)
-          .map((part) => (
-            <span
-              key={part.key}
-              className="h-full transition-[width] duration-500 ease-out"
-              style={{ width: `${(part.count / total) * 100}%`, backgroundColor: part.color }}
-            />
-          ))
+      className={cn(
+        "flex w-full overflow-hidden rounded-full",
+        size === "sm" ? "h-1" : "h-2",
+        gap && "gap-0.5",
+        legend === "none" && className,
       )}
+    >
+      {widths.map((part) => (
+        <span
+          key={part.key}
+          className="h-full transition-[width] duration-500 ease-out"
+          style={{ width: `${part.width}%`, backgroundColor: color.get(part.key) }}
+        />
+      ))}
+      {/* The track shows only where no part is: an empty whole, or the rest
+          of a larger one. Between the parts the gap is the page's ground. */}
+      {filled < 99.95 && <span className="h-full flex-1 bg-meter-track" />}
     </span>
+  )
+  if (legend === "none") return bar
+  const named = parts.filter((part) => part.count > 0)
+  return (
+    <div data-slot="split" className={cn("min-w-0 space-y-2", className)}>
+      {bar}
+      <ul data-slot="split-legend" className="flex flex-wrap gap-x-4 gap-y-1">
+        {named.map((part) => {
+          const words = (
+            <>
+              {part.mark ?? (
+                <span
+                  aria-hidden
+                  className="size-1.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: part.color }}
+                />
+              )}
+              {part.label !== undefined && (
+                <span className="truncate text-muted-foreground">{part.label}</span>
+              )}
+              {part.figure !== undefined && (
+                <span className="numeric font-medium text-foreground">{part.figure}</span>
+              )}
+              {part.note !== undefined && (
+                <span className="numeric text-muted-foreground">{part.note}</span>
+              )}
+            </>
+          )
+          const pressed = picked === part.key
+          return (
+            <li key={part.key} className="flex min-w-0 text-hint">
+              {legend === "pick" && onPick ? (
+                <button
+                  type="button"
+                  aria-pressed={pressed}
+                  aria-label={part.pickLabel}
+                  onClick={() => onPick(part.key)}
+                  className={cn(
+                    "-mx-1 flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 focus-ring transition-colors hover:bg-row-hover",
+                    pressed && "bg-accent hover:bg-accent",
+                  )}
+                >
+                  {words}
+                </button>
+              ) : (
+                <span className="flex min-w-0 items-center gap-1.5">{words}</span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
