@@ -306,7 +306,7 @@ test("the rail walks the list with the open view, and the arrows say where they 
   await openMaturity(page, [])
   await page.goto("/network/connections/198.51.100.23?tab=past")
   const rail = page.getByRole("navigation", { name: "Remote addresses" })
-  await expect(rail.getByRole("button", { name: "198.51.100.23" })).toHaveAttribute(
+  await expect(rail.getByRole("link", { name: "198.51.100.23" })).toHaveAttribute(
     "aria-current",
     "page",
   )
@@ -316,7 +316,7 @@ test("the rail walks the list with the open view, and the arrows say where they 
   await expect(page).toHaveURL(/\/network\/connections\/198\.51\.100\.23\?tab=past/)
   // The rail's chip is the list's: the next address from the internet skips the tailnet.
   await rail.getByRole("radio", { name: /From the internet/ }).click()
-  await expect(rail.getByRole("button", { name: "100.110.34.9" })).toHaveCount(0)
+  await expect(rail.getByRole("link", { name: "100.110.34.9" })).toHaveCount(0)
   await page.goto("/network/connections")
   await expect(page.getByRole("radio", { name: /From the internet/ })).toHaveAttribute(
     "aria-checked",

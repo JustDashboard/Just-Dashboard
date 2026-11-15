@@ -14,7 +14,7 @@ import { risen } from "./risen"
 const identity = (page: Page, name: string) => page.getByRole("region", { name: `About ${name}` })
 const picture = (page: Page) => page.locator("[data-slot=wire-flow]")
 const rail = (page: Page) => page.locator("[data-slot=volume-rail]")
-const railRows = (page: Page) => rail(page).getByRole("listitem").getByRole("button")
+const railRows = (page: Page) => rail(page).getByRole("listitem").getByRole("link")
 const tab = (page: Page, name: string) => page.getByRole("tab", { name })
 
 async function open(page: Page, path: string) {
@@ -275,7 +275,7 @@ test("the rail is the table as it was left, and Alt+↓ walks it with the view k
 
   await expect(railRows(page)).toHaveCount(3)
   await expect(rail(page)).toContainText("3 of 16 · shop")
-  await expect(rail(page).getByRole("button", { name: "shop_uploads" })).toHaveAttribute(
+  await expect(rail(page).getByRole("link", { name: "shop_uploads" })).toHaveAttribute(
     "aria-current",
     "page",
   )
@@ -285,7 +285,7 @@ test("the rail is the table as it was left, and Alt+↓ walks it with the view k
   // Largest first, as the table was ordered: uploads, pgdata, redis.
   await expect(page).toHaveURL(/\/docker\/volumes\/shop_pgdata\?tab=mounts$/)
   await expect(tab(page, "Mounts")).toHaveAttribute("aria-selected", "true")
-  await expect(rail(page).getByRole("button", { name: "shop_pgdata" })).toHaveAttribute(
+  await expect(rail(page).getByRole("link", { name: "shop_pgdata" })).toHaveAttribute(
     "aria-current",
     "page",
   )
@@ -297,11 +297,11 @@ test("the rail is the table as it was left, and Alt+↓ walks it with the view k
   await rail(page).getByRole("button", { name: "Clear filters" }).click()
   await expect(railRows(page)).toHaveCount(VOLUMES.length)
   await expect(rail(page)).toContainText("16 volumes · largest first")
-  await rail(page).getByLabel("Find volumes").fill("nextcloud")
+  await rail(page).getByLabel("Search the volumes").fill("nextcloud")
   await expect(railRows(page)).toHaveCount(3)
   // The volume on screen stays first when the list no longer holds it.
   await expect(railRows(page).first()).toHaveAttribute("aria-label", "shop_uploads")
-  await rail(page).getByRole("button", { name: "nextcloud_html" }).click()
+  await rail(page).getByRole("link", { name: "nextcloud_html" }).click()
   await expect(page).toHaveURL(/\/docker\/volumes\/nextcloud_html\?tab=mounts$/)
 })
 
@@ -353,7 +353,7 @@ test("the picture is one height whatever a volume has on either side", async ({ 
 
   // One container and a paused job, then nothing on either side.
   for (const name of ["minio-data", "scratch"]) {
-    await rail(page).getByRole("button", { name }).click()
+    await rail(page).getByRole("link", { name }).click()
     await expect(identity(page, name)).toBeVisible()
     await risen(page)
     expect((await picture(page).boundingBox())?.height).toBe(two?.height)

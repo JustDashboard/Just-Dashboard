@@ -342,7 +342,7 @@ test.describe("the rail", () => {
     await loaded(page)
     const rail = page.getByRole("navigation", { name: "Devices" })
     await expect(rail).toBeVisible()
-    await expect(rail.getByRole("button", { name: /^tailscale0,/ })).toHaveAttribute(
+    await expect(rail.getByRole("link", { name: /^tailscale0,/ })).toHaveAttribute(
       "aria-current",
       "page",
     )
@@ -355,13 +355,13 @@ test.describe("the rail", () => {
 
     await page.keyboard.press("Alt+ArrowDown")
     await expect(page).toHaveURL(/\/network\/interfaces\/wg0\?tab=addresses$/)
-    await expect(rail.getByRole("button", { name: /^wg0,/ })).toHaveAttribute(
+    await expect(rail.getByRole("link", { name: /^wg0,/ })).toHaveAttribute(
       "aria-current",
       "page",
     )
     await page.getByRole("button", { name: "Previous device" }).click()
     await expect(page).toHaveURL(/\/network\/interfaces\/tailscale0\?tab=addresses$/)
-    await rail.getByRole("button", { name: /^jd-lab,/ }).click()
+    await rail.getByRole("link", { name: /^jd-lab,/ }).click()
     await expect(page).toHaveURL(/\/network\/interfaces\/jd-lab\?tab=addresses$/)
     await expect(identity(page, "jd-lab")).toContainText("made here")
   })
@@ -377,11 +377,11 @@ test.describe("the rail", () => {
     await expect(page).toHaveURL(/\/network\/interfaces\/docker0$/)
     const rail = page.getByRole("navigation", { name: "Devices" })
     await expect(rail.getByLabel("Search the devices", { exact: true })).toHaveValue("10.0")
-    await expect(rail.getByRole("button", { name: /^ens3,/ })).toHaveCount(0)
-    await expect(rail.getByRole("button", { name: /^docker0,/ })).toHaveCount(1)
+    await expect(rail.getByRole("link", { name: /^ens3,/ })).toHaveCount(0)
+    await expect(rail.getByRole("link", { name: /^docker0,/ })).toHaveCount(1)
 
     await rail.getByLabel("Search the devices", { exact: true }).fill("")
-    await expect(rail.getByRole("button", { name: /^ens3,/ })).toHaveCount(1)
+    await expect(rail.getByRole("link", { name: /^ens3,/ })).toHaveCount(1)
     // A container's veth is behind Everything: opened by its address, it is
     // still on its own rail, first.
     await page.goto("/network/interfaces/veth6e4f828")
@@ -391,7 +391,7 @@ test.describe("the rail", () => {
       "veth6e4f828",
     )
     await rail.getByRole("button", { name: /^Everything/ }).click()
-    await expect(rail.getByRole("button", { name: /^lo,/ })).toHaveCount(1)
+    await expect(rail.getByRole("link", { name: /^lo,/ })).toHaveCount(1)
     // And the list it came from has the same filter when it is gone back to.
     await page.getByRole("link", { name: "Interfaces", exact: true }).first().click()
     await expect(page.getByRole("link", { name: "Open lo", exact: true })).toBeVisible()

@@ -983,13 +983,13 @@ test("a process's page keeps the table beside it and carries the view between pr
   await page.goto("/processes/4021")
   const rail = page.getByRole("navigation", { name: "Processes" })
   await expect(rail).toBeVisible()
-  await expect(rail.getByRole("button", { name: "node, PID 4021" })).toHaveAttribute(
+  await expect(rail.getByRole("link", { name: "node, PID 4021" })).toHaveAttribute(
     "aria-current",
     "page",
   )
   await page.getByRole("tab", { name: /Files/ }).click()
   await expect(page).toHaveURL(/\/processes\/4021\?tab=files$/)
-  await rail.getByRole("button", { name: "nginx, PID 812" }).click()
+  await rail.getByRole("link", { name: "nginx, PID 812" }).click()
   await expect(page).toHaveURL(/\/processes\/812\?tab=files$/)
   await expect(page.getByRole("tab", { name: /Files/ })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByText("/var/log/nginx/access.log")).toBeVisible()

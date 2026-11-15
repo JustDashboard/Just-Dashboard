@@ -284,7 +284,7 @@ test("the table opens a unit's page, and the rail beside it walks the list", asy
   // The table's own list beside it, failed first, the one on screen filled.
   const rail = page.getByRole("navigation", { name: "Services" })
   await expect(rail).toBeVisible()
-  const rows = rail.getByRole("list", { name: "Services to open" }).getByRole("button")
+  const rows = rail.getByRole("list", { name: "Services to open" }).getByRole("link")
   await expect(rows.first()).toHaveAccessibleName("postgresql.service")
   await expect(rows.first()).toHaveAttribute("aria-current", "page")
   await expect(rows.nth(1)).toContainText("exit 1")
