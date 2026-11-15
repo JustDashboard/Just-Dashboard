@@ -127,7 +127,12 @@ export function pathMap(moves: Moves) {
  * under `frontend/src/`, and one written from components/ (`deploy/wire.tsx`). Basenames alone
  * are left: `nav.ts` could be any of three.
  */
-export type MentionRule = { needle: string; pattern: RegExp; to: string }
+/**
+ * `glob` marks a rule for a folder of prefixed files: its match carries the rest of the name, and
+ * the mention is rewritten only for a file the tree has (or had, before it moved), so a sentence
+ * about a module that is gone keeps the name it had.
+ */
+export type MentionRule = { needle: string; pattern: RegExp; to: string; glob?: string }
 
 export function mentionRules(moves: Moves): MentionRule[] {
   const rules: MentionRule[] = []
@@ -150,7 +155,13 @@ export function mentionRules(moves: Moves): MentionRule[] {
   }
   for (const { from, to } of moves.files) {
     if (from.endsWith("*")) {
-      rule(before, from.slice(0, -1), String.raw`(?=[\w*])`, to.slice(0, -1))
+      const needle = from.slice(0, -1)
+      rules.push({
+        needle,
+        pattern: new RegExp(before + escape(needle) + String.raw`(\*|[\w.\-]*\w)`, "gm"),
+        to: to.slice(0, -1),
+        glob: needle,
+      })
       continue
     }
     add(from, to, true)
@@ -159,13 +170,19 @@ export function mentionRules(moves: Moves): MentionRule[] {
   return rules
 }
 
-export function rewriteMentions(text: string, rules: MentionRule[]) {
+/** `known(path)` says whether a file under src/ exists, before or after its move. */
+export function rewriteMentions(
+  text: string,
+  rules: MentionRule[],
+  known: (path: string) => boolean = () => true,
+) {
   let count = 0
-  for (const { needle, pattern, to } of rules) {
+  for (const { needle, pattern, to, glob } of rules) {
     if (!text.includes(needle)) continue
-    text = text.replace(pattern, (_, lead: string) => {
+    text = text.replace(pattern, (match: string, lead: string, rest?: string) => {
+      if (glob !== undefined && rest !== "*" && !known(`src/${glob}${rest}`)) return match
       count++
-      return lead + to
+      return lead + to + (glob !== undefined ? rest : "")
     })
   }
   return { text, count }
@@ -287,6 +304,9 @@ export function run(options: Options): Result {
   const suffixFor = (dest: string, suffix: string) => (suffix === "" ? "" : extOf(dest))
 
   const rules = mentionRules(moves)
+  /** A file under src/ the tree has, named with or without its extension, before or after its move. */
+  const known = (path: string) =>
+    SUFFIXES.some((suffix) => existing.has(path + suffix) || existing.has(map(path + suffix)))
   const contents = new Map<string, string>()
 
   for (const file of code) {
@@ -560,7 +580,7 @@ export function run(options: Options): Result {
       text = text.slice(0, edit.start) + edit.text + text.slice(edit.end)
       last = edit.start
     }
-    const mentioned = rewriteMentions(text, rules)
+    const mentioned = rewriteMentions(text, rules, known)
     const count = edits.length + mentioned.count
     if (count) {
       contents.set(file, mentioned.text)
@@ -581,7 +601,7 @@ export function run(options: Options): Result {
   }
   const docEdits = new Map<string, string>()
   for (const doc of docs) {
-    const mentioned = rewriteMentions(readFileSync(doc, "utf8"), rules)
+    const mentioned = rewriteMentions(readFileSync(doc, "utf8"), rules, known)
     if (!mentioned.count) continue
     docEdits.set(doc, mentioned.text)
     result.docs.push({ file: doc, edits: mentioned.count })

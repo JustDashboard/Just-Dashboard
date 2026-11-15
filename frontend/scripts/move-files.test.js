@@ -55,7 +55,7 @@ const FILES = {
   "frontend/src/app/page.tsx": 'import { WireMark } from "@/components/deploy/wire"\n',
   "frontend/tests/browser/ipam.spec.ts": 'import type { Ipam } from "../../src/lib/network-ipam"\n',
   "docs/internal/notes.md":
-    "See `frontend/src/components/deploy/wire.tsx:27`, `@/lib/network-ipam` and `lib/network-*`.\n",
+    "See `frontend/src/components/deploy/wire.tsx:27`, `@/lib/network-ipam` and `lib/network-*`.\nThe old `lib/network-format.ts` is gone.\n",
   "docs/audits/2026-11-13/map.md": "Built on `components/deploy/wire.tsx`.\n",
 }
 
@@ -103,7 +103,8 @@ describe("moving files", () => {
       ].join("\n"),
     )
     expect(read("docs/internal/notes.md")).toBe(
-      "See `frontend/src/components/wire/wire.tsx:27`, `@/lib/network/ipam` and `lib/network/*`.\n",
+      // A module that is gone keeps the name it had.
+      "See `frontend/src/components/wire/wire.tsx:27`, `@/lib/network/ipam` and `lib/network/*`.\nThe old `lib/network-format.ts` is gone.\n",
     )
     // A dated audit is a record of the tree it read.
     expect(read("docs/audits/2026-11-13/map.md")).toBe("Built on `components/deploy/wire.tsx`.\n")
