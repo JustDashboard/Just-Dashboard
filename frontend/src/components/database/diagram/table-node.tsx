@@ -246,7 +246,7 @@ function ColumnRow({ table, column, hit }: { table: string; column: DbGraphColum
       <span
         className={cn(
           "shrink-0 truncate font-mono text-micro",
-          column.nullable ? "text-muted-foreground/60" : "text-muted-foreground",
+          column.nullable ? "text-faint" : "text-muted-foreground",
         )}
       >
         {shortType(column.type)}

@@ -240,7 +240,7 @@ export function RailRow({
           <span
             data-slot={staged.slot}
             title={staged.title}
-            className="shrink-0 font-mono text-hint text-(--git-modified)"
+            className="shrink-0 font-mono text-hint text-git-modified"
           >
             ~{staged.count}
             <span className="sr-only"> {staged.label}</span>

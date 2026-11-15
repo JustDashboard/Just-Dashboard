@@ -573,7 +573,6 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
                   key={action.id}
                   size="xs"
                   variant="outline"
-                  className="max-sm:h-8"
                   title={action.description}
                   disabled={run !== undefined}
                   pending={going}
@@ -590,7 +589,6 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
                   <Button
                     size="xs"
                     variant="outline"
-                    className="max-sm:h-8"
                     title={action.description}
                     disabled={run !== undefined}
                   >
@@ -668,12 +666,7 @@ export function MaintenanceBand({ schema, table }: { schema: string; table: stri
           ? "The table is locked until it is done."
           : "It goes on while you read elsewhere."}
       </span>
-      <Button
-        size="xs"
-        variant="outline"
-        className="ml-auto max-sm:h-8"
-        onClick={() => stopMaintenance(key)}
-      >
+      <Button size="xs" variant="outline" className="ml-auto" onClick={() => stopMaintenance(key)}>
         Stop
       </Button>
       {/* Working, and it cannot say how far. */}

@@ -167,6 +167,7 @@ export function RedisKeys() {
                 onRefresh={refresh}
                 onNew={() => setCreating(true)}
                 onBulk={() => setBulk(true)}
+                saidBeside={wide && selected === undefined}
               />
             </WorkbenchSide>
           )}

@@ -49,7 +49,6 @@ import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useFullscreen } from "@/hooks/use-fullscreen"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -59,6 +58,7 @@ import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/search-input"
 import { PaneHeader } from "@/components/panel"
 import { PaneBar } from "@/components/phone-panes"
+import { Stale } from "@/components/stale"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {
@@ -127,6 +127,7 @@ import {
   type DbGraphTable,
   type DbSchemaGraph,
 } from "@/components/database/diagram/types"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const nodeTypes = { table: TableNode }
 const edgeTypes = { relation: RelationEdge }
@@ -266,6 +267,7 @@ export function ErDiagram() {
                 reset={memory.reset}
                 picker={picker}
                 refresh={read.refresh}
+                stale={read.error}
                 full={screen.full}
                 onFullscreen={screen.toggle}
               />
@@ -369,6 +371,7 @@ function Canvas({
   reset,
   picker,
   refresh,
+  stale,
   full,
   onFullscreen,
 }: {
@@ -381,6 +384,8 @@ function Canvas({
   reset: () => Promise<void>
   picker: React.ReactNode
   refresh: () => void
+  /** The read after the one drawn failed: the picture is the last reading. */
+  stale?: Error
   full: boolean
   onFullscreen: () => void
 }) {
@@ -401,7 +406,7 @@ function Canvas({
   // reader who wants it beside the canvas all the time pins it. On a narrow
   // window it would take the lower half of a canvas that has none to spare:
   // there it opens only when asked for, and is closed on every arrival.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const [pinned, setPinned] = useViewState("databases.diagram.inspector", false)
   const [askedFor, setAskedFor] = useState(false)
   const [closedOn, setClosedOn] = useState<string | null>(null)
@@ -940,6 +945,7 @@ function Canvas({
         />
         <span className="flex-1" />
 
+        <Stale error={stale} />
         <Saved status={status} updatedAt={updatedAt} arranged={isArranged(doc)} />
 
         {hiddenHere.length > 0 && (

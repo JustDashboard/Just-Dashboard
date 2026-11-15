@@ -867,7 +867,7 @@ export function SqlQuery() {
               onChange={setSplit}
               onReset={() => setSplit(SPLIT.fallback)}
               measure={() => main.current?.getBoundingClientRect().height ?? 1}
-              className={cn("absolute inset-x-0 -top-1 z-20", !railBeside && "hidden")}
+              className={cn("absolute inset-x-0 -top-1 z-sticky", !railBeside && "hidden")}
             />
             <Results
               held={held}

@@ -436,7 +436,7 @@ export function TableView({
               and on a phone the reading's commands take a line of their own
               under the readings rather than covering them. */}
           <div className="@container/strip shrink-0 border-b border-hairline px-1.5">
-            <div className="flex min-h-10 items-stretch @max-[36rem]/strip:flex-wrap">
+            <div className="flex min-h-10 items-stretch @max-xl/strip:flex-wrap">
               <ViewTabList
                 label={`Readings of ${name}`}
                 value={open}
@@ -448,7 +448,7 @@ export function TableView({
                 className="min-w-0 border-b-0 [&_[role=tab]]:max-sm:px-2.5"
               />
               {data && (
-                <div className="ml-auto flex shrink-0 items-center gap-1 py-1 pl-2 empty:hidden @max-[36rem]/strip:basis-full @max-[36rem]/strip:justify-end @max-[36rem]/strip:pb-1.5">
+                <div className="ml-auto flex shrink-0 items-center gap-1 py-1 pl-2 empty:hidden @max-xl/strip:basis-full @max-xl/strip:justify-end @max-xl/strip:pb-1.5">
                   {open === "columns" && isTable && mayWrite && has("addColumn") && (
                     <Button
                       size="xs"

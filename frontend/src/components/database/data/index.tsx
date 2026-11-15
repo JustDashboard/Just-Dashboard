@@ -45,6 +45,7 @@ import { useExport } from "@/components/database/data/use-export"
 import { useCatalog, useTableDetail } from "@/components/database/data/use-table"
 import { readView, sameRows, viewParams, type ViewState } from "@/components/database/data/view"
 import { TableWorkbench, type TableWorkbenchHandle } from "@/components/database/data/workbench"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const NO_STAGED: Record<string, number> = {}
 
@@ -125,7 +126,7 @@ export function SqlData() {
   // window's (`panes.ts`). Before it is measured — one render, never painted —
   // the window answers.
   const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
-  const windowWide = useMediaQuery("(min-width: 1024px)")
+  const windowWide = useBreakpoint("lg")
   const windowPhone = useMediaQuery("(max-width: 479px)")
   const [railPinned, setRailPinned] = useViewState("databases.data.rail", true)
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize(

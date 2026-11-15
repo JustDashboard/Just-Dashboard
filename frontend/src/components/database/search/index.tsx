@@ -317,25 +317,12 @@ export function SqlSearch() {
               form's submit under the very press that stopped the scan, and the
               browser then submitted the form — a second scan. */}
           {busy ? (
-            <Button
-              key="stop"
-              type="button"
-              size="sm"
-              variant="outline"
-              className="max-sm:h-10"
-              onClick={stop}
-            >
+            <Button key="stop" type="button" size="sm" variant="outline" onClick={stop}>
               <StopCircle />
               Stop
             </Button>
           ) : (
-            <Button
-              key="search"
-              type="submit"
-              size="sm"
-              className="max-sm:h-10"
-              disabled={!draft.trim()}
-            >
+            <Button key="search" type="submit" size="sm" disabled={!draft.trim()}>
               <MagnifyingGlass />
               Search
             </Button>

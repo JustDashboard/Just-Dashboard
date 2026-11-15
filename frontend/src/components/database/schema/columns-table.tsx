@@ -208,7 +208,7 @@ export function ColumnsTable({
                   <TableCell
                     className={cn(
                       CELL,
-                      "max-w-64 truncate font-mono text-muted-foreground @min-[56rem]:max-w-[26rem]",
+                      "max-w-64 truncate font-mono text-muted-foreground @4xl:max-w-[26rem]",
                     )}
                     title={said}
                   >

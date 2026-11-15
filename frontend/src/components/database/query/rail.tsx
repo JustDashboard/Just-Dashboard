@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import type { PollState } from "@/hooks/use-poll"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { Stale } from "@/components/stale"
 import { StatusDot } from "@/components/status-dot"
 import { ViewTabs } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -556,6 +557,13 @@ function SchemaTree({
           <RefreshClockwise />
         </IconAction>
       </div>
+      {/* The tree is the last reading: the read just asked for failed. */}
+      <Stale
+        form="strip"
+        error={model.tables.length > 0 ? schema.error : undefined}
+        subject={`the ${engine.nouns.objects}`}
+        onRetry={schema.refresh}
+      />
       <RailFind
         value={find}
         onChange={setFind}

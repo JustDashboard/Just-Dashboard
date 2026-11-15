@@ -87,6 +87,7 @@ export function useKeyWalk(redis: Redis, epoch: number, enabled: boolean): Paged
 /** What every row of the rail needs to know about the page around it. */
 type RailContext = {
   redis: Redis
+  saidBeside: boolean
   pattern: string
   type: string
   epoch: number
@@ -122,6 +123,7 @@ export function KeyRail({
   onRefresh,
   onNew,
   onBulk,
+  saidBeside = false,
 }: {
   redis: Redis
   selected: RedisBytes | undefined
@@ -137,6 +139,8 @@ export function KeyRail({
   onNew: () => void
   /** Open the bulk actions on the pattern and type the rail is narrowed to. */
   onBulk: () => void
+  /** The pane beside says what is there, or that nothing is: the rail does not say it twice. */
+  saidBeside?: boolean
 }) {
   const { id, target, db, server, select, param, canWrite } = redis
   const pattern = param("pattern")
@@ -205,6 +209,7 @@ export function KeyRail({
 
   const context: RailContext = {
     redis,
+    saidBeside,
     pattern,
     type,
     epoch,
@@ -357,8 +362,13 @@ function NoKeys({
   narrowed: boolean
   onNew?: () => void
 }) {
-  const { pattern, type, redis } = context
+  const { pattern, type, redis, saidBeside } = context
   const named = pattern && !hasGlob(pattern)
+  if (!narrowed && saidBeside) {
+    // The pane beside says what the database is made of, and that it is
+    // empty; the way to fill it is the head's New key.
+    return <EmptyNote dense>db{redis.db ?? ""} holds no keys yet.</EmptyNote>
+  }
   if (!narrowed) {
     return (
       <EmptyState

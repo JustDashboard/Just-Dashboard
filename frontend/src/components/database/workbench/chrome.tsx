@@ -184,7 +184,7 @@ function FrameHead({
       {/* Narrower than one row holds it folds on purpose, as the Git head
           does: who, with the menu at its end, then the page's verbs on a line
           of their own — which is not there at all for a page with none. */}
-      <div className="grid min-h-12 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 px-2 py-1.5 @4xl:flex">
+      <div className="grid min-h-12 w-full min-w-0 grid-cols-main-end items-center gap-x-2 gap-y-1.5 px-2 py-1.5 @4xl:flex">
         <div className="flex min-w-0 items-center gap-2 @4xl:flex-1">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -380,7 +380,7 @@ export function WorkbenchSide({
       max={column.max}
       onChange={column.setWidth}
       onReset={column.reset}
-      className={cn("absolute inset-y-0 z-20", side === "left" ? "-right-1" : "-left-1")}
+      className={cn("absolute inset-y-0 z-sticky", side === "left" ? "-right-1" : "-left-1")}
     />
   )
   return (
@@ -397,7 +397,7 @@ export function WorkbenchSide({
         "flex min-h-0 min-w-0 flex-col border-hairline bg-card",
         column.beside
           ? cn("relative shrink-0", side === "left" ? "border-r" : "border-l")
-          : "absolute inset-0 z-30",
+          : "absolute inset-0 z-pane",
         className,
       )}
     >

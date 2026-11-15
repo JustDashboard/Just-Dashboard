@@ -319,7 +319,7 @@ export function ObjectView({
                 {data.values.map((label, index) => (
                   <li key={label} className="flex items-baseline gap-1.5">
                     <span className="numeric text-micro text-muted-foreground">{index + 1}</span>
-                    <Tag mono className="text-(--tag-pink)">
+                    <Tag mono className="text-tag-pink">
                       {label}
                     </Tag>
                   </li>

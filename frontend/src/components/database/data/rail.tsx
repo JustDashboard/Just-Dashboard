@@ -188,6 +188,12 @@ export function TableRail({
               }
             />
           )
+        ) : total === 0 && saidBeside ? (
+          // The pane beside says it, with the way to make the first one: a
+          // rail says it in a sentence, as MongoDB's and the keys' do.
+          <EmptyNote dense>
+            Nothing in {schema || `this ${engine.nouns.container}`} holds rows yet.
+          </EmptyNote>
         ) : total === 0 ? (
           <EmptyState
             className="mt-2 border-0 px-2 py-8"
