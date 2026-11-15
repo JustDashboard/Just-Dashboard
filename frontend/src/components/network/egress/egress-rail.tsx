@@ -1,10 +1,8 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import Link from "next/link"
 import type { EgressGroup } from "@/lib/network/egress"
-import { cn } from "@/lib/utils"
-import { LoadingRows } from "@/components/loading"
+import { plural } from "@/lib/format"
+import { Rail, RailLine, RailName, RailRow } from "@/components/rail"
 import { EgressMark, TONE_TEXT } from "@/components/network/egress/marks"
 import { egressCarrying, egressHref } from "@/components/network/egress/reading"
 
@@ -20,6 +18,8 @@ export function EgressRail({
   tab,
   loading,
   failed,
+  error,
+  onRetry,
   className,
 }: {
   groups: EgressGroup[]
@@ -28,68 +28,47 @@ export function EgressRail({
   loading: boolean
   /** The first read failed: the column says so instead of counting nothing. */
   failed?: boolean
+  /** The failure itself, where the page has it. */
+  error?: Error
+  onRetry?: () => void
   className?: string
 }) {
-  const list = useRef<HTMLOListElement>(null)
-  useEffect(() => {
-    list.current
-      ?.querySelector<HTMLElement>("[aria-current='page']")
-      ?.scrollIntoView({ block: "nearest" })
-  }, [current])
+  const failure = error ?? (failed ? new Error("The egress groups could not be read.") : undefined)
   return (
-    <nav
-      aria-label="Egress groups"
-      data-slot="egress-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <p className="shrink-0 pb-3 text-hint text-muted-foreground">
-        {failed
-          ? "Not read"
+    <Rail
+      slot="egress-rail"
+      label="Egress groups"
+      listLabel="Groups to open"
+      caption={
+        failure
+          ? undefined
           : loading && groups.length === 0
             ? "Reading the groups…"
-            : `${groups.length} ${groups.length === 1 ? "group" : "groups"}`}
-      </p>
-      <ol
-        ref={list}
-        aria-label="Groups to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {groups.map((group) => {
-          const carrying = egressCarrying(group)
-          const here = group.id === current
-          return (
-            <li key={group.id} className="min-w-0">
-              <Link
-                href={egressHref(group.name, tab)}
-                aria-current={here ? "page" : undefined}
-                aria-label={group.name}
-                data-workspace-item={String(group.id)}
-                data-workspace-name={group.name}
-                className={cn(
-                  "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-                  here ? "bg-accent" : "hover:bg-row-hover",
-                )}
-              >
-                <EgressMark group={group} size="sm" />
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={cn(
-                      "block truncate text-body",
-                      here ? "font-semibold" : "font-medium",
-                    )}
-                  >
-                    {group.name}
-                  </span>
-                  <span className={cn("block truncate text-hint", TONE_TEXT[carrying.tone])}>
-                    {carrying.label}
-                  </span>
-                </span>
-              </Link>
-            </li>
-          )
-        })}
-        {loading && groups.length === 0 && <LoadingRows rows={3} />}
-      </ol>
-    </nav>
+            : plural(groups.length, "group")
+      }
+      rows={groups}
+      keyOf={(group) => String(group.id)}
+      current={(group) => group.id === current}
+      row={(group, here) => {
+        const carrying = egressCarrying(group)
+        return (
+          <RailRow
+            item={String(group.id)}
+            name={group.name}
+            current={here}
+            href={egressHref(group.name, tab)}
+            mark={<EgressMark group={group} size="sm" />}
+          >
+            <RailName current={here}>{group.name}</RailName>
+            <RailLine ink={TONE_TEXT[carrying.tone]}>{carrying.label}</RailLine>
+          </RailRow>
+        )
+      }}
+      loading={loading}
+      loadingRows={3}
+      error={failure}
+      onRetry={onRetry}
+      className={className}
+    />
   )
 }

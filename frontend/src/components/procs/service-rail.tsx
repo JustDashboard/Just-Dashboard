@@ -1,14 +1,13 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useSearchParams } from "next/navigation"
 import { Servers } from "@/components/icons"
 import { bytes, duration, percent } from "@/lib/format"
 import type { SystemdUnit } from "@/lib/types"
-import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/search-input"
 import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { LoadingRows } from "@/components/loading"
+import { Rail, RailFigures, RailLine, RailName, RailRow, railInk } from "@/components/rail"
+import { serviceHref } from "@/components/procs/service-facts"
 import { cpuTone } from "@/components/procs/shared"
 import {
   failureWords,
@@ -35,6 +34,8 @@ export function ServiceRail({
   current,
   currentUnit,
   loading,
+  error,
+  onRetry,
   query,
   onQuery,
   filtered,
@@ -50,78 +51,50 @@ export function ServiceRail({
   /** The unit on screen, drawn first when the list does not hold it. */
   currentUnit?: SystemdUnit
   loading: boolean
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
   query: string
   onQuery: (value: string) => void
   filtered: boolean
   onClearFilters: () => void
   caption: string
   now: number
-  onOpen: (name: string) => void
+  /** Opens a unit carrying the page's view; the row's link does the same without it. */
+  onOpen?: (name: string) => void
   bindings: React.HTMLAttributes<HTMLElement>
   className?: string
 }) {
-  const listed = units.some((unit) => unit.name === current)
-  const pinned = !listed && currentUnit ? currentUnit : undefined
-  const list = useRef<HTMLOListElement>(null)
-  // The unit on screen is kept in view: opened from a link or by Alt+↓ past
-  // the column's edge, it would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current])
-
+  const tab = useSearchParams().get("tab") ?? undefined
   return (
-    <nav
-      aria-label="Services"
-      data-slot="service-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Name or description"
-          aria-label="Search the services"
-          containerClassName="sm:w-full"
+    <Rail
+      slot="service-rail"
+      label="Services"
+      search={{ placeholder: "Name or description", query, onQuery }}
+      rows={units}
+      keyOf={(unit) => unit.name}
+      current={(unit) => unit.name === current}
+      pinned={currentUnit}
+      row={(unit, on) => (
+        <ServiceRow
+          unit={unit}
+          current={on}
+          now={now}
+          href={serviceHref(unit.name, tab)}
+          onOpen={onOpen}
         />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{caption}</span>
-          {filtered && (
-            <button
-              type="button"
-              onClick={onClearFilters}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
-            >
-              Clear filters
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Services to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-        {...bindings}
-      >
-        {pinned && <RailRow unit={pinned} current now={now} onOpen={onOpen} />}
-        {pinned && units.length > 0 && (
-          <li aria-hidden className="mx-3 my-1.5 border-t border-hairline" />
-        )}
-        {units.map((unit) => (
-          <RailRow
-            key={unit.name}
-            unit={unit}
-            current={unit.name === current}
-            now={now}
-            onOpen={onOpen}
-          />
-        ))}
-        {loading && units.length === 0 && <LoadingRows rows={8} />}
-        {!loading && units.length === 0 && !pinned && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No service matches.</li>
-        )}
-      </ol>
-    </nav>
+      )}
+      loading={loading}
+      loadingRows={8}
+      error={error}
+      onRetry={onRetry}
+      empty="No service matches."
+      filtered={filtered}
+      onClearFilters={onClearFilters}
+      caption={caption}
+      bindings={bindings}
+      className={className}
+    />
   )
 }
 
@@ -138,88 +111,53 @@ function railLine(unit: SystemdUnit, now: number): { text: string; tone?: "dange
   return { text: unitStateWord(unit) }
 }
 
-function RailRow({
+function ServiceRow({
   unit,
   current,
   now,
+  href,
   onOpen,
 }: {
   unit: SystemdUnit
   current: boolean
   now: number
-  onOpen: (name: string) => void
+  href: string
+  onOpen?: (name: string) => void
 }) {
   const line = railLine(unit, now)
   const running = unitBucket(unit) === "active" && (unit.cpuReady || (unit.memoryBytes ?? 0) > 0)
   const tone = cpuTone(unit.cpuPercent ?? 0)
   return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        data-workspace-item={unit.name}
-        data-workspace-name={unit.name}
-        aria-current={current ? "page" : undefined}
-        aria-label={unit.name}
-        title={unit.description}
-        onClick={() => onOpen(unit.name)}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <span className="relative flex shrink-0">
-          <ProductLogo
-            id={unitProduct(unit.name)}
-            size="sm"
-            fallback={Servers}
-            className="size-7 rounded-md [&_img]:size-4"
+    <RailRow
+      item={unit.name}
+      name={unit.name}
+      title={unit.description}
+      current={current}
+      href={href}
+      onOpen={onOpen && (() => onOpen(unit.name))}
+      mark={
+        <ProductLogo
+          id={unitProduct(unit.name)}
+          size="sm"
+          fallback={Servers}
+          className="size-7 rounded-md [&_img]:size-4"
+        />
+      }
+      dot={<StatusDot tone={unitTone(unit)} className="size-1.5" />}
+      end={
+        running && (
+          <RailFigures
+            top={unit.cpuReady ? percent(unit.cpuPercent ?? 0) : "—"}
+            bottom={(unit.memoryBytes ?? 0) > 0 ? bytes(unit.memoryBytes) : "—"}
+            ink={tone === "danger" ? "font-medium text-destructive" : railInk(tone)}
           />
-          <span
-            aria-hidden
-            className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-          >
-            <StatusDot tone={unitTone(unit)} className="size-1.5" />
-          </span>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}
-          >
-            {unitShortName(unit.name)}
-          </span>
-          <span
-            className={cn(
-              "numeric block truncate text-hint",
-              line.tone === "danger"
-                ? "text-destructive"
-                : line.tone === "warning"
-                  ? "text-warning"
-                  : "text-muted-foreground",
-            )}
-          >
-            {line.text}
-          </span>
-        </span>
-        {running && (
-          <span className="flex shrink-0 flex-col items-end">
-            <span
-              className={cn(
-                "numeric font-mono text-hint",
-                tone === "danger"
-                  ? "font-medium text-destructive"
-                  : tone === "warning"
-                    ? "text-warning"
-                    : "text-muted-foreground",
-              )}
-            >
-              {unit.cpuReady ? percent(unit.cpuPercent ?? 0) : "—"}
-            </span>
-            <span className="numeric font-mono text-micro text-muted-foreground">
-              {(unit.memoryBytes ?? 0) > 0 ? bytes(unit.memoryBytes) : "—"}
-            </span>
-          </span>
-        )}
-      </button>
-    </li>
+        )
+      }
+    >
+      <RailName current={current}>{unitShortName(unit.name)}</RailName>
+      <RailLine className="numeric" ink={railInk(line.tone)}>
+        {line.text}
+      </RailLine>
+    </RailRow>
   )
 }

@@ -6,13 +6,13 @@ import { dedupeEvents } from "@/lib/docker-events"
 import { bytes, percent, plural } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import type { Container, ContainerStats, DockerEvent } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
-import { DockerRail, DockerRailRow } from "@/components/docker/item-rail"
+import { Rail, RailFigures, RailLine, RailName, RailRow } from "@/components/rail"
 import {
   CONTAINER_FILTER_KEYS,
   DEFAULT_CONTAINER_SORT,
@@ -162,28 +162,29 @@ export function ContainerRail({
   bindings: React.HTMLAttributes<HTMLElement>
   className?: string
 }) {
+  const tab = useSearchParams().get("tab")
   return (
-    <DockerRail
+    <Rail
       slot="container-rail"
       label="Containers"
-      search={{ label: "Search the containers", placeholder: "Name, image or stack" }}
+      search={{ placeholder: "Name, image or stack", query, onQuery }}
       rows={rows}
       keyOf={(row) => row.id}
       current={(row) => row.id === current || row.name === current}
       pinned={currentRow}
       row={(row, on) => (
-        <RailRow
+        <ContainerRow
           row={row}
           current={on}
           stat={stats[row.id]}
           oom={oomKilled.has(row.id)}
+          href={containerHref(row.id, tab)}
           onOpen={onOpen}
         />
       )}
       loading={loading}
+      loadingRows={8}
       empty="No container matches."
-      query={query}
-      onQuery={onQuery}
       filtered={filtered}
       onClearFilters={onClearFilters}
       caption={caption}
@@ -191,6 +192,12 @@ export function ContainerRail({
       className={className}
     />
   )
+}
+
+/** A container's page, on the view the one on screen is showing. */
+function containerHref(id: string, tab: string | null) {
+  const path = `/docker/containers/${encodeURIComponent(id)}`
+  return tab ? `${path}?tab=${encodeURIComponent(tab)}` : path
 }
 
 /** How a container is doing, in the rail's few words: whose it is while it runs, why it is not when it does not. */
@@ -209,28 +216,31 @@ function railLine(row: Container, oom: boolean): { text: string; color?: string;
   }
 }
 
-function RailRow({
+function ContainerRow({
   row,
   current,
   stat,
   oom,
+  href,
   onOpen,
 }: {
   row: Container
   current: boolean
   stat?: ContainerStats
   oom: boolean
-  onOpen: (id: string) => void
+  href: string
+  onOpen?: (id: string) => void
 }) {
   const line = railLine(row, oom)
   const running = row.state === "running" && stat
   return (
-    <DockerRailRow
+    <RailRow
       item={row.id}
       name={row.name}
       title={row.image}
       current={current}
-      onOpen={() => onOpen(row.id)}
+      href={href}
+      onOpen={onOpen && (() => onOpen(row.id))}
       mark={
         <ProductLogo
           id={containerProduct(row)}
@@ -241,29 +251,20 @@ function RailRow({
       }
       dot={<StatusDot tone={bucketTone(containerBucket(row, oom))} className="size-1.5" />}
       end={
+        // Plain: a share of one core is not an alarm for a container, which
+        // may be given several. The table tones it against its limit.
         running && (
-          <span className="flex shrink-0 flex-col items-end">
-            {/* Plain: a share of one core is not an alarm for a container, which
-                may be given several. The table tones it against its limit. */}
-            <span className="numeric font-mono text-hint text-muted-foreground">
-              {stat.cpuReady === false ? "—" : percent(stat.cpuPercent)}
-            </span>
-            <span className="numeric font-mono text-micro text-muted-foreground">
-              {stat.memUsage ? bytes(stat.memUsage) : "—"}
-            </span>
-          </span>
+          <RailFigures
+            top={stat.cpuReady === false ? "—" : percent(stat.cpuPercent)}
+            bottom={stat.memUsage ? bytes(stat.memUsage) : "—"}
+          />
         )
       }
     >
-      <span className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}>
-        {row.name}
-      </span>
-      <span
-        className={cn("block truncate text-hint", line.tone || "text-muted-foreground")}
-        style={line.color ? { color: line.color } : undefined}
-      >
+      <RailName current={current}>{row.name}</RailName>
+      <RailLine ink={line.tone} style={line.color ? { color: line.color } : undefined}>
         {line.text}
-      </span>
-    </DockerRailRow>
+      </RailLine>
+    </RailRow>
   )
 }

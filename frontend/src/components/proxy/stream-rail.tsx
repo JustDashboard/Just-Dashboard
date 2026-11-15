@@ -1,15 +1,11 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import Link from "next/link"
 import { Connection } from "@/components/icons"
-import { cn } from "@/lib/utils"
 import type { StreamEntry } from "@/lib/types"
 import { stateLabel, stateStatus } from "@/lib/streams"
-import { SearchInput } from "@/components/search-input"
 import { ProductLogo, portProduct } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
-import { LoadingRows } from "@/components/loading"
+import { Rail, RailLine, RailName, RailRow } from "@/components/rail"
 import { routeLine, streamHref, type StreamTab } from "@/components/proxy/stream-facts"
 
 function dotTone(stream: StreamEntry): DotTone {
@@ -31,6 +27,8 @@ export function StreamRail({
   current,
   tab,
   loading,
+  error,
+  onRetry,
   query,
   onQuery,
   filter,
@@ -43,6 +41,9 @@ export function StreamRail({
   /** The view on screen, carried to the next stream. */
   tab: StreamTab
   loading: boolean
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
   query: string
   onQuery: (value: string) => void
   /** The list's chip, when one other than All is chosen. */
@@ -51,106 +52,60 @@ export function StreamRail({
   caption: string
   className?: string
 }) {
-  const list = useRef<HTMLOListElement>(null)
-  // The stream on screen is kept in view: opened by Alt+↓ past the column's
-  // edge, it would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current])
-
   return (
-    <nav
-      aria-label="Streams"
-      data-slot="stream-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Name, port, upstream or source"
-          aria-label="Search the streams"
-          containerClassName="sm:w-full"
-        />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{caption}</span>
-          {filter && (
-            <button
-              type="button"
-              onClick={onClearFilter}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
+    <Rail
+      slot="stream-rail"
+      label="Streams"
+      search={{ placeholder: "Name, port, upstream or source", query, onQuery }}
+      rows={streams}
+      keyOf={(stream) => stream.name}
+      current={(stream) => stream.name === current}
+      row={(stream, here) => {
+        const live = !stream.error && stream.state === "live"
+        return (
+          <RailRow
+            item={stream.name}
+            name={stream.name}
+            current={here}
+            href={streamHref(stream.name, tab)}
+            mark={
+              <ProductLogo
+                id={portProduct(stream.listen)}
+                size="sm"
+                fallback={Connection}
+                className="size-7 rounded-md [&_img]:size-4"
+              />
+            }
+            dot={<StatusDot tone={dotTone(stream)} className="size-1.5" />}
+          >
+            <RailName current={here}>{stream.name}</RailName>
+            <RailLine
+              ink={
+                stream.error || stream.state === "not-listening"
+                  ? "text-destructive"
+                  : live || stream.paused
+                    ? undefined
+                    : "text-warning"
+              }
+              className={live || stream.paused ? "font-mono" : undefined}
             >
-              Clear filter
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Streams to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {streams.map((stream) => {
-          const here = stream.name === current
-          const live = !stream.error && stream.state === "live"
-          return (
-            <li key={stream.name} className="min-w-0">
-              <Link
-                href={streamHref(stream.name, tab)}
-                aria-current={here ? "page" : undefined}
-                aria-label={stream.name}
-                className={cn(
-                  "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-                  here ? "bg-accent" : "hover:bg-row-hover",
-                )}
-              >
-                <span className="relative flex shrink-0">
-                  <ProductLogo
-                    id={portProduct(stream.listen)}
-                    size="sm"
-                    fallback={Connection}
-                    className="size-7 rounded-md [&_img]:size-4"
-                  />
-                  <span
-                    aria-hidden
-                    className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-                  >
-                    <StatusDot tone={dotTone(stream)} className="size-1.5" />
-                  </span>
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={cn(
-                      "block truncate text-body",
-                      here ? "font-semibold" : "font-medium",
-                    )}
-                  >
-                    {stream.name}
-                  </span>
-                  <span
-                    className={cn(
-                      "block truncate text-hint",
-                      live || stream.paused ? "font-mono text-muted-foreground" : "text-warning",
-                      (stream.error || stream.state === "not-listening") && "text-destructive",
-                    )}
-                  >
-                    {stream.error
-                      ? "could not be read"
-                      : live || stream.paused
-                        ? routeLine(stream)
-                        : stateLabel(stream.state)}
-                  </span>
-                </span>
-              </Link>
-            </li>
-          )
-        })}
-        {loading && streams.length === 0 && <LoadingRows rows={6} />}
-        {!loading && streams.length === 0 && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No stream matches.</li>
-        )}
-      </ol>
-    </nav>
+              {stream.error
+                ? "could not be read"
+                : live || stream.paused
+                  ? routeLine(stream)
+                  : stateLabel(stream.state)}
+            </RailLine>
+          </RailRow>
+        )
+      }}
+      loading={loading}
+      error={error}
+      onRetry={onRetry}
+      empty="No stream matches."
+      filtered={Boolean(filter)}
+      onClearFilters={onClearFilter}
+      caption={caption}
+      className={className}
+    />
   )
 }

@@ -376,7 +376,7 @@ test.describe("an account", () => {
       "aria-label",
       "root",
     )
-    await rail.getByRole("button", { name: "deploy", exact: true }).click()
+    await rail.getByRole("link", { name: "deploy", exact: true }).click()
     await expect(page).toHaveURL(/\/system-users\/user\/deploy\?tab=settings$/)
     await expect(rail.locator("[aria-current='page']")).toHaveAttribute("aria-label", "deploy")
     await page.keyboard.press("Alt+ArrowDown")
@@ -1128,7 +1128,7 @@ test.describe("a group", () => {
     await expect(rail.locator("[aria-current='page']")).toHaveAttribute("aria-label", "docker")
     await page.keyboard.press("Alt+ArrowDown")
     await expect(page).toHaveURL(/\/system-users\/groups\/lxd\?tab=members$/)
-    await rail.getByRole("button", { name: "developers", exact: true }).click()
+    await rail.getByRole("link", { name: "developers", exact: true }).click()
     await expect(page).toHaveURL(/\/system-users\/groups\/developers\?tab=members$/)
     await page.getByRole("button", { name: "Previous group" }).click()
     await expect(page).toHaveURL(/\/system-users\/groups\/sudo\?tab=members$/)
