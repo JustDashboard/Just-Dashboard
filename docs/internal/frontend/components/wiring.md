@@ -64,13 +64,13 @@ still under reduced motion, while the tab is hidden and while the reader has pau
 - `stack` (the default): the columns stack under their headings with every word kept and no lines,
   for a picture that is the only place its nodes are named (the Network overview, the link
   picture).
-- `marks`: a row of the start column's marks, the hub with its words beside it, and a row of the end
+- `marks`: a row of the start column's marks, the hub with its words under it, and a row of the end
   column's marks, the lines running down between them, for a picture whose nodes a list under it
-  names again (Notifications, Backups, the proxy's alerts, the account). The hub's words stand to
-  the right of its mark, as a narrow `WireNode`'s do, clear of the lines running down through it.
-  Until 0.9.0 they were printed over the first row, which named that row (the not-found page's "?"
-  read "This server"), and the account picture's own phone layout ran its lines through the
-  account's name. A column with `href` keeps its heading as a link above or below its row.
+  names again (Notifications, Backups, the proxy's alerts, the account). The lines to the end row
+  leave from under the hub's words, so none runs through them. Until 0.9.0 the words were printed
+  over the first row, which named that row (the not-found page's "?" read "This server"), and the
+  account picture's own phone layout ran its lines through the account's name. A column with
+  `href` keeps its heading as a link above or below its row.
 
 **Accessibility.** Each column is a `section` named by its title, its nodes an `ol`. A node's link or
 button is named by `label`, else `name`, else a string `title`; on a phone the marks carry their

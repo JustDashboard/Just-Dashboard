@@ -143,14 +143,13 @@ export type WireFlowHub = {
  * - `stack` (the default): the columns stack under their headings with every
  *   word kept and the lines not drawn. For a picture that is the only place its
  *   nodes are named — the Network overview, the gateway.
- * - `marks`: a row of the start column's marks, the hub with its words
- *   beside it, and a row of the end column's, the lines running down between
- *   them. For a picture whose nodes a list under it names again —
- *   Notifications, Backups, the proxy's alerts — where the words would be said
- *   twice. The hub's words stand to the right of its mark, as a narrow
- *   `WireNode`'s do, clear of the lines running down through it: printed over
- *   the first row they named that row (the not-found page's "?" read "This
- *   server"), and under the mark the lines ran through them.
+ * - `marks`: a row of the start column's marks, the hub with its words under
+ *   it, and a row of the end column's, the lines running down between them.
+ *   For a picture whose nodes a list under it names again — Notifications,
+ *   Backups, the proxy's alerts — where the words would be said twice. The
+ *   lines to the end row leave from under the hub's words rather than from
+ *   the mark, so none runs through them; printed over the first row instead,
+ *   the words named that row (the not-found page's "?" read "This server").
  *
  * `loading` draws the picture's final shape — the hub, and grey rows where
  * the nodes will be — so nothing under it moves when the data lands. A column
@@ -185,6 +184,8 @@ export function WireFlow({
   const wide = useMediaQuery("(min-width: 1024px)")
   const container = useRef<HTMLDivElement>(null)
   const hubRef = useRef<HTMLDivElement>(null)
+  // Down a phone, where the end row's lines leave from: under the hub's words.
+  const hubFoot = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
   const compact = phone === "marks" && !wide
   // A hidden tab or paused motion draws every line still, as reduced motion does.
@@ -224,7 +225,7 @@ export function WireFlow({
       <AnimatedBeam
         key={node.id}
         containerRef={container}
-        fromRef={into ? ref : hubRef}
+        fromRef={into ? ref : compact ? hubFoot : hubRef}
         toRef={into ? hubRef : ref}
         // Wide, a wire leaves a mark level from its edge and arrives level at
         // the other; down a phone the rows are above and below, so it runs
@@ -261,34 +262,33 @@ export function WireFlow({
             <WireLaneTitle title={start.title} count={start.count} href={start.href} />
           )}
           <MarkRow column={start} nodes={left} refs={refs} className={start.href && "mt-3"} />
-          {/* The mark in the middle column, so it stays on the picture's
-              centre line; its words in the right-hand one, beside it. */}
-          <div className="mt-10 grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
-            <span aria-hidden />
-            <div ref={hubRef} className="relative z-10 flex">
-              {draw(hub.mark, "lg")}
-            </div>
-            <div data-slot="wire-hub-words" className="min-w-0 text-left">
-              {hub.eyebrow && <p className="eyebrow">{hub.eyebrow}</p>}
-              {loading ? (
-                <>
-                  <p className="text-body leading-snug font-medium">
-                    {hub.loadingLines?.title ?? <WaitingWords className="w-24" />}
-                  </p>
-                  {hubWaits && (
-                    <div className="text-hint leading-snug text-muted-foreground">{hubWaits}</div>
-                  )}
-                </>
-              ) : (
-                <>
-                  {hub.title && <p className="text-body leading-snug font-medium">{hub.title}</p>}
-                  {hub.hint && (
-                    <div className="text-hint leading-snug text-muted-foreground">{hub.hint}</div>
-                  )}
-                </>
-              )}
-            </div>
+          <div ref={hubRef} className="relative z-10 mt-10 flex">
+            {draw(hub.mark, "lg")}
           </div>
+          {/* The hub's words under its mark, between the two rows: the lines
+              to the end row leave from under them (`hubFoot`), so none runs
+              through a word. */}
+          <div data-slot="wire-hub-words" className="mt-2">
+            {hub.eyebrow && <p className="eyebrow">{hub.eyebrow}</p>}
+            {loading ? (
+              <>
+                <p className="text-body leading-snug font-medium">
+                  {hub.loadingLines?.title ?? <WaitingWords className="w-32" />}
+                </p>
+                {hubWaits && (
+                  <div className="text-hint leading-snug text-muted-foreground">{hubWaits}</div>
+                )}
+              </>
+            ) : (
+              <>
+                {hub.title && <p className="text-body leading-snug font-medium">{hub.title}</p>}
+                {hub.hint && (
+                  <div className="text-hint leading-snug text-muted-foreground">{hub.hint}</div>
+                )}
+              </>
+            )}
+          </div>
+          <div ref={hubFoot} aria-hidden className="mt-1 h-0 w-0" />
           <MarkRow column={end} nodes={right} refs={refs} className="mt-10" />
           {end.href && (
             <WireLaneTitle title={end.title} count={end.count} href={end.href} className="mt-3" />
