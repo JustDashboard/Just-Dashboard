@@ -1207,7 +1207,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const tiles = marks.length > 0 ? marks : engines.map((e) => e.id)
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {header}
 
       {/* What the host serves, as one line: its sites as the applications

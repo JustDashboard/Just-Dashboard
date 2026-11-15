@@ -211,14 +211,7 @@ export function SiteSaveBar({
       actions={
         <>
           {onDiscard && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={saving}
-              onClick={onDiscard}
-              className="max-sm:h-10"
-            >
+            <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={onDiscard}>
               Discard
             </Button>
           )}
@@ -230,7 +223,6 @@ export function SiteSaveBar({
               disabled={disabled || saving}
               pending={secondary.pending}
               onClick={secondary.run}
-              className="max-sm:h-10"
             >
               {secondary.label}
             </Button>
@@ -242,7 +234,6 @@ export function SiteSaveBar({
             pending={primary.pending}
             onClick={primary.run}
             aria-keyshortcuts="Control+S Meta+S"
-            className="max-sm:h-10"
           >
             {primary.label}
             <SaveKey hidden={primary.pending} />

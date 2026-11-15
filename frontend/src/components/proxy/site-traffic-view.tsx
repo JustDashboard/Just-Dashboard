@@ -198,7 +198,7 @@ function TrafficPage() {
 
   if (engineMissing) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext title="Traffic" />
         <HostIdentity
           fallback={ChartActivity}
@@ -216,7 +216,7 @@ function TrafficPage() {
   const nginxSites = (vhosts.data ?? []).filter((v) => v.kind === "nginx")
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title="Traffic" />
       <HostIdentity
         mark={engineProduct(status)}
@@ -564,7 +564,7 @@ function HourChart({ hour }: { hour: EdgeHour | undefined }) {
           {hour ? (
             <>
               {hour.total.toLocaleString()}
-              <span className="text-muted-foreground/50"> · </span>
+              <span className="text-faint"> · </span>
               <span className={cn(hour.failed > 0 && "text-destructive")}>
                 {hour.failed.toLocaleString()} failed
               </span>

@@ -379,7 +379,7 @@ export function StreamsPage() {
 
   if (noNginx) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         {header}
         {identity}
         {/* The section's own install screen: the module and the forwards
@@ -419,7 +419,7 @@ export function StreamsPage() {
   const drawn = listed.filter((s) => !s.error)
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {header}
       {identity}
 

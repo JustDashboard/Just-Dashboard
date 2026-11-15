@@ -424,7 +424,7 @@ export default function ProxyOverviewPage() {
   const labelOf = (site: string) => hosts.find((v) => v.name === site)?.serverNames[0] ?? site
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title="Proxy & TLS" />
       {statusError && <ErrorState error={statusError} onRetry={refreshStatus} />}
 

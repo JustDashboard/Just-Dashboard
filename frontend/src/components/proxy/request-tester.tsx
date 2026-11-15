@@ -175,7 +175,7 @@ export function RequestTester() {
   const missing = status !== undefined && !hasNginx
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Proxy" title="Request tester" />
       <HostIdentity
         // The view strip under the line draws the rule: the line's own under
@@ -187,7 +187,7 @@ export function RequestTester() {
           <span
             role="heading"
             aria-level={2}
-            className={cn("break-all", (hop || url) && "font-mono text-[0.92em]")}
+            className={cn("break-all", (hop || url) && "code-inline")}
           >
             {hop?.url ?? (url || "Request tester")}
           </span>
@@ -405,7 +405,7 @@ export function RequestTester() {
                           {index + 1}
                         </span>
                       }
-                      title={<span className="font-mono text-[0.92em]">{entry.url}</span>}
+                      title={<span className="code-inline">{entry.url}</span>}
                       description={`${entry.method} · site ${entry.site}`}
                       trailing={<Status verdict={hopVerdict(entry)} label={hopLabel(entry)} />}
                     />
