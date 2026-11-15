@@ -3,7 +3,10 @@
 The catalogue: every shared export, so a page can find what to use in five minutes. Shared means
 `components/*.tsx`, `components/ui/`, `components/wire/`, `components/settings/`,
 `components/shell/` and `hooks/`; a component of one area (`components/docker/`, …) is that area's
-and is found from [`../features/`](../features/). Each family's own page carries the detail:
+and is found from [`../features/`](../features/). A few exports outside those folders have rows
+too: the ones another area is meant to reuse (`account/one-time-code.tsx`,
+`onboarding/purpose-card.tsx`, `lib/password.ts`), and the area copies a shared export
+replaced, as deprecated rows. Each family's own page carries the detail:
 anatomy, when to use it and when not, props, states, the phone and accessibility.
 
 How to read it:
@@ -29,14 +32,14 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `HostIdentity` | [Page header](page-header.md) | `components/identity-header.tsx` | The identity line: a mark, the title, its state and a line of facts. | deprecated (use `IdentityHeader`, WP-09) |
 | `IdentityHeader` | [Page header](page-header.md) | `components/identity-header.tsx` | `HostIdentity` under its own name, with a `loading` form that stands at the loaded shape. | new (WP-09) |
 | `platformName` | [Page header](page-header.md) | `components/identity-header.tsx` | The distribution as its own name spells it, for an identity line. | keep |
-| `PageContext` | [Page header](page-header.md) | `components/page.tsx` | A page's accessible name and its verbs, with no visual title; gains `back={{href, label}}`. | keep |
-| `BackLink` | [Page header](page-header.md) | `components/page.tsx` | The way back to a parent page, for the few eyebrows outside `PageContext`. | new (WP-09) |
-| `IdentityVerbs`, `Verb` (type) | [Page header](page-header.md) | `components/verbs.tsx` | Splits a page's verbs into the header's one command and its overflow menu. | new (WP-09) |
-| `Metric`, `MetricStrip` | [Facts lines](values-facts.md) | `components/detail-list.tsx` | One figure with its name, and a run of them under a chart, ruled apart. | keep |
-| `DetailList`, `Detail` | [Facts lines](values-facts.md) | `components/detail-list.tsx` | Label and value pairs in a stacked list; gains a `ruled` form. | keep |
-| `FactLine`, `Fact` | [Facts lines](values-facts.md) | `components/fact-line.tsx` | A line of facts with the dot between them drawn once, in the faint ink. | new (WP-09) |
+| `PageContext` | [Page header](page-header.md) | `components/page.tsx` | A page's accessible name, its way back (`back={{href, label}}`), the walk and the help, with no visual title; a thing's verbs are on its identity line. | keep |
+| `BackLink`, `Back` (type) | [Page header](page-header.md) | `components/page.tsx` | The way back to the list a page sits under ("← Containers"), drawn by `PageContext back` and, outside it, on its own. | new (WP-09) |
+| `IdentityVerbs` | [Page header](page-header.md) | `components/identity-header.tsx` | Splits a thing's verbs into its identity line's one command and the `⋯` menu after it: `{...IdentityVerbs({ verbs, name })}`. | new (WP-09) |
+| `Metric`, `MetricStrip` | [Facts lines](values-facts.md) | `components/detail-list.tsx` | One figure with its name, and a run of them; they draw as `FormFact` and `FormFacts` now. | deprecated (use `FormFact`, `FormFacts`, WP-09) |
+| `DetailList`, `Detail` | [Facts lines](values-facts.md) | `components/detail-list.tsx` | Label and value pairs in a stacked list; gains `ruled`, `labelWidth` and `size` (WP-09). | keep |
+| `FactLine`, `Fact`, `facts`, `hasFacts` | [Facts lines](values-facts.md) | `components/fact-line.tsx` | A line of facts with the dot between them drawn once, in the faint ink; `facts` makes one from data, and `hasFacts` says whether children are written as facts. | new (WP-09) |
 | `HostFact` | [Facts lines](values-facts.md) | `components/identity-header.tsx` | A fact in the identity line with the product it names drawn before it. | deprecated (use `Fact`, WP-09) |
-| `FactDot` | [Facts lines](values-facts.md) | `components/identity-header.tsx` | The dot between two facts of a line. | deprecated (use `FactLine`, WP-09) |
+| `FactDot` | [Facts lines](values-facts.md) | `components/fact-line.tsx` | The dot between two facts of a line, as an item of its own (`identity-header.tsx` re-exports it). | deprecated (use `FactLine`, WP-09) |
 | `FactsLine` | [Facts lines](values-facts.md) | `components/settings/facts-line.tsx` | A settings section's facts line, with the paragraph it used to print behind a mark. | keep |
 | `SectionLink` | [Section head](section-head.md) | `components/section-link.tsx` | The way on to the page a block stands for, at the end of its head. | keep |
 | `Section` | [Section head](section-head.md) | `components/section.tsx` | A titled group of blocks inside a page: the title and a hairline. | keep |
@@ -47,35 +50,43 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `Well` | [Surfaces](surfaces.md) | `components/panel.tsx` | A recessed ground inside a body, for a value set apart. | keep |
 | `Group` | [Surfaces](surfaces.md) | `components/panel.tsx` | A fenced group of fields inside a body. | keep |
 | `Separator` | [Surfaces](surfaces.md) | `components/ui/separator.tsx` | A hairline between two things. | keep |
-| `SearchInput` | [Search and toolbar](search-toolbar.md) | `components/search-input.tsx` | The one filter box: 40px and its own line on a phone; gains deferred apply and a clear (WP-10). | keep |
+| `SearchInput` | [Search and toolbar](search-toolbar.md) | `components/search-input.tsx` | The one filter box: 44px and its own line on a phone; gains deferred apply and a clear (WP-10). | keep |
 | `SearchInputSkeleton` | [Search and toolbar](search-toolbar.md) | `components/search-input.tsx` | The search box's bone at the box's own size. | new (WP-10) |
 | `Toolbar` | [Search and toolbar](search-toolbar.md) | `components/toolbar.tsx` | A row of filters and actions standing on its own, outside a panel. | keep |
 | `ListToolbar` | [Search and toolbar](search-toolbar.md) | `components/toolbar.tsx` | A list's search, sort, actions and chips in one order with one phone layout. | new (WP-10) |
-| `useDeferredSearch` | [Search and toolbar](search-toolbar.md) | `hooks/use-deferred-search.ts` | Applies a typed search after a pause, without echoing the applied value back. | new (WP-10) |
-| `FindingList`, `FindingAction` (type), `Finding` (type) | [List row](list-row.md) | `components/finding-list.tsx` | Results of a diagnostic tool: the problem, its consequence and the next step, the evidence folded. | keep |
+| `useDeferredSearch`, `receiveApplied` | [Search and toolbar](search-toolbar.md) | `hooks/use-deferred-search.ts` | Applies a typed search after a pause, without echoing the applied value back; `receiveApplied` is the echo guard as a pure step. | new (WP-10) |
+| `FindingList`, `FindingAction` (type), `Finding` (type) | [List row](list-row.md) | `components/finding-list.tsx` | Results of a diagnostic tool: the problem, its consequence and the next step, the evidence in a popover off the title (rows never grow). | keep |
 | `RowLink` | [List row](list-row.md) | `components/row-link.tsx` | A table cell's primary column as the row's way into its detail page. | keep |
 | `RowList`, `Row` | [List row](list-row.md) | `components/row-list.tsx` | The list of rows you read: a mark, a title, a second line and the right edge, one height in every state. | keep |
 | `ROW_BLEED` | [List row](list-row.md) | `components/row-list.tsx` | The bleed a row takes inside a plain panel, for a list laid out by hand. | keep |
+| `RowsSkeleton` | [List row](list-row.md) | `components/row-list.tsx` | Rows that have not arrived, at a `Row`'s own pitch, so a list is as tall loading as loaded. | new (WP-11) |
+| `TABLE_BLEED` | [List row](list-row.md) | `components/row-list.tsx` | The bleed a table takes inside a plain panel, so its first column starts on the panel title's edge. | new (WP-11) |
 | `useColumnWidth` | [List row](list-row.md) | `hooks/use-column-width.ts` | The width a list is drawn in, for a row that sets its readings beside its name or under it. | keep |
 | `ChoiceList`, `ChoiceRow` | [Card row](card-row.md) | `components/choice-row.tsx` | The card row you take: a project to enter, a site to open; the arrow always drawn. | keep |
 | `GroupRule` | [Card row](card-row.md) | `components/choice-row.tsx` | What the next run of cards is and how many, as a rule over them. | keep |
 | `CONTROL` | [Card row](card-row.md) | `components/choice-row.tsx` | The selector for anything inside a card that owns its own press. | keep |
 | `ChoiceListSkeleton` | [Card row](card-row.md) | `components/choice-row.tsx` | Card rows that have not arrived, at the card's own box. | new (WP-11) |
-| `useChoicePress` | [Card row](card-row.md) | `components/choice-row.tsx` | A card's press: skips inner controls and opens a new tab on a modified click. | new (WP-11) |
+| `useChoicePress`, `choicePress`, `ChoicePress` (type) | [Card row](card-row.md) | `components/choice-row.tsx` | A card's press: skips inner controls and a text selection, and opens a new tab on a modified click; `choicePress` is the rule as a pure step. | new (WP-11) |
+| `CHOICE_ROW_BOX` | [Card row](card-row.md) | `components/choice-row.tsx` | A `ChoiceRow`'s box inside its edge, shared with its skeleton so both are 58px. | new (WP-11) |
 | `ChoiceGrid`, `ChoiceCard`, `ChoiceCardTitle`, `ChoiceCardHint` | [Choice card](choice-card.md) | `components/choice-card.tsx` | A block you pick one of, in a grid of choices. | keep |
 | `ProductCard` | [Choice card](choice-card.md) | `components/choice-card.tsx` | One product as a picker of products draws it: its logo, name and a line. | keep |
-| `OpenCard` | [Choice card](choice-card.md) | `components/open-card.tsx` | The press-anywhere card shell under a repository, a drawing or a fleet card. | new (WP-11) |
-| `DetailPage`, `StepArrows`, `useSiblingSteps`, `useDetailTab`, `DetailRail` | [Rail](rail.md) | `components/detail-page.tsx` | An item's detail page: the rail, the steps to its neighbours and the `?tab=` views. | new (WP-07) |
-| `Rail`, `RailRow`, `RailGhosts` | [Rail](rail.md) | `components/rail.tsx` | The sibling list beside a detail page from `xl`, its rows, and the rows it waits on. | new (WP-07) |
+| `PurposeCard`, `ExperimentalMark` | [Choice card](choice-card.md) | `components/onboarding/purpose-card.tsx` | One purpose the server is for, as a card pressed to take or leave it, and what an experimental one says on it. | new (WP-11) |
+| `OpenCard` | [Card row](card-row.md) | `components/open-card.tsx` | The press-anywhere card shell under a repository, a drawing or a fleet card. | new (WP-11) |
+| `DetailPage`, `StepArrows`, `BackLink`, `useSiblingSteps`, `siblingSteps`, `stepCommands`, `useDetailTab`, `Step` (type) | [Rail](rail.md) | `components/detail-page.tsx` | An item's detail page: the rail, the way back, the steps to its neighbours (Alt+↑ and Alt+↓, the arrows on a phone) and the `?tab=` views. | new (WP-07) |
+| `Rail`, `RailColumn`, `RailRow`, `RailName`, `RailLine`, `RailFigures`, `RailFigure`, `RailAction`, `RailNote`, `RailGhosts` | [Rail](rail.md) | `components/rail.tsx` | The sibling list beside a detail page from `xl`: its column, a row and its two lines and readings, the caption line's action, the line in place of rows, and the rows it waits on. | new (WP-07) |
+| `railRowClass`, `railInk` | [Rail](rail.md) | `components/rail.tsx` | A rail row's one 48px class, and a reading's tone as its ink, for a row drawn by hand. | new (WP-07) |
+| `DockerRail`, `DockerRailRow` | [Rail](rail.md) | `components/docker/item-rail.tsx` | The Docker item pages' rail, drawn through `Rail` now. | deprecated (use `Rail`, `RailRow`, WP-07) |
+| `DetailShell`, `DetailRail`, `RailRow`, `steps` | [Rail](rail.md) | `components/network/traffic/detail-shell.tsx` | The network detail pages' frame, rail, row and steps, drawn through the shared ones now. | deprecated (use `DetailPage`, `Rail`, `RailRow`, `useSiblingSteps`, WP-07) |
 | `FilterChip`, `ChipStrip`, `ChipCount` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/chips.tsx` | A filter chip, the run chips sit in (scrolling on a phone), and a count beside a label. | keep |
-| `Segments` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/segments.tsx` | A closed choice of two to five short words as one segmented control. | keep |
-| `tabClasses` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The underlined tab, for views of the page you are on. | keep |
-| `ViewTabs` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The one strip of views: Radix tabs that scroll on a phone, with counts and dots. | new (WP-08) |
+| `Segments`, `SegmentOption` (type), `SegmentsSize` (type) | [Tabs, chips, segments](tabs-chips-segments.md) | `components/segments.tsx` | A closed choice of two to five short words as one segmented control. | keep |
+| `tabClasses` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The underlined tab's look; the query editor's tabs keep it for a control of their own. | deprecated (use `ViewTabs`, WP-08) |
+| `ViewTabs`, `TabView` (type) | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The one strip of views: Radix tabs that scroll on a phone, with counts and dots. | new (WP-08) |
+| `ViewTabList` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The strip alone, inside a `Tabs` the caller holds, whose `TabsContent` are the panels. | new (WP-08) |
 | `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`, `tabsListVariants` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/tabs.tsx` | Radix tabs; the pill list is retired for `ViewTabs`. | keep (under `ViewTabs`, WP-08) |
 | `ToggleGroup`, `ToggleGroupItem` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/toggle-group.tsx` | A Radix toggle group; a single choice is a `Segments`, which draws with it. | keep (inside `Segments` only, WP-08) |
 | `Toggle`, `toggleVariants` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/toggle.tsx` | A Radix toggle; a single choice is a `Segments`. | keep |
 | `WindowPicker` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/window-picker.tsx` | The time window over a chart, on `Segments`. | new (WP-08) |
-| `useViewTab` | [Tabs, chips, segments](tabs-chips-segments.md) | `hooks/use-view-tab.ts` | The view a page shows, held in `?tab=`. | new (WP-08) |
+| `useViewTab`, `pickView`, `viewSearch`, `ViewTabOptions` (type) | [Tabs, chips, segments](tabs-chips-segments.md) | `hooks/use-view-tab.ts` | The view a page shows, held in `?tab=`; `pickView` and `viewSearch` are its rules as pure steps. | new (WP-08) |
 | `Bone` | [States](states.md) | `components/bone.tsx` | A bone in a line of words that keeps the height the words will give it. | keep |
 | `Spinner` | [States](states.md) | `components/loading.tsx` | A small turning mark for a wait too short for a skeleton. | keep |
 | `LoadingRows`, `LoadingPanel` | [States](states.md) | `components/loading.tsx` | Skeleton rows, and a panel's skeleton at the panel's height. | keep |
@@ -98,10 +109,14 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `OutcomeStrip`, `OUTCOME_FILL`, `OutcomeTone` (type), `Outcome` (type) | [Status and tags](status-tag.md) | `components/outcome-strip.tsx` | The last few attempts at something as a square each in how it ended, oldest first. | keep |
 | `StateMark`, `StateCorner` | [Status and tags](status-tag.md) | `components/product-logo.tsx` | A product's tile with its status dot in the corner, on one size ladder. | new (WP-13) |
 | `Status`, `DotTone` (type), `Verdict` (type) | [Status and tags](status-tag.md) | `components/status-dot.tsx` | The one live-state indicator: a coloured dot and its word. | keep |
-| `StatusDot` | [Status and tags](status-tag.md) | `components/status-dot.tsx` | The dot alone, for a place that already says the state; gains `corner` for a mark's corner (WP-13). | keep |
-| `toneFor`, `DOT_COLOR` | [Status and tags](status-tag.md) | `components/status-dot.tsx` | Maps docker, systemd and pm2 states onto one tone, and each tone's fill as a colour. | keep |
+| `StatusDot`, `CornerSize` (type) | [Status and tags](status-tag.md) | `components/status-dot.tsx` | The dot alone, for a place that already says the state; gains `corner` for a mark's corner (WP-13). | keep |
+| `StatusWords` | [Status and tags](status-tag.md) | `components/status-dot.tsx` | A state in words in a polite live region that is not drawn, for a header or a console whose state is not a `Status`. | new (WP-13) |
+| `toneFor`, `DOT_COLOR` | [Status and tags](status-tag.md) | `components/status-dot.tsx` | Maps docker, systemd and pm2 states onto one tone, and each tone's fill as a colour; re-exported from `tone.ts`. | keep |
 | `Tag` | [Status and tags](status-tag.md) | `components/tag.tsx` | Small caps for a fixed property of a row; no chip, no border; gains `hue` (WP-13). | keep |
 | `Tone` | [Status and tags](status-tag.md) | `components/tone.ts` | The four signal tones (default, success, warning, danger) a coloured state is said in. | keep |
+| `DotTone` (type), `Verdict` (type), `OutcomeTone` (type), `toneFor`, `DOT_TONE`, `DOT_COLOR`, `TEXT_TONE`, `ICON_TONE`, `TONE_DOT`, `VERDICT_TONE`, `OUTCOME_FILL` | [Status and tags](status-tag.md) | `components/tone.ts` | Every state's dot, word, icon and outcome colour, and the maps between tones and states, in one file; `status-dot.tsx` and `outcome-strip.tsx` re-export theirs. | new (WP-13) |
+| `StateTile` | [Status and tags](status-tag.md) | `components/network/diagnostic-marks.tsx` | A network tile with its state in the corner, moved to `product-logo.tsx`. | deprecated (use `StateMark`, WP-13) |
+| `DOT` | [Status and tags](status-tag.md) | `components/network/egress/marks.tsx` | The egress marks' tone-to-dot map. | deprecated (use `TONE_DOT`, WP-13) |
 | `Ago` | [Values](values.md) | `components/ago.tsx` | A relative time that keeps itself current ("checked 4 min ago"). | new (WP-14) |
 | `ClientMark`, `BadgedLogo` | [Values](values.md) | `components/client-mark.tsx` | What signed a session in as the product it is, and a tile with a second product in its corner. | keep |
 | `NetworkFact`, `NETWORK_GLYPH` | [Values](values.md) | `components/client-mark.tsx` | Where an address is (the tailnet drawn as Tailscale) and the address itself. | keep |
@@ -127,20 +142,26 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `useShortcuts` | [Values](values.md) | `hooks/use-shortcuts.ts` | A page's keys, skipped while typing or while a dialog or menu has them. | new (WP-36) |
 | `ConfirmDialog`, `useConfirm`, `ConfirmRequest` (type) | [Overlays](overlays-confirm.md) | `components/confirm-dialog.tsx` | The one confirmation: a dialog driven from anywhere in a page. | keep |
 | `Dock` | [Overlays](overlays-confirm.md) | `components/dock.tsx` | A floating dock at the bottom right, stacked over the ones below it. | new (WP-15) |
+| `useStackOccupant`, `useBottomStack`, `stackOffsets`, `STACK_EDGE`, `STACK_GAP`, `StackLayer` (type), `StackOccupant` (type) | [Overlays](overlays-confirm.md) | `components/dock.tsx` | The bottom stack: what floats at the window's foot, measured, so a bar, a dock and a toast never cover one another. | new (WP-15) |
 | `Explain`, `ExplainEntry` (type), `ExplainProps` (type) | [Overlays](overlays-confirm.md) | `components/explain.tsx` | The one toggletip for an explanation: an ⓘ, a dotted term or a wrapped control. | keep |
 | `ImageLightbox`, `LightboxImage` (type) | [Overlays](overlays-confirm.md) | `components/image-lightbox.tsx` | A picture as large as the window allows, over a dark ground. | keep |
-| `Modal`, `PaletteModal` | [Overlays](overlays-confirm.md) | `components/modal.tsx` | The centred task surface, and the search overlay whose input is its header. | keep |
+| `Modal`, `PaletteModal`, `OverlaySize` (type) | [Overlays](overlays-confirm.md) | `components/modal.tsx` | The centred task surface, and the search overlay whose input is its header; `size` takes the overlay size names (WP-15). | keep |
+| `ModalDescription` | [Overlays](overlays-confirm.md) | `components/modal.tsx` | An alert dialog's sentence, drawn in its body and read as its description. | new (WP-15) |
+| `StageModal`, `STAGE_CONTROL` | [Overlays](overlays-confirm.md) | `components/modal.tsx` | A viewer that takes the whole window on a dark ground (a picture), and a control in its strip. | new (WP-15) |
 | `DialogSubject` | [Overlays](overlays-confirm.md) | `components/modal.tsx` | What a dialog acts on, as a mark, a name and its facts. | new (WP-15) |
-| `PromptDialog`, `usePrompt` | [Overlays](overlays-confirm.md) | `components/prompt-dialog.tsx` | Asks for one value (a name) in a dialog, from a component or imperatively. | new (WP-15) |
-| `RailNotice` | [Overlays](overlays-confirm.md) | `components/rail-notice.tsx` | A notice card at the sidebar's foot that folds to a tile on the collapsed rail. | new (WP-15) |
-| `SidePanel`, `SidePanelFooter`, `useInSidePanel` | [Overlays](overlays-confirm.md) | `components/side-panel.tsx` | The sheet, for a small add or edit form; a command the body brings to its footer. | keep |
+| `PromptDialog`, `usePrompt`, `PromptOptions` (type), `PromptFact` (type) | [Overlays](overlays-confirm.md) | `components/prompt-dialog.tsx` | Asks for one value (a name) in a dialog, from a component or imperatively. | new (WP-15) |
+| `RailNotice`, `RailNoticeHead`, `RailNoticeTone` (type) | [Overlays](overlays-confirm.md) | `components/rail-notice.tsx` | A notice card at the sidebar's foot that folds to a tile on the collapsed rail, and its first line with the dismiss. | new (WP-15) |
+| `SidePanel`, `SidePanelFooter`, `useInSidePanel` | [Overlays](overlays-confirm.md) | `components/side-panel.tsx` | The sheet, for a small add or edit form; a command the body brings to its footer. Gains `size`, the overlay size names; `width` is deprecated (WP-15). | keep |
 | `Command`, `CommandDialog`, `CommandInput`, `CommandList`, `CommandEmpty`, `CommandGroup`, `CommandItem`, `CommandShortcut`, `CommandSeparator` | [Overlays](overlays-confirm.md) | `components/ui/command.tsx` | cmdk's command list, under the command palette. | keep |
 | `Dialog`, `DialogClose`, `DialogContent`, `DialogDescription`, `DialogFooter`, `DialogHeader`, `DialogOverlay`, `DialogPortal`, `DialogTitle`, `DialogTrigger` | [Overlays](overlays-confirm.md) | `components/ui/dialog.tsx` | Radix dialog, assembled only in `modal.tsx` (and `ui/command`); a page opens a `Modal`. | keep |
+| `DialogBareContent`, `OVERLAY_CLOSE`, `OVERLAY_GROUND` | [Overlays](overlays-confirm.md) | `components/ui/dialog.tsx` | The dialog's content with no face (for `StageModal`), the one close button, and the dim ground under every overlay that takes the page. | new (WP-15) |
 | `HoverCard`, `HoverCardTrigger`, `HoverCardContent` | [Overlays](overlays-confirm.md) | `components/ui/hover-card.tsx` | A card shown on hover, for a preview a pointer asks for. | keep |
 | `Popover`, `PopoverTrigger`, `PopoverContent`, `PopoverAnchor`, `PopoverHeader`, `PopoverTitle`, `PopoverDescription` | [Overlays](overlays-confirm.md) | `components/ui/popover.tsx` | A floating panel, one of the three things that may cast a shadow. | keep |
 | `Sheet`, `SheetTrigger`, `SheetClose`, `SheetContent`, `SheetHeader`, `SheetFooter`, `SheetTitle`, `SheetDescription` | [Overlays](overlays-confirm.md) | `components/ui/sheet.tsx` | Radix sheet, assembled only in `SidePanel` (and the sidebar's phone drawer). | keep |
 | `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider` | [Overlays](overlays-confirm.md) | `components/ui/tooltip.tsx` | A label for an icon-only control; an explanation is an `Explain`. | keep |
 | `useFocusReturn`, `firstReachable`, `claimFocusReturn` | [Overlays](overlays-confirm.md) | `hooks/use-focus-return.ts` | Where the keyboard goes when a dialog closes. | keep |
+| `NameDialog` | [Overlays](overlays-confirm.md) | `components/git/name-dialog.tsx` | Git's dialog asking for a name. | deprecated (use `PromptDialog`, WP-15) |
+| `usePrompt`, `PromptRequest` (type) | [Overlays](overlays-confirm.md) | `components/files/prompt-dialog.tsx` | Files' own prompt. | deprecated (use `usePrompt` from `prompt-dialog.tsx`, WP-15) |
 | `menuOpener` | [Overlays](overlays-confirm.md) | `hooks/use-focus-return.ts` | The one walk from a menu item back to the control that opened its menu. | new (WP-23) |
 | `IconAction`, `RevealGroup` (type) | [Menus](menus.md) | `components/icon-action.tsx` | An icon-only control with a real tooltip label. | keep |
 | `RowActions`, `DimActions`, `rowReveal`, `ROW_REVEAL`, `ROW_DIM` | [Menus](menus.md) | `components/icon-action.tsx` | Where a row's controls are: revealed on hover and focus, or always drawn and dimmed. | keep |
@@ -149,9 +170,10 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `MenuItemText` | [Menus](menus.md) | `components/ui/menu-item-text.tsx` | An option's name and its metadata in one text column. | keep |
 | `menuSurfaceClasses`, `menuItemClasses`, `menuDangerClasses`, `menuLabelClasses`, `menuIndicatorClasses` | [Menus](menus.md) | `components/ui/menu-styles.ts` | The one look of a menu's surface, rows, labels and marks, for select, dropdown and context menu. | keep |
 | `Select`, `SelectContent`, `SelectGroup`, `SelectItem`, `SelectLabel`, `SelectScrollDownButton`, `SelectScrollUpButton`, `SelectSeparator`, `SelectTrigger`, `SelectValue` | [Menus](menus.md) | `components/ui/select.tsx` | The select, its trigger a `Button` and its rows the menu rows. | keep |
-| `VerbActions`, `VerbBar`, `VerbMenu` | [Menus](menus.md) | `components/verbs.tsx` | A row's icon verbs, a detail's verb bar, and the overflow menu where a verb is a word. | keep |
-| `VerbItems` | [Menus](menus.md) | `components/verbs.tsx` | One list of verbs drawn into a dropdown or a context menu. | new (WP-15) |
-| `FloatingBar` | [Forms and settings](forms.md) | `components/floating-bar.tsx` | The floating bar a save or a pending change stands in. | new (WP-15) |
+| `VerbActions`, `VerbBar`, `VerbMenu`, `VerbActionsMode` (type) | [Menus](menus.md) | `components/verbs.tsx` | A row's icon verbs, a detail's verb bar, and the overflow menu where a verb is a word; `VerbActions` gains `mode` for its `reveal` and `dim` booleans (WP-15). | keep |
+| `VerbSpec` (type), `Verb` (type), `DANGER_AT_REST` | [Menus](menus.md) | `components/verbs.tsx` | A verb declared once as data (its label, a `short` word for a bar, its capability and confirmation), and the ink a danger verb keeps at rest. | new (WP-15) |
+| `VerbItems`, `VerbItemList`, `VerbMenuParts` (type) | [Menus](menus.md) | `components/verbs.tsx` | One list of verbs drawn into a dropdown or a context menu, or with parts of the caller's. | new (WP-15) |
+| `FloatingBar`, `SaveKey`, `useFloatingBarHost`, `saveShortcut` | [Forms and settings](forms.md) | `components/floating-bar.tsx` | The floating bar a save or a pending change stands in, the keycap at its command's end, where it is drawn, and the save shortcut's words. | new (WP-15) |
 | `Field`, `FieldRow`, `useField`, `useFieldControl`, `FieldControl` (type) | [Forms and settings](forms.md) | `components/form.tsx` | A label, a control and one line under it; two or three on a line; what a control reads from its field. | keep |
 | `FieldChecks`, `FieldCheck` | [Forms and settings](forms.md) | `components/form.tsx` | The rules a value has to meet, lit as they are met and spoken as they change. | keep |
 | `InfoTip` | [Forms and settings](forms.md) | `components/form.tsx` | The ⓘ beside a label. | deprecated (use `Explain`) |
@@ -161,20 +183,25 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `FormFacts`, `FormFact` | [Forms and settings](forms.md) | `components/form.tsx` | What a form operates on, as data under its title. | keep |
 | `Statement` | [Forms and settings](forms.md) | `components/form.tsx` | The statement a form will run, shown before it runs. | keep |
 | `FormNote` | [Forms and settings](forms.md) | `components/form.tsx` | A short piece of guidance under a form, quieter than a `Notice`. | keep |
-| `ListField` | [Forms and settings](forms.md) | `components/list-field.tsx` | A field that holds a list of entries (addresses, headers), each checked as typed. | new (WP-16) |
+| `ListField`, `ListEntry` (type) | [Forms and settings](forms.md) | `components/list-field.tsx` | A field that holds a list of entries (addresses, headers), each checked as typed. | new (WP-16) |
 | `ScheduleBuilder`, `SchedulePreset` (type), `ScheduleFields` (type) | [Forms and settings](forms.md) | `components/schedule-builder.tsx` | A schedule as a sentence with the moments it fires under it. | keep |
 | `scheduleFields`, `scheduleExpression`, `scheduleValid`, `schedulePreview`, `SCHEDULE_PRESETS`, `WEEKDAYS` | [Forms and settings](forms.md) | `components/schedule-builder.tsx` | A schedule's fields, its cron expression and its next firings, both ways. | keep |
 | `SecretField` | [Forms and settings](forms.md) | `components/secret-field.tsx` | A password or token field with show, generate and copy. | new (WP-16) |
-| `DangerRow` | [Forms and settings](forms.md) | `components/settings/danger-row.tsx` | One destructive verb in a settings page's danger zone, with its sentence. | new (WP-16) |
+| `generatePassword`, `PASSWORD_ALPHABET` | [Forms and settings](forms.md) | `lib/password.ts` | The one generator behind every Generate: thirty characters by default, from an alphabet with no look-alikes. | new (WP-16) |
+| `OneTimeCodeInput`, `RecoveryCodes` | [Forms and settings](forms.md) | `components/account/one-time-code.tsx` | The six-digit code from an authenticator, and the recovery codes two-factor hands out once. | new (WP-16) |
+| `DangerRow`, `DangerRows` | [Forms and settings](forms.md) | `components/settings/danger-row.tsx` | One destructive verb in a settings page's danger zone, with its sentence, and the one edge around them all. | new (WP-16) |
 | `PendingStrip`, `PendingItem` (type) | [Forms and settings](forms.md) | `components/settings/pending-strip.tsx` | What is saved and not in force yet, at the head of a settings column. | keep |
 | `appliesLine`, `namesLine`, `pendingLine`, `SettingApplies` (type) | [Forms and settings](forms.md) | `components/settings/save-bar-words.ts` | The save bar's second line in words. | keep |
-| `SaveBarProvider`, `useSaveBarEntry`, `useSaveBarHost`, `saveShortcut`, `SettingApplies` (type) | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | The page's one floating save bar, the forms on it, and its shortcut. | keep |
-| `SettingsPage`, `SettingForm`, `SettingSection`, `settingStatus` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | A deployment's settings page, one form of it, one section, and where a section stands against what is live. | keep |
+| `SaveBarProvider`, `useSaveBarEntry`, `saveShortcut`, `SettingApplies` (type) | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | The page's one floating save bar, the forms on it, and its shortcut (re-exported from `floating-bar.tsx`). | keep |
+| `useSaveBarHost` | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | Where the save bar is drawn. | deprecated (use `useFloatingBarHost`, WP-15) |
+| `SettingsPage` | [Forms and settings](forms.md) | `components/settings/settings-page.tsx` | A deployment's settings page: its configuration read, what is saved but not live, and its forms, in the one settings column. | new (WP-16) |
+| `SettingForm`, `SettingSection`, `settingStatus` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | One form of a settings page, one section, and where a section stands against what is live. | keep |
+| `SettingsPage` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | The settings page's old home, re-exported. | deprecated (use `SettingsPage` from `settings/settings-page.tsx`, WP-16) |
 | `SettingsColumn` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | The one centred settings column for a page that is not a deployment's. | keep |
 | `SwitchRows`, `SwitchRow` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | A switch as a full-width row, in a run ruled apart. | keep |
 | `EditedTag` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | A section holding a change not applied yet, in git's modified colour. | keep |
 | `NoticeLines`, `NoticeLine` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | One-line notices under a page's identity line, ruled apart. | keep |
-| `Accordion`, `AccordionItem`, `AccordionTrigger`, `AccordionContent` | [Forms and settings](forms.md) | `components/ui/accordion.tsx` | Folding sections; a form's fold is a `Disclosure`. | keep |
+| `Accordion`, `AccordionItem`, `AccordionTrigger`, `AccordionContent` | [Forms and settings](forms.md) | `components/ui/accordion.tsx` | Folding sections; a form's fold is a `Disclosure`, and a finding's evidence a popover. | retired (0.9.0, WP-11) |
 | `Button`, `buttonVariants`, `hitAreaClasses` | [Forms and settings](forms.md) | `components/ui/button.tsx` | The button: faces and sizes, touch heights, and the 24px hit area for a small one. | keep |
 | `Checkbox` | [Forms and settings](forms.md) | `components/ui/checkbox.tsx` | A 16px box with a 24px press box (44px under a finger) and the control edge. | keep |
 | `Collapsible`, `CollapsibleTrigger`, `CollapsibleContent` | [Forms and settings](forms.md) | `components/ui/collapsible.tsx` | A part that folds away; the primitive under `Disclosure`. | keep |
@@ -214,7 +241,8 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `WireLane`, `WireLaneTitle` | [Wiring pictures](wiring.md) | `components/wire/wire-lane.tsx` | One column of a hand-laid picture (its heading, count and list), and the heading alone. | new |
 | `WireNode`, `WireMark`, `WireHost`, `WirePlaceholder`, `WireLink`, `WireLabel` | [Wiring pictures](wiring.md) | `components/wire/wire.tsx` | A picture's parts: a node, a filled mark, this server, a mark not there yet, a linked mark, a caption on a line. | keep |
 | `CANVAS_MOVE`, `zoomKey`, `zoomAbout`, `useCanvasPinch` | [Workbench](workbench.md) | `components/canvas-move.ts` | How a canvas moves, Excalidraw's way: trackpad pans, pinch and keys zoom about a point. | keep |
-| `CanvasZoom` | [Workbench](workbench.md) | `components/canvas-zoom.tsx` | A canvas's zoom out, percent, in, Fit and Tidy. | new (WP-15) |
+| `CanvasZoom`, `CanvasZoomWord`, `FLOAT` | [Workbench](workbench.md) | `components/canvas-zoom.tsx` | A canvas's zoom out, percent, in, Fit and Tidy, a word beside Fit, and the ground of a control floating on a canvas. | new (WP-15) |
+| `ZoomBar`, `FLOAT` | [Workbench](workbench.md) | `components/database/diagram/chrome.tsx` | The ER diagram's own zoom bar and its ground. | deprecated (use `CanvasZoom`, `FLOAT` from `canvas-zoom.tsx`, WP-15) |
 | `CodeEditor`, `EditorCommands` (type) | [Workbench](workbench.md) | `components/code-editor.tsx` | Monaco, wired to the dashboard's palette and keys. | keep |
 | `PaneBar`, `PaneBack`, `paneShown`, `PaneBreak` (type), `PaneStop` (type) | [Workbench](workbench.md) | `components/phone-panes.tsx` | One pane at a time on a phone: the bar at the foot, the way back, and which pane shows. | keep |
 | `ResizeHandle` | [Workbench](workbench.md) | `components/resize-handle.tsx` | The grab strip between a side column and the work, by pointer or by keys. | keep |
@@ -315,12 +343,14 @@ A small set of files defines the visual language, and pages compose them rather 
 layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations/`](../foundations/README.md); this is the map.
 
 - `components/page.tsx` — `Page` (one measure, gutter and rhythm; `fill` for terminal and logs, whose
-  content *is* the viewport), `PageContext` (an accessible page name, plus a linked parent and verbs
-  on detail pages, with no visual page title; list commands live in their section or workbench),
+  content *is* the viewport), `PageContext` (an accessible page name, the way back as `back`, and the
+  walk and help, with no visual page title; a thing's verbs are on its identity line, and list
+  commands live in their section or workbench),
   `PageState`; and beside it, each in a file named after it, `section.tsx` (`Section`),
   `toolbar.tsx` (`Toolbar`), `search-input.tsx` (`SearchInput`), `detail-list.tsx`
   (`Metric`/`MetricStrip`, `DetailList`/`Detail`) and `row-link.tsx` (`RowLink`) (`SearchInput` is
-  40px and a line of its own below `sm`; `MetricStrip` is two-up on a phone — §8). **None of the heading primitives takes a
+  44px and a line of its own below `sm`; `Metric`/`MetricStrip` are deprecated and draw as
+  `FormFact`/`FormFacts`). **None of the heading primitives takes a
   `description`** — see rule 5 in [`design-system.md`](../design-system.md).
 - `components/panel.tsx` — `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`; `Pane`,
   `PaneHeader`, `PaneFooter`; `Well`. A **panel** is *the* content block: a framed surface with a header
@@ -350,8 +380,8 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
   *glance*: you open it with the list still showing, read it, and close it. A detail that holds a
   **stream, a terminal, or an editor** is not that. You stay in it for minutes, the list behind it is
   dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
-  destination with a breadcrumb back: `PageContext` with the parent as an `eyebrow` link and the
-  verbs in `actions`, then the resource name and state among the page's facts — an identity line
+  destination with a breadcrumb back: `PageContext` with `back` and the verbs on the identity line
+  (`IdentityVerbs`), then the resource name and state among the page's facts — an identity line
   (`HostIdentity`) on a container's page and on a stack's, with the verdict at its end. The run page
   (`deploy/run-page.tsx`) goes one step further: since 2026-10-05 it opens on the header its
   project's pages open on (`run-header.tsx`, the project's tile, the commit, the run's state and how
@@ -368,7 +398,7 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
   columns, no facts beside the name), because the unit or the process is still the glance and the log
   one tab of it.
 
-  Their tabs stay **in** the page — they are views of one thing, which is what `tabClasses` is for.
+  Their tabs stay **in** the page — they are views of one thing, which is what `ViewTabs` is for.
   Do not reintroduce a route-level strip for them (see the note on route-level strips below), and do not give
   one a `useNavScope`: the rail drills into a *section* with many pages, not into a leaf.
 
@@ -386,14 +416,16 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
   accessible description and nothing is drawn. **Raw `Dialog`/`Sheet` are assembled only in those three
   components** — a page or a feature panel never opens one itself.
 - `components/tabs.tsx` — the switchers that remain, all of which switch between *views of one page*:
-  `tabClasses` (the underlined tab, for a log pane's Live, History and Insights and the page's own
+  `ViewTabs` (the one strip of views, for a log pane's Live, History and Insights and the page's own
   views beside them, the packages page's installed, updates, search and log, the deploy wizard's source
-  kinds); beside it, `components/chips.tsx` holds `FilterChip`, `ChipCount` and
+  kinds), `ViewTabList` (the strip alone, in a `Tabs` the caller holds) and `useViewTab`
+  (`hooks/use-view-tab.ts`, the view held in `?tab=`); `tabClasses`, the underlined tab's look, is
+  deprecated; beside it, `components/chips.tsx` holds `FilterChip`, `ChipCount` and
   `ChipStrip`, the run every set of chips sits in (sideways-scrolling on a phone, wrapping from `sm`).
   The route-level strips were deleted in 0.6.7 when the rail started
   drilling into sections; do not reintroduce a strip that changes the URL.
 - `components/form.tsx` — what goes inside a task surface: `Field` (a label, a control, one line under
-  it — a hint, or the error while there is one), `FieldRow`, `FormSection` (an eyebrow and a hairline
+  it — a hint, or the error while there is one), `FieldRow`, `FormSection` (a title and a hairline
   opening part of a longer form), `FormSections` (a run of `FormSection aside`s, each head over its
   fields, held with the hairlines between them to the fields' 48rem),
   `FieldCheck` (one rule a value has to meet, lit as it is met and saying "met" or "not yet" to a
@@ -426,13 +458,15 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
   `RowActions` (the cluster of them that appears on hover, stays on keyboard focus and on an open menu,
   and is always visible on touch) and `DimActions`, the same cluster for a row whose controls have a
   column to themselves: always drawn, dimmed until the pointer arrives.
+  `rowReveal(group, "control" | "cluster")` is the one reveal; `RowActions` is its cluster form.
 - Copying has two kinds of feedback. `copyText` (`lib/clipboard.ts`), called directly with the words
   to announce, raises a toast that says *what* was copied (340 rows as SQL); `useCopy`
   (`hooks/use-copy.ts`) sets a `copied` flag for 1.6 s, for an inline tick that says *that* it worked
   without moving the reader's eye (a chip about to be pasted) or where a toast would sit on what was
-  copied (a set of recovery codes).
-- `components/finding-list.tsx` renders results in requested diagnostic tools, including TLS/network
-  reports, config lint and issuance diagnostics. Automatic attention panels, routine settings
+  copied (a set of recovery codes). The tick controls are `CopyButton`, `CopyAction` and
+  `CopyValue` in `components/copy.tsx` ([values](values.md#copy)).
+- `components/finding-list.tsx` — `FindingList`, a `RowList` of findings whose evidence opens in a
+  popover off the title (rows never grow). Automatic attention panels, routine settings
   recommendations and navigation attention marks were removed in 0.7.5. Pending-edit marks still
   represent saved changes. Operational error messages and diagnostic evidence remain visible.
 
@@ -499,7 +533,7 @@ agree and a rename is one file.
 Where the UI draws the dashboard *itself* as one thing among others — the `just-dashboard` Compose
 stack, its containers on a network, the sockets it listens on, the routes and rules it made, the
 audit log's machine actors, a backup of its own store — it takes the mark (`DashboardMark` on a
-product tile, `LogoGlyph` bare), not the Docker or Caddy logo its images would otherwise resolve to.
+product tile, in `components/logo.tsx`; `LogoGlyph` bare), not the Docker or Caddy logo its images would otherwise resolve to.
 
 The browser icons are `just-tile-ink.svg`: `app/icon.svg` is the file itself, and `favicon.ico`
 (16–128px) is rasterised from it, an ink tile rather than the bare mark because the pale mark would
