@@ -59,6 +59,13 @@ export type PaneStop<K extends string> = {
  * The bar at the foot: one stop for each pane, 56px tall, a finger's width,
  * the glyph over its word. It keeps clear of a phone's home indicator, and
  * is not drawn from the break up.
+ *
+ * It is a `nav` of buttons, and the stop on screen is `aria-current="page"`:
+ * on a phone each pane is a page of its own, the way an app's bottom bar
+ * moves between them. It used to claim to be a tab list without behaving as
+ * one — no arrow keys, no panels it named — so a screen reader announced a
+ * widget that did not answer the keys it promised. Each stop is a Tab stop,
+ * as a bar of buttons is.
  */
 export function PaneBar<K extends string>({
   label,
@@ -88,7 +95,6 @@ export function PaneBar<K extends string>({
       )}
     >
       <div
-        role="tablist"
         className="grid"
         style={{ gridTemplateColumns: `repeat(${stops.length}, minmax(0, 1fr))` }}
       >
@@ -99,8 +105,7 @@ export function PaneBar<K extends string>({
             <button
               key={stop.key}
               type="button"
-              role="tab"
-              aria-selected={selected}
+              aria-current={selected ? "page" : undefined}
               // The count is beside the name, not in it: a stop is found by
               // its word whether or not anything is waiting there.
               aria-description={count > 0 ? `${count}` : undefined}
@@ -126,7 +131,9 @@ export function PaneBar<K extends string>({
                   </span>
                 )}
               </span>
-              <span className="text-micro font-medium">{stop.label}</span>
+              {/* The hint size, 11px (12 under a finger): at 10px the word
+                  under the glyph was the smallest text in the product. */}
+              <span className="max-w-full truncate px-1 text-hint font-medium">{stop.label}</span>
             </button>
           )
         })}

@@ -812,7 +812,7 @@ test("on a phone the column lies over the editor, and the page is one pane at a 
   // On a phone the assistant is a stop of the Query page's bar, not a button in its head.
   await page
     .locator("[data-slot=pane-bar]")
-    .getByRole("tab", { name: "Assistant", exact: true })
+    .getByRole("button", { name: "Assistant", exact: true })
     .click()
   await expect(pane(page)).toBeVisible()
   await ask(pane(page), "How many orders has each customer placed?")
@@ -834,7 +834,7 @@ test("on a phone the column lies over the editor, and the page is one pane at a 
   // The shared bar (`phone-panes.tsx`) is the one this page drew by hand:
   // three stops of one width across it, at the foot of the screen.
   const stops = await bar
-    .getByRole("tab")
+    .getByRole("button")
     .evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().width)))
   const foot = await bar.boundingBox()
   expect(stops).toHaveLength(3)
@@ -843,7 +843,7 @@ test("on a phone the column lies over the editor, and the page is one pane at a 
   expect(Math.round(foot!.y + foot!.height)).toBe(844)
   expect(Math.round(foot!.height)).toBe(57)
   await expect(page.locator("[data-slot=agent-rail]")).toBeHidden()
-  await bar.getByRole("tab", { name: "Chats" }).click()
+  await bar.getByRole("button", { name: "Chats" }).click()
   await expect(page.locator("[data-slot=agent-chats-list]")).toBeInViewport()
   await expect(box).toBeHidden()
 })

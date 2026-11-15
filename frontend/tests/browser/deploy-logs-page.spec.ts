@@ -93,19 +93,23 @@ test.describe("on a phone", () => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
 
-    const bar = page.getByRole("navigation", { name: "Log view" }).filter({
-      has: page.getByRole("tablist"),
-    })
+    const bar = page
+      .getByRole("navigation", { name: "Log view" })
+      .and(page.locator("[data-slot=pane-bar]"))
     await expect(bar).toBeVisible()
-    await expect(bar.getByRole("tab")).toHaveText(
+    await expect(bar.getByRole("button")).toHaveText(
       ["Requests", "Insights", "Output", "Builds", "Events"].map((name) => new RegExp(name)),
     )
-    await expect(bar.getByRole("tab", { name: "Requests" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await expect(bar.getByRole("button", { name: "Requests" })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
-    // The strip a desk picks the view on is not drawn twice.
-    await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeHidden()
+    // The strip a desk picks the view on is not drawn twice: the one Insights
+    // button shown is the bar's own stop.
+    await expect(
+      page.getByRole("button", { name: "Insights", exact: true }).filter({ visible: true }),
+    ).toHaveCount(1)
+    await expect(bar.getByRole("button", { name: "Insights", exact: true })).toBeVisible()
     await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
     // The readings are behind the pane's first line, not stacked over it.
     await expect(page.getByRole("group", { name: "The last hour" })).toHaveCount(0)
@@ -131,18 +135,21 @@ test.describe("on a phone", () => {
     ).toBe(true)
 
     // Every view is a stop, and the address says which.
-    await bar.getByRole("tab", { name: "Insights" }).click()
+    await bar.getByRole("button", { name: "Insights" }).click()
     await expect(page.getByText("Pages", { exact: true })).toBeVisible()
     await expect(page).toHaveURL(/view=insights/)
-    await bar.getByRole("tab", { name: "Output" }).click()
+    await bar.getByRole("button", { name: "Output" }).click()
     await expect(page).toHaveURL(/view=output/)
-    await bar.getByRole("tab", { name: "Builds" }).click()
+    await bar.getByRole("button", { name: "Builds" }).click()
     await expect(page).toHaveURL(/view=builds/)
-    await bar.getByRole("tab", { name: "Events" }).click()
+    await bar.getByRole("button", { name: "Events" }).click()
     await expect(page.getByLabel("Filter container events")).toBeVisible()
     await expect(page).toHaveURL(/view=events/)
     // The exit the hour saw is counted on the stop, beside its word.
-    await expect(bar.getByRole("tab", { name: "Events" })).toHaveAttribute("aria-description", "1")
+    await expect(bar.getByRole("button", { name: "Events" })).toHaveAttribute(
+      "aria-description",
+      "1",
+    )
     expect(Math.round((await bar.boundingBox())!.y + barBox.height)).toBe(PHONE.height)
   })
 

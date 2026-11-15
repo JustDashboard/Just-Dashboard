@@ -419,9 +419,12 @@ test("on a phone the page is one pane at a time, and a shell put away keeps its 
   await page.setViewportSize({ width: 390, height: 844 })
   const { connections, errors } = await terminalFixture(page, "dom")
   const bar = page.getByRole("navigation", { name: "Terminal" })
-  await expect(bar.getByRole("tab")).toHaveText(["Sessions", "Terminal", "Files", "Git"])
+  await expect(bar.getByRole("button")).toHaveText(["Sessions", "Terminal", "Files", "Git"])
   // It opens on the emulator, with the session that was on screen last.
-  await expect(bar.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true")
+  await expect(bar.getByRole("button", { name: "Terminal" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
   await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
   // The bar is the one way between panes.
   await expect(page.getByRole("button", { name: "Hide this panel" })).toHaveCount(0)
@@ -441,7 +444,7 @@ test("on a phone the page is one pane at a time, and a shell put away keeps its 
   const said = first.sizes.length
   expect(size!.cols).toBeGreaterThan(20)
 
-  await bar.getByRole("tab", { name: "Sessions" }).click()
+  await bar.getByRole("button", { name: "Sessions" }).click()
   const rail = page.getByLabel("Terminal sessions")
   await expect(rail).toBeVisible()
   await expect(page.locator(".xterm-screen:visible")).toHaveCount(0)
@@ -457,13 +460,16 @@ test("on a phone the page is one pane at a time, and a shell put away keeps its 
 
   // Picking a session is asking for its shell: the emulator is shown and has the keyboard.
   await rail.locator('[data-session="session-b"]').getByRole("button").first().click()
-  await expect(bar.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true")
+  await expect(bar.getByRole("button", { name: "Terminal" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
   await expect(page.locator(".xterm-helper-textarea:visible")).toBeFocused()
   await page.keyboard.type("only-c")
   await expect.poll(() => connections.get("window-c")![0].input.join("")).toContain("only-c")
   expect(first.input.join("")).not.toContain("only-c")
 
-  await bar.getByRole("tab", { name: "Sessions" }).click()
+  await bar.getByRole("button", { name: "Sessions" }).click()
   await rail.locator('[data-session="session-a"]').getByRole("button").first().click()
   await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
   await expect(page.locator(".xterm-helper-textarea:visible")).toBeFocused()

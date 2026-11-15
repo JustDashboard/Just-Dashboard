@@ -3004,9 +3004,9 @@ test("on a phone the query page is one pane at a time: the statement, what it re
   })
   await openEditor(page)
   const selected = (name: string) =>
-    expect(paneBar(page).getByRole("tab", { name, exact: true })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(paneBar(page).getByRole("button", { name, exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
 
   // The statement has the frame; the bar is at the very foot of the screen.

@@ -70,3 +70,30 @@ test("a pane is hidden only below its break, by a class Tailwind can read", () =
     expect(text).toContain(`"${name}"`)
   }
 })
+
+test("the bar is a nav of buttons, with the pane on screen as the current page", async () => {
+  const { createElement: h } = await import("react")
+  const { renderToStaticMarkup } = await import("react-dom/server")
+  const { PaneBar } = await import("./phone-panes")
+  const html = renderToStaticMarkup(
+    h(PaneBar, {
+      label: "Logs",
+      stops: [
+        { key: "sources", label: "Sources", icon: null },
+        { key: "log", label: "Log", icon: null, count: 3 },
+      ],
+      active: "log",
+      onPick: () => {},
+    }),
+  )
+  // It promised a tab list's keys and panels and had neither.
+  expect(html).not.toContain('role="tab')
+  expect(html).not.toContain("aria-selected")
+  expect(html).toMatch(/^<nav aria-label="Logs"/)
+  const buttons = html.match(/<button[^>]*>/g) ?? []
+  expect(buttons).toHaveLength(2)
+  expect(buttons[0]).not.toContain("aria-current")
+  expect(buttons[1]).toContain('aria-current="page"')
+  // The word under the glyph is the hint size, not the 10px micro.
+  expect(html).toMatch(/<span class="[^"]*text-hint[^"]*">Sources<\/span>/)
+})

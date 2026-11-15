@@ -97,7 +97,7 @@ test.describe("on a phone", () => {
     // The commit box is on screen without scrolling anything.
     await expect(message).toBeInViewport()
     for (const name of ["Changes", "History", "Branches", "GitHub", "Files"]) {
-      await expect(bar.getByRole("tab", { name, exact: true })).toBeVisible()
+      await expect(bar.getByRole("button", { name, exact: true })).toBeVisible()
     }
     const box = await bar.boundingBox()
     expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(844)
@@ -105,19 +105,19 @@ test.describe("on a phone", () => {
     // five stops of one width, 56px under a hairline.
     expect(Math.round(box?.height ?? 0)).toBe(57)
     const stops = await bar
-      .getByRole("tab")
+      .getByRole("button")
       .evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().width)))
     expect(stops).toEqual([78, 78, 78, 78, 78])
     await expect(page.locator("html")).toHaveJSProperty("scrollWidth", 390)
 
-    await bar.getByRole("tab", { name: "Files" }).click()
+    await bar.getByRole("button", { name: "Files" }).click()
     await expect(page.getByText("README.md")).toBeVisible()
     await expect(message).toBeHidden()
 
-    await bar.getByRole("tab", { name: "History" }).click()
+    await bar.getByRole("button", { name: "History" }).click()
     await expect(page.getByText("README.md")).toBeHidden()
 
-    await bar.getByRole("tab", { name: "GitHub" }).click()
+    await bar.getByRole("button", { name: "GitHub" }).click()
     await page.locator("[data-pull='411'] button[aria-pressed]").click()
     const heading = page.getByRole("heading", { name: "What it is" })
     await expect(heading).toBeVisible()

@@ -715,16 +715,16 @@ test("on a phone the conversation, the chats and what it did are one pane at a t
   // The bar's stops are found by their word; how many changes are waiting
   // is said beside the name, not in it.
   const bar = page.getByRole("navigation", { name: "Assistant panes" })
-  const did = bar.getByRole("tab", { name: "What it did", exact: true })
+  const did = bar.getByRole("button", { name: "What it did", exact: true })
   await expect(did).toHaveAttribute("aria-description", "1")
   await did.click()
-  await expect(did).toHaveAttribute("aria-selected", "true")
+  await expect(did).toHaveAttribute("aria-current", "page")
   await expect(page.locator("[data-slot='agent-activity']")).toBeVisible()
   await expect(chat(page)).toBeHidden()
-  await bar.getByRole("tab", { name: "Chats", exact: true }).click()
+  await bar.getByRole("button", { name: "Chats", exact: true }).click()
   await expect(page.locator("[data-slot='agent-chats-list']")).toContainText("Which database")
   await expect(page.locator("[data-slot='agent-activity']")).toBeHidden()
-  await bar.getByRole("tab", { name: "Chat", exact: true }).click()
+  await bar.getByRole("button", { name: "Chat", exact: true }).click()
   await expect(box).toBeInViewport()
 })
 

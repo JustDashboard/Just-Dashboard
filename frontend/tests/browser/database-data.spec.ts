@@ -2097,10 +2097,10 @@ test("on a phone the table editor is one pane with a bar at its foot, and a row 
   await expect(card(page, 0)).toContainText("Item 1")
 
   // One pane, the height the head leaves, and the bar at the very foot.
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Tables", "Rows", "Details"])
-  await expect(paneBar(page).getByRole("tab", { name: "Rows" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Tables", "Rows", "Details"])
+  await expect(paneBar(page).getByRole("button", { name: "Rows" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
   const foot = (await paneBar(page).boundingBox())!
   expect(Math.round(foot.y + foot.height)).toBe(844)
@@ -2123,9 +2123,9 @@ test("on a phone the table editor is one pane with a bar at its foot, and a row 
 
   // The full row is a tap away, and what is written there is the card's.
   await card(page, 1).click()
-  await expect(paneBar(page).getByRole("tab", { name: "Details" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button", { name: "Details" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
   const panel = page.getByRole("complementary", { name: "Row" })
   await expect(panel).toContainText("Row 2")
@@ -2155,9 +2155,9 @@ test("on a phone the table editor is one pane with a bar at its foot, and a row 
   const rail = page.getByRole("navigation", { name: "tables of this schema" })
   await rail.getByRole("link", { name: /^other/ }).click()
   await expect(title(page)).toContainText("other")
-  await expect(paneBar(page).getByRole("tab", { name: "Rows" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button", { name: "Rows" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
 })
 
