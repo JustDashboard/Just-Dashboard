@@ -1432,16 +1432,12 @@ test("every generator the server lists is reachable, and the request carries wha
   ).toHaveCount(1)
   await expect(page.getByRole("region", { name: "Schema" }).getByRole("button")).toHaveCount(1)
   // Each is drawn as the project it writes for, or as its language where that has no mark.
-  await expect(page.locator("[data-target=prisma] img")).toHaveAttribute("src", "/logos/prisma.svg")
-  await expect(page.locator("[data-target=typeorm] img")).toHaveAttribute(
-    "src",
-    "/logos/typeorm.svg",
-  )
-  await expect(page.locator("[data-target=zod] img")).toHaveAttribute("src", "/logos/zod.svg")
-  await expect(page.locator("[data-target=diesel] img")).toHaveAttribute(
-    "src",
-    "/logos/diesel.webp",
-  )
+  // The card's mark is its first picture; its language tag carries the language's own after it.
+  const mark = (id: string) => page.locator(`[data-target=${id}] img`).first()
+  await expect(mark("prisma")).toHaveAttribute("src", "/logos/prisma.svg")
+  await expect(mark("typeorm")).toHaveAttribute("src", "/logos/typeorm.svg")
+  await expect(mark("zod")).toHaveAttribute("src", "/logos/zod.svg")
+  await expect(mark("diesel")).toHaveAttribute("src", "/logos/diesel.webp")
   // Nothing is asked of the server until the reader asks: the generator's
   // own mark, two words and the command, with what it writes behind an (i).
   const empty = page.locator("[data-slot=empty-state]")
