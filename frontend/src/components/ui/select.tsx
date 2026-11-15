@@ -5,6 +5,7 @@ import { Check, ChevronDown, ChevronUp } from "@/components/icons"
 import { Select as SelectPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useFieldControl } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { MenuItemText } from "@/components/ui/menu-item-text"
 import {
@@ -59,10 +60,12 @@ function SelectTrigger({
   className,
   size = "default",
   children,
-  ...props
+  ...rest
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default"
 }) {
+  // Inside a `Field`: its id, its hint and error ids, and whether it is wrong.
+  const props = useFieldControl(rest)
   return (
     <SelectPrimitive.Trigger asChild {...props}>
       <Button

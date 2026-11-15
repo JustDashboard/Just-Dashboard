@@ -1,6 +1,9 @@
+"use client"
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { useFieldControl } from "@/components/form"
 
 /**
  * A field is 44px under a finger and 36px under a pointer.
@@ -26,7 +29,9 @@ import { cn } from "@/lib/utils"
  * The edge is the control edge, the one border that has to reach 3:1 against
  * the ground (WCAG 1.4.11); it falls back to `--input` until that token lands.
  */
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+function Input({ className, type, ...rest }: React.ComponentProps<"input">) {
+  // Inside a `Field`: its id, its hint and error ids, and whether it is wrong.
+  const props = useFieldControl(rest)
   return (
     <input
       type={type}

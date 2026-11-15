@@ -145,6 +145,10 @@ function DayBars({
             // Dates repeat when a window is longer than the recorded history;
             // the position is what makes a bar unique.
             key={`${day.date}-${index}`}
+            // A strip the pointer scrubs: a bubble the pointer could move onto
+            // held the last day open while it crossed to the next, and the
+            // next day's reading never came.
+            disableHoverableContent
             open={active === index}
             onOpenChange={(open) =>
               setActive((current) => (open ? index : current === index ? null : current))

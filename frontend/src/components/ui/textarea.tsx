@@ -1,6 +1,9 @@
+"use client"
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { useFieldControl } from "@/components/form"
 
 /**
  * `Input`'s rules for a field of several lines: 16px text under a finger or
@@ -8,7 +11,9 @@ import { cn } from "@/lib/utils"
  * `font-mono text-xs` cannot undo the iOS zoom guard; no shadow; the control
  * edge, falling back to `--input`.
  */
-function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
+function Textarea({ className, ...rest }: React.ComponentProps<"textarea">) {
+  // Inside a `Field`: its id, its hint and error ids, and whether it is wrong.
+  const props = useFieldControl(rest)
   return (
     <textarea
       data-slot="textarea"
