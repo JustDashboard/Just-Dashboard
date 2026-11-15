@@ -7,8 +7,51 @@ import { cn } from "@/lib/utils"
 import { menuSurfaceClasses } from "@/components/ui/menu-styles"
 import { usePortalContainer } from "@/lib/portal-container"
 
-function Popover({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
-  return <PopoverPrimitive.Root data-slot="popover" {...props} />
+/**
+ * Whether a closed popover may hand the focus back to its trigger. Radix does
+ * that when the content unmounts, which is after its fade, and unconditionally:
+ * Escape on one popover and a press on another within the fade, and the first
+ * took the focus back out of the second as it left, which closed the second.
+ * The focus goes back only when it has nowhere else to be — on the page's body,
+ * because it was inside the content that just left. A reader who has moved on
+ * keeps the focus where they put it.
+ */
+export function keepMovedFocus(event: Event) {
+  const active = document.activeElement
+  if (active && active !== document.body) event.preventDefault()
+}
+
+/** Whether the popover around this content is open, or null outside one of ours. */
+const OpenContext = React.createContext<boolean | null>(null)
+
+/**
+ * Radix keeps a closed popover's content mounted while it fades out, with its
+ * role and its words, so for a moment after Escape the page held two dialogs —
+ * the one closing and the one just opened — and anything that asked for "the
+ * dialog" found both. The content reads whether it is open from here and
+ * leaves the accessibility tree the moment it closes; the fade is only paint.
+ */
+function Popover({
+  open,
+  defaultOpen = false,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof PopoverPrimitive.Root>) {
+  const [own, setOwn] = React.useState(defaultOpen)
+  const shown = open ?? own
+  return (
+    <OpenContext.Provider value={shown}>
+      <PopoverPrimitive.Root
+        data-slot="popover"
+        open={shown}
+        onOpenChange={(next) => {
+          if (open === undefined) setOwn(next)
+          onOpenChange?.(next)
+        }}
+        {...props}
+      />
+    </OpenContext.Provider>
+  )
 }
 
 function PopoverTrigger({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
@@ -19,12 +62,19 @@ function PopoverContent({
   className,
   align = "center",
   sideOffset = 4,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+  const open = React.useContext(OpenContext)
   return (
     <PopoverPrimitive.Portal container={usePortalContainer()}>
       <PopoverPrimitive.Content
         data-slot="popover-content"
+        aria-hidden={open === false ? true : undefined}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          if (!event.defaultPrevented) keepMovedFocus(event)
+        }}
         align={align}
         sideOffset={sideOffset}
         className={cn(
