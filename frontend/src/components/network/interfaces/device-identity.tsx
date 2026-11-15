@@ -155,7 +155,7 @@ export function DeviceIdentity({
           // One line at every width, so the line is as tall with a device on
           // it as while it waits for one: a phone gets the first address and
           // leaves who keeps the device to its Settings.
-          <FactLine nowrap className="w-full">
+          <FactLine nowrap className="h-4 w-full">
             <Fact className="shrink-0!">{ROLE_LABEL[link.role]}</Fact>
             {kindLabel(link).toLowerCase() !== ROLE_LABEL[link.role].toLowerCase() && (
               <Fact className="shrink-0!">{kindLabel(link)}</Fact>
