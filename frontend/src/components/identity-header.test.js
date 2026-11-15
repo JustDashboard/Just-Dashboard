@@ -38,9 +38,11 @@ describe("IdentityHeader", () => {
     expect(html).not.toContain("text-title")
   })
 
-  test("on a phone the command row is the foot by default, so the title keeps the row", () => {
+  test("on a phone the command takes a row of its own by default, so the title keeps the row", () => {
     const html = draw({ title: "api.example.test", facts: "x", command: h("button", null, "View") })
-    expect(html).toContain("max-sm:order-last max-sm:col-span-3")
+    // Title row, state row, command row, then the facts, whose wrapping never moves the command.
+    expect(html).toContain("max-sm:order-3 max-sm:col-span-3")
+    expect(html).toContain("max-sm:order-4")
     expect(html).not.toContain("max-sm:order-1")
   })
 
@@ -48,7 +50,7 @@ describe("IdentityHeader", () => {
     const empty = draw({ title: "api", facts: "x", state: "ok", menu: false })
     expect(empty).toContain("max-sm:min-h-(--control-compact)")
     const none = draw({ title: "api", facts: "x", state: "ok" })
-    expect(none).not.toContain("max-sm:order-last")
+    expect(none).not.toContain("max-sm:order-3 max-sm:col-span-3")
   })
 
   test("facts written as facts are drawn as a FactLine", () => {

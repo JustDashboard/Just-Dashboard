@@ -71,11 +71,12 @@ type IdentityHeaderProps = {
   /** The `⋯` menu after the command, holding the rest of the verbs. */
   menu?: React.ReactNode
   /**
-   * In a project's layout, the command row at the line's foot wherever the
-   * line itself is narrower than 42rem, not only on a phone (where it always
-   * is). For a line beside a rail, whose title is a name that must be read
-   * whole: sharing a narrow row, the controls kept theirs and the name and
-   * its facts were left a column a word wide.
+   * In a project's layout, the command on a row of its own at the line's
+   * foot wherever the line itself is narrower than 42rem, not only on a
+   * phone (where it always has a row of its own). For a line beside a rail,
+   * whose title is a name that must be read whole: sharing a narrow row, the
+   * controls kept theirs and the name and its facts were left a column a
+   * word wide.
    */
   foot?: boolean
   /** The line's landmark name ("About api"): set, the line is a `section`. */
@@ -253,13 +254,15 @@ function FactsBone() {
  * both.
  *
  * On a phone the tile and the title have the first row to themselves, the
- * state takes the next, the facts run the full width under them, and the
- * command and its menu are the foot. Beside the title, "View deployment" cut
- * the project's address to eleven characters on every deploy page; the name
- * is the one part of the line that must never give way. The foot keeps a
- * control's height whenever the line has a place for verbs, so a loading
- * line that passes `menu={false}` or `command` is as tall as the line it
- * becomes (D11).
+ * state takes the next, the command and its menu a row of their own under
+ * it, and the facts run the full width at the foot. Beside the title, "View
+ * deployment" cut the project's address to eleven characters on every deploy
+ * page; the name is the one part of the line that must never give way. The
+ * command's row comes before the facts, so facts that wrap to more lines once
+ * they are read never move it; the state's row keeps a line's height and the
+ * command's row a control's whenever the line has a place for verbs, so a
+ * loading line that passes `menu={false}` or `command` is as tall as the line
+ * it becomes, with its command where it will be (D11).
  */
 function ProjectLine({
   tile,
@@ -323,7 +326,7 @@ function ProjectLine({
           {title}
         </p>
         {state !== undefined && (
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:order-2 max-sm:col-span-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:order-2 max-sm:col-span-3 max-sm:min-h-4">
             {state}
           </div>
         )}
@@ -332,7 +335,7 @@ function ProjectLine({
         className={cn(
           "flex shrink-0 items-center gap-2 sm:row-span-2",
           footed
-            ? "max-sm:order-last max-sm:col-span-3 max-sm:mt-1 max-sm:min-h-(--control-compact) max-sm:flex-wrap"
+            ? "max-sm:order-3 max-sm:col-span-3 max-sm:mt-1 max-sm:min-h-(--control-compact) max-sm:flex-wrap"
             : "max-sm:order-1",
           // Important, so the row of its own wins over the phone's place for
           // it whichever of the two rules the sheet happens to write last.
@@ -344,7 +347,7 @@ function ProjectLine({
         {command}
         {menu}
       </div>
-      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:order-3 sm:col-span-1 sm:col-start-2">
+      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:order-4 sm:col-span-1 sm:col-start-2">
         {facts}
       </div>
     </Line>
