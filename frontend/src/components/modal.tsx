@@ -141,7 +141,9 @@ export function Modal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        role={alert ? (role ?? "alertdialog") : undefined}
+        // Spread, not `role={undefined}`: Radix spreads its props after its
+        // own `role="dialog"`, and an undefined one would take the role away.
+        {...(alert && { role: role ?? "alertdialog" })}
         data-variant={variant}
         className={cn(
           "flex max-h-[calc(100svh-4rem)] flex-col gap-0 overflow-hidden rounded-xl p-0",
