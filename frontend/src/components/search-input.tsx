@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef } from "react"
+import { useCallback, useRef } from "react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -147,6 +147,16 @@ function SearchBox({
   ...props
 }: BoxProps) {
   const own = useRef<HTMLInputElement | null>(null)
+  // One callback for the life of the caller's ref, so a callback ref is not
+  // called with null and the node again on every render.
+  const attach = useCallback(
+    (node: HTMLInputElement | null) => {
+      own.current = node
+      if (typeof ref === "function") return ref(node)
+      if (ref) ref.current = node
+    },
+    [ref],
+  )
   const filled = String(props.value ?? "") !== ""
   const clear = () => {
     if (onClear) onClear()
@@ -163,11 +173,7 @@ function SearchBox({
         )}
       />
       <Input
-        ref={(node) => {
-          own.current = node
-          if (typeof ref === "function") return ref(node)
-          if (ref) ref.current = node
-        }}
+        ref={attach}
         // A page's own filter, not one inside a pane's chrome, is what `/` focuses.
         data-page-search={dense ? undefined : ""}
         className={cn(
