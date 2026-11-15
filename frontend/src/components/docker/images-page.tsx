@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { BuildDialog } from "@/components/docker/build-dialog"
-import { DockerTitle } from "@/components/docker/docker-identity"
+import { DockerIdentity, useDockerHost, VerdictButton } from "@/components/docker/docker-identity"
 import { Definition } from "@/components/docker/explain"
 import { useImageActions } from "@/components/docker/image-actions"
 import { ImageBand } from "@/components/docker/image-band"
@@ -25,17 +25,17 @@ import {
   type ImageSort,
   type Use,
 } from "@/components/docker/images"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, FilterChip } from "@/components/chips"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { VerbMenu } from "@/components/verbs"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { Workspace } from "@/components/workspace/workspace"
 import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
@@ -66,6 +66,7 @@ const NEXT_SORT: Record<ImageSort, ImageSort> = { size: "created", created: "nam
 export function ImagesPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const host = useDockerHost()
   const wide = useBreakpoint("xl")
   const [query, setQuery] = useSessionState("docker.images.query", "")
   const [use, setUse] = useViewState<Use>("docker.images.use", "all")
@@ -208,64 +209,47 @@ export function ImagesPage() {
             press narrows the table to what is behind), what Docker holds as
             facts, and at the far end the one command, Pull, with the other
             way an image arrives behind the menu. */}
-        <HostIdentity
+        <DockerIdentity
           className="animate-rise"
-          mark="docker"
-          fallback={Layers}
-          title={<DockerTitle version={engine?.serverVersion} />}
+          page="Images"
+          version={engine?.serverVersion}
+          host={host}
           state={
             outdated > 0 ? (
-              <button
-                type="button"
-                aria-label={`Only the ${plural(outdated, "image")} with an update`}
-                onClick={() => {
-                  setState("outdated")
+              <VerdictButton
+                pressed={state === "outdated"}
+                label={`Only the ${plural(outdated, "image")} with an update`}
+                onPress={() => {
+                  setState(state === "outdated" ? "" : "outdated")
                   setUse("all")
                 }}
-                // A flex box, so the button is the height of its dot and
-                // words and the line does not grow when the verdict lands.
-                className="flex items-center rounded-sm focus-ring hover:underline"
               >
                 <Status verdict="warning" label={`${plural(outdated, "update")} available`} />
-              </button>
+              </VerdictButton>
             ) : updates.error ? (
               <Status verdict="warning" label="Registry checks unavailable" />
             ) : unverified > 0 ? (
               <Status verdict="warning" label={`${plural(unverified, "image")} unverified`} />
             ) : verified > 0 && checkedAt ? (
               <Status verdict="ok" label="Tags in use are current" />
-            ) : null
+            ) : undefined
           }
           facts={
             images.data ? (
               <>
-                <span className="numeric font-medium text-foreground">
+                <Fact className="numeric font-medium text-foreground">
                   {plural(list.length, "image")}
-                </span>
+                </Fact>
                 {usage.data && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">{bytes(usage.data.layersSize)} of layers</span>
-                  </>
+                  <Fact className="numeric">{bytes(usage.data.layersSize)} of layers</Fact>
                 )}
-                <FactDot />
-                <span className="numeric">{inUse} in use</span>
-                {untagged > 0 && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">{untagged} untagged</span>
-                  </>
-                )}
+                <Fact className="numeric">{inUse} in use</Fact>
+                {untagged > 0 && <Fact className="numeric">{untagged} untagged</Fact>}
               </>
             ) : (
               // Holds the line open, so the band under it does not move when the list lands.
               <span aria-hidden>&nbsp;</span>
             )
-          }
-          aside={
-            <span className="max-sm:hidden">
-              <WorkspaceHelp compact />
-            </span>
           }
           command={
             can("service.control") && (
@@ -323,36 +307,23 @@ export function ImagesPage() {
           <ErrorState error={images.error} onRetry={images.refresh} />
         ) : (
           <Panel className="animate-rise">
+            {/* The list section's one anatomy (PGH-06): the title, its count
+                and the state chips on the title line; search, the registry's
+                narrowing and the order on the toolbar under it. */}
             <PanelHeader
               title="Images"
+              count={list.length}
               actions={
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground"
-                    aria-label={`Order: ${SORT_LABEL[sort]}`}
-                    onClick={() => setSort(NEXT_SORT[sort])}
-                  >
-                    {SORT_LABEL[sort]}
+                can("destructive") &&
+                untagged > 0 && (
+                  <Button size="sm" variant="outline" onClick={pruneUntagged}>
+                    <Trash className="size-4" />
+                    Prune untagged
                   </Button>
-                  {can("destructive") && untagged > 0 && (
-                    <Button size="sm" variant="outline" onClick={pruneUntagged}>
-                      <Trash className="size-4" />
-                      Prune untagged
-                    </Button>
-                  )}
-                </>
+                )
               }
-            />
-            <PanelToolbar>
-              <SearchInput
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Name, version or id"
-                aria-label="Find images"
-              />
-              <div className="flex min-w-0 flex-wrap items-center gap-1">
+            >
+              <ChipStrip aria-label="Use" className="mr-auto">
                 <FilterChip selected={use === "all"} onClick={() => setUse("all")}>
                   All <ChipCount>{list.length}</ChipCount>
                 </FilterChip>
@@ -367,7 +338,15 @@ export function ImagesPage() {
                     Untagged <ChipCount>{untagged}</ChipCount>
                   </FilterChip>
                 )}
-              </div>
+              </ChipStrip>
+            </PanelHeader>
+            <PanelToolbar>
+              <SearchInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Name, version or id"
+                aria-label="Find images"
+              />
               {state && (
                 <FilterChip
                   selected
@@ -377,6 +356,15 @@ export function ImagesPage() {
                   {FRESHNESS_LABEL[state]} ×
                 </FilterChip>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto text-muted-foreground"
+                aria-label={`Order: ${SORT_LABEL[sort]}`}
+                onClick={() => setSort(NEXT_SORT[sort])}
+              >
+                {SORT_LABEL[sort]}
+              </Button>
             </PanelToolbar>
             <PanelBody flush>
               {list.length === 0 ? (

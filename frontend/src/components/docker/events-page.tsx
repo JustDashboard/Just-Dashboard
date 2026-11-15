@@ -11,7 +11,6 @@ import {
   foldBursts,
   foldRestarts,
   outcomeOf,
-  perSlice,
   settleAskedExits,
   spanWords,
   type EventEntry,
@@ -24,25 +23,22 @@ import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useNow } from "@/hooks/use-now"
 import { socketReading } from "@/components/deploy/request-marks"
 import { InfoTip } from "@/components/form"
-import { FactDot } from "@/components/identity-header"
-import { TileTrend } from "@/components/sparkline"
-import { SeriesKey } from "@/components/live-figure"
+import { Fact } from "@/components/fact-line"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
-import { NumberTicker } from "@/components/ui/number-ticker"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { WindowPicker } from "@/components/window-picker"
 import { Workspace } from "@/components/workspace/workspace"
 import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
-import { ActivityTable, OUTCOME, OutcomeKey, type Span } from "@/components/docker/event-activity"
+import { ActivityTable, OutcomeKey, type Span } from "@/components/docker/event-activity"
 import { EventFeed } from "@/components/docker/event-feed"
+import { EventBand, READING_LABEL, type EventReading } from "@/components/docker/event-band"
 
 const HOUR = 3_600_000
 
@@ -60,19 +56,6 @@ const KINDS = [
   { id: "volume", label: "Volumes" },
   { id: "network", label: "Networks" },
 ]
-
-/** The four readings, each a question a press narrows the page to. */
-type Reading = "failures" | "restarts" | "changes" | "external"
-
-const READING_LABEL: Record<Reading, string> = {
-  failures: "Failures",
-  restarts: "Restarts",
-  changes: "Created or removed",
-  external: "External",
-}
-
-/** How many slices each reading's trend has across the window. */
-const SLICES = 24
 
 /** How many feed rows are drawn before "Show all". */
 const FEED_ROWS = 150
@@ -101,16 +84,16 @@ function isFailure(event: DockerEvent) {
  * which container it was beyond its name.
  *
  * It opens now on the line every Docker page opens on (`DockerIdentity`): the
- * engine as its mark and version, the verdict beside its name (a restart
- * loop, the containers that failed, or that nothing did) with the socket's
- * state, the host, how long the dashboard has been listening and how much it
- * has kept, and at the far end the window the page reads over.
+ * page's name with Docker as its mark, the verdict beside it (a restart loop,
+ * the containers that failed, or that nothing did) with the socket's state,
+ * then Docker's version, the host, how long the dashboard has been listening
+ * and how much it has kept.
  *
- * Then four readings over that window, each counting up as it lands with its
- * shape across the window as its trend, each a press that narrows the page to
- * what it counts (§15 pass 2's `StatButton`): exits that failed, comebacks,
- * objects made or removed, and actions nothing in this dashboard or compose
- * explains.
+ * Then the band every Docker page opens on (`EventBand`), with the window the
+ * page reads over on its line: what happened as one bar of four kinds, each a
+ * press that narrows the page to what it counts — exits that failed,
+ * comebacks, objects made or removed, and actions nothing in this dashboard or
+ * compose explains — and Recent, the newest of those on the window's axis.
  *
  * Then the containers the record names as a table, one row each, worst first:
  * the container as its product, its state now from Docker's listing, its
@@ -132,7 +115,7 @@ export function EventsPage() {
   const [range, setRange] = useSessionState<string>("docker.events.window", "24h")
   const [kinds, setKinds] = useSessionState<string[]>("docker.events.kinds", [])
   const [search, setSearch] = useSessionState("docker.events.query", "")
-  const [reading, setReading] = useSessionState<Reading | "">("docker.events.reading", "")
+  const [reading, setReading] = useSessionState<EventReading | "">("docker.events.reading", "")
   const [container, setContainer] = useSessionState("docker.events.container", "")
   const [everything, setEverything] = useState(false)
   const [live, setLive] = useState<DockerEvent[]>([])
@@ -195,14 +178,14 @@ export function EventsPage() {
       looping: activity.filter((row) => row.looping),
       changes: inWindow.filter((e) => outcomeOf(e) === "changed"),
       external: inWindow.filter(isExternal),
-      trend: {
-        failures: perSlice(inWindow, from, to, SLICES, isFailure),
-        restarts: perSlice(inWindow, from, to, SLICES, (e) => back.has(e)),
-        changes: perSlice(inWindow, from, to, SLICES, (e) => outcomeOf(e) === "changed"),
-        external: perSlice(inWindow, from, to, SLICES, isExternal),
-      },
     }
-  }, [activity, back, inWindow, from, to])
+  }, [activity, back, inWindow])
+
+  // What Recent draws: the window's failures, comebacks and actions nothing explains.
+  const notable = useMemo(
+    () => inWindow.filter((e) => isFailure(e) || back.has(e) || isExternal(e)),
+    [inWindow, back],
+  )
 
   const rows = useMemo(
     () =>
@@ -239,9 +222,13 @@ export function EventsPage() {
     return foldBursts(foldRestarts(kept).filter((entry) => matches(entry, reading, back)))
   }, [inWindow, kinds, search, container, reading, back])
   const shown = everything ? entries : entries.slice(0, FEED_ROWS)
+  const eventCount = entries.reduce(
+    (sum, entry) => sum + (entry.kind === "event" ? 1 : entry.events.length),
+    0,
+  )
   const filterKey = [range, kinds.join(","), search, reading, container].join("\u0000")
 
-  const toggleReading = (next: Reading) => setReading(reading === next ? "" : next)
+  const toggleReading = (next: EventReading) => setReading(reading === next ? "" : next)
   const selectContainer = (key: string) => setContainer(container === key ? "" : key)
   const refresh = () => {
     buffer.refresh()
@@ -259,6 +246,7 @@ export function EventsPage() {
       <Page>
         {header}
         <DockerIdentity
+          page="Events"
           version={ping.data?.serverVersion}
           host={host ?? undefined}
           facts={
@@ -316,6 +304,7 @@ export function EventsPage() {
         {header}
 
         <DockerIdentity
+          page="Events"
           version={version}
           host={host ?? undefined}
           state={
@@ -336,39 +325,17 @@ export function EventsPage() {
           facts={
             <>
               {since && listening && (
-                <>
-                  <span className="numeric" title={`Listening since ${timestamp(meta?.since)}`}>
-                    listening for {duration((to - since) / 1000)}
-                  </span>
-                  <FactDot />
-                </>
+                <Fact className="numeric" title={`Listening since ${timestamp(meta?.since)}`}>
+                  listening for {duration((to - since) / 1000)}
+                </Fact>
               )}
-              <span className="numeric" title="The dashboard keeps the newest 2,000 in memory">
+              <Fact className="numeric" title="The dashboard keeps the newest 2,000 in memory">
                 {plural(meta?.buffered ?? all.length, "event")} kept
-              </span>
-              <span className="contents max-sm:hidden">
-                <FactDot />
-                <span className="numeric">
-                  {plural(activity.length, "container")} in {win.words}
-                </span>
-              </span>
+              </Fact>
+              <Fact className="numeric max-sm:hidden">
+                {plural(activity.length, "container")} in {win.words}
+              </Fact>
             </>
-          }
-          controls={
-            <ToggleGroup
-              type="single"
-              size="sm"
-              variant="outline"
-              value={win.value}
-              onValueChange={(value) => value && setRange(value)}
-              aria-label="Window"
-            >
-              {WINDOWS.map((w) => (
-                <ToggleGroupItem key={w.value} value={w.value} className="px-2.5 text-hint">
-                  {w.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
           }
         />
 
@@ -383,130 +350,56 @@ export function EventsPage() {
           <EmptyState {...quietReading(since, to, listening)} />
         ) : (
           <>
-            <StatGrid columns={4} dense className="animate-rise">
-              <StatButton
-                label="Show only failures"
-                pressed={reading === "failures"}
-                onClick={() => toggleReading("failures")}
-              >
-                <StatTile
-                  className="h-full"
-                  label={
-                    <>
-                      <SeriesKey color={OUTCOME.failed.color} />
-                      Failures
-                    </>
-                  }
-                  value={<NumberTicker value={tally.failures} />}
-                  tone={tally.failures > 0 ? "danger" : "success"}
-                  trend={
-                    <TileTrend
-                      values={tally.trend.failures}
-                      color={OUTCOME.failed.color}
-                      label={`Failures across ${win.words}`}
-                    />
-                  }
-                  hint={
+            <div className="space-y-3">
+              {/* The window the whole page reads over, on the first reading's
+                  line, as Runtime's is (PGH-27); the header keeps its verdict. */}
+              <div className="flex items-center justify-end">
+                <WindowPicker
+                  label="Window"
+                  windows={WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
+                  value={win.value}
+                  onChange={setRange}
+                />
+              </div>
+              <EventBand
+                counts={{
+                  failures: tally.failures,
+                  restarts: tally.restarts,
+                  changes: tally.changes.length,
+                  external: tally.external.length,
+                }}
+                hints={{
+                  failures:
                     tally.failed.length > 0
                       ? tally.failed
                           .slice(0, 3)
                           .map((row) => (row.oom ? `${row.name} out of memory` : row.name))
                           .join(" · ")
-                      : "every exit was clean"
-                  }
-                />
-              </StatButton>
-              <StatButton
-                label="Show only restarts"
-                pressed={reading === "restarts"}
-                onClick={() => toggleReading("restarts")}
-              >
-                <StatTile
-                  className="h-full"
-                  label={
-                    <>
-                      <SeriesKey color={OUTCOME.restarted.color} />
-                      Restarts
-                    </>
-                  }
-                  value={<NumberTicker value={tally.restarts} />}
-                  tone={tally.looping.length > 0 ? "warning" : "default"}
-                  trend={
-                    <TileTrend
-                      values={tally.trend.restarts}
-                      color={OUTCOME.restarted.color}
-                      label={`Restarts across ${win.words}`}
-                    />
-                  }
-                  hint={restartHint(tally.looping, activity)}
-                />
-              </StatButton>
-              <StatButton
-                label="Show only what was created or removed"
-                pressed={reading === "changes"}
-                onClick={() => toggleReading("changes")}
-              >
-                <StatTile
-                  className="h-full"
-                  label={
-                    <>
-                      <SeriesKey color={OUTCOME.changed.color} />
-                      Created or removed
-                    </>
-                  }
-                  value={<NumberTicker value={tally.changes.length} />}
-                  trend={
-                    <TileTrend
-                      values={tally.trend.changes}
-                      color={OUTCOME.changed.color}
-                      label={`Objects created or removed across ${win.words}`}
-                    />
-                  }
-                  hint={changeHint(tally.changes)}
-                />
-              </StatButton>
-              <StatButton
-                label="Show only external actions"
-                pressed={reading === "external"}
-                onClick={() => toggleReading("external")}
-              >
-                <StatTile
-                  className="h-full"
-                  label={
-                    <>
-                      <SeriesKey color="var(--tag-violet)" />
-                      External
-                    </>
-                  }
-                  value={<NumberTicker value={tally.external.length} />}
-                  trend={
-                    <TileTrend
-                      values={tally.trend.external}
-                      color="var(--tag-violet)"
-                      label={`External actions across ${win.words}`}
-                    />
-                  }
-                  hint={
+                      : "every exit was clean",
+                  restarts: restartHint(tally.looping, activity),
+                  changes: changeHint(tally.changes),
+                  external:
                     tally.external.length > 0
                       ? `${[...new Set(tally.external.map((e) => e.name))].slice(0, 3).join(", ")}`
-                      : "everything is explained"
-                  }
-                />
-              </StatButton>
-            </StatGrid>
+                      : "everything is explained",
+                }}
+                reading={reading}
+                onReading={toggleReading}
+                notable={notable}
+                from={from}
+                to={to}
+                words={win.words}
+                selected={container}
+                onContainer={selectContainer}
+              />
+            </div>
 
             {/* Framed, because it is a table: the grid owns a scroll region and
                 the edge is what says so (§2). */}
             <Panel aria-label="Containers">
               <PanelHeader
-                title={
-                  <>
-                    Containers
-                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                      {rows.length}
-                    </span>
-                  </>
-                }
+                title="Containers"
+                count={rows.length}
                 actions={<OutcomeKey className="max-md:hidden" />}
               />
               <PanelBody flush>
@@ -543,16 +436,9 @@ export function EventsPage() {
                 and a hairline with its rows on hairlines, and it scrolls with
                 the page (§2). It was a framed panel with a scroll of its own. */}
             <Panel plain aria-label="Events">
-              <PanelHeader
-                title={
-                  <>
-                    Events
-                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                      {entries.length}
-                    </span>
-                  </>
-                }
-              >
+              {/* The count is of events, as the All chip's is: a folded loop
+                  is one row and all its events. */}
+              <PanelHeader title="Events" count={plural(eventCount, "event")}>
                 <ChipStrip aria-label="Kind" className="mr-auto">
                   <FilterChip selected={kinds.length === 0} onClick={() => setKinds([])}>
                     All
@@ -581,7 +467,7 @@ export function EventsPage() {
                   placeholder="Container, image, stack or person"
                   containerClassName="sm:w-72"
                 />
-                <div className="flex flex-wrap items-center gap-1 sm:ml-auto">
+                <ChipStrip aria-label="Narrowed to" className="sm:ml-auto">
                   {reading && (
                     <FilterChip
                       selected
@@ -602,7 +488,7 @@ export function EventsPage() {
                       <Cross aria-hidden className="size-3" />
                     </FilterChip>
                   )}
-                </div>
+                </ChipStrip>
               </PanelToolbar>
               <PanelBody flush>
                 {entries.length === 0 ? (
@@ -660,7 +546,7 @@ export function EventsPage() {
 }
 
 /** Whether a feed entry is one the pressed reading counts. */
-function matches(entry: EventEntry, reading: Reading | "", back: Set<DockerEvent>) {
+function matches(entry: EventEntry, reading: EventReading | "", back: Set<DockerEvent>) {
   if (!reading) return true
   if (entry.kind === "loop") return reading === "failures" || reading === "restarts"
   const event = entry.event

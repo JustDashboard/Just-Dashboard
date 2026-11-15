@@ -124,7 +124,9 @@ test("the window narrows everything, and an arriving event is drawn", async ({ p
   await expect(feed.getByText("worker started")).toBeVisible()
 })
 
-test("the page opens on Docker's line, with the window at its end", async ({ page }) => {
+test("the page opens on its own name with Docker's line, and the window on the band", async ({
+  page,
+}) => {
   await mockEvents(page)
   await page.goto("/docker/events")
 
@@ -135,8 +137,12 @@ test("the page opens on Docker's line, with the window at its end", async ({ pag
   await expect(
     identity.getByRole("button", { name: "shop-db-1 is in a restart loop" }),
   ).toBeVisible()
+  await expect(identity.getByText("Events", { exact: true })).toBeVisible()
   await expect(identity.getByText("Live", { exact: true })).toBeVisible()
-  await expect(identity.getByLabel("Window")).toBeVisible()
+  // The window is the band's, on the first reading's line (PGH-27).
+  await expect(identity.getByLabel("Window")).toHaveCount(0)
+  await expect(page.getByLabel("Window")).toBeVisible()
+  await expect(page.locator("[data-slot=event-band]")).toBeVisible()
   await expect(identity.getByText(/^\d+ events kept$/)).toBeVisible()
 })
 

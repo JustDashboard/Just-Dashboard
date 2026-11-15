@@ -8,17 +8,16 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useNow } from "@/hooks/use-now"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { platformProduct } from "@/components/product-logo"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { Workspace } from "@/components/workspace/workspace"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useLiveTraffic } from "@/components/network/use-live-traffic"
 import { get } from "@/lib/api"
@@ -27,7 +26,7 @@ import type { DockerEvent, DockerNetwork, DockerNetworkingInfo } from "@/lib/typ
 import { cn } from "@/lib/utils"
 import { membersKnown } from "@/lib/docker-networks"
 import { useSessionState } from "@/lib/view-state"
-import { DockerTitle } from "@/components/docker/docker-identity"
+import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
 import { HueKey, NetworkBand, type NetworkRate } from "@/components/docker/network-band"
 import { NetworkRows } from "@/components/docker/network-table"
 import { ContainerNetworkRows, type Placement } from "@/components/docker/network-members"
@@ -305,47 +304,34 @@ export function Networks() {
           </Notice>
         )}
 
-        <HostIdentity
-          mark="docker"
-          fallback={Box}
-          title={<DockerTitle version={version} />}
+        <DockerIdentity
+          page="Networks"
+          version={version}
+          host={host?.hostname ? host : info.data?.Name ? { hostname: info.data.Name } : undefined}
           facts={
-            <>
-              {/* The server and the joiners are left off a phone, where the
-                  line would run to a second one once the list landed and push
-                  the band down. */}
-              {(host?.hostname || info.data?.Name) && (
-                <span className="contents max-sm:hidden">
-                  <HostFact product={platformProduct(host?.platform)}>
-                    {host?.hostname || info.data?.Name}
-                  </HostFact>
-                  {list.data && <FactDot />}
-                </span>
-              )}
-              {list.data ? (
-                <>
-                  <span className="numeric">
-                    {plural(networks.length, "network")}, {networks.length - (counts.docker ?? 0)}{" "}
-                    made here
-                  </span>
-                  <FactDot />
-                  <span className="numeric">
-                    {unread.length > 0
-                      ? "members unread"
-                      : `${plural(attached.size, "container")} on them`}
-                  </span>
-                </>
-              ) : (
-                // Holds the line open, so the band under it does not move when the list lands.
-                <span aria-hidden>&nbsp;</span>
-              )}
-              {lensCounts.several > 0 && (
-                <span className="contents max-sm:hidden">
-                  <FactDot />
-                  <span className="numeric">{lensCounts.several} joining two or more</span>
-                </span>
-              )}
-            </>
+            list.data ? (
+              <>
+                <Fact className="numeric">
+                  {plural(networks.length, "network")}, {networks.length - (counts.docker ?? 0)}{" "}
+                  made here
+                </Fact>
+                <Fact className="numeric">
+                  {unread.length > 0
+                    ? "members unread"
+                    : `${plural(attached.size, "container")} on them`}
+                </Fact>
+                {/* The joiners are left off a phone, where the line would run
+                    to a second one once the list landed and push the band down. */}
+                {lensCounts.several > 0 && (
+                  <Fact className="numeric max-sm:hidden">
+                    {lensCounts.several} joining two or more
+                  </Fact>
+                )}
+              </>
+            ) : (
+              // Holds the line open, so the band under it does not move when the list lands.
+              <span aria-hidden>&nbsp;</span>
+            )
           }
           state={
             // Not for a host that lists none: "every network in use" over
@@ -358,24 +344,15 @@ export function Networks() {
                 pressed={shelf === "unused"}
                 onUnused={() => setShelf(shelf === "unused" ? "" : "unused")}
               />
-            ) : (
-              // The verdict's line, empty: on a phone it has a row of its own,
-              // which is there before the list is.
-              <span aria-hidden className="text-xs">
-                &nbsp;
-              </span>
-            )
+            ) : undefined
           }
           command={
-            <>
-              <WorkspaceHelp compact />
-              {can("service.control") && (
-                <Button size="sm" onClick={() => setCreating(true)}>
-                  <Plus className="size-4" />
-                  Create network
-                </Button>
-              )}
-            </>
+            can("service.control") && (
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <Plus className="size-4" />
+                Create network
+              </Button>
+            )
           }
         />
 
@@ -678,17 +655,9 @@ function Verdict({
   }
   if (unused > 0) {
     return (
-      <button
-        type="button"
-        aria-pressed={pressed}
-        onClick={onUnused}
-        title="Each holds a block of the address pool"
-        // A flex box, so the button is as tall as the verdict in it and the
-        // line keeps one height whichever verdict it holds.
-        className="inline-flex rounded-sm focus-ring hover:underline"
-      >
+      <VerdictButton pressed={pressed} onPress={onUnused}>
         <Status tone="warning" label={`${plural(unused, "network")} unused`} />
-      </button>
+      </VerdictButton>
     )
   }
   return <Status tone="running" label="Every network in use" />

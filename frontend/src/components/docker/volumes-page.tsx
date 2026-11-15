@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useConfirm } from "@/components/confirm-dialog"
-import { DockerTitle } from "@/components/docker/docker-identity"
+import { DockerIdentity, useDockerHost, VerdictButton } from "@/components/docker/docker-identity"
 import { FormNote } from "@/components/form"
 import { Definition } from "@/components/docker/explain"
 import { useVolumeVerbs } from "@/components/docker/volume-actions"
@@ -39,7 +39,7 @@ import {
   type Standing,
   type VolumeSort,
 } from "@/components/docker/volumes"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Modal } from "@/components/modal"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
@@ -48,11 +48,11 @@ import { containerProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, FilterChip } from "@/components/chips"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { Workspace } from "@/components/workspace/workspace"
 import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
@@ -80,6 +80,7 @@ export function VolumesPage() {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
+  const host = useDockerHost()
   const wide = useBreakpoint("xl")
   const widest = useBreakpoint("2xl")
   // Kept under names a volume's page reads too: its rail is this table, narrowed
@@ -293,69 +294,49 @@ export function VolumesPage() {
             Docker as the mark, the verdict beside its name (a press narrows
             the table to what a prune would delete), what it stores as facts,
             and the one way a volume is made here at the far end. */}
-        <HostIdentity
+        <DockerIdentity
           className="animate-rise"
-          mark="docker"
-          fallback={Database}
-          title={<DockerTitle version={engine?.serverVersion} />}
+          page="Volumes"
+          version={engine?.serverVersion}
+          host={host}
           state={
             share.volumes.length > 0 ? (
-              <button
-                type="button"
-                aria-label={`Only the ${plural(share.volumes.length, "volume")} a prune would delete`}
-                onClick={() => narrow({ show: "prunable" })}
-                // A flex box, so the button is as tall as the verdict in it
-                // and not a line of the body's size: taller, it grew the line
-                // when the list landed and pushed the band down.
-                className="inline-flex rounded-sm focus-ring hover:underline"
+              <VerdictButton
+                pressed={showing === "prunable"}
+                label={`Only the ${plural(share.volumes.length, "volume")} a prune would delete`}
+                onPress={() => narrow({ show: showing === "prunable" ? "all" : "prunable" })}
               >
                 <Status
                   verdict="warning"
                   label={`${plural(share.volumes.length, "volume")} a prune would delete`}
                 />
-              </button>
+              </VerdictButton>
             ) : list.data && volumes.length > 0 ? (
               <Status verdict="ok" label="A prune would delete nothing" />
-            ) : (
-              // The verdict's line, empty: on a phone it has a row of its own,
-              // which is there before the list is.
-              <span aria-hidden className="text-xs">
-                &nbsp;
-              </span>
-            )
+            ) : undefined
           }
           command={
-            <>
-              <WorkspaceHelp compact />
-              {can("service.control") && (
-                <Button size="sm" onClick={() => setCreating(true)}>
-                  <Plus className="size-4" />
-                  Create volume
-                </Button>
-              )}
-            </>
+            can("service.control") && (
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <Plus className="size-4" />
+                Create volume
+              </Button>
+            )
           }
           facts={
             list.data ? (
               <>
-                <span className="numeric font-medium text-foreground">
+                <Fact className="numeric font-medium text-foreground">
                   {plural(volumes.length, "volume")}
-                </span>
-                <FactDot />
-                <span className="numeric">{bytes(stored)} stored</span>
+                </Fact>
+                <Fact className="numeric">{bytes(stored)} stored</Fact>
                 {/* The Mounts band says it again; without it the facts are
                     one line on a phone, as the line held open for them is. */}
-                <span className="contents max-sm:hidden">
-                  <FactDot />
-                  <span className="numeric">{mounted} mounted</span>
-                </span>
+                <Fact className="numeric max-sm:hidden">{mounted} mounted</Fact>
                 {coverage.data && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">
-                      {covered} of {volumes.length} backed up
-                    </span>
-                  </>
+                  <Fact className="numeric">
+                    {covered} of {volumes.length} backed up
+                  </Fact>
                 )}
               </>
             ) : (
@@ -388,26 +369,18 @@ export function VolumesPage() {
           <ErrorState error={list.error} onRetry={list.refresh} />
         ) : (
           <Panel className="animate-rise">
+            {/* The list section's one anatomy (PGH-06): the title, its count
+                and the state chips on the title line; search and what the
+                band narrowed on the toolbar under it. */}
             <PanelHeader
               title="Volumes"
-              actions={
-                filtered &&
-                volumes.length > 0 && (
-                  <span className="numeric text-hint text-muted-foreground">
-                    {visible.length} of {volumes.length}
-                  </span>
-                )
+              count={
+                volumes.length > 0 &&
+                (filtered ? `${visible.length} of ${volumes.length}` : undefined)
               }
-            />
-            {volumes.length > 0 && (
-              <PanelToolbar>
-                <SearchInput
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Volume, container or path"
-                  aria-label="Find volumes"
-                />
-                <div className="flex min-w-0 flex-wrap items-center gap-1">
+            >
+              {volumes.length > 0 && (
+                <ChipStrip aria-label="State" className="mr-auto">
                   <FilterChip selected={showing === "all"} onClick={() => setShow("all")}>
                     All <ChipCount>{volumes.length}</ChipCount>
                   </FilterChip>
@@ -425,7 +398,17 @@ export function VolumesPage() {
                       </FilterChip>
                     ) : null,
                   )}
-                </div>
+                </ChipStrip>
+              )}
+            </PanelHeader>
+            {volumes.length > 0 && (
+              <PanelToolbar>
+                <SearchInput
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Volume, container or path"
+                  aria-label="Find volumes"
+                />
                 {showing === "prunable" && (
                   <FilterChip
                     selected
