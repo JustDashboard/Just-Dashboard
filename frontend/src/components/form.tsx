@@ -254,18 +254,14 @@ export function FieldChecks({
  */
 export function FieldCheck({ met, children }: { met: boolean; children: React.ReactNode }) {
   const Mark = met ? Check : Minus
+  const tone = met ? "text-success" : "text-muted-foreground"
   return (
-    <span
-      aria-atomic="true"
-      className={cn(
-        "inline-flex items-center gap-1 text-hint transition-colors",
-        met ? "text-success" : "text-muted-foreground",
-      )}
-    >
-      <Mark aria-hidden className="size-3" />
-      {/* Its own element, so the visible words are exactly the rule and can be
-          found by them; the state word beside it is for a screen reader. */}
-      <span>{children}</span>
+    <span aria-atomic="true" className="inline-flex items-center gap-1 text-hint">
+      <Mark aria-hidden className={cn("size-3 transition-colors", tone)} />
+      {/* Its own element, carrying the tone, so the visible words are exactly
+          the rule and are what turns green; the state word beside it is for a
+          screen reader. */}
+      <span className={cn("transition-colors", tone)}>{children}</span>
       <span className="sr-only">{met ? ", met" : ", not yet"}</span>
     </span>
   )
