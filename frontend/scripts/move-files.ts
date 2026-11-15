@@ -6,7 +6,8 @@
  * from disk, and path mentions in comments, strings and the docs.
  *
  *     bun scripts/move-files.ts --dry-run   # list what it would change, change nothing
- *     bun scripts/move-files.ts             # change it, with `git mv` for the moves
+ *     bun scripts/move-files.ts             # change it, with `git mv` for the moves, and
+ *                                           # print the edited sources with Prettier
  *
  * It is written to be run again: on a tree where the moves are done it changes nothing, and on a
  * tree where someone has since written an import against an old path it points that import at
@@ -629,6 +630,26 @@ export function run(options: Options): Result {
   return result
 }
 
+/**
+ * Prints the edited sources the way the repository's Prettier does: an import whose path got
+ * shorter fits on one line again, one that got longer breaks over several. Files it did not edit
+ * are not read.
+ */
+export async function format(root: string, files: string[]) {
+  const prettier = await import("prettier")
+  let changed = 0
+  for (const file of files) {
+    const path = join(root, file)
+    const text = readFileSync(path, "utf8")
+    const config = (await prettier.resolveConfig(path)) ?? {}
+    const printed = await prettier.format(text, { ...config, filepath: path })
+    if (printed === text) continue
+    writeFileSync(path, printed)
+    changed++
+  }
+  return changed
+}
+
 const here = dirname(fileURLToPath(import.meta.url))
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -648,7 +669,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     dryRun: flag("--dry-run"),
     git: flag("--no-git") ? false : undefined,
   })
+  const printed =
+    flag("--dry-run") || flag("--no-format")
+      ? 0
+      : await format(
+          root,
+          result.edited.map(({ file }) => file),
+        )
   console.log(
-    `${result.moved.length} files ${flag("--dry-run") ? "to move" : "moved"}, ${result.edited.length} sources and ${result.docs.length} docs ${flag("--dry-run") ? "to edit" : "edited"}, ${result.warnings.length} warnings`,
+    `${printed} reprinted by Prettier, ${result.moved.length} files ${flag("--dry-run") ? "to move" : "moved"}, ${result.edited.length} sources and ${result.docs.length} docs ${flag("--dry-run") ? "to edit" : "edited"}, ${result.warnings.length} warnings`,
   )
 }

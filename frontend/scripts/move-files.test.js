@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { mentionRules, rewriteMentions, run } from "./move-files.ts"
+import { format, mentionRules, rewriteMentions, run } from "./move-files.ts"
 
 const made = []
 afterEach(() => {
@@ -263,5 +263,43 @@ describe("path mentions", () => {
       "/deploy/settings/segments",
     ])
       expect(rewrite(text)).toBe(text)
+  })
+})
+
+describe("printing", () => {
+  test("an import that got shorter comes back to one line under the repository's Prettier", async () => {
+    const { root, read, go } = tree({
+      "frontend/.prettierrc": JSON.stringify({
+        semi: false,
+        printWidth: 100,
+        trailingComma: "all",
+      }),
+      "frontend/src/components/deploy/settings/save-bar-words.ts": "export const appliesLine = 1\n",
+      "frontend/src/app/page.tsx": [
+        "import {",
+        "  appliesLine,",
+        "  pendingLine,",
+        "  type SettingApplies,",
+        '} from "@/components/deploy/settings/save-bar-words"',
+        "",
+      ].join("\n"),
+    })
+    const result = go({
+      files: [
+        {
+          from: "components/deploy/settings/save-bar-words.ts",
+          to: "components/settings/save-bar-words.ts",
+        },
+      ],
+    })
+    expect(
+      await format(
+        root,
+        result.edited.map(({ file }) => file),
+      ),
+    ).toBe(1)
+    expect(read("frontend/src/app/page.tsx")).toBe(
+      'import { appliesLine, pendingLine, type SettingApplies } from "@/components/settings/save-bar-words"\n',
+    )
   })
 })
