@@ -33,6 +33,67 @@ export function percent(value: number | undefined | null, precision = 1): string
   return `${value.toFixed(precision)}%`
 }
 
+/**
+ * A share of 0–1 in whole percent, as a ranked list's last column prints it:
+ * a sliver is "<1%" rather than nothing, and a near-whole ">99%" rather than
+ * all of it.
+ */
+export function sharePercent(share: number): string {
+  if (share <= 0) return "0%"
+  if (share >= 1) return "100%"
+  const whole = Math.round(share * 100)
+  if (whole === 0) return "<1%"
+  if (whole === 100) return ">99%"
+  return `${whole}%`
+}
+
+/*
+ * Figures are written in one style, en-US: digits grouped with a comma and a
+ * point for the decimal. The database pages pinned it while other pages took
+ * the browser's locale, so a German browser read "1.204" keys beside "1,204"
+ * collections. A dashboard's figures are read beside a terminal's, which
+ * prints them the same way whatever the reader's language.
+ */
+const GROUPED = new Intl.NumberFormat("en-US")
+
+/** A count with its digits grouped: 1204 → "1,204". */
+export function grouped(n: number): string {
+  return GROUPED.format(n)
+}
+
+const COMPACT_UNITS: [number, string][] = [
+  [1e12, "T"],
+  [1e9, "B"],
+  [1e6, "M"],
+  [1e3, "k"],
+]
+
+/**
+ * A count in the width of a chip or a tile: 1,204 → "1.2k", 60,000 → "60k",
+ * 16,103,894 → "16.1M". Thousands are a lower-case k, the SI prefix, and the
+ * larger units capitals, since "m" is a minute; one decimal while the figure
+ * is under a hundred of its unit, none past it. Below `exactBelow` (1,000 by
+ * default, and never less) every digit is written, grouped: a tile that has
+ * room for "9,999" says it rather than "10k".
+ */
+export function compactCount(n: number, opts: { exactBelow?: number } = {}): string {
+  if (!Number.isFinite(n)) return "—"
+  const exactBelow = Math.max(opts.exactBelow ?? 1000, 1000)
+  const size = Math.abs(n)
+  if (size < exactBelow) return grouped(Math.round(n))
+  const sign = n < 0 ? "-" : ""
+  for (let i = 0; i < COMPACT_UNITS.length; i++) {
+    const [unit, suffix] = COMPACT_UNITS[i]
+    if (size < unit) continue
+    const value = size / unit
+    const rounded = value >= 100 ? Math.round(value) : Math.round(value * 10) / 10
+    // 999,960 rounds to "1000k": that is the next unit's 1.
+    if (rounded >= 1000 && i > 0) return `${sign}1${COMPACT_UNITS[i - 1][1]}`
+    return `${sign}${rounded}${suffix}`
+  }
+  return grouped(Math.round(n))
+}
+
 /** Compact duration for uptimes and ages: 3d 4h, 12m 5s. */
 export function duration(seconds: number | undefined | null): string {
   if (seconds === undefined || seconds === null || seconds < 0) return "—"
@@ -55,6 +116,24 @@ export function duration(seconds: number | undefined | null): string {
     if (parts.length === 2) break
   }
   return parts.join(" ")
+}
+
+/**
+ * How long ago an instant was, against `now`, in its largest unit: "14s ago",
+ * "3m ago", "2d ago". The first five seconds read as "just now" rather than as
+ * a counter starting at 0s. Two units ("2m 30s ago") only where a reading's
+ * seconds matter, since the second unit ticks while it is read. An instant a
+ * little ahead of `now` (two clocks) is now too.
+ *
+ * `relativeTime` is the ISO version for a moment either side of now; this is
+ * for an age the page holds as a number, and `<Ago>` keeps it ticking.
+ */
+export function ago(at: number, now: number, opts: { units?: 1 | 2 } = {}): string {
+  const age = Math.max(0, (now - at) / 1000)
+  if (!Number.isFinite(age)) return "—"
+  if (age < 5) return "just now"
+  const words = duration(age)
+  return `${opts.units === 2 ? words : words.split(" ")[0]} ago`
 }
 
 export function relativeTime(iso: string | undefined | null): string {
@@ -150,6 +229,38 @@ export const dayMinuteAt = dateFormatter({
   hour12: false,
 })
 
+/** The start of `at`'s day in the reader's zone, so two instants compare by calendar day. */
+function dayStart(at: Date): number {
+  return new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime()
+}
+
+/**
+ * The heading over a day's group in a feed: "Today", "Yesterday", then "Oct 28"
+ * within this year and "Oct 28, 2025" before it. One ladder for every feed,
+ * so a project's runs and its webhook deliveries name the same day the same
+ * way.
+ */
+export function dayHeading(iso: string, now: number): string {
+  const day = new Date(iso)
+  if (Number.isNaN(day.getTime())) return "—"
+  const today = new Date(now)
+  // Rounded: a day the clocks change on is 23 or 25 hours long.
+  const days = Math.round((dayStart(today) - dayStart(day)) / 86_400_000)
+  if (days === 0) return "Today"
+  if (days === 1) return "Yesterday"
+  return day.getFullYear() === today.getFullYear() ? dayAt(day) : calendarDateFormat(day)
+}
+
+/**
+ * A date as a `datetime-local` input holds it: the reader's wall-clock time,
+ * to the millisecond, with no zone ("2026-11-15T14:03:07.250"). The input has
+ * no zone of its own, so the offset is taken off before the ISO string is cut.
+ */
+export function localInputValue(date: Date): string {
+  const offset = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 23)
+}
+
 export function timestamp(iso: string | undefined | null): string {
   if (!iso) return "—"
   const d = new Date(iso)
@@ -202,6 +313,19 @@ export function shortSha(sha: string | undefined | null, length = 7): string {
   return sha.slice(0, length)
 }
 
+/**
+ * An image or content digest as the product shows it: the first 12 hex
+ * characters, with no "sha256:" in front and no ellipsis after. Twelve is what
+ * Docker prints for an image id, so the same image reads the same here and in
+ * `docker images`. A value that is not a digest (a tag, a release name) is cut
+ * to the same width. Commits are `shortSha`.
+ */
+export function shortDigest(value?: string | null): string {
+  if (!value) return ""
+  const hex = /^[a-z0-9]+:([0-9a-f]{12,})$/i.exec(value)?.[1] ?? value
+  return hex.slice(0, 12)
+}
+
 export function truncateMiddle(value: string, max = 48): string {
   if (value.length <= max) return value
   const half = Math.floor((max - 1) / 2)
@@ -219,7 +343,7 @@ export function truncateMiddle(value: string, max = 48): string {
  * table of exceptions.
  */
 export function plural(n: number, singular: string, many?: string): string {
-  return `${n.toLocaleString()} ${n === 1 ? singular : (many ?? singular + "s")}`
+  return `${grouped(n)} ${n === 1 ? singular : (many ?? singular + "s")}`
 }
 
 /**

@@ -22,14 +22,12 @@ import {
 import type { SiteChip } from "@/components/proxy/site-filters"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { upstreamLabel, upstreamTone } from "@/components/proxy/upstream-health"
-import { plural } from "@/lib/format"
+import { compactCount, plural } from "@/lib/format"
 import type { Certificate, SiteUpstreamHealth, SitesTraffic, VHost } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /** How many things each block names; the rest are counted at its strip's end. */
 const SHOWN = 5
-
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
 /**
  * A site as the things it is made of: the application it hands requests to,
@@ -160,7 +158,7 @@ function TrafficBlock({
       trail
       rest={rest}
       restLabel="Other sites"
-      format={(value) => `${compact.format(value)} requests`}
+      format={(value) => `${compactCount(value)} requests`}
       figure={shares && <HeadFigure value={total} word="requests in the hour" />}
       message={
         shares ? (
@@ -208,8 +206,8 @@ function TrafficBlock({
               {(reading.errorRate * 100).toFixed(1)}% 5xx
             </span>
           ),
-          figure: compact.format(reading.requests),
-          label: `${vhost.name} ${compact.format(reading.requests)} requests`,
+          figure: compactCount(reading.requests),
+          label: `${vhost.name} ${compactCount(reading.requests)} requests`,
           title: `${reading.requests.toLocaleString()} requests in the last hour`,
           href: { label: `Open ${vhost.name}`, to: sitePath(vhost.name) },
         }

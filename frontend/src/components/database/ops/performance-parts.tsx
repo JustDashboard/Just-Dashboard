@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowDown, ArrowUp } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -22,6 +22,7 @@ import { SESSION_STATES } from "@/components/database/ops/performance-activity"
 import type { DbSessionStatus } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { statusLabel } from "@/components/database/shell/status"
+import { useElapsed } from "@/hooks/use-elapsed"
 
 /**
  * The small pieces the Performance views share, so that a name, a statement,
@@ -90,15 +91,6 @@ export function ViewRead<T>({
 /** How long a wait is before the page says it is one. */
 const PATIENCE_MS = 4000
 
-function useElapsed(since: number): number {
-  const [now, setNow] = useState(since)
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  return Math.max(0, now - since)
-}
-
 /**
  * A read that has not answered in the time a read takes. It names what is
  * being waited for and counts, so a skeleton that stays is never mistaken for
@@ -114,7 +106,7 @@ export function StillWaiting({
   locking?: boolean
 }) {
   const { engine } = useDatabase()
-  const waited = useElapsed(since)
+  const waited = useElapsed(since, 1000)
   if (waited < PATIENCE_MS) return null
   return (
     <div role="status" className="animate-rise space-y-2 pb-4 group-data-[plain]/panel:pt-4">

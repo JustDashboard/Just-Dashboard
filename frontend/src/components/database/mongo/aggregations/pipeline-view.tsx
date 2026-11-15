@@ -39,7 +39,7 @@ import {
 import { Input } from "@/components/ui/input"
 import type { Verb } from "@/components/verbs"
 import { useGridLayout } from "@/components/database/grid"
-import { EngineMark, downloadText } from "@/components/database/kit"
+import { EngineMark } from "@/components/database/kit"
 import {
   STAGES,
   enabledStages,
@@ -84,6 +84,7 @@ import {
 import { CollectionMark, collectionKind } from "@/components/database/mongo/kinds"
 import type { MongoAggregateResult, MongoDoc } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
+import { saveText } from "@/lib/download"
 
 const LIMITS = ["100", "500", "1000"] as const
 type Limit = (typeof LIMITS)[number]
@@ -357,7 +358,7 @@ export function PipelineView({
                 Copy as shell text
               </DropdownMenuItem>
               <DropdownMenuItem
-                onSelect={() => downloadText(`${shell}\n`, `${collection}-pipeline.js`)}
+                onSelect={() => saveText(`${collection}-pipeline.js`, `${shell}\n`)}
               >
                 <Download className="size-3.5" />
                 Download as a file

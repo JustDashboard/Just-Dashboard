@@ -21,9 +21,10 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import type { Standing } from "@/components/database/query/editor"
 import { riskWord, type Gate } from "@/components/database/query/gate"
 import { useKeyNames } from "@/components/database/query/keys"
-import { ROW_LIMITS, useElapsed } from "@/components/database/query/results"
+import { ROW_LIMITS } from "@/components/database/query/results"
 import { elapsedText, type Run } from "@/components/database/query/run-model"
 import type { Risk } from "@/components/database/query/types"
+import { useElapsed } from "@/hooks/use-elapsed"
 
 const LIMITS = ROW_LIMITS.map((limit) => ({
   value: String(limit),

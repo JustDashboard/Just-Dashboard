@@ -163,7 +163,7 @@ test("totals, checks and evidence read as sentences", async () => {
     await import("./reading")
   expect(
     totalWord({ packets: 1200, bytes: 0, since: "2026-10-03", resets: 2 }, () => "3 Oct"),
-  ).toBe("1.2K packets since 3 Oct, across 2 reloads")
+  ).toBe("1.2k packets since 3 Oct, across 2 reloads")
   expect(totalWord({ packets: 5, bytes: 0, since: null, resets: 0 }, () => "")).toBe("5 packets")
   expect(totalWord(undefined, () => "")).toBeUndefined()
   expect(checkWord({ status: "refused", target: "10.0.0.5:80" })).toBe(

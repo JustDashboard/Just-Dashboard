@@ -25,7 +25,6 @@ import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { NetworkReadWarning } from "@/components/network/read-warning"
-import { RX, TX } from "@/components/network/rate-pair"
 import { containerHref, containerWindow, trafficHref } from "./address"
 import {
   BackLink,
@@ -39,27 +38,15 @@ import {
 } from "./detail-shell"
 import { FactGroups, FactRowHeld } from "./facts"
 import { WINDOW_WORDS, type RecordedWindow } from "./span"
+import { decodeSegment } from "@/lib/route-params"
+import { axisRate, formatRate, inOutSeries, RX, TX } from "@/components/in-out"
 
-const SERIES = [
-  { key: "rx", label: "In", color: RX, kind: "area" as const },
-  { key: "tx", label: "Out", color: TX, kind: "area" as const },
-]
-const formatRate = (value: number) => rate(value)
-const axisRate = (value: number) => `${bytes(value, 0)}/s`
+const SERIES = inOutSeries()
 const WINDOW_OPTIONS = (["1h", "6h", "24h", "7d"] as const).map((value) => ({
   value,
   label: value,
 }))
 const CHART_HEIGHT = 220
-
-function decoded(segment: string | undefined) {
-  if (!segment) return null
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
-}
 
 /**
  * One container's traffic, as a place of its own: its chart over a window at
@@ -78,7 +65,7 @@ export function ContainerTrafficPage() {
   const params = useParams<{ name: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decoded(params.name)
+  const name = decodeSegment(params.name) || null
   const range = containerWindow(search)
   const [query, setQuery] = useSessionState("network.traffic.containers.query", "")
   const list = usePoll<ContainerTraffic>(

@@ -59,6 +59,7 @@ import { PortPath } from "@/components/proxy/port-path"
 import { socketMenuLabel, useSocketVerbs } from "@/components/proxy/port-verbs"
 import { useProxy } from "@/components/proxy/proxy-context"
 import type { Reading } from "@/components/proxy/freshness"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["reach", "owner", "clients", "history"] as const
 type Tab = (typeof TABS)[number]
@@ -96,7 +97,7 @@ export function PortPage() {
   const params = useParams<{ port: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const key = useMemo(() => parsePortKey(decodeURIComponent(params.port ?? "")), [params.port])
+  const key = useMemo(() => parsePortKey(decodeSegment(params.port)), [params.port])
   const requested = search.get("tab")
   const [remembered, remember] = useViewState<string>("proxy.port.tab", "reach")
   const [chosen, setChosen] = useState<string>(requested ?? remembered)

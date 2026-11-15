@@ -1980,7 +1980,7 @@ test("tables show what the engine keeps, flag what is overdue, and run its maint
   ])
   // A vacuum is overdue past the advisor's own line; a table with rows was never analysed.
   const overdue = tables.getByRole("row", { name: /sessions_log/ })
-  await expect(overdue.locator(".text-warning")).toContainText("40K · 67%")
+  await expect(overdue.locator(".text-warning")).toContainText("40k · 67%")
   await expect(
     tables.getByRole("row", { name: /import_staging/ }).locator(".text-warning"),
   ).toHaveText("never")
@@ -2589,7 +2589,7 @@ test("an engine that keeps run times gives the history its percentiles and the r
   await expect(recorded.getByText("99 in 100 within", { exact: true }).first()).toBeVisible()
   // The percentiles are said in words on the line of its figures.
   await expect(recorded.locator("[data-slot=figure-line]")).toContainText("99 in 100 inside 487 ms")
-  await expect(recorded).toContainText("40K for each returned")
+  await expect(recorded).toContainText("40k for each returned")
 })
 
 test("a file has no statement history to offer", async ({ page }) => {

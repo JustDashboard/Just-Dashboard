@@ -6,16 +6,7 @@ import { useCopy } from "@/hooks/use-copy"
 import { CodeEditor } from "@/components/code-editor"
 import { Pane, PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
-
-/** Hands the reader a text as a file of the given name. */
-export function downloadText(text: string, filename: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }))
-  const link = document.createElement("a")
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
-}
+import { saveText } from "@/lib/download"
 
 /**
  * Code to read and take away: a generated schema, a table's definition, a
@@ -61,7 +52,7 @@ export function CodeView({
           Copy
         </Button>
         {filename && (
-          <Button size="xs" variant="ghost" onClick={() => downloadText(code, filename)}>
+          <Button size="xs" variant="ghost" onClick={() => saveText(filename, code)}>
             <Download />
             Download
           </Button>

@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { localInputValue, plural } from "@/lib/format"
 import type {
   LogLine,
   LogRetention,
@@ -59,6 +59,7 @@ import { tabClasses } from "@/components/tabs"
 import { ChipCount, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Pane } from "@/components/panel"
+import { useDebounced } from "@/hooks/use-debounced"
 
 /** How many lines the live pane holds before the oldest fall off the top. */
 const LIVE_BUFFER = 4000
@@ -68,12 +69,6 @@ const TAIL_LINES = 500
 
 /** The most keys one search may rank (`facets=`), the server's limit. */
 const FACET_LIMIT = 12
-
-/** datetime-local wants the browser's own clock, not an ISO string in UTC. */
-function toLocalInput(date: Date) {
-  const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 23)
-}
 
 /** The presets the time window offers; a custom span is the popover's own fields. */
 const WINDOW_PRESETS = TIME_RANGES.filter((r) => r.id !== "custom")
@@ -368,7 +363,11 @@ export function LogWorkspace(props: WorkspaceProps) {
   }
   const pickSpan = (from: Date, to: Date) => {
     props.onCustomRange(from, to)
-    const at = { range: "custom" as const, since: toLocalInput(from), until: toLocalInput(to) }
+    const at = {
+      range: "custom" as const,
+      since: localInputValue(from),
+      until: localInputValue(to),
+    }
     const left = leaveLive()
     const target = left ? windowTarget : mode
     if (target === "search") search.run(at)
@@ -681,7 +680,11 @@ export function LogWorkspace(props: WorkspaceProps) {
               lens={lensId}
               onZoom={(from, to) => {
                 props.onCustomRange(from, to)
-                search.run({ range: "custom", since: toLocalInput(from), until: toLocalInput(to) })
+                search.run({
+                  range: "custom",
+                  since: localInputValue(from),
+                  until: localInputValue(to),
+                })
               }}
             />
           )}
@@ -776,19 +779,6 @@ function requirementOf(lens: LogLens | undefined, filter: LogFilterState) {
     (view) =>
       view.requires && Object.keys(fields).length > 0 && fieldsEqual(fields, view.fields ?? {}),
   )?.requires
-}
-
-function useDebounced<T>(value: T, delay: number): T {
-  const [settled, setSettled] = useState(value)
-  const key = JSON.stringify(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), delay)
-    return () => clearTimeout(timer)
-    // The value is an object rebuilt on every keystroke, so the identity is
-    // useless as a dependency and its content is what actually changed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, delay])
-  return settled
 }
 
 /**

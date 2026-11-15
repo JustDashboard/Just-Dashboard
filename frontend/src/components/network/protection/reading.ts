@@ -14,6 +14,7 @@ import type {
 import type { Tone } from "@/components/tone"
 import { countryName } from "@/lib/countries"
 import { portProduct } from "@/components/product-logo"
+import { compactCount } from "@/lib/format"
 
 /**
  * What a limit, a blocklist, a trusted address and a kernel setting say about
@@ -316,10 +317,6 @@ export function coverageWord(c: BlocklistCoverage | undefined) {
     )
   }
   return parts.join(" · ") || undefined
-}
-
-function compactCount(n: number) {
-  return Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n)
 }
 
 /** The expiries the exception and trusted editors offer. */

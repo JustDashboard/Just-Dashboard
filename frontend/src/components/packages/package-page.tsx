@@ -37,12 +37,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import {
-  PACKAGE_TABS,
-  packageHref,
-  packageName,
-  type PackageTab,
-} from "@/components/packages/inventory"
+import { PACKAGE_TABS, packageHref, type PackageTab } from "@/components/packages/inventory"
 import { PackageLogView } from "@/components/packages/log-view"
 import {
   VersionTo,
@@ -62,6 +57,7 @@ import {
   needsOf,
 } from "@/components/packages/package-views"
 import { usePackageFilter } from "@/components/packages/use-package-filter"
+import { decodeSegment } from "@/lib/route-params"
 
 const BACK = (
   <Link
@@ -114,7 +110,7 @@ export function PackagePage() {
   const params = useParams<{ name: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = packageName(params.name)
+  const name = decodeSegment(params.name)
   const requested = search.get("tab")
   const [remembered, remember] = useViewState<string>("packages.page.tab", "overview")
   const [chosen, setChosen] = useState<string>(requested ?? remembered)

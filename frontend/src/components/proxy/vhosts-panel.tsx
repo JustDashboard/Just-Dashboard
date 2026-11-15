@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { ArrowRight, CloudUpload, Download, Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { bytes, plural } from "@/lib/format"
-import { downloadText } from "@/lib/metrics/export"
+import { bytes, compactCount, plural } from "@/lib/format"
 import { ApiError, del, get, post } from "@/lib/api"
 import type {
   Certificate,
@@ -140,6 +139,7 @@ import {
 import { isDisabled, sharedNames } from "@/components/proxy/site-order"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { saveText } from "@/lib/download"
 
 /** What a bulk change is called while it runs and once it has landed. */
 const BULK = {
@@ -165,8 +165,6 @@ const CHIP_TONE: Partial<Record<SiteChip, string>> = {
 
 /** A card's identity in the list: two entries may share a name across layouts. */
 const siteKey = (v: VHost) => `${v.kind}:${v.layout ?? ""}:${v.name}`
-
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
 /** nginx's own words about a change, kept for the operator who asks to see them. */
 type NginxOutput = { title: string; output: string }
@@ -1050,7 +1048,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         })),
       )
       const at = new Date()
-      downloadText(
+      saveText(
         `nginx-sites-${at.toISOString().slice(0, 10)}.conf`,
         exportBundle(files, at),
         "text/plain",
@@ -1247,7 +1245,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
             {hour !== undefined && (
               <>
                 <FactDot />
-                <span className="numeric">{compact.format(hour)} requests in the hour</span>
+                <span className="numeric">{compactCount(hour)} requests in the hour</span>
               </>
             )}
             {counts.disabled > 0 && (
@@ -1856,7 +1854,7 @@ function HourMeter({
               : "text-foreground",
         )}
       >
-        {compact.format(hour.requests)}
+        {compactCount(hour.requests)}
       </span>
       <span>req/h</span>
     </span>

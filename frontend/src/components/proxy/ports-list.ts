@@ -10,6 +10,7 @@ import {
   type ReachGroup,
   type Socket,
 } from "@/components/proxy/ports"
+import { ago } from "@/lib/format"
 
 /**
  * How the ports page narrows, orders and hands over its rows: the search
@@ -416,14 +417,13 @@ export function groupPids(group: SocketGroup): number[] {
   return [...new Set(group.sockets.flatMap(socketPids))].sort((a, b) => a - b)
 }
 
-/** "8s ago", "3m ago": how old a reading is, to the second while that matters. */
+/**
+ * "8s ago", "3m ago": how old a reading is, given its age in milliseconds.
+ *
+ * @deprecated use `ago(at, now)` from lib/format, or `<Ago>` (components/ago).
+ */
 export function sinceWords(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000))
-  if (seconds < 5) return "just now"
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  return `${Math.floor(minutes / 60)}h ago`
+  return ago(0, ms)
 }
 
 /** The sockets behind rows, each folded pair as the two sockets the host lists. */

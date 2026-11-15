@@ -12,7 +12,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { bytes, duration, percent, plural, timestamp } from "@/lib/format"
+import { bytes, compactCount, duration, percent, plural, timestamp } from "@/lib/format"
 import type { ProcessInspect, ProcessLink, ProcessRow, ProcessTree } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ShellWords } from "@/components/deploy/run-evidence"
@@ -862,9 +862,8 @@ function HowItIsScheduled({
 }
 
 /** A counter that runs to millions, as a figure that fits its cell: 1.2M. */
-const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
 function count(value: number) {
-  return value < 10_000 ? value.toLocaleString("en-US") : COMPACT.format(value)
+  return compactCount(value, { exactBelow: 10_000 })
 }
 
 const MEMORY_COLORS: Record<string, string> = {

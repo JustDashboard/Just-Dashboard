@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, Crosshair, Globe, RefreshClockwise, Wrench } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural, rate } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -49,9 +49,11 @@ import {
   type LiveTraffic,
 } from "@/components/network/use-live-traffic"
 import { deviceHref } from "@/components/network/interfaces/device-facts"
+import { axisRate, formatRate, RX, TX } from "@/components/in-out"
 
-const IN = "var(--chart-5)"
-const OUT = "var(--chart-2)"
+// In and out are the network chart's two colours, as every in/out pair draws them.
+const IN = RX
+const OUT = TX
 const TUNNELS = "var(--chart-4)"
 const CONTAINERS = "var(--chart-3)"
 
@@ -61,9 +63,6 @@ const SERIES = [
   { key: "tunnels", label: "Tunnels", color: TUNNELS, kind: "line" as const },
   { key: "containers", label: "Containers", color: CONTAINERS, kind: "line" as const },
 ]
-
-const formatRate = (value: number) => rate(value)
-const axisRate = (value: number) => `${bytes(value, 0)}/s`
 
 /** What the picture drew at the last visit, so the grey page is the page's own shape. */
 type Shape = { outside: number; inside: number; facts: number }

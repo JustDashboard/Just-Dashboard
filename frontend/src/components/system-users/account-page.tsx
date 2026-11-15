@@ -27,7 +27,6 @@ import { RootPanel } from "@/components/system-users/account-root"
 import { AccountSettings } from "@/components/system-users/account-settings"
 import { SignInPanel } from "@/components/system-users/account-sign-in"
 import {
-  decodeSegment,
   StepArrows,
   useAddressTab,
   ViewTabs,
@@ -47,6 +46,7 @@ import { bytes, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { SystemUser, SystemUserDetail } from "@/lib/types"
 import { useSessionState, useViewState } from "@/lib/view-state"
+import { decodeSegment } from "@/lib/route-params"
 
 type AccountContextValue = {
   user: SystemUserDetail

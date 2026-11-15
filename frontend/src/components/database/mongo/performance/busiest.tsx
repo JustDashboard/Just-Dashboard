@@ -17,6 +17,7 @@ import {
 } from "@/components/database/mongo/performance/activity"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { micros, perSecond } from "@/components/database/redis/performance/samples"
+import { grouped } from "@/lib/format"
 
 /** How many collections are watched: each is one small read every time. */
 const WATCHED = 8
@@ -24,8 +25,6 @@ const WATCHED = 8
 const EVERY_MS = 10_000
 
 type Reading = Readonly<Record<string, CollectionCounters | null>>
-
-const grouped = (n: number) => n.toLocaleString("en-US")
 
 /**
  * Which collections the server is working on: reads and writes a second,

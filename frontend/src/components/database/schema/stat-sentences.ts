@@ -1,3 +1,4 @@
+import { grouped } from "@/lib/format"
 /**
  * What an engine has counted of one table, said as sentences.
  *
@@ -27,7 +28,6 @@ export type StatFigures = {
 }
 
 const kept = (value: number | undefined): value is number => value !== undefined && value >= 0
-const grouped = (value: number) => value.toLocaleString("en-US")
 const figure = (value: number) => ({ figure: grouped(value) })
 
 /** A share as a reader says it: none under half a percent is "under 1%", never "0%". */

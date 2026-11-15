@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { bytes, duration, rate } from "@/lib/format"
+import { bytes, duration, grouped, rate } from "@/lib/format"
 import type { PollState } from "@/hooks/use-poll"
 import { ChartPanel } from "@/components/chart-panel"
 import { ChartReadings, SeriesReading } from "@/components/metrics/chart-reading"
@@ -70,8 +70,6 @@ const countLabel = (value: number) =>
   Number.isInteger(value) ? value.toLocaleString("en-US") : value.toFixed(2)
 const wholeLabel = (value: number) => Math.round(value).toLocaleString("en-US")
 const microsLabel = (value: number) => micros(value)
-
-const grouped = (n: number) => n.toLocaleString("en-US")
 
 /**
  * The server's counters as charts, each headed by its newest reading, and the

@@ -1,6 +1,6 @@
 import type { DbExportFormat } from "@/lib/types"
 import type { DbExportState } from "@/components/database/data/types"
-import { grouped } from "@/components/database/data/view"
+import { grouped } from "@/lib/format"
 
 /**
  * How an export ended, read from the signs the server leaves.

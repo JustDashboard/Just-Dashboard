@@ -21,7 +21,6 @@ import {
   DEVICE_TABS,
   behindEverything,
   deviceHref,
-  deviceName,
   deviceViews,
   groupDevices,
   type DeviceTab,
@@ -34,6 +33,7 @@ import { DeviceSettings } from "./device-settings"
 import { DeviceTraffic } from "./device-traffic"
 import { NamespaceSheet, type NamespaceTarget } from "./namespace-sheet"
 import { useDeviceFilter, useDevices } from "./use-devices"
+import { decodeSegment } from "@/lib/route-params"
 
 const LABEL: Record<DeviceTab, string> = {
   traffic: "Traffic",
@@ -71,7 +71,7 @@ export function DevicePage() {
   const router = useRouter()
   const { can } = useAuth()
   const admin = can("system.admin")
-  const name = deviceName(params.name)
+  const name = decodeSegment(params.name)
   const requested = search.get("tab") ?? "traffic"
   const tab: DeviceTab = (DEVICE_TABS as readonly string[]).includes(requested)
     ? (requested as DeviceTab)

@@ -15,7 +15,6 @@ import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { useNow } from "@/hooks/use-now"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { DiagnosticList, type ProxyPlace } from "@/components/proxy/diagnostic-list"
 import { engineKind, type ProxyStatus } from "@/components/proxy/proxy-context"
@@ -23,11 +22,11 @@ import { engineProduct } from "@/components/proxy/marks"
 import { openableFile } from "@/components/proxy/engine-lifecycle"
 import {
   engineRoots,
-  testedLabel,
   testMeaning,
   testVerdict,
   type TestOrigin,
 } from "@/components/proxy/config-test"
+import { Ago } from "@/components/ago"
 
 /** A test the panel shows: its result, when it began, and what ran it. */
 type Shown = { validation: ProxyValidation; checkedAt: number; origin: TestOrigin }
@@ -258,7 +257,14 @@ function TestPanel({
       description={`What ${engine}'s own config test says about the configuration on disk.`}
       footer={
         <>
-          {result && <TestedAt checkedAt={result.checkedAt} live={open} />}
+          {result && (
+            <Ago
+              at={result.checkedAt}
+              verb="tested"
+              live={open}
+              className="mr-auto text-hint text-muted-foreground"
+            />
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -341,15 +347,5 @@ function TestResult({
         </Disclosure>
       )}
     </div>
-  )
-}
-
-/** "tested 14s ago", kept current while the panel is open. */
-function TestedAt({ checkedAt, live }: { checkedAt: number; live: boolean }) {
-  const now = useNow(1000, live)
-  return (
-    <span className="mr-auto text-hint text-muted-foreground">
-      {testedLabel(checkedAt, Math.max(now, checkedAt))}
-    </span>
   )
 }

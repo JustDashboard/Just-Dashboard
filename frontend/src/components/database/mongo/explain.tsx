@@ -21,13 +21,14 @@ import { tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 import { useEffect, useMemo, useState } from "react"
+import { grouped } from "@/lib/format"
 
 /** What is explained: a find as the query bar states it, or a pipeline. */
 export type ExplainSubject =
   | { kind: "find"; spec: MongoFindSpec; statement: string }
   | { kind: "pipeline"; pipeline: string; statement: string }
 
-const grouped = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US"))
+const figure = (n: number | null) => (n === null ? "—" : grouped(n))
 
 /** Every node of a plan with how deep it sits, the last thing done first. */
 function flatten(node: MongoPlanNode, depth = 0): { node: MongoPlanNode; depth: number }[] {
@@ -147,10 +148,10 @@ function Explain({
 
           {summary?.executed && (
             <p className="text-body text-muted-foreground">
-              Returned {grouped(summary.returned)} documents
-              {summary.timeMs !== null ? ` in ${grouped(summary.timeMs)} ms (server estimate)` : ""}
-              ; examined {grouped(summary.docsExamined)} documents and{" "}
-              {grouped(summary.keysExamined)} index keys.
+              Returned {figure(summary.returned)} documents
+              {summary.timeMs !== null ? ` in ${figure(summary.timeMs)} ms (server estimate)` : ""};
+              examined {figure(summary.docsExamined)} documents and {figure(summary.keysExamined)}{" "}
+              index keys.
             </p>
           )}
           {summary && (
@@ -272,15 +273,15 @@ function PlanRow({
             </span>
           )}
         </div>
-        <span className="numeric w-20 shrink-0 text-right text-xs">{grouped(node.returned)}</span>
+        <span className="numeric w-20 shrink-0 text-right text-xs">{figure(node.returned)}</span>
         <span className="numeric w-20 shrink-0 text-right text-xs max-sm:hidden">
-          {grouped(node.docsExamined)}
+          {figure(node.docsExamined)}
         </span>
         <span className="numeric w-16 shrink-0 text-right text-xs max-sm:hidden">
-          {grouped(node.keysExamined)}
+          {figure(node.keysExamined)}
         </span>
         <span className="numeric w-14 shrink-0 text-right text-xs text-muted-foreground">
-          {grouped(node.timeMs)}
+          {figure(node.timeMs)}
         </span>
       </div>
       {executed && node.docsExamined !== null && node.docsExamined > 0 && (
@@ -289,7 +290,7 @@ function PlanRow({
             size="thin"
             value={share * 100}
             tone={scan ? "warning" : "default"}
-            label={`${node.stage} examined ${grouped(node.docsExamined)} documents`}
+            label={`${node.stage} examined ${figure(node.docsExamined)} documents`}
           />
         </div>
       )}

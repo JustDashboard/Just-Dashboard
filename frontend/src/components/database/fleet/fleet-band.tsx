@@ -1,6 +1,6 @@
 "use client"
 
-import { bytes, plural, relativeTime } from "@/lib/format"
+import { bytes, compactCount, plural, relativeTime } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { BarReading } from "@/components/bar-reading"
@@ -18,8 +18,6 @@ import { EngineGlyph } from "@/components/database/kit"
 
 /** How many databases a block names; the rest are counted at its strip's end. */
 const SHOWN = 5
-
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
 /**
  * The fleet read three ways under the identity line, each block a question
@@ -208,7 +206,7 @@ function SessionsBlock({
           ),
           figure: (
             <>
-              {compact.format(value)}
+              {compactCount(value)}
               <span className="ml-1 font-normal text-muted-foreground">{word}</span>
             </>
           ),

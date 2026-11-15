@@ -47,16 +47,6 @@ export function engineHref(id: string, tab: EngineTab = "overview", change?: str
   return text ? `${path}?${text}` : path
 }
 
-/** The route's segment as a connection id. */
-export function engineIdOf(segment: string | undefined) {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
-}
-
 /** The engine before or after one in the list, for Alt+↑ and Alt+↓. */
 export function engineSibling<T extends { id: string }>(
   engines: T[],

@@ -39,6 +39,7 @@ import { RunComparison } from "./run-comparison"
 import { RunHistory } from "./run-history"
 import { RunDetails, RunResult } from "./run-inspector"
 import { RunChips, runHref, useRunList } from "./saved-runs"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["result", "compare", "history", "details"] as const
 type Tab = (typeof TABS)[number]
@@ -63,7 +64,7 @@ export function RunPage() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const params = useParams<{ id: string }>()
-  const id = params.id ? decodeURIComponent(params.id) : ""
+  const id = decodeSegment(params.id)
   const search = useSearchParams()
   const router = useRouter()
   const requested = search.get("tab")

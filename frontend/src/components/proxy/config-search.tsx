@@ -15,18 +15,17 @@ import { EmptyNote, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Segments } from "@/components/segments"
-import { useNow } from "@/hooks/use-now"
 import { DiagnosticList } from "@/components/proxy/diagnostic-list"
 import { openableFile, refusalOf } from "@/components/proxy/engine-lifecycle"
 import {
   fileLines,
   MAX_MATCHES,
-  readLabel,
   relativePath,
   searchEffective,
   type SearchMatch,
   type SearchMode,
 } from "@/components/proxy/config-tree"
+import { Ago } from "@/components/ago"
 
 const MODES: { value: SearchMode; label: string }[] = [
   { value: "text", label: "Text" },
@@ -87,7 +86,9 @@ export function EffectiveConfigView({
         />
         <Segments label="Search by" value={mode} options={MODES} onChange={setMode} />
         <span className="flex items-center gap-1 sm:ml-auto">
-          {config && !reading && <ReadAt at={Date.parse(config.checkedAt)} />}
+          {config && !reading && (
+            <Ago at={config.checkedAt} verb="read" className="text-hint text-muted-foreground" />
+          )}
           <Button size="xs" variant="ghost" onClick={readAgain} pending={reading}>
             <RefreshClockwise />
             {reading ? "Reading…" : "Read again"}
@@ -252,15 +253,5 @@ function MatchRow({
         </>
       }
     />
-  )
-}
-
-/** "read 12s ago", kept current. */
-function ReadAt({ at }: { at: number }) {
-  const now = useNow(5000)
-  return (
-    <span className="numeric text-hint text-muted-foreground">
-      {readLabel(at, Math.max(now, at))}
-    </span>
   )
 }

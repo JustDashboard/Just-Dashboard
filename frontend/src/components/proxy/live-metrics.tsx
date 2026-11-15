@@ -4,7 +4,7 @@ import { useId, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, FileText, Warning } from "@/components/icons"
 import { ApiError, errorMessage, get, put } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
+import { bytes, compactCount, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { ProxyMetrics } from "@/lib/proxy/types-metrics"
 import type { SiteTrafficReading } from "@/lib/types"
@@ -32,7 +32,7 @@ import {
   readingsStopped,
   type MetricsSeries,
 } from "@/components/proxy/live-metrics-series"
-import { compactCount, edgeTraffic, errorRateTone, share } from "@/components/proxy/site-traffic"
+import { edgeTraffic, errorRateTone, share } from "@/components/proxy/site-traffic"
 
 /**
  * Module constants: `ChartPanel` is memoised on its props, and a series array

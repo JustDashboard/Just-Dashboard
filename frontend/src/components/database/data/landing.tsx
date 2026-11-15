@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { bytes } from "@/lib/format"
+import { bytes, compactCount } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { RankList } from "@/components/rank-list"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,6 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { KindGlyph, ROW_GROUPS, ROW_OBJECT_KINDS } from "@/components/database/data/kinds"
 import { schemaSummary } from "@/components/database/data/summary"
 import type { DbCatalog } from "@/components/database/data/types"
-import { compactCount } from "@/components/database/data/view"
 import { FactsLine } from "@/components/database/workbench/facts-line"
 import { schemaFacts } from "@/components/database/workbench/table-facts"
 

@@ -1,7 +1,6 @@
 "use client"
 
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
-import { grouped } from "@/components/database/data/view"
 import type { SectionId } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
 import { CollectionMark, collectionKind } from "@/components/database/mongo/kinds"
@@ -13,7 +12,7 @@ import { EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import Link from "next/link"
 
 /** How many collections the ranked list draws; the rail has all of them. */

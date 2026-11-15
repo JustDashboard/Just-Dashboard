@@ -24,7 +24,7 @@ import {
   type MetricsWindow,
   type StorageSeriesMeta,
 } from "@/lib/metrics/range"
-import { downloadText, rowsToCsv } from "@/lib/metrics/export"
+import { rowsToCsv } from "@/lib/metrics/export"
 import {
   formatDelta,
   relativeChange,
@@ -72,6 +72,7 @@ import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { saveText } from "@/lib/download"
 
 /*
  * A series' hue is the measurement's, never its position on a chart (§10).
@@ -320,7 +321,11 @@ export default function MetricsPage() {
 
   const exportCsv = () => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
-    downloadText(`${host.hostname}-metrics-${windowLabel(win)}-${stamp}.csv`, rowsToCsv(rows))
+    saveText(
+      `${host.hostname}-metrics-${windowLabel(win)}-${stamp}.csv`,
+      rowsToCsv(rows),
+      "text/csv",
+    )
   }
 
   return (

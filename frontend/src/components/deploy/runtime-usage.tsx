@@ -5,7 +5,7 @@ import { Download, Pause, Play } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { bytes, percent, rate } from "@/lib/format"
 import { bucketLive, containerRateLabel, peakOf } from "@/lib/container-usage"
-import { downloadText, rowsToCsv } from "@/lib/metrics/export"
+import { rowsToCsv } from "@/lib/metrics/export"
 import { windowLabel, type ContainerRow } from "@/lib/metrics/range"
 import type { ContainerStats, MetricEvent } from "@/lib/types"
 import { useContainerFrame, useContainerLive } from "@/hooks/use-container-live"
@@ -26,6 +26,7 @@ import { TileTrend } from "@/components/sparkline"
 import type { Series } from "@/components/metrics/metric-chart"
 import { HUE, LiveBytes, LiveFigure, SeriesKey } from "@/components/live-figure"
 import { useContainerScales, useContainerUsage } from "@/components/docker/container-usage"
+import { saveText } from "@/lib/download"
 
 // The Metrics page's colours and words for the same measurements (§10), so a
 // container's network is the line the host's network is. Its processes stand
@@ -168,7 +169,7 @@ export function RuntimeUsage({
   const exportCsv = () => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
     const file = `${name}-usage-${windowLabel(controls.window)}-${stamp}.csv`
-    downloadText(file, rowsToCsv(rows))
+    saveText(file, rowsToCsv(rows), "text/csv")
   }
 
   return (

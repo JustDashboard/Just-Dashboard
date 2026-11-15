@@ -19,7 +19,7 @@ import {
   Trash,
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -40,7 +40,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { grouped } from "@/components/database/data/view"
 import { useGridLayout } from "@/components/database/grid"
 import { EngineMark } from "@/components/database/kit"
 import {

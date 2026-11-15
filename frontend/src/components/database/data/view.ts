@@ -216,24 +216,8 @@ export function pageFacts(
   }
 }
 
-/** A count as the foot and the rail print it: digits grouped. */
-export function grouped(n: number): string {
-  return n.toLocaleString("en-US")
-}
-
-/** A row estimate at the rail's width: 1,204 → "1.2k", 60,000 → "60k". */
-export function compactCount(n: number): string {
-  if (n < 1000) return String(n)
-  const units: [number, string][] = [
-    [1e9, "B"],
-    [1e6, "M"],
-    [1e3, "k"],
-  ]
-  for (const [size, suffix] of units) {
-    if (n < size) continue
-    const value = n / size
-    const text = value >= 100 ? String(Math.round(value)) : (Math.round(value * 10) / 10).toString()
-    return `${text}${suffix}`
-  }
-  return String(n)
-}
+/**
+ * @deprecated use `grouped` and `compactCount` from lib/format, which now hold
+ * the count style every page writes (en-US grouping, a lower-case k).
+ */
+export { compactCount, grouped } from "@/lib/format"

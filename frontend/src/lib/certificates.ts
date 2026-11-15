@@ -8,7 +8,8 @@ import type {
   RenewalHealth,
   ServedCertificate,
 } from "@/lib/types"
-import { calendarDate } from "@/lib/format"
+import { calendarDate, plural } from "@/lib/format"
+import type { Verdict } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 
 /**
@@ -399,12 +400,77 @@ export function certSource(cert: Pick<Certificate, "source">): CertSource {
  */
 export type CertState = "unreadable" | "test" | "expired" | "expiring" | "valid"
 
-export function certState(cert: Certificate): CertState {
+export function certState(cert: CertificateFacts): CertState {
   if (cert.error) return "unreadable"
   if (cert.staging) return "test"
   if (cert.expired) return "expired"
   if (cert.expiring) return "expiring"
   return "valid"
+}
+
+/**
+ * What a certificate's words are made from. A proxy `Certificate` is one; a
+ * project's domain, which knows only its state and its days, is adapted to
+ * one by its caller. Without `notAfter` the last day cannot be said in hours.
+ */
+export type CertificateFacts = Pick<
+  Certificate,
+  "daysLeft" | "notAfter" | "expired" | "expiring" | "error" | "staging"
+>
+
+/**
+ * How long a certificate has left, in the unit that reads true: days while
+ * there are two or more, hours in its last day and a half, which "1d" and "0d"
+ * hid ("0d left" on a certificate with ten hours to run). Short is the width
+ * of a status word or a figure ("29d", "10h", "<1h"); long is a sentence's
+ * ("29 days", "10 hours", "under an hour").
+ */
+export function timeLeftWords(
+  cert: Pick<Certificate, "daysLeft" | "notAfter">,
+  { form, now }: { form: "short" | "long"; now: number },
+): string {
+  const short = form === "short"
+  if (cert.daysLeft >= 2) return short ? `${cert.daysLeft}d` : plural(cert.daysLeft, "day")
+  const end = Date.parse(cert.notAfter ?? "")
+  if (!Number.isFinite(end)) {
+    // Days and nothing finer: a project's domain is read as a count of days.
+    if (cert.daysLeft >= 1) return short ? "1d" : "1 day"
+    return short ? "<1d" : "under a day"
+  }
+  const hours = Math.floor((end - now) / 3_600_000)
+  if (hours >= 1) return short ? `${hours}h` : plural(hours, "hour")
+  return short ? "<1h" : "under an hour"
+}
+
+const STATE_WORDS: Record<Exclude<CertState, "expiring" | "valid">, string> = {
+  unreadable: "Unreadable",
+  test: "Test certificate",
+  expired: "Expired",
+}
+
+/**
+ * A certificate's state as the one word every page says, built on `certState`:
+ * "Unreadable", "Test certificate" (browsers refuse it whatever its days, so
+ * it says so before anything about them), "Expired", and otherwise the time it
+ * has left: "29d left" in a status word, "29 days left" in a sentence, and in
+ * its last day the hours ("10h left", "Under an hour left").
+ */
+export function certificateWords(
+  cert: CertificateFacts,
+  { form, now = Date.now() }: { form: "short" | "long"; now?: number },
+): string {
+  const state = certState(cert)
+  if (state !== "expiring" && state !== "valid") return STATE_WORDS[state]
+  const left = `${timeLeftWords(cert, { form, now })} left`
+  return left.charAt(0).toUpperCase() + left.slice(1)
+}
+
+/** The verdict a certificate's dot and figures take: refused is critical, the renewal window a warning. */
+export function certificateTone(cert: CertificateFacts): Verdict {
+  const state = certState(cert)
+  if (state === "expiring") return "warning"
+  if (state === "valid") return "ok"
+  return "critical"
 }
 
 const STATE_RANK: Record<CertState, number> = {

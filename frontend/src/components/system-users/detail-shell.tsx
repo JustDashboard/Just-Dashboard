@@ -104,13 +104,3 @@ export function StepArrows({
     </span>
   )
 }
-
-/** The route's segment as a name; decoding a name twice is harmless. */
-export function decodeSegment(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
-}
