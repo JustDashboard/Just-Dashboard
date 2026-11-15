@@ -21,8 +21,11 @@ export function keepMovedFocus(event: Event) {
   if (active && active !== document.body) event.preventDefault()
 }
 
-/** Whether the popover around this content is open, or null outside one of ours. */
-const OpenContext = React.createContext<boolean | null>(null)
+/**
+ * Whether the popover around this content is open, and how many times it has
+ * opened, or null outside one of ours.
+ */
+const OpenContext = React.createContext<{ open: boolean; opens: number } | null>(null)
 
 /**
  * Radix keeps a closed popover's content mounted while it fades out, with its
@@ -39,8 +42,13 @@ function Popover({
 }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
   const [own, setOwn] = React.useState(defaultOpen)
   const shown = open ?? own
+  // Counted during render, from the previous render's state, so the content
+  // takes its new key in the same render that opens it.
+  const [seen, setSeen] = React.useState({ shown, opens: shown ? 1 : 0 })
+  if (seen.shown !== shown) setSeen({ shown, opens: seen.opens + (shown ? 1 : 0) })
+  const state = React.useMemo(() => ({ open: shown, opens: seen.opens }), [shown, seen.opens])
   return (
-    <OpenContext.Provider value={shown}>
+    <OpenContext.Provider value={state}>
       <PopoverPrimitive.Root
         data-slot="popover"
         open={shown}
@@ -65,12 +73,18 @@ function PopoverContent({
   onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
-  const open = React.useContext(OpenContext)
+  const state = React.useContext(OpenContext)
   return (
     <PopoverPrimitive.Portal container={usePortalContainer()}>
       <PopoverPrimitive.Content
+        // A fresh content for every opening. Opened again during its fade-out,
+        // Radix kept the closing content and did not move the focus into it, so
+        // a reader who reopened quickly typed into nothing and Enter chose the
+        // row the last search had left active. A new key mounts a new focus
+        // scope, which takes the focus as a first opening does.
+        key={state?.opens}
         data-slot="popover-content"
-        aria-hidden={open === false ? true : undefined}
+        aria-hidden={state?.open === false ? true : undefined}
         onCloseAutoFocus={(event) => {
           onCloseAutoFocus?.(event)
           if (!event.defaultPrevented) keepMovedFocus(event)
