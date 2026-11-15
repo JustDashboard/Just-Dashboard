@@ -56,7 +56,9 @@ test("an address under no page offers the Overview alone", async ({ page }) => {
     lineHeight: parseFloat(getComputedStyle(node).lineHeight),
   }))
   expect(line.height).toBeLessThanOrEqual(line.lineHeight + 1)
-  await expect(state.getByText("/this-page-does-not-exist", { exact: true })).toBeVisible()
+  await expect(state.locator("p", { hasText: "Nothing is at" })).toContainText(
+    "/this-page-does-not-exist",
+  )
   await expect(state.getByRole("link", { name: /^Open / })).toHaveCount(1)
   await expect(state.getByRole("link", { name: "Back to the Overview" })).toHaveAttribute(
     "data-variant",

@@ -22,8 +22,13 @@ export function WireLaneTitle({
   const words = (
     <>
       {title}
+      {/* A space, not only a margin: a link named "Sessions3" is what a
+          screen reader says without one. */}
       {count !== undefined && count > 0 && (
-        <span className="numeric ml-1.5 font-medium tracking-normal text-faint">{count}</span>
+        <>
+          {" "}
+          <span className="numeric ml-0.5 font-medium tracking-normal text-faint">{count}</span>
+        </>
       )}
     </>
   )
