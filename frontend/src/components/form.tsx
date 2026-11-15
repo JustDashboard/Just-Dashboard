@@ -263,7 +263,9 @@ export function FieldCheck({ met, children }: { met: boolean; children: React.Re
       )}
     >
       <Mark aria-hidden className="size-3" />
-      {children}
+      {/* Its own element, so the visible words are exactly the rule and can be
+          found by them; the state word beside it is for a screen reader. */}
+      <span>{children}</span>
       <span className="sr-only">{met ? ", met" : ", not yet"}</span>
     </span>
   )
