@@ -90,21 +90,30 @@ export function StatusDot({
     </span>
   )
   if (bare) return dot
+  if (size) {
+    // The words sit beside the ring, not in it: a filled round shape with
+    // text inside is the pill the product does not draw, to a reader and to
+    // design-system.spec alike.
+    return (
+      <>
+        <span
+          data-slot="status-dot"
+          aria-hidden
+          className={cn(
+            "absolute -right-0.5 -bottom-0.5 flex items-center justify-center rounded-full bg-background",
+            size.ring,
+            className,
+          )}
+          {...props}
+        >
+          {dot}
+        </span>
+        {words}
+      </>
+    )
+  }
   return (
-    <span
-      data-slot="status-dot"
-      aria-hidden={words ? undefined : true}
-      className={
-        size
-          ? cn(
-              "absolute -right-0.5 -bottom-0.5 flex items-center justify-center rounded-full bg-background",
-              size.ring,
-              className,
-            )
-          : "inline-flex shrink-0"
-      }
-      {...props}
-    >
+    <span data-slot="status-dot" className="inline-flex shrink-0" {...props}>
       {dot}
       {words}
     </span>

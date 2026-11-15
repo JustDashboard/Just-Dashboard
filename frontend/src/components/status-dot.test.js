@@ -101,7 +101,8 @@ describe("StatusDot", () => {
 
   test("label says the state in words a screen reader reads, and only then", () => {
     const html = draw(StatusDot, { tone: "warning", corner: true, label: "Unsaved" })
-    expect(html).toContain('<span class="sr-only">Unsaved</span>')
+    // Beside the ring, not inside it: a filled round shape holding text is a pill.
+    expect(html).toMatch(/<\/span><\/span><span class="sr-only">Unsaved<\/span>$/)
     expect(html).toContain('aria-hidden="true"')
     expect(draw(StatusDot, { tone: "warning", label: "Unsaved" })).toContain(
       '<span class="sr-only">Unsaved</span>',
