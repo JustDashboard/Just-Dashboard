@@ -355,7 +355,11 @@ function ProjectLine({
       </div>
       <div
         className={cn(
-          "flex shrink-0 items-center gap-2 sm:row-span-2",
+          // On a phone a verb's 32px even with no verb in it, so the row is a
+          // control's height whatever the line holds: a loading line has no
+          // verbs yet, and a tile smaller than 32px (an account's mark) left
+          // its row 3px short of the loaded one's.
+          "flex shrink-0 items-center gap-2 max-sm:min-h-8 sm:row-span-2",
           PHONE_VERBS,
           // Important, so the row of its own wins over the line's place for it
           // whichever of the two rules the sheet happens to write last. From

@@ -61,6 +61,8 @@ describe("IdentityHeader", () => {
     const none = draw({ title: "api", facts: "x", state: "ok" })
     expect(empty).not.toContain("max-sm:min-h-(--control-compact)")
     expect(empty).not.toContain("max-sm:mt-1")
+    // The row is a control's height on a phone with no verb in it yet, whatever the tile.
+    expect(empty).toContain("max-sm:min-h-8")
     expect(none).not.toContain("max-sm:mt-1")
     const footed = draw({ title: "api", facts: "x", state: "ok", menu: false, foot: true })
     // The foot's own row is a wide screen's beside a rail, never a phone's.

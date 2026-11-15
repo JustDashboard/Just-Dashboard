@@ -145,7 +145,9 @@ shape while it loads and nothing under the line moves when the words land (D11).
   it is on) is not on a phone's line at all: it takes `max-sm:hidden` at its call site, so the line
   keeps the facts that differ.
 - The row has a control's height and the facts a line's whatever is in them, so a loading line is
-  as tall as the line it becomes, with nothing reserved. `menu={false}`, `command` passed as `true`
+  as tall as the line it becomes, with nothing reserved. The verbs' cell is 32px tall even with no
+  verb in it, so a tile smaller than 32px (an account's mark) does not leave a loading row short of
+  the loaded one. `menu={false}`, `command` passed as `true`
   while `loading`, and `foot` still work; on a phone none of them adds a row.
 - Off a phone, facts wrap between facts, never inside one, and no dot is left at a line's end
   (`FactLine`).
