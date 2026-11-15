@@ -382,6 +382,8 @@ function PackagesPage({ asked }: { asked: string | null }) {
             fallback={Puzzle}
             title={<TextShimmer>Reading the package database…</TextShimmer>}
             state={<span className="text-body">&nbsp;</span>}
+            // The verbs' place, so on a phone the line holds the row they land on.
+            menu={false}
             facts={<span>&nbsp;</span>}
           />
         )}
