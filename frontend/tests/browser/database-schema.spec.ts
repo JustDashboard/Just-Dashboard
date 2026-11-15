@@ -699,7 +699,7 @@ test("on a phone the tree lies over the schema, and has a way off it with nothin
 
   // The bar at the foot is the way off the tree: to the schema with nothing
   // chosen, and back to the tree again.
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Objects", "Schema"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Objects", "Schema"])
   await showPane(page, "Schema")
   await expect(rail).toBeHidden()
   await expect(page.getByRole("region", { name: "Largest in sales" })).toBeVisible()
@@ -711,7 +711,7 @@ test("on a phone the tree lies over the schema, and has a way off it with nothin
   await rail.getByRole("link", { name: /^orders/ }).click()
   await expect(page.getByRole("heading", { name: "sales.orders" })).toContainText("sales")
   await expect(rail).toBeHidden()
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Objects", "Table"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Objects", "Table"])
 })
 
 test("a table is its schema and its name: two schemas' orders are two tables", async ({ page }) => {
@@ -2310,7 +2310,7 @@ test("on a phone the diagram and its inspector are two panes of one frame", asyn
   await page.goto("/databases/1/diagram?schema=public")
   await expect(tableNode(page, "public.orders")).toBeVisible()
   const inspector = page.getByRole("complementary", { name: "Diagram inspector" })
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Diagram", "Tables"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Diagram", "Tables"])
   const foot = (await paneBar(page).boundingBox())!
   expect(Math.round(foot.y + foot.height)).toBe(844)
 

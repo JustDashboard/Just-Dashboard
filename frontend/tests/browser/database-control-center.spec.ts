@@ -1407,8 +1407,8 @@ test.describe("the map", () => {
       await page.goto("/databases/map?database=1")
       await expect(page.locator(".react-flow__node").first()).toBeVisible()
       const bar = page.locator("[data-slot=pane-bar]")
-      await expect(bar.getByRole("tab")).toHaveText(["Databases", "Map", "Inspector"])
-      await expect(bar.getByRole("tab", { name: "Map" })).toHaveAttribute("aria-selected", "true")
+      await expect(bar.getByRole("button")).toHaveText(["Databases", "Map", "Inspector"])
+      await expect(bar.getByRole("button", { name: "Map" })).toHaveAttribute("aria-current", "page")
       // The canvas is the whole width and stands on the bar, which is at the very foot.
       await expect(rail(page)).toHaveCount(0)
       await expect(inspector(page)).toHaveCount(0)
@@ -1424,19 +1424,19 @@ test.describe("the map", () => {
       )
 
       // The inspector names the links of what was tapped, as it does at a desk.
-      await bar.getByRole("tab", { name: "Inspector" }).tap()
+      await bar.getByRole("button", { name: "Inspector" }).tap()
       await expect(inspector(page)).toBeVisible()
       await expect(inspector(page)).toContainText("shop")
       expect((await inspector(page).boundingBox())!.width).toBe(390)
 
       // The rail lists every database by engine; picking one shows it on the canvas.
-      await bar.getByRole("tab", { name: "Databases" }).tap()
+      await bar.getByRole("button", { name: "Databases" }).tap()
       await expect(rail(page)).toBeVisible()
       await expect(inspector(page)).toHaveCount(0)
       await expect(rail(page).getByRole("button")).toHaveCount(5)
       await rail(page).locator('[data-system="system:db:4"]').tap()
       await expect(rail(page)).toHaveCount(0)
-      await expect(bar.getByRole("tab", { name: "Map" })).toHaveAttribute("aria-selected", "true")
+      await expect(bar.getByRole("button", { name: "Map" })).toHaveAttribute("aria-current", "page")
       await expect(frame(page, "system:db:4")).toBeInViewport()
       // Nothing is wider than the phone in any of the three.
       expect(

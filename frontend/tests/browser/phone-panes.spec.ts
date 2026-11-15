@@ -117,9 +117,9 @@ test.describe("on a phone", () => {
     const bar = page.getByRole("navigation", { name: "Logs", exact: true })
     const rail = page.getByLabel("Log sources")
     await expectBarAtTheFoot(bar)
-    await expect(bar.getByRole("tab", { name: "Log", exact: true })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await expect(bar.getByRole("button", { name: "Log", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
     // The console is what is on screen, without scrolling anything: the
     // whole of it between the page's head and the bar, a dozen lines tall
@@ -137,7 +137,7 @@ test.describe("on a phone", () => {
     await page.screenshot({ path: testInfo.outputPath("logs-phone-log.png") })
 
     // The sources are the other pane: the same height, down to the bar.
-    await bar.getByRole("tab", { name: "Sources" }).click()
+    await bar.getByRole("button", { name: "Sources" }).click()
     await expect(rail).toBeVisible()
     await expect(line).toBeHidden()
     const railBox = await box(rail)
@@ -159,9 +159,9 @@ test.describe("on a phone", () => {
     await api.click()
     await expect(page.getByText("listening on :8080").first()).toBeInViewport()
     await expect(rail).toBeHidden()
-    await expect(bar.getByRole("tab", { name: "Log", exact: true })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await expect(bar.getByRole("button", { name: "Log", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
     await expectHeldToTheWindow(page)
   })
@@ -172,7 +172,7 @@ test.describe("on a phone", () => {
     await page.goto("/logs")
     await expect(page.getByText("Failed password").first()).toBeVisible()
     const bar = page.getByRole("navigation", { name: "Logs", exact: true })
-    await bar.getByRole("tab", { name: "Sources" }).click()
+    await bar.getByRole("button", { name: "Sources" }).click()
     await expect(page.getByLabel("Log sources")).toBeVisible()
     await expect(page.getByLabel("Log sources").getByText("auth.log")).toBeVisible()
   })
@@ -190,9 +190,9 @@ test.describe("on a phone", () => {
     const bar = page.getByRole("navigation", { name: "Tools", exact: true })
     const catalogue = page.getByRole("navigation", { name: "Diagnostics" })
     await expectBarAtTheFoot(bar)
-    await expect(bar.getByRole("tab", { name: "Tool", exact: true })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await expect(bar.getByRole("button", { name: "Tool", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
     // The chosen tool is on screen without scrolling: its Run in the upper
     // half, nothing stacked over it.
@@ -210,7 +210,7 @@ test.describe("on a phone", () => {
 
     // The catalogue is the other pane, the same height, and every tool in
     // it is reachable.
-    await bar.getByRole("tab", { name: "Every tool" }).click()
+    await bar.getByRole("button", { name: "Every tool" }).click()
     await expect(catalogue).toBeVisible()
     await expect(run).toBeHidden()
     const list = await box(catalogue)
@@ -228,9 +228,9 @@ test.describe("on a phone", () => {
     await expect(catalogue).toBeHidden()
     await expect(panel.getByText("calculated in this browser")).toHaveCount(1)
     await expect(panel.getByRole("textbox").first()).toBeInViewport()
-    await expect(bar.getByRole("tab", { name: "Tool", exact: true })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await expect(bar.getByRole("button", { name: "Tool", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
     await expectHeldToTheWindow(page)
   })
