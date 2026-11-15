@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Box } from "@/components/icons"
+import { Box } from "@/components/icons"
 import { hueFor, LANES } from "@/lib/hue"
 import type { Container, ContainerStats } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -87,20 +87,14 @@ export function ContainerCompany({
             {company.name}
           </span>
         }
-        actions={
-          <>
-            <span className="numeric text-hint text-muted-foreground">
-              {running} of {company.containers.length} running
-            </span>
-            {company.kind === "stack" && (
-              <Link
-                href={`/docker/stacks/${encodeURIComponent(company.name)}`}
-                className="ml-2 flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                Open the stack <ArrowRight className="size-3" />
-              </Link>
-            )}
-          </>
+        count={`${running} of ${company.containers.length} running`}
+        link={
+          company.kind === "stack"
+            ? {
+                href: `/docker/stacks/${encodeURIComponent(company.name)}`,
+                label: "Open the stack",
+              }
+            : undefined
         }
       />
       {/* Fixed columns at a floor of 40rem: narrower, the table scrolls inside

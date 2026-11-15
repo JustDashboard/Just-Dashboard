@@ -1062,16 +1062,7 @@ function ServicesPanel({
   const roomy = useMediaQuery(ROOMY_BESIDE_RAIL)
   return (
     <Panel aria-label="Services">
-      <PanelHeader
-        title={
-          <>
-            Services
-            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-              {all}
-            </span>
-          </>
-        }
-      >
+      <PanelHeader title="Services" count={all}>
         <ChipStrip aria-label="State" className="mr-auto">
           {STATES.map(({ value, label, tone }) => {
             const count = counts[value]

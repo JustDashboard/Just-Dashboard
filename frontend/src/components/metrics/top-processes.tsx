@@ -1,8 +1,7 @@
 "use client"
 
 import { useCallback } from "react"
-import Link from "next/link"
-import { ArrowRight, Cpu } from "@/components/icons"
+import { Cpu } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, percent, rate } from "@/lib/format"
 import type { ProcessRow } from "@/lib/types"
@@ -11,7 +10,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { ProductGlyph, hasProductLogo, processProduct } from "@/components/product-logo"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Segments } from "@/components/segments"
 
 type Sort = "cpu" | "memory" | "io"
 
@@ -52,33 +51,18 @@ export function TopProcesses({ className }: { className?: string }) {
       <PanelHeader
         title="Top processes"
         actions={
-          <div className="flex items-center gap-2">
-            <ToggleGroup
-              type="single"
-              value={sort}
-              onValueChange={(next) => setSort((next as Sort) || sort)}
-              variant="outline"
-              size="sm"
-              aria-label="Order processes by"
-            >
-              <ToggleGroupItem value="cpu" className="px-2 text-hint">
-                CPU
-              </ToggleGroupItem>
-              <ToggleGroupItem value="memory" className="px-2 text-hint">
-                Memory
-              </ToggleGroupItem>
-              <ToggleGroupItem value="io" className="px-2 text-hint">
-                I/O
-              </ToggleGroupItem>
-            </ToggleGroup>
-            <Link
-              href="/processes"
-              className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-            >
-              Processes <ArrowRight className="size-3" />
-            </Link>
-          </div>
+          <Segments
+            label="Order processes by"
+            value={sort}
+            onChange={setSort}
+            options={[
+              { value: "cpu", label: "CPU" },
+              { value: "memory", label: "Memory" },
+              { value: "io", label: "I/O" },
+            ]}
+          />
         }
+        link={{ href: "/processes", label: "Processes" }}
       />
       <PanelBody flush className="min-h-66">
         {loading && !data ? (

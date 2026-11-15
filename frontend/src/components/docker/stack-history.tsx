@@ -157,16 +157,7 @@ export function StackHistory({
         className={cn("grid min-w-0 gap-6", wide && "grid-cols-[22rem_minmax(0,1fr)] items-start")}
       >
         <Panel aria-label="Deployments">
-          <PanelHeader
-            title={
-              <>
-                Deployments
-                <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                  {records.length}
-                </span>
-              </>
-            }
-          />
+          <PanelHeader title="Deployments" count={records.length} />
           <PanelBody className="p-1.5">
             <Rail
               records={records}

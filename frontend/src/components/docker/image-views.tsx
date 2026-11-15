@@ -41,11 +41,6 @@ import {
  * block of the sheet that used to open over the table.
  */
 
-/** A section's count, at the far end of its title line. */
-function Count({ children }: { children: React.ReactNode }) {
-  return <span className="numeric text-hint text-muted-foreground">{children}</span>
-}
-
 /** The `--tag-*` hue an instruction's verb takes: what kind of step it was. */
 const VERB_HUE: Record<string, string> = {
   RUN: "var(--tag-blue)",
@@ -132,10 +127,10 @@ export function ImageLayers({ detail }: { detail: ImageDetail }) {
     <Panel plain className="animate-rise" data-slot="image-layers">
       <PanelHeader
         title="Where the size went"
-        actions={
-          <Count>
+        count={
+          <>
             {plural(sized.length, "layer")} · {bytes(detail.size)}
-          </Count>
+          </>
         }
       />
       {sized.length === 0 ? (
@@ -198,7 +193,7 @@ export function ImageContainers({
   }
   return (
     <Panel plain className="animate-rise" data-slot="image-containers">
-      <PanelHeader title="Containers" actions={<Count>{detail.usedBy.length}</Count>} />
+      <PanelHeader title="Containers" count={detail.usedBy.length} />
       <ChoiceList aria-label="Containers using this image" className="pt-4">
         {detail.usedBy.map((container) => (
           <ChoiceRow
@@ -240,11 +235,7 @@ export function ImageHistory({ detail, wide }: { detail: ImageDetail; wide: bool
   }
   return (
     <Panel className="animate-rise" data-slot="image-history">
-      <PanelHeader
-        title="History"
-        actions={<Count>{plural(steps.length, "step")}</Count>}
-        className="min-h-11"
-      />
+      <PanelHeader title="History" count={plural(steps.length, "step")} className="min-h-11" />
       <Table className="table-fixed">
         <TableHeader>
           <TableRow>
@@ -417,7 +408,7 @@ export function ImageConfiguration({ detail }: { detail: ImageDetail }) {
 
       {labels.length > 0 && (
         <Panel plain>
-          <PanelHeader title="Labels" actions={<Count>{labels.length}</Count>} />
+          <PanelHeader title="Labels" count={labels.length} />
           <div className="flex min-w-0 flex-col gap-3 pt-4">
             {oci.length > 0 && (
               <DetailList className="gap-y-2">
@@ -458,7 +449,7 @@ export function ImageConfiguration({ detail }: { detail: ImageDetail }) {
 
       {detail.env.length > 0 && (
         <Panel plain>
-          <PanelHeader title="Environment" actions={<Count>{detail.env.length}</Count>} />
+          <PanelHeader title="Environment" count={detail.env.length} />
           <Well className="mt-4 max-h-64 break-all whitespace-pre-wrap">
             {detail.env.join("\n")}
           </Well>

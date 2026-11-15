@@ -386,16 +386,7 @@ export function Networks() {
             {/* Framed, because it is a table: the grid owns a scroll region and
             the edge is what says so (§2). Everything above it stays plain. */}
             <Panel>
-              <PanelHeader
-                title={
-                  <>
-                    Networks
-                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                      {networks.length}
-                    </span>
-                  </>
-                }
-              >
+              <PanelHeader title="Networks" count={networks.length}>
                 <ChipStrip aria-label="Made by" className={cn("mr-auto", CHIPS_WRAP)}>
                   {OWNER_KINDS.map(({ kind, label, title }) => {
                     const count = counts[kind] ?? 0
@@ -504,16 +495,7 @@ export function Networks() {
             </Panel>
 
             <Panel ref={containersPanel} className="scroll-mt-4">
-              <PanelHeader
-                title={
-                  <>
-                    Containers
-                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                      {containers.length}
-                    </span>
-                  </>
-                }
-              >
+              <PanelHeader title="Containers" count={containers.length}>
                 <ChipStrip aria-label="Which containers" className={cn("mr-auto", CHIPS_WRAP)}>
                   {LENSES.map(({ value, label, title, tone }) => {
                     const count = lensCounts[value]

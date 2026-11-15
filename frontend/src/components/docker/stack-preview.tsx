@@ -215,16 +215,7 @@ export function StackPreview({
       </section>
 
       <Panel aria-label="Services">
-        <PanelHeader
-          title={
-            <>
-              Services
-              <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                {services.length}
-              </span>
-            </>
-          }
-        />
+        <PanelHeader title="Services" count={services.length} />
         <PanelBody flush>
           {wide ? (
             <Table className="table-fixed">
