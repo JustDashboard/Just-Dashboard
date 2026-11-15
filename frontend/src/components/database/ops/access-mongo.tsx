@@ -2,7 +2,6 @@
 
 import { useConfirm } from "@/components/confirm-dialog"
 import { generatePassword } from "@/components/database/connect/rules"
-import { CardsSkeleton } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import {
@@ -34,7 +33,7 @@ import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Disclosure, Field, FieldRow, FormFact, FormNote } from "@/components/form"
 import { Cross, Key, Trash, UserPlus } from "@/components/icons"
 import { Panel, PanelBody } from "@/components/panel"
@@ -161,7 +160,7 @@ export function MongoAccess() {
             users.error ? (
               <ErrorState what="the users" error={users.error} onRetry={users.refresh} />
             ) : (
-              <CardsSkeleton count={3} />
+              <ChoiceListSkeleton rows={3} lines={2} />
             )
           ) : list.length === 0 ? (
             <Notice tone="warning" title="No user exists on this server">

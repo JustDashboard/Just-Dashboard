@@ -61,44 +61,6 @@ export function Block({
   )
 }
 
-/** A list of rows that has not arrived: a mark, two lines, a figure. */
-export function RowsSkeleton({ rows = 3, mark = true }: { rows?: number; mark?: boolean }) {
-  return (
-    <div className="divide-y divide-hairline" aria-hidden>
-      {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="flex items-center gap-3 py-3">
-          {mark && <Skeleton className="size-8 shrink-0 rounded-lg" />}
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <Skeleton className="h-3.5" style={{ width: `${44 - ((index * 11) % 20)}%` }} />
-            <Skeleton className="h-3" style={{ width: `${58 - ((index * 7) % 22)}%` }} />
-          </div>
-          <Skeleton className="h-3 w-14 shrink-0" />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * Cards that have not arrived: a mark and two lines in each. Stacked unless
- * the caller lays them out as the cards themselves will be.
- */
-export function CardsSkeleton({ count = 3, className }: { count?: number; className?: string }) {
-  return (
-    <div className={className ?? "space-y-2"} aria-hidden>
-      {Array.from({ length: count }).map((_, index) => (
-        <div key={index} className="flex min-h-14 items-center gap-3 rounded-xl border px-3 py-2.5">
-          <Skeleton className="size-8 shrink-0 rounded-lg" />
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <Skeleton className="h-3.5" style={{ width: `${52 - index * 9}%` }} />
-            <Skeleton className="h-3" style={{ width: `${70 - index * 12}%` }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 /** A list of facts that has not arrived: names down one side, values beside them, a rule under each. */
 export function FactsSkeleton({ rows = 4, className }: { rows?: number; className?: string }) {
   return (

@@ -16,7 +16,7 @@ import { Field, FormFact, FormFacts, FormNote, InfoTip } from "@/components/form
 import { Modal } from "@/components/modal"
 import { OutcomeStrip, type Outcome } from "@/components/outcome-strip"
 import { ProductGlyph } from "@/components/product-logo"
-import { ChoiceRow } from "@/components/choice-row"
+import { ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -25,7 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { sectionHref } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
-import { Block, CardsSkeleton } from "@/components/database/home/blocks"
+import { Block } from "@/components/database/home/blocks"
 import { EmptyNote } from "@/components/state"
 import { nameHue } from "@/components/database/home/kinds"
 import { read, record } from "@/components/database/home/read"
@@ -758,7 +758,13 @@ export function ServerDatabases() {
         rise
         poll={list}
         what="the server's databases"
-        skeleton={<CardsSkeleton className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" />}
+        skeleton={
+          <ChoiceListSkeleton
+            rows={3}
+            lines={2}
+            className="grid gap-2 space-y-0 sm:grid-cols-2 xl:grid-cols-3"
+          />
+        }
       >
         {() =>
           rows.length === 0 ? (
@@ -996,7 +1002,13 @@ export function Keyspaces({ server }: { server: PollState<RedisServer> }) {
         rise
         poll={server}
         what="the keyspace"
-        skeleton={<CardsSkeleton className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" />}
+        skeleton={
+          <ChoiceListSkeleton
+            rows={3}
+            lines={2}
+            className="grid gap-2 space-y-0 sm:grid-cols-2 xl:grid-cols-3"
+          />
+        }
       >
         {(data) =>
           data.keyspace.length === 0 ? (

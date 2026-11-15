@@ -21,7 +21,7 @@ import {
   consumerWord,
 } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
-import { Block, CardsSkeleton } from "@/components/database/home/blocks"
+import { Block } from "@/components/database/home/blocks"
 import { copyTone } from "@/components/database/home/holdings"
 import { read } from "@/components/database/home/read"
 import type { DbBackups } from "@/components/database/home/types"
@@ -151,10 +151,11 @@ export function HomePicture({
     >
       {topology.error && !topology.data ? (
         <ErrorState what="what uses it" error={topology.error} onRetry={topology.refresh} />
-      ) : !topology.data ? (
-        <CardsSkeleton count={2} />
       ) : (
-        <div className="relative animate-rise py-4">
+        // While the readers are read the picture is already its own shape:
+        // the database and what it holds where they will stay, and grey
+        // readers in their lane, so nothing moves when the read lands.
+        <div className="relative py-4" aria-busy={!topology.data || undefined}>
           <div ref={container} className="relative">
             {shownReaders.map(({ node, edge }, index) => {
               const from = refFor(`r:${node.id}`)
@@ -222,7 +223,9 @@ export function HomePicture({
 
             <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(3rem,7vw,7rem)_minmax(0,11rem)_clamp(3rem,7vw,7rem)_minmax(0,1fr)] lg:items-center">
               <Lane title="Read by" count={readers.length} className="lg:text-right">
-                {readers.length === 0 ? (
+                {!topology.data ? (
+                  <WaitingNodes align="end" />
+                ) : readers.length === 0 ? (
                   <li>
                     <WireNode
                       align="end"
@@ -487,6 +490,45 @@ function eyebrowOf(node: DbTopoNode): string {
 export function pulseFor(sessions: number): number {
   if (sessions <= 0) return 3
   return Math.max(1.2, 3 - Math.log2(sessions + 1) * 0.5)
+}
+
+/**
+ * Nodes that have not been read, in a lane of a picture that is waiting: a
+ * grey tile where the mark will be and grey lines where the words will be,
+ * each line at the height its words will give it, so the lane is the height
+ * it will be. Performance's picture waits with them too.
+ */
+export function WaitingNodes({
+  rows = 2,
+  align = "start",
+}: {
+  rows?: number
+  align?: "start" | "end"
+}) {
+  return Array.from({ length: rows }, (_, index) => (
+    <li key={index} aria-hidden className="min-w-0">
+      <WireNode
+        align={align}
+        mark={<span className="size-11 animate-pulse rounded-xl bg-muted" />}
+        eyebrow={<WaitingLine className="w-16" />}
+        title={<WaitingLine className={index % 2 ? "w-24" : "w-32"} />}
+        hint={<WaitingLine className={index % 2 ? "w-36" : "w-28"} />}
+      />
+    </li>
+  ))
+}
+
+/** A grey bar where a line of words will be, inline so the line keeps the height its words give it. */
+export function WaitingLine({ className }: { className?: string }) {
+  return (
+    <span
+      data-slot="skeleton"
+      className={cn(
+        "inline-block h-[0.7em] max-w-full animate-pulse rounded-md bg-muted align-middle",
+        className,
+      )}
+    />
+  )
 }
 
 /** One lane of a picture: its name and count over its nodes. Performance's picture draws its lanes with it too. */

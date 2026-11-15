@@ -4,12 +4,11 @@ import { useEffect, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { duration } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { DbClientMark } from "@/components/database/client-mark"
 import { clientOf } from "@/components/database/clients"
-import { CardsSkeleton } from "@/components/database/home/blocks"
 import {
   concernOf,
   orderSessions,
@@ -83,7 +82,11 @@ export function AccountSessions({
         }
       />
       <PanelBody>
-        <Read poll={activity} what="the sessions" skeleton={<CardsSkeleton count={2} />}>
+        <Read
+          poll={activity}
+          what="the sessions"
+          skeleton={<ChoiceListSkeleton rows={2} lines={2} />}
+        >
           {(data) =>
             !data.supported ? (
               <NotAvailable title="The sessions cannot be listed" reason={data.reason} />

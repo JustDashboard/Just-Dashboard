@@ -1,7 +1,6 @@
 "use client"
 
 import { useConfirm } from "@/components/confirm-dialog"
-import { CardsSkeleton } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { dropAccountRequest } from "@/components/database/ops/access-drop"
@@ -32,7 +31,7 @@ import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { FormNote } from "@/components/form"
 import { Key, Trash, UserPlus } from "@/components/icons"
 import { SearchInput } from "@/components/search-input"
@@ -240,7 +239,7 @@ export function SqlAccess() {
             roles.error ? (
               <ErrorState what="the accounts" error={roles.error} onRetry={roles.refresh} />
             ) : (
-              <CardsSkeleton count={4} />
+              <ChoiceListSkeleton rows={4} lines={2} />
             )
           ) : !data.supported ? (
             <Notice title="The accounts cannot be listed">
