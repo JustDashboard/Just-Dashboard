@@ -10,11 +10,10 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { FormFact } from "@/components/form"
 import type { Verb } from "@/components/verbs"
-import { EmptyNote, EmptyState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { CodeView } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
@@ -255,7 +254,7 @@ export function ObjectView({
         </div>
       ) : !data && read.error ? (
         <div className="p-4">
-          <ReadFailed error={read.error} onRetry={read.refresh} />
+          <ErrorState retryable error={read.error} onRetry={read.refresh} />
         </div>
       ) : !data ? (
         <div aria-hidden className="space-y-5 p-4">

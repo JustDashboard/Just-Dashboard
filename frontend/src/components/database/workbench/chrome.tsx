@@ -23,7 +23,7 @@ import { usePanelSize } from "@/lib/panel-size"
 import { cn } from "@/lib/utils"
 import { ResizeHandle } from "@/components/resize-handle"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FactDot } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -213,37 +213,33 @@ function FrameHead({
             </div>
             {/* What it is for comes before what it is: "production" and
                 "protected" stay, and the facts after them give way first. */}
-            <div className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
+            <FactLine nowrap className="text-micro text-muted-foreground">
               {labelled && (
-                <span data-slot="database-labels" className="flex shrink-0 items-center gap-1.5">
-                  <EnvironmentTag environment={conn.environment} className="max-w-32" />
-                  {readOnly && <ProtectedTag />}
-                </span>
-              )}
-              <span
-                className={cn(
-                  "flex min-w-0 shrink-[1000] items-center overflow-hidden",
-                  labelled && "@max-xl:hidden",
-                )}
-              >
-                {facts.map((fact, index) => (
+                <Fact className="shrink-0! overflow-visible!">
                   <span
-                    key={fact.key}
-                    title={fact.title ?? fact.text}
-                    className={cn(
-                      "flex items-center gap-1.5",
-                      // The address and the database go before the engine does.
-                      index === 0 ? "shrink-0" : "min-w-0 @max-md:hidden",
-                      (index > 0 || labelled) && "pl-1.5",
-                    )}
+                    data-slot="database-labels"
+                    className="inline-flex items-center gap-1.5 align-top"
                   >
-                    {/* Inside the fact, so a fact that gives way takes its dot. */}
-                    {(index > 0 || labelled) && <FactDot />}
-                    <span className={cn("truncate", fact.mono && "font-mono")}>{fact.text}</span>
+                    <EnvironmentTag environment={conn.environment} className="max-w-32" />
+                    {readOnly && <ProtectedTag />}
                   </span>
-                ))}
-              </span>
-            </div>
+                </Fact>
+              )}
+              {facts.map((fact, index) => (
+                <Fact
+                  key={fact.key}
+                  title={fact.title ?? fact.text}
+                  mono={fact.mono}
+                  className={cn(
+                    // The address and the database go before the engine does.
+                    index > 0 && "@max-md:hidden",
+                    labelled && "@max-xl:hidden",
+                  )}
+                >
+                  {fact.text}
+                </Fact>
+              ))}
+            </FactLine>
           </div>
         </div>
 
