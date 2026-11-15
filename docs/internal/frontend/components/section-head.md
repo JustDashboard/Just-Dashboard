@@ -59,6 +59,7 @@ under it.
 | `advanced` | Marks a panel that assumes the reader administers the thing directly (`caps`, after the title). |
 | `plain` | For a head drawn outside a `Panel` (`Section`, `FormSection`). Inside a panel, the panel decides. |
 | `children` | Content on the head's own line between the title and the end: chips, a segment. |
+| `hint` | Deprecated. `FormSection`'s old line under the title, drawn in the title's column so it holds still when the actions land. WP-39 deletes it with `FormSection hint`. |
 
 A head carries no description (§5, `standard.md`) and no icon (§14).
 

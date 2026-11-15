@@ -380,20 +380,21 @@ export function FormSection({
       title={title}
       actions={actions}
       className={aside ? "border-b-0 pb-0" : undefined}
-    >
-      {hint && (
-        // Its own line under the title, still above the rule: the last child
-        // of the head's wrapping row, a full line wide.
-        <div
-          className={cn(
-            "order-last -mt-1.5 min-w-0 basis-full text-muted-foreground",
-            aside ? "text-xs leading-relaxed" : "text-hint",
-          )}
-        >
-          {hint}
-        </div>
-      )}
-    </PanelHeader>
+      hint={
+        hint && (
+          // Under the title in its own column, still above the rule, so the
+          // actions landing beside the title move neither it nor the fields.
+          <div
+            className={cn(
+              "mt-0.5 min-w-0 text-muted-foreground",
+              aside ? "text-xs leading-relaxed" : "text-hint",
+            )}
+          >
+            {hint}
+          </div>
+        )
+      }
+    />
   )
   if (aside) {
     return (
