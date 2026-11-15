@@ -13,7 +13,7 @@ import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -268,20 +268,11 @@ export function DNSPage() {
           onValueChange={(next) => show(next as DNSViewKey)}
           className="min-w-0 gap-0"
         >
-          <TabsPrimitive.List
-            aria-label="Views of DNS"
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            {DNS_VIEWS.map((key) => (
-              <TabsPrimitive.Trigger
-                key={key}
-                value={key}
-                className={tabClasses(view === key, "h-10")}
-              >
-                {DNS_VIEW_NAME[key]}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
+          <ViewTabList
+            label="Views of DNS"
+            views={DNS_VIEWS.map((key) => ({ key, label: DNS_VIEW_NAME[key] }))}
+            value={view}
+          />
 
           <TabsPrimitive.Content value="resolver" className={panel}>
             {unread ?? (

@@ -20,8 +20,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabList } from "@/components/tabs"
 import { Tabs } from "@/components/ui/tabs"
 import { VerbMenu } from "@/components/verbs"
 import { WireFlow } from "@/components/wire/wire-flow"
@@ -175,22 +174,20 @@ function NetworkVPNContent() {
             />
           )}
           <Tabs value={view} onValueChange={show} className="min-w-0 gap-0">
-            <TabsPrimitive.List
-              aria-label="Kinds of VPN"
-              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-            >
-              {vpnViews(headscale).map((key) => (
-                <TabsPrimitive.Trigger
-                  key={key}
-                  value={key}
-                  className={tabClasses(view === key, "h-10")}
-                >
-                  {GLYPH[key] && <ProductGlyph id={GLYPH[key]} />}
-                  {VPN_VIEW_NAME[key]}
-                  {(count[key] ?? 0) > 0 && <ChipCount>{count[key]}</ChipCount>}
-                </TabsPrimitive.Trigger>
-              ))}
-            </TabsPrimitive.List>
+            <ViewTabList
+              label="Kinds of VPN"
+              views={vpnViews(headscale).map((key) => ({
+                key,
+                label: (
+                  <>
+                    {GLYPH[key] && <ProductGlyph id={GLYPH[key]} />}
+                    {VPN_VIEW_NAME[key]}
+                  </>
+                ),
+                count: count[key],
+              }))}
+              value={view}
+            />
 
             {failed ? (
               <TabsPrimitive.Content value={view} className={PANEL}>
