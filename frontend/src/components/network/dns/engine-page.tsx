@@ -273,9 +273,9 @@ function Engine({ account, id }: { account: number; id: string }) {
   const changes = history.data ?? []
 
   return (
-    // The engine's whole page, rail and line included, as its specs find it;
-    // a box of no layout of its own.
-    <div data-slot="dns-engine" className="contents">
+    // The engine's whole page, rail and line included, as its specs find it:
+    // the window's height from `xl`, as the frame inside it asks for.
+    <div data-slot="dns-engine" className="min-w-0 xl:h-full">
       <DetailPage
         name="DNS engine"
         what="engine"

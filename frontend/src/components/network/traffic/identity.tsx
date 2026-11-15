@@ -67,7 +67,8 @@ export function TrafficIdentity({
               <span key="what">
                 {uplink ? (
                   <>
-                    Uplink <span className="font-mono text-foreground">{uplink.name}</span>
+                    Uplink{" "}
+                    <span className="font-mono leading-none text-foreground">{uplink.name}</span>
                   </>
                 ) : links ? (
                   "No uplink found"
