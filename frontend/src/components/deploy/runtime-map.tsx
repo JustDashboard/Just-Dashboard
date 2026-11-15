@@ -339,7 +339,7 @@ export function RuntimeMap({
                       ref={refFor(`p:${one.id}`)}
                       aria-hidden
                       className={cn(
-                        "relative z-10 hidden size-1.5 shrink-0 rounded-full lg:block",
+                        "relative z-raised hidden size-1.5 shrink-0 rounded-full lg:block",
                         edges.some((edge) => edge.from === id)
                           ? "bg-border-strong"
                           : "bg-transparent",
@@ -444,9 +444,7 @@ function Lane({
       <p className={cn("eyebrow mb-4", className)}>
         {title}
         {count !== undefined && count > 0 && (
-          <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-            {count}
-          </span>
+          <span className="numeric ml-1.5 font-medium tracking-normal text-faint">{count}</span>
         )}
       </p>
       <ol className="flex flex-col gap-5" aria-label={title}>

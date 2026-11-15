@@ -229,7 +229,7 @@ function BeforeAndAfter({ watch }: { watch: RollbackWatch }) {
           <li
             key={key}
             data-slot="watch-row"
-            className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 sm:h-5 sm:grid-cols-[9.5rem_minmax(0,1fr)_15rem]"
+            className="grid min-w-0 grid-cols-main-end items-center gap-x-4 gap-y-1 sm:h-5 sm:grid-cols-[9.5rem_minmax(0,1fr)_15rem]"
           >
             <span className="truncate text-hint text-muted-foreground">{name}</span>
             <span className="numeric truncate text-right text-hint text-foreground sm:order-3">

@@ -9,7 +9,6 @@ import { get, post } from "@/lib/api"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type { ArchivedDeployment } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -27,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu } from "@/components/verbs"
 import { WorkloadMark, projectProduct, sourceProduct } from "@/components/deploy/vocabulary"
 import { purgeRequest } from "@/components/deploy/project-verbs"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Deployments that have been taken out of the active fleet but keep their
@@ -52,7 +52,7 @@ export function ArchivedProjects() {
   const { confirm, dialog } = useConfirm()
   // Chosen once, because each reading is found by its text and a hidden twin
   // is a second answer.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const [query, setQuery] = useSessionState("deploy.archived.query", "")
   const [restoringId, setRestoringId] = useState<number>()
   const result = usePoll(
@@ -137,7 +137,7 @@ export function ArchivedProjects() {
   )
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow={BACK} title="Archived" />
       <Panel plain>
         <PanelToolbar>

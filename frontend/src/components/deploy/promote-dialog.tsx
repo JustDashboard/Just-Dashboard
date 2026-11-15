@@ -242,7 +242,7 @@ export function PromoteDialog({
                         <ReleaseRevision revision={release.sourceRevision} />
                         <AuthorMark name={commit?.author} />
                         {commit?.subject && (
-                          <span className="min-w-0 truncate text-foreground/80">
+                          <span className="min-w-0 truncate text-muted-foreground">
                             {commit.subject}
                           </span>
                         )}

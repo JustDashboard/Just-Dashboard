@@ -402,7 +402,7 @@ function SeverityBar({ counts }: { counts: VulnerabilityCounts }) {
             <span key={part.severity} className="inline-flex items-center gap-1.5">
               <span
                 aria-hidden
-                className="size-2 rounded-[2px]"
+                className="size-2 rounded-xs"
                 style={{ background: SEVERITY_COLOR[part.severity] }}
               />
               <span className="font-medium text-foreground">{part.count}</span>

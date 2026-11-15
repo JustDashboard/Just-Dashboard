@@ -385,7 +385,7 @@ export function NewProject({
       search={false}
       rows={false}
     >
-      <Page register="flow" fill="xl" className="animate-rise">
+      <Page rise register="flow" fill="xl">
         <div className="flex shrink-0 justify-end">
           <WorkspaceHelp />
         </div>

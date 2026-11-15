@@ -170,7 +170,7 @@ function DockerConsole() {
               session. */}
           <p className="flex min-w-0 flex-1 items-center gap-1.5 text-hint text-muted-foreground">
             <span className="min-w-0 truncate">
-              Inside <span className="font-mono text-foreground/80">{service.name}</span>
+              Inside <span className="font-mono text-muted-foreground">{service.name}</span>
               {number !== undefined && <span className="numeric"> · release #{number}</span>}
             </span>
             <InfoTip label="What this shell reaches">

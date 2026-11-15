@@ -49,6 +49,7 @@ import {
   splitCatalogue,
   templateProvenance,
 } from "@/components/deploy/templates"
+import { breakpointQuery } from "@/lib/breakpoints"
 import { useSourceInspection } from "./use-source-inspection"
 import { templateInputErrors } from "./template-inputs"
 
@@ -267,7 +268,7 @@ export function SourceTemplate({
     shelves.reduce((total, shelf) => total + shelf.entries.length, 0) + yoursMatched.length
 
   const revealOnSmallScreen = (id: string) => {
-    if (window.matchMedia("(min-width: 1280px)").matches) return
+    if (window.matchMedia(breakpointQuery("xl")).matches) return
     requestAnimationFrame(() => {
       const panel = document.getElementById(id)
       panel?.focus({ preventScroll: true })
@@ -418,7 +419,7 @@ export function SourceTemplate({
     // up to find the first. The second column is always there at this width —
     // it says what will open in it until something does, so choosing the
     // first template does not reflow every card in the grid.
-    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_24rem] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch">
+    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_24rem] xl:grid-rows-fill xl:items-stretch">
       <Panel plain id="template-catalogue" tabIndex={-1} className="min-w-0 scroll-mt-4 xl:min-h-0">
         <PanelHeader
           title="Application templates"
@@ -758,12 +759,7 @@ export function SourceTemplate({
               </Button>
             }
           >
-            <Button
-              className="h-11 sm:h-9"
-              pending={busy}
-              disabled={!definition || blocked}
-              onClick={() => void use()}
-            >
+            <Button pending={busy} disabled={!definition || blocked} onClick={() => void use()}>
               Use this template
             </Button>
           </FlowActions>

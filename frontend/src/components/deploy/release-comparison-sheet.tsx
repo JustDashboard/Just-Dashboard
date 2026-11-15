@@ -326,10 +326,10 @@ function ChangeRow({ change }: { change: Change }) {
       >
         <Value
           value={change.from}
-          className="text-(--git-deleted) line-through decoration-(--git-deleted)/50"
+          className="text-git-deleted line-through decoration-git-deleted/50"
         />
         <span className="text-muted-foreground"> → </span>
-        <Value value={change.to} className="text-(--git-added)" />
+        <Value value={change.to} className="text-git-added" />
       </p>
     </li>
   )

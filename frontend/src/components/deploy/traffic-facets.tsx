@@ -488,7 +488,7 @@ function StatusReading({ summary }: { summary: RequestSummary }) {
   return (
     <>
       <span className={cn(failing > 0 && "text-destructive")}>{failing.toFixed(1)}% 5xx</span>
-      <span className="text-muted-foreground/50"> · </span>
+      <span className="text-faint"> · </span>
       <span className={cn(refused > 0 && "text-warning")}>{refused.toFixed(1)}% 4xx</span>
     </>
   )

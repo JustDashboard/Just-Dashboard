@@ -11,7 +11,6 @@ import {
   unavailableReason,
 } from "@/lib/pull-requests"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentPreview,
@@ -55,6 +54,7 @@ import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
 import { SleepPanel, useSleep } from "@/components/deploy/sleep-panel"
 import { Vulnerabilities } from "@/components/deploy/vulnerabilities"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The project's front page, in the order a visitor asks: is something
@@ -463,7 +463,7 @@ export function ProjectOverview() {
         runs={project.runs}
         domains={domainHostnames}
       />
-      <Confetti ref={celebrate} className="pointer-events-none fixed inset-0 z-50 size-full" />
+      <Confetti ref={celebrate} className="pointer-events-none fixed inset-0 z-overlay size-full" />
       {pulls.dialogs}
     </div>
   )
@@ -503,7 +503,7 @@ function PullRequestList({
   // compete for the width until the title has none. The compact row keeps
   // the title and the preview's state and drops the branches, which the
   // dialog that tests the pull request names anyway.
-  const roomy = useMediaQuery("(min-width: 640px)")
+  const roomy = useBreakpoint("sm")
   return (
     <div className="space-y-3">
       {!info.available && (

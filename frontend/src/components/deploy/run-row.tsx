@@ -3,7 +3,6 @@
 import { relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DeploymentEngineRun, DeploymentRelease, DeploymentSummary } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceRow } from "@/components/choice-row"
 import { FactDot } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
@@ -29,6 +28,7 @@ import {
   shortRevision,
 } from "@/components/deploy/vocabulary"
 import { useNow } from "@/hooks/use-now"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type RunSource = Pick<
   DeploymentSummary,
@@ -88,7 +88,7 @@ export function RunRow({
   /** The release this run made is the live one. */
   live?: boolean
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const active = isActiveRun(run.state)
   const now = useNow(1000, active)
   const subject = runSubject(run)

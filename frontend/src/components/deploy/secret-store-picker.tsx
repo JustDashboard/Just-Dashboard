@@ -176,11 +176,11 @@ export function StoreReferenceLabel({ target, compact }: { target: string; compa
         <SecretStoreMark kind={store.kind} className="inline-block size-3.5 align-[-2px]" />
       )}{" "}
       {compact ? (
-        <span className="font-mono text-foreground/90">{reference.store}</span>
+        <span className="font-mono text-foreground">{reference.store}</span>
       ) : (
         <Link
           href="/deploy/secret-stores"
-          className="rounded-sm font-mono text-foreground/90 focus-ring hover:underline"
+          className="rounded-sm font-mono text-foreground focus-ring hover:underline"
         >
           {reference.store}
         </Link>

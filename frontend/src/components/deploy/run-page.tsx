@@ -588,8 +588,8 @@ export function RunPage() {
   )
 
   return (
-    <Page className="animate-rise pt-4 md:pt-5">
-      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
+    <Page rise className="pt-4 md:pt-5">
+      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-overlay size-full" />
       {/* The name is for assistive technology alone (§15): the header is the
           first thing drawn. */}
       <PageContext title={`Deployment #${run.runNumber}`} />

@@ -107,7 +107,7 @@ export function SitePreview({
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`Open ${hostOf(url)} in a new tab`}
-          className="absolute inset-0 z-10 rounded-xl focus-ring"
+          className="absolute inset-0 z-raised rounded-xl focus-ring"
         />
       )}
       {url && (
@@ -131,7 +131,7 @@ export function SitePreview({
               value={device}
               onValueChange={(value) => value && setDevice(value as Device)}
               aria-label="Preview width"
-              className="relative z-20 shrink-0"
+              className="relative z-sticky shrink-0"
             >
               <ToggleGroupItem value="desktop" className="h-6 min-w-0 px-2 text-hint">
                 Desktop
@@ -157,7 +157,7 @@ export function SitePreview({
         {live && !loaded && (
           <div
             aria-hidden="true"
-            className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden bg-meter-track"
+            className="absolute inset-x-0 top-0 z-raised h-0.5 overflow-hidden bg-meter-track"
           >
             <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep bg-brand" />
           </div>

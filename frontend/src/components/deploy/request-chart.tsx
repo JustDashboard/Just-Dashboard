@@ -172,7 +172,7 @@ export function RequestChart({
       <span className="flex min-w-0 items-center gap-2">
         <span className="numeric truncate text-hint text-muted-foreground">
           {total.toLocaleString()}
-          <span className="text-muted-foreground/50"> · </span>
+          <span className="text-faint"> · </span>
           <span className={cn(failed > 0 && "text-destructive")}>
             {failed.toLocaleString()} failed
           </span>

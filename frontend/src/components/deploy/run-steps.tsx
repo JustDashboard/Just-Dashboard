@@ -11,7 +11,6 @@ import type {
   DeploymentStep,
   DeploymentSummary,
 } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Section } from "@/components/section"
 import { Group } from "@/components/panel"
 import { Status } from "@/components/status-dot"
@@ -54,6 +53,7 @@ import {
   StepTile,
   stepSummary,
 } from "@/components/deploy/run-evidence"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** Where a step sits in the run's time, as start and end in milliseconds. */
 function stepSpan(step: DeploymentStep, now: number) {
@@ -235,7 +235,7 @@ export function RunDetails({
   /** Opens the build console on one step's output. */
   onShowOutput: (id: number) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const rail = useRef<HTMLOListElement>(null)
   const inspector = useRef<HTMLDivElement>(null)
   const current = steps.find((step) => step.id === selected) ?? initialStep(steps)
@@ -303,7 +303,7 @@ export function RunDetails({
     >
       <div
         id="run-details"
-        className="grid min-w-0 scroll-mt-16 overflow-hidden rounded-xl border bg-card lg:h-[min(80vh,48rem)] lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]"
+        className="grid min-w-0 scroll-mt-16 overflow-hidden rounded-xl border bg-card lg:h-[min(80svh,48rem)] lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]"
       >
         <ol
           ref={rail}
@@ -431,7 +431,7 @@ function StepRow({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute top-0 left-6 z-10 h-2.5 w-px",
+            "pointer-events-none absolute top-0 left-6 z-raised h-2.5 w-px",
             LINE[above] ?? "bg-hairline",
           )}
         />
@@ -440,7 +440,7 @@ function StepRow({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute top-10.5 bottom-0 left-6 z-10 w-px",
+            "pointer-events-none absolute top-10.5 bottom-0 left-6 z-raised w-px",
             LINE[step.state] ?? "bg-hairline",
           )}
         />
@@ -474,9 +474,7 @@ function StepRow({
           <span className="flex min-w-0 items-baseline gap-2 text-hint text-muted-foreground">
             <span className="min-w-0 flex-1 truncate">{summary}</span>
             {lines > 0 && (
-              <span className="numeric shrink-0 text-muted-foreground/70">
-                {plural(lines, "line")}
-              </span>
+              <span className="numeric shrink-0 text-faint">{plural(lines, "line")}</span>
             )}
           </span>
           {/* Where in the run it happened, on the run's own scale: a picture
@@ -673,14 +671,12 @@ function candidateLine(candidate: DeploymentDetectionCandidate) {
   const packageManager = packageManagerProduct(candidate.packageManager)
   return (
     <>
-      {framework && <ProductGlyph id={framework} className="mr-1 inline align-[-2px]" />}
+      {framework && <ProductGlyph id={framework} className="mr-1 glyph-inline" />}
       {candidate.framework ? frameworkLabel(candidate.framework) : candidate.name}
       {candidate.packageManager && (
         <>
           {" · "}
-          {packageManager && (
-            <ProductGlyph id={packageManager} className="mr-1 inline align-[-2px]" />
-          )}
+          {packageManager && <ProductGlyph id={packageManager} className="mr-1 glyph-inline" />}
           {candidate.packageManager}
         </>
       )}

@@ -560,7 +560,7 @@ function Digest({ value, label }: { value: string; label: string }) {
   const [algorithm, hash] = value.includes(":") ? value.split(":", 2) : ["", value]
   return (
     <span className="inline-flex min-w-0 items-center gap-1 font-mono text-xs" title={value}>
-      {algorithm && <span className="text-muted-foreground/60">{algorithm}:</span>}
+      {algorithm && <span className="text-faint">{algorithm}:</span>}
       <span className={tokenClass("id")}>{hash.slice(0, 12)}</span>
       <button
         type="button"
@@ -694,7 +694,7 @@ function TextBlock({ name, value }: { name: string; value: string }) {
     >
       {lines.map((line, index) => (
         <span key={index} className="flex">
-          <span className="numeric w-8 shrink-0 pr-3 text-right text-muted-foreground/40 select-none">
+          <span className="numeric w-8 shrink-0 pr-3 text-right text-faint select-none">
             {index + 1}
           </span>
           <span className="min-w-0 wrap-anywhere whitespace-pre-wrap">
@@ -813,17 +813,17 @@ export function ShellWords({ command, className }: { command: string; className?
  * and the punctuation steps back.
  */
 export const CODE = {
-  key: "text-[var(--tag-blue)]",
-  keyword: "font-semibold text-[var(--tag-violet)]",
-  literal: "text-[var(--tag-violet)]",
-  string: "text-[var(--tag-green)]",
-  number: "text-[var(--tag-pink)]",
-  variable: "text-[var(--tag-pink)]",
-  path: "text-[var(--tag-cyan)]",
-  flag: "text-[var(--tag-cyan)]",
-  digest: "text-[var(--tag-slate)]",
-  comment: "text-muted-foreground/70 italic",
-  punct: "text-muted-foreground/60",
+  key: "text-tag-blue",
+  keyword: "font-semibold text-tag-violet",
+  literal: "text-tag-violet",
+  string: "text-tag-green",
+  number: "text-tag-pink",
+  variable: "text-tag-pink",
+  path: "text-tag-cyan",
+  flag: "text-tag-cyan",
+  digest: "text-tag-slate",
+  comment: "text-faint italic",
+  punct: "text-faint",
   program: "font-semibold text-foreground",
 }
 

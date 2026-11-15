@@ -190,7 +190,7 @@ function DayBars({
               {reading.map((line) => (
                 <p key={line.text} className="numeric flex items-center gap-1.5">
                   {line.fill && (
-                    <span aria-hidden className={cn("size-2 shrink-0 rounded-[2px]", line.fill)} />
+                    <span aria-hidden className={cn("size-2 shrink-0 rounded-xs", line.fill)} />
                   )}
                   {line.text}
                 </p>
@@ -340,7 +340,7 @@ export function Insights({
           <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
             {(Object.keys(FILL) as Outcome[]).map((outcome) => (
               <span key={outcome} className="inline-flex items-center gap-1.5">
-                <span aria-hidden className={cn("size-2 rounded-[2px]", FILL[outcome])} />
+                <span aria-hidden className={cn("size-2 rounded-xs", FILL[outcome])} />
                 {outcome}
               </span>
             ))}

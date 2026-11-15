@@ -24,7 +24,6 @@ import type { DeploymentLifecycle, DockerEvent } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { GroupRule } from "@/components/choice-row"
 import { laneStyle } from "@/components/logs/log-text"
@@ -43,6 +42,7 @@ import { isCleanExit } from "@/components/deploy/traffic-strip"
 import { EventMark, EventWho, HAPPENED } from "@/components/docker/event-marks"
 import { LinesBlock, OutputLines } from "@/components/deploy/output-lines"
 import { foldRestarts, loopSpan, type FeedItem } from "@/components/deploy/logs-model"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * What Docker did to this deployment's containers.
@@ -122,7 +122,7 @@ export function LifecycleFeed({
   const [kinds, setKinds] = useSessionState<string[]>("deploy.events.kinds", [])
   const [live, setLive] = useState<DockerEvent[]>([])
   const [following, setFollowing] = useState(true)
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   const feed = usePoll<DeploymentLifecycle>(
     (signal) =>

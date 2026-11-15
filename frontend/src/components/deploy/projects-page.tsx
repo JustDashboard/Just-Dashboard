@@ -26,7 +26,6 @@ import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import type {
@@ -74,6 +73,7 @@ import {
   sortFleet,
   type FleetFilter,
 } from "@/components/deploy/fleet"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The fleet: every project, what it is, and what is happening to it now.
@@ -142,9 +142,9 @@ function Fleet() {
   // flight keeps its stage and clock beside its name from `sm`; its release
   // path, and a project's readings, join the line only from `lg`, where the
   // sidebar leaves the name room to be read.
-  const roomy = useMediaQuery("(min-width: 640px)")
-  const lined = useMediaQuery("(min-width: 1024px)")
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const roomy = useBreakpoint("sm")
+  const lined = useBreakpoint("lg")
+  const wide = useBreakpoint("xl")
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
     5000,
@@ -560,7 +560,7 @@ function InProgressPanel({
                 <RunActorMark run={run} remote={summary?.sourceRemote} size="xs" />
                 <span className="shrink-0">{runTriggerLine(run)}</span>
                 {commit?.subject && (
-                  <span className="min-w-0 truncate text-foreground/80">· {commit.subject}</span>
+                  <span className="min-w-0 truncate text-muted-foreground">· {commit.subject}</span>
                 )}
               </>
             )
