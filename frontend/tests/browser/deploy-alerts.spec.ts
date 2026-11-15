@@ -20,11 +20,24 @@ test.describe("traffic alerts", () => {
     await expect(card.getByRole("button", { name: /^No traffic/ })).toHaveCount(0)
 
     await card.getByRole("button", { name: "Add alert" }).click()
-    // The kind is picked by its card, and the unit sits inside the limit's edge.
-    await page
-      .getByRole("group", { name: "Alert kind" })
-      .getByRole("button", { name: /^Slow responses/ })
-      .click()
+    // The kind is one choice of three, picked by its card, and the unit sits
+    // inside the limit's edge.
+    const kinds = page.getByRole("radiogroup", { name: "Alert kind" })
+    await expect(kinds.getByRole("radio", { name: /^Failing requests/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    // The arrow keys move the pick, as in a native radio group.
+    await kinds.getByRole("radio", { name: /^Failing requests/ }).press("ArrowRight")
+    await expect(kinds.getByRole("radio", { name: /^Slow responses/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    await expect(kinds.getByRole("radio", { name: /^Slow responses/ })).toBeFocused()
+    await expect(kinds.getByRole("radio", { name: /^Failing requests/ })).toHaveAttribute(
+      "tabindex",
+      "-1",
+    )
     await expect(page.getByRole("dialog").getByText("ms", { exact: true })).toBeVisible()
     await page.getByLabel("Alert limit").fill("800")
     await page.getByLabel("Alert window in minutes").fill("10")
