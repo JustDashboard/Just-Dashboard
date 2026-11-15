@@ -1,6 +1,5 @@
 "use client"
 
-import { forwardRef, type Ref } from "react"
 import {
   mdiRecordCircleOutline,
   mdiSourceBranch,
@@ -32,17 +31,16 @@ import type { Icon, IconProps } from "@/components/icons"
  * into a second icon weight.
  */
 function mdi(path: string, name: string): Icon {
-  function MdiGlyph({ size = 16, title, ...props }: IconProps, ref: Ref<SVGSVGElement>) {
+  function MdiGlyph({ size = 16, title, ...props }: IconProps) {
     return (
-      <svg ref={ref} viewBox="0 0 24 24" fill="currentColor" width={size} height={size} {...props}>
+      <svg viewBox="0 0 24 24" fill="currentColor" width={size} height={size} {...props}>
         {title ? <title>{title}</title> : null}
         <path d={path} />
       </svg>
     )
   }
-  const Forwarded = forwardRef<SVGSVGElement, Omit<IconProps, "ref">>(MdiGlyph)
-  Forwarded.displayName = name
-  return Forwarded
+  MdiGlyph.displayName = name
+  return MdiGlyph
 }
 
 /** A branch: the fork every git UI draws beside a ref name. */

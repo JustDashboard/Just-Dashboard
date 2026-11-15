@@ -1,5 +1,4 @@
-import { forwardRef } from "react"
-import type { ForwardRefExoticComponent, Ref, RefAttributes, SVGProps } from "react"
+import type { ForwardRefExoticComponent, ReactNode, RefAttributes, SVGProps } from "react"
 import {
   AdjustmentsHorizontalIcon,
   ArchiveBoxArrowDownIcon,
@@ -189,8 +188,14 @@ export type IconProps = SVGProps<SVGSVGElement> & {
   title?: string
 }
 
-/** What every icon in this file is, for anything that takes one as a value. */
-export type Icon = ForwardRefExoticComponent<Omit<IconProps, "ref"> & RefAttributes<SVGSVGElement>>
+/**
+ * What every icon in this file is, for anything that takes one as a value: a
+ * plain function component. React 19 hands `ref` to a function component as
+ * a prop, so `IconProps` carries it straight to the `<svg>` and no icon needs
+ * `forwardRef`. `displayName` is the glyph's name, which tells two drawings
+ * apart where the inner function's name is the adapter's.
+ */
+export type Icon = ((props: IconProps) => ReactNode) & { displayName?: string }
 
 type HeroIcon = ForwardRefExoticComponent<
   Omit<SVGProps<SVGSVGElement>, "ref"> & {
@@ -209,12 +214,11 @@ type HeroIcon = ForwardRefExoticComponent<
  * because CSS beats the width/height attributes below.
  */
 function adapt(Hero: HeroIcon, name: string): Icon {
-  function Adapted({ size = 16, title, ...props }: IconProps, ref: Ref<SVGSVGElement>) {
-    return <Hero ref={ref} width={size} height={size} title={title} {...props} />
+  function Adapted({ size = 16, title, ...props }: IconProps) {
+    return <Hero width={size} height={size} title={title} {...props} />
   }
-  const Forwarded = forwardRef<SVGSVGElement, Omit<IconProps, "ref">>(Adapted)
-  Forwarded.displayName = name
-  return Forwarded
+  Adapted.displayName = name
+  return Adapted
 }
 
 export const Check: Icon = adapt(CheckIcon, "Check")
@@ -315,13 +319,9 @@ export const Code: Icon = adapt(CodeBracketSquareIcon, "Code")
    `RefreshClockwise` as the only two-arrow glyph, where the arrows mean the
    action rather than the wait. Callers supply the turn with `animate-spin`;
    the drawing is centred in its box so it spins on its own axis. */
-export const LoaderCircle: Icon = forwardRef(function LoaderCircle(
-  { size = 16, ...props }: Omit<IconProps, "ref">,
-  ref: Ref<SVGSVGElement>,
-) {
+export const LoaderCircle: Icon = function LoaderCircle({ size = 16, ...props }: IconProps) {
   return (
     <svg
-      ref={ref}
       viewBox="0 0 24 24"
       width={size}
       height={size}
@@ -336,7 +336,7 @@ export const LoaderCircle: Icon = forwardRef(function LoaderCircle(
       <path d="M21 12A9 9 0 0 0 7.5 4.2" />
     </svg>
   )
-})
+}
 
 /* The side-panel toggles, drawn inline. They were Heroicons' `ViewColumns`,
    three equal columns: the same glyph for a left panel and a right one, shown
@@ -352,13 +352,9 @@ export const LoaderCircle: Icon = forwardRef(function LoaderCircle(
    at 16px unless a caller says otherwise: shrunk from a 24-unit grid to 14px,
    every line fell between two pixels. */
 function sidebarGlyph(side: "left" | "right", showing: boolean, name: string): Icon {
-  function SidebarGlyph(
-    { size = 16, title, className, ...props }: IconProps,
-    ref: Ref<SVGSVGElement>,
-  ) {
+  function SidebarGlyph({ size = 16, title, className, ...props }: IconProps) {
     return (
       <svg
-        ref={ref}
         viewBox="0 0 16 16"
         width={size}
         height={size}
@@ -385,9 +381,8 @@ function sidebarGlyph(side: "left" | "right", showing: boolean, name: string): I
       </svg>
     )
   }
-  const Forwarded = forwardRef<SVGSVGElement, Omit<IconProps, "ref">>(SidebarGlyph)
-  Forwarded.displayName = name
-  return Forwarded
+  SidebarGlyph.displayName = name
+  return SidebarGlyph
 }
 
 export const SidebarLeftOpen: Icon = sidebarGlyph("left", false, "SidebarLeftOpen")
@@ -479,24 +474,13 @@ export const GitTag: Icon = adapt(TagIcon, "GitTag")
 
 /* GitHub's own brand mark, drawn inline — no icon set ships brand logos, and
    a generic glyph beside the word "GitHub" reads as a different product. */
-export const GitHubMark: Icon = forwardRef(function GitHubMark(
-  { size = 16, ...props }: Omit<IconProps, "ref">,
-  ref: Ref<SVGSVGElement>,
-) {
+export const GitHubMark: Icon = function GitHubMark({ size = 16, ...props }: IconProps) {
   return (
-    <svg
-      ref={ref}
-      viewBox="0 0 16 16"
-      width={size}
-      height={size}
-      fill="currentColor"
-      aria-hidden
-      {...props}
-    >
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="currentColor" aria-hidden {...props}>
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
     </svg>
   )
-})
+}
 
 /* Security. There is one shield drawing with a check and one with an
    exclamation — `Shield`, `ShieldCheck` and `FirewallCheck` are the former,
