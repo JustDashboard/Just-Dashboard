@@ -526,12 +526,15 @@ test("the catalogue's empty and failed answers are said, and Retry asks again", 
     failing ? refusal(503, "docker_unavailable", "Docker did not answer", true) : { body: [] },
   )
   await page.goto("/databases/new")
-  await expect(page.getByText("Not available on this host")).toBeVisible()
+  // Docker that did not answer is the Docker screen, with the way to its page.
+  const absent = page.locator('[data-slot="missing-thing"][data-reason="docker-silent"]')
+  await expect(absent).toContainText("Docker is not answering")
+  await expect(absent.getByRole("link", { name: "Open Docker" })).toBeVisible()
   // A catalogue that could not be read is not one that offers nothing.
   await expect(page.getByText("This server offers no engine to start from here.")).toHaveCount(0)
   failing = false
   await page.getByRole("button", { name: "Retry loading database engines" }).click()
-  await expect(page.getByText("Not available on this host")).toHaveCount(0)
+  await expect(absent).toHaveCount(0)
   await expect(page.getByText("This server offers no engine to start from here.")).toBeVisible()
 })
 

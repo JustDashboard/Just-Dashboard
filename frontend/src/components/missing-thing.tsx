@@ -36,15 +36,19 @@ export type MissingGain = { icon: Glyph; title: string; text: string }
  *   other things on it (Timers on Scheduled): the mark beside the words, the
  *   steps under them, no frame of its own.
  *
- * An empty list is still `EmptyState`, a failed read still `ErrorState`, and
- * one line inside a rail or an inspector is `MissingLine`. `MissingOrError`
- * picks between this and `ErrorState` for a read that failed.
+ * An empty list is still `EmptyState` and one line inside a rail or an
+ * inspector is `MissingLine`. A failed read whose answer names an absence is
+ * drawn as this by `ErrorState` itself (`absentFromError`), so a page that
+ * passes its error to `ErrorState` gets the designed screen at block size
+ * without asking for it. `InstallHandoff` is this screen with the package's
+ * install as its step and the job's console after it.
  *
  * The daemon's words go in `raw` and are drawn folded, never as the title.
  */
 export function MissingThing({
   thing,
   icon: Icon = Slash,
+  mark: drawn,
   title,
   children,
   step,
@@ -60,6 +64,11 @@ export function MissingThing({
   /** The thing as itself: a `ProductLogo` id. Without one, `icon` on the same tile. */
   thing?: string
   icon?: Glyph
+  /**
+   * Drawn in place of the tile, for a thing that is more than one product
+   * (Tailscale and Headscale): `ProductLogos`.
+   */
+  mark?: React.ReactNode
   /** What is missing, in plain words: "Docker is stopped". */
   title: string
   /** Why, and where it is fixed. */
@@ -80,7 +89,7 @@ export function MissingThing({
   className?: string
 }) {
   const page = size === "page"
-  const mark = (
+  const mark = drawn ?? (
     <ProductLogo
       id={hasProductLogo(thing) ? thing : undefined}
       fallback={Icon}
@@ -233,12 +242,18 @@ export function MissingScreen({
   gains,
   gainsLabel,
   after,
+  retry,
   className,
 }: {
   missing: Missing
   size?: "page" | "block"
   /** A step the page has and the model does not (a start, an install), drawn first. */
   step?: React.ReactNode
+  /**
+   * Asking again, last: a daemon that did not answer may answer the next time,
+   * and the reader should not have to reload the page around it to find out.
+   */
+  retry?: React.ReactNode
   gains?: MissingGain[]
   gainsLabel?: string
   after?: React.ReactNode
@@ -260,6 +275,7 @@ export function MissingScreen({
         <>
           {step && first && own(first, false)}
           {rest.map((item) => own(item, false))}
+          {retry}
         </>
       }
       gains={gains}
@@ -276,6 +292,10 @@ export function MissingScreen({
  * A read that failed, as what it is. Where the answer names an absence
  * (Docker did not answer, there is no systemd, the module is off) that is
  * drawn, with its step; anything else is the failure `ErrorState` draws.
+ *
+ * `ErrorState` draws the absence by itself now; this stays for the page that
+ * knows what it reads from systemd (the sentence names it) or whether the
+ * account may change Configuration, and for a page-sized screen.
  */
 export function MissingOrError({
   error,

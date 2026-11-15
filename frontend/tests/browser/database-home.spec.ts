@@ -1093,7 +1093,7 @@ test("statistics that cannot be read are dashes, never zeros, with the way to tr
   await expect(block(page, "Activity")).toContainText("permission denied")
 
   await page
-    .getByRole("status")
+    .getByRole("alert")
     .filter({ hasText: "the server's statistics" })
     .getByRole("button", { name: "Try again" })
     .click()

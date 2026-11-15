@@ -8,6 +8,8 @@
  * the fold the screen calls "What the server said".
  */
 
+import { sentenceCase } from "@/lib/format"
+
 /** The next step: a page that helps, or a line to copy into a shell or a file. */
 export type MissingStep =
   { kind: "link"; label: string; href: string } | { kind: "copy"; label: string; text: string }
@@ -34,6 +36,8 @@ export type MissingReason =
   | "docker-other"
   | "no-systemd"
   | "module-off"
+  | "not-installed"
+  | "no-proxy"
 
 /** Where the host's systemd is looked for (`procs.SystemdRunDir`'s parent, the folder Compose mounts). */
 export const SYSTEMD_RUN_DIR = "/run/systemd"
@@ -144,6 +148,60 @@ export function missingFromError(
     default:
       return undefined
   }
+}
+
+/**
+ * Every absence a failed read can name, for `ErrorState`: what
+ * `missingFromError` draws, and the two it leaves to the page — a program the
+ * package manager would install (`not_installed` for anything but systemd)
+ * and a host that runs no proxy (`no_proxy`). Those were the calm box reading
+ * "Not available on this host"; they are the designed absence now, with the
+ * way to the page that installs or sets the thing up.
+ *
+ * `missingFromError` keeps leaving them alone, because a page that calls it
+ * for its own screen (the terminal's) draws its own install step.
+ */
+export function absentFromError(
+  error: unknown,
+  context: { systemd?: SystemdReader; canConfigure?: boolean } = {},
+): Missing | undefined {
+  const known = missingFromError(error, context)
+  if (known || !error || typeof error !== "object") return known
+  const refusal = error as Refusal
+  const raw = refusal.raw?.trim() || undefined
+  if (refusal.code === "not_installed") {
+    const program = refusal.resource?.trim()
+    const said = refusal.message?.trim().replace(/\.$/, "")
+    return {
+      thing: program?.toLowerCase(),
+      reason: "not-installed",
+      title: sentenceCase(
+        program ? `${program} is not installed` : said || "Not installed on this server",
+      ),
+      sentence: program
+        ? `This is read with ${program}, and this server does not have it. Packages installs it.`
+        : "This is read with a program this server does not have. Packages installs it.",
+      steps: [
+        {
+          kind: "link",
+          label: "Open Packages",
+          href: program ? `/packages?q=${encodeURIComponent(program)}` : "/packages",
+        },
+      ],
+      raw,
+    }
+  }
+  if (refusal.code === "no_proxy") {
+    return {
+      reason: "no-proxy",
+      title: "No proxy on this server",
+      sentence:
+        "This is read from the web server in front of the apps, and this server runs none the dashboard manages. The Proxy page sets one up.",
+      steps: [{ kind: "link", label: "Open Proxy", href: "/proxy" }],
+      raw: raw ?? (refusal.message?.trim() || undefined),
+    }
+  }
+  return undefined
 }
 
 /**

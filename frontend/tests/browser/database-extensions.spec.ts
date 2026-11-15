@@ -652,7 +652,7 @@ test("an empty database and a list that cannot be read each say so", async ({ pa
   })
   await visit(page)
   await expect(section(page)).toContainText("Could not read the extensions")
-  await expect(section(page)).toContainText("permission denied for view pg_settings")
+  await expect(section(page)).toContainText("Permission denied for view pg_settings")
   failing = false
   await section(page).getByRole("button", { name: "Try again" }).click()
   await expect(section(page)).toContainText("No extension is enabled in this database.")

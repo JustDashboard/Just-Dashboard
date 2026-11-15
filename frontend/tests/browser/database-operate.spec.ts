@@ -1178,8 +1178,8 @@ test("dumps that could not be read say so and can be tried again", async ({ page
     },
   })
   await visit(page, "/databases/1/backups")
-  await expect(dumps(page).getByRole("status")).toContainText("Could not read the dumps")
-  await expect(dumps(page)).toContainText("the dump directory could not be listed")
+  await expect(dumps(page).getByRole("alert")).toContainText("Could not read the dumps")
+  await expect(dumps(page)).toContainText("The dump directory could not be listed.")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   failing = false
@@ -2363,8 +2363,8 @@ test("parameters that cannot be read say so and are tried again", async ({ page 
   })
   await visit(page, "/databases/1/settings/parameters")
   const parameters = section(page, "parameters")
-  await expect(parameters.getByRole("status")).toContainText("Could not read the parameters")
-  await expect(parameters).toContainText("permission denied for view pg_settings")
+  await expect(parameters.getByRole("alert")).toContainText("Could not read the parameters")
+  await expect(parameters).toContainText("Permission denied for view pg_settings")
   failing = false
   await parameters.getByRole("button", { name: "Try again" }).click()
   await expect(parameters.getByRole("button", { name: /Resource Usage/ })).toBeVisible()
@@ -3128,7 +3128,7 @@ test("accounts that cannot be read say so in the server's words without metric c
     },
   })
   await visit(page, "/databases/1/access")
-  await expect(accounts(page).getByRole("status")).toContainText("Could not read the accounts")
+  await expect(accounts(page).getByRole("alert")).toContainText("Could not read the accounts")
   await expect(accounts(page)).toContainText("SELECT command denied for table user")
   await expect(accounts(page).getByRole("button", { name: "Try again" })).toBeVisible()
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
@@ -3142,9 +3142,9 @@ test("accounts that cannot be read say so in the server's words without metric c
     "/databases/1/access",
   )
   await visit(page, "/databases/1/access/reporting")
-  const failed = page.locator("[data-slot=page] [role=status]:visible")
+  const failed = page.locator("[data-slot=page] [role=alert]:visible")
   await expect(failed).toContainText("Could not read the account")
-  await expect(failed).toContainText("permission denied for pg_authid")
+  await expect(failed).toContainText("Permission denied for pg_authid")
   await expect(failed.getByRole("button", { name: "Try again" })).toBeVisible()
 })
 
