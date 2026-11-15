@@ -25,7 +25,7 @@ import { Page, PageContext } from "@/components/page"
 import { ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { IdentityHeader } from "@/components/identity-header"
 import { useProjectStart } from "@/components/deploy/project-verbs"
 import { projectProduct } from "@/components/deploy/vocabulary"
 import { OverviewSkeleton } from "@/components/deploy/overview-skeleton"
@@ -391,7 +391,7 @@ export function ProjectProvider({
   if (!valid || (detail.error && !detail.data)) {
     return (
       <Page>
-        <PageContext eyebrow="Deployments" title="Deployment unavailable" />
+        <PageContext title="Deployment unavailable" />
         {detail.error && <ErrorState error={detail.error} onRetry={detail.refresh} />}
         <Button variant="outline" size="sm" asChild className="w-fit">
           <Link href="/deploy">
@@ -412,29 +412,19 @@ export function ProjectProvider({
 
 /**
  * The project shell's silhouette while its first read is in flight: its one
- * header row — the mark's tile, where it answers over the facts, the command's
- * place at the end — then the page's own: the Overview's preview, wiring and
- * readings on the Overview, a plain block elsewhere. It was a page titled
- * "Deployment" over a framed table, so every project opened on a heading and
- * a box that were both replaced a moment later by different ones.
+ * header — the project's identity line in its loading form, bones in the
+ * boxes the tile, the address, the state, the facts and the command will
+ * take — then the page's own: the Overview's preview, wiring and readings on
+ * the Overview, a plain block elsewhere. It was a page titled "Deployment"
+ * over a framed table, and then a hand-drawn grey header a few pixels off the
+ * real one, so every project opened on a header that moved when it landed.
  */
 function ShellSkeleton({ projectId }: { projectId: number }) {
   const overview = usePathname() === `/deploy/${projectId}`
   return (
     <Page aria-busy="true" className="pt-4 md:pt-5">
       <h1 className="sr-only">Loading deployment</h1>
-      <div aria-hidden className="flex min-w-0 items-center gap-3 border-b border-hairline pb-4">
-        <Skeleton className="size-10 shrink-0 rounded-lg" />
-        <div className="min-w-0 flex-1 space-y-2">
-          <Skeleton className="h-4 w-44 max-w-full" />
-          <div className="flex min-w-0 gap-3">
-            <Skeleton className="h-3 w-32" />
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="hidden h-3 w-40 sm:block" />
-          </div>
-        </div>
-        <Skeleton className="h-8 w-28 shrink-0" />
-      </div>
+      <IdentityHeader loading slot="project-header" state command />
       {overview ? <OverviewSkeleton /> : <LoadingPanel plain />}
     </Page>
   )

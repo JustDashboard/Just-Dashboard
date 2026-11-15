@@ -10,10 +10,10 @@ import { notify } from "@/lib/toast"
 import type { WGInterface } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader as HostIdentity } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { findingsWord, tunnelHref, tunnelMoved, tunnelState } from "./tunnel-reading"
 
@@ -205,27 +205,12 @@ export function TunnelIdentity({
       }
       facts={
         <>
-          <HostFact>
-            <span className="block truncate font-mono">
-              {tunnel.subnet || tunnel.addresses[0] || "no network"}
-            </span>
-          </HostFact>
-          <FactDot />
-          <HostFact>UDP {tunnel.listenPort || "—"}</HostFact>
-          {moved > 0 && (
-            <>
-              <FactDot />
-              <HostFact>
-                <span className="numeric">moved {bytes(moved)}</span>
-              </HostFact>
-            </>
-          )}
-          {!tunnel.managed && (
-            <>
-              <FactDot />
-              <HostFact>written by hand, read and never changed here</HostFact>
-            </>
-          )}
+          <Fact mono className="truncate">
+            {tunnel.subnet || tunnel.addresses[0] || "no network"}
+          </Fact>
+          <Fact>UDP {tunnel.listenPort || "—"}</Fact>
+          {moved > 0 && <Fact className="numeric">moved {bytes(moved)}</Fact>}
+          {!tunnel.managed && <Fact>written by hand, read and never changed here</Fact>}
         </>
       }
       command={
@@ -241,24 +226,7 @@ export function TunnelIdentity({
   )
 }
 
-/** The line's place while the tunnels are read: WireGuard's mark and grey words. */
+/** The line's place while the tunnels are read: WireGuard's mark and bones in the line's boxes. */
 export function IdentitySkeleton({ mark }: { mark: string }) {
-  return (
-    <HostIdentity
-      mark={mark}
-      // Each grey bar stands in a box of the line it stands for, so the line
-      // is the height it will be and nothing under it moves when it is read.
-      title={
-        <span className="flex h-[1lh] items-center">
-          <Skeleton className="h-4 w-28" />
-        </span>
-      }
-      state={
-        <span className="flex h-4 items-center">
-          <Skeleton className="h-3 w-24" />
-        </span>
-      }
-      facts={<Skeleton className="my-0.5 h-3 w-64 max-w-full" />}
-    />
-  )
+  return <HostIdentity loading mark={mark} state />
 }

@@ -4,7 +4,8 @@ import Link from "next/link"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
 import { parseAgent } from "@/lib/clients"
 import { useAuth } from "@/hooks/use-auth"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Section } from "@/components/section"
 import { LoadingRows } from "@/components/loading"
@@ -56,7 +57,9 @@ function Profile() {
   const keys = useApiKeys()
   const users = useDashboardUsers(admin)
 
-  if (!user) return <PageState eyebrow="Account" title="Profile" />
+  // While the account is read the page is already its own shape: the identity
+  // line with bones in its boxes, not a framed table that the line replaces.
+  if (!user) return <PageState title="Profile" skeleton={<IdentityHeader loading state />} />
 
   const name = displayNameOf(user)
   const twoFactor = user.totpEnabled
@@ -66,10 +69,10 @@ function Profile() {
   const people = users.data ?? []
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Account" title={name} />
+    <Page rise>
+      <PageContext title={name} />
 
-      <HostIdentity
+      <IdentityHeader
         logo={<UserAvatar key={user.avatarVersion} user={user} size="lg" />}
         title={
           <span className="inline-flex min-w-0 items-center gap-2.5">
@@ -79,23 +82,21 @@ function Profile() {
         }
         facts={
           <>
-            <span>member since {calendarDate(user.createdAt)}</span>
-            <FactDot />
-            <span>signed in {user.lastLoginAt ? relativeTime(user.lastLoginAt) : "just now"}</span>
+            <Fact>member since {calendarDate(user.createdAt)}</Fact>
+            <Fact>signed in {user.lastLoginAt ? relativeTime(user.lastLoginAt) : "just now"}</Fact>
             {current && agent && (
               <>
-                <FactDot />
-                <HostFact product={agent.product}>
+                <Fact product={agent.product} className="truncate">
                   {agent.client}
                   {agent.os && ` on ${agent.os}`}
-                </HostFact>
-                <FactDot />
-                <NetworkFact ip={current.ip} />
+                </Fact>
+                <Fact>
+                  <NetworkFact ip={current.ip} />
+                </Fact>
               </>
             )}
             {admin && people.length > 0 && (
-              <>
-                <FactDot />
+              <Fact>
                 <Link
                   href="/account/users"
                   className="inline-flex items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
@@ -103,7 +104,7 @@ function Profile() {
                   <AvatarRun users={people} />
                   {plural(people.length, "account")}
                 </Link>
-              </>
+              </Fact>
             )}
           </>
         }
