@@ -6,15 +6,11 @@ import { Dialog as SheetPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { usePortalContainer } from "@/lib/portal-container"
-
-/**
- * The close button, the same target as `ui/dialog.tsx`'s — 40px on a touch
- * screen, 32px under a pointer, centred on `SidePanel`'s title strip. Written
- * out again rather than imported: the rule that keeps everything but `Modal`
- * off the raw dialog applies to this file too.
- */
-const CLOSE =
-  "absolute top-0.5 right-1 flex size-10 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none sm:top-1.5 sm:right-2 sm:size-8 [&_svg]:pointer-events-none [&_svg]:shrink-0"
+// The close button and the dim ground are the dialog's, so the two strips put
+// their cross in one place and the two overlays fade alike. Constants only:
+// the dialog parts themselves stay `Modal`'s to assemble.
+// eslint-disable-next-line no-restricted-imports -- two class strings, not the dialog
+import { OVERLAY_CLOSE, OVERLAY_GROUND } from "@/components/ui/dialog"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
@@ -41,10 +37,7 @@ function SheetOverlay({
   return (
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
-      className={cn(
-        "fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
-        className,
-      )}
+      className={cn(OVERLAY_GROUND, className)}
       {...props}
     />
   )
@@ -66,7 +59,10 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:duration-500",
+          // One length each way, the sheet's slide (`--duration-slow`): it
+          // arrived in 500ms and left in 300, so it felt slower to open than
+          // the dialog beside it by more than its longer travel explains.
+          "fixed z-overlay flex flex-col gap-4 bg-background shadow-lg transition duration-slow ease-in-out data-[state=closed]:animate-out data-[state=open]:animate-in",
           side === "right" &&
             "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
           side === "left" &&
@@ -81,7 +77,7 @@ function SheetContent({
       >
         {children}
         {showCloseButton && (
-          <SheetPrimitive.Close className={CLOSE}>
+          <SheetPrimitive.Close className={OVERLAY_CLOSE}>
             <Cross className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>

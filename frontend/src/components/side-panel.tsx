@@ -5,6 +5,7 @@ import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
 import { useFocusReturn } from "@/hooks/use-focus-return"
 import { useWorkspaceFocus } from "@/components/workspace/workspace"
+import type { OverlaySize } from "@/components/modal"
 import {
   Sheet,
   SheetContent,
@@ -13,12 +14,18 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 
+/**
+ * The overlay size names (`OverlaySize`, written at `components/modal.tsx`)
+ * as a sheet's widths. A sheet is a column the height of the window, so each
+ * step is wider than the dialog's of the same name: a sheet's `md` holds what
+ * a dialog's `lg` does, with the room a column needs for its labels.
+ */
 const WIDTHS = {
   sm: "sm:max-w-lg",
   md: "sm:max-w-2xl",
   lg: "sm:max-w-3xl",
   xl: "sm:max-w-5xl",
-} as const
+} as const satisfies Record<OverlaySize, string>
 
 /**
  * The sheet: a small add or edit form that opens over the page it belongs to,
@@ -70,7 +77,8 @@ export function SidePanel({
   description,
   actions,
   footer,
-  width = "lg",
+  size,
+  width,
   initialFocus = "first",
   onCloseAutoFocus,
   bodyClassName,
@@ -84,7 +92,10 @@ export function SidePanel({
   description?: React.ReactNode
   actions?: React.ReactNode
   footer?: React.ReactNode
-  width?: keyof typeof WIDTHS
+  /** How much the sheet holds, by the overlays' one vocabulary; `lg` if left out. */
+  size?: OverlaySize
+  /** @deprecated use `size`, the name `Modal` has for the same thing. */
+  width?: OverlaySize
   /**
    * Where the keyboard lands when the sheet opens, as `Modal`'s does. A form
    * wants its first field; one whose first field already holds a sensible
@@ -104,7 +115,7 @@ export function SidePanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className={cn("flex w-full flex-col gap-0 p-0", WIDTHS[width], className)}
+        className={cn("flex w-full flex-col gap-0 p-0", WIDTHS[size ?? width ?? "lg"], className)}
         onCloseAutoFocus={(event) => {
           onCloseAutoFocus?.(event)
           if (!event.defaultPrevented && restoreFocus?.()) event.preventDefault()
