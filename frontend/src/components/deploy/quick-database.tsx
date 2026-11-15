@@ -50,7 +50,6 @@ export function DatabaseQuickDeploy({
   /** The connection shape the application parses when it is not a URL. */
   format?: DeploymentDatabaseConnectionFormat
 }) {
-  const inSheet = useInSidePanel()
   const alive = useRef(true)
   const provisioning = useRef(false)
   const [startedContainer, setStartedContainer] = useState<string | undefined>(resume?.container)
