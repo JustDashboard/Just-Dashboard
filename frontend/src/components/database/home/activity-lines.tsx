@@ -6,11 +6,11 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { TileTrend } from "@/components/sparkline"
 import { WireMark } from "@/components/wire/wire"
-import { HistoryRange } from "@/components/database/home/activity"
+import { HistoryFact, HistoryRange } from "@/components/database/home/activity"
 import { offeredViews, type ChartView } from "@/components/database/home/charts"
 import { lineReading } from "@/components/database/home/lines"
 import type { Sample } from "@/components/database/home/samples"
-import { HISTORY_RANGES, SAMPLE_EVERY_MS, keptFor } from "@/components/database/home/use-samples"
+import { HISTORY_RANGES } from "@/components/database/home/use-samples"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { Stale } from "@/components/stale"
 import { SectionLink } from "@/components/section-link"
@@ -94,14 +94,7 @@ export const ActivityLines = memo(function ActivityLines({
         actions={
           <>
             {error && samples.length > 0 && <Stale error={error} />}
-            {/* How long the record goes back, on the line that picks the
-                window; how it is collected is on the pointer. */}
-            <span
-              className="text-hint text-muted-foreground max-sm:hidden"
-              title={`Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed.`}
-            >
-              kept for {keptFor(retentionHours)}
-            </span>
+            <HistoryFact samples={samples} retentionHours={retentionHours} />
             {performance && <SectionLink href={performance}>Performance</SectionLink>}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>

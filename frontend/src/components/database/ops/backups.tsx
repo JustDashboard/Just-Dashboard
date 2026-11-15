@@ -384,16 +384,8 @@ export function Backups() {
         className="outline-none"
       >
         <PanelHeader
-          title={
-            <span className="flex items-baseline gap-2">
-              Dumps
-              {data && (
-                <span className="numeric text-hint font-normal text-muted-foreground">
-                  {files.length}
-                </span>
-              )}
-            </span>
-          }
+          title="Dumps"
+          count={data ? files.length : undefined}
           actions={
             <>
               <Stale poll={backups} />

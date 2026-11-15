@@ -689,7 +689,9 @@ test("every view of saved activity is a line of words with its window, and the r
   await expect(reading(page, "Cache")).toContainText("99.0% hit rate")
   // The footnote under the charts is gone; how the record is kept is on the title's line.
   await expect(activity).not.toContainText(/Recorded activity over/)
-  await expect(activity.getByText("kept for 7 days")).toHaveAttribute(
+  // The record's words are Performance's, and they stay at every width.
+  await expect(activity.locator("[data-slot=history-fact]")).toContainText("kept for 7 days")
+  await expect(activity.locator("[data-slot=history-fact]")).toHaveAttribute(
     "title",
     "Collected every 30 seconds, including while this page is closed.",
   )

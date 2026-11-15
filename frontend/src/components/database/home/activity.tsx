@@ -59,7 +59,6 @@ export const Activity = memo(function Activity({
   const offered = useMemo(() => offeredViews(views, newest), [views, newest])
   if (offered.length === 0) return null
 
-  const held = heldSeconds(samples)
   const note = loading
     ? "Reading the server…"
     : error && samples.length === 0
@@ -72,16 +71,7 @@ export const Activity = memo(function Activity({
         title="Activity"
         actions={
           <>
-            {/* What was a sentence under the charts: how much is recorded and
-                how long it is kept, on the line that picks the window. */}
-            <span
-              className="text-hint text-muted-foreground max-sm:hidden"
-              title={`Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed.`}
-            >
-              {held > 0
-                ? `${duration(held)} recorded, kept for ${keptFor(retentionHours)}`
-                : `kept for ${keptFor(retentionHours)}`}
-            </span>
+            <HistoryFact samples={samples} retentionHours={retentionHours} />
             {error && samples.length > 0 && <Stale error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
@@ -105,6 +95,38 @@ export const Activity = memo(function Activity({
     </Panel>
   )
 })
+
+/**
+ * What the record holds and how long it is kept, on the line that picks the
+ * window: "2h recorded, kept for 7 days". The Home's Activity and
+ * Performance's Overview head the same record with it, in the same words and
+ * at every width; the Home had its own shorter line, hidden on a phone. How
+ * it is collected is on the pointer.
+ */
+export function HistoryFact({
+  samples,
+  retentionHours,
+}: {
+  samples: readonly Sample[]
+  retentionHours: number
+}) {
+  const held = heldSeconds(samples)
+  return (
+    <span
+      data-slot="history-fact"
+      className="min-w-0 truncate text-hint text-muted-foreground"
+      title={`Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed.`}
+    >
+      {held > 0 && (
+        <>
+          <span className="numeric font-medium text-foreground">{duration(held)}</span>{" "}
+          recorded,{" "}
+        </>
+      )}
+      kept for {keptFor(retentionHours)}
+    </span>
+  )
+}
 
 /** The recorded window the charts cover, as one row of presses. */
 export function HistoryRange({

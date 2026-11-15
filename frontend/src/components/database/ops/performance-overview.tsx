@@ -1,19 +1,16 @@
 "use client"
 
-import { ViewChart, HistoryRange } from "@/components/database/home/activity"
+import { HistoryFact, HistoryRange, ViewChart } from "@/components/database/home/activity"
 import { Block } from "@/components/database/home/blocks"
 import { offeredViews } from "@/components/database/home/charts"
 import { chartEvents } from "@/components/database/home/events"
-import { gauge, heldSeconds, type Sample } from "@/components/database/home/samples"
-import { SAMPLE_EVERY_MS, keptFor } from "@/components/database/home/use-samples"
+import { gauge, type Sample } from "@/components/database/home/samples"
 import { overviewCharts, quietChart } from "@/components/database/ops/performance-figures"
 import { Notes } from "@/components/database/ops/performance-parts"
-import { Fig, TitleFact } from "@/components/database/ops/performance-words"
 import { NowPicture } from "@/components/database/ops/performance-picture"
 import type { DbActivityResponse, DbServerStats } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import type { PollState } from "@/hooks/use-poll"
-import { duration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
 import { Stale } from "@/components/stale"
@@ -70,8 +67,6 @@ export function OverviewView({
       quiet: all.filter((chart) => !ids.has(chart.id)),
     }
   }, [charts, drawnKey, offeredKey])
-  const held = heldSeconds(samples)
-  const every = SAMPLE_EVERY_MS / 1000
   const note = loading
     ? "Reading the server…"
     : error && samples.length === 0
@@ -95,17 +90,7 @@ export function OverviewView({
           <>
             {/* What was two sentences under the charts: how much is recorded
                 and how long it is kept, on the line that picks the window. */}
-            <TitleFact
-              title={`Collected every ${every} seconds, including while this page is closed.`}
-            >
-              {held > 0 ? (
-                <>
-                  <Fig>{duration(held)}</Fig> recorded, kept for {keptFor(retentionHours)}
-                </>
-              ) : (
-                <>kept for {keptFor(retentionHours)}</>
-              )}
-            </TitleFact>
+            <HistoryFact samples={samples} retentionHours={retentionHours} />
             {error && samples.length > 0 && <Stale error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
