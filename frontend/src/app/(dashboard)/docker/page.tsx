@@ -326,7 +326,7 @@ export default function DockerOverviewPage() {
               <span className="inline-flex items-center gap-1.5">
                 Containers
                 {read && (
-                  <span className="numeric text-body font-normal text-muted-foreground">
+                  <span className="numeric text-body leading-none font-normal text-muted-foreground">
                     {containers.length}
                   </span>
                 )}
@@ -362,7 +362,7 @@ export default function DockerOverviewPage() {
                 <span className="inline-flex items-center gap-1.5">
                   Compose projects
                   {stacks.data && (
-                    <span className="numeric text-body font-normal text-muted-foreground">
+                    <span className="numeric text-body leading-none font-normal text-muted-foreground">
                       {active.length} of {detected.length} up
                     </span>
                   )}

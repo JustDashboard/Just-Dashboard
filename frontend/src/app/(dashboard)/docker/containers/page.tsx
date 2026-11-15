@@ -408,7 +408,7 @@ export default function ContainersPage() {
             title={
               <span className="inline-flex items-center gap-1.5">
                 Containers
-                <span className="numeric text-body font-normal text-muted-foreground">
+                <span className="numeric text-body leading-none font-normal text-muted-foreground">
                   {containers.length}
                 </span>
                 <ExplainIcon name="container" />
