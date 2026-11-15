@@ -2,9 +2,8 @@
 
 import { useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Archive, ArrowLeft, MagnifyingGlass, Trash } from "@/components/icons"
+import { Archive, MagnifyingGlass, Trash } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -137,7 +136,7 @@ export function ArchivedProjects() {
 
   return (
     <Page rise>
-      <PageContext eyebrow={BACK} title="Archived" />
+      <PageContext back={BACK} title="Archived" />
       <Panel plain>
         <PanelToolbar>
           <SearchInput
@@ -228,14 +227,7 @@ export function ArchivedProjects() {
   )
 }
 
-const BACK = (
-  <Link
-    href="/deploy"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Deployments
-  </Link>
-)
+const BACK = { href: "/deploy", label: "Deployments" }
 
 /** Three rows in the archive's shape, before its first answer. */
 function ArchivedRows() {
@@ -250,7 +242,7 @@ function ArchivedRows() {
 export function ArchivedSkeleton() {
   return (
     <Page>
-      <PageContext eyebrow={BACK} title="Archived" />
+      <PageContext back={BACK} title="Archived" />
       <Panel plain>
         <PanelToolbar>
           <SearchInputSkeleton />

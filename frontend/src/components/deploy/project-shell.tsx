@@ -90,6 +90,9 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   // rather than a page that scrolls: it fills what is left, down to the foot.
   const pathname = usePathname()
   const fill = pathname.endsWith("/assistant")
+  // The console is the window under the header from `xl`, the way Logs fills
+  // its page: a fixed offset left ground under the terminal at 1440x900.
+  const held = pathname.endsWith("/console")
   // Logs is one pane on a phone, the whole height under this header with its
   // views on a bar along the foot (`components/phone-panes.tsx`), so below
   // `md` its page is held to the window too. From `md` it flows like the rest.
@@ -174,14 +177,14 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
 
   return (
     <Page
-      fill={fill}
+      fill={fill || (held ? "xl" : undefined)}
       className={cn(
         "pt-4 md:pt-5",
         fill && "gap-0 pb-0 md:gap-0 md:pb-0",
         phonePane && "max-md:h-full max-md:min-h-0 max-md:gap-4 max-md:overflow-hidden max-md:pb-0",
       )}
     >
-      <PageContext title={record.name} />
+      <PageContext title={record.name} back={{ href: "/deploy", label: "Deployments" }} />
 
       <HostIdentity
         label={`About ${record.name}`}

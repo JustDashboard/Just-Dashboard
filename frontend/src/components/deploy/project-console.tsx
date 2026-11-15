@@ -28,13 +28,15 @@ import { serviceProduct } from "@/components/deploy/service-product"
 import { GameConsole } from "@/components/deploy/game/console"
 
 /**
- * The shell's height: the window below the project's header, which is about
- * 17.5rem of it, so the pane's footer and its last rows — where the prompt
- * sits once output fills it — are on screen on a laptop without scrolling
- * the page. Never shorter than a usable terminal, never taller than a
- * readable one. The page's skeleton takes the same.
+ * The shell's height. From `xl` the project shell holds this page to the
+ * window (`Page fill="xl"`, as Logs fills its page), so the pane takes what is
+ * left under the header, down to the foot, and a fixed offset no longer
+ * leaves ground under it. Below `xl` the page scrolls, and the pane is the
+ * window less the header's 17.5rem: never shorter than a usable terminal,
+ * never taller than a readable one. The page's skeleton takes the same.
  */
-export const CONSOLE_HEIGHT = "h-[clamp(26rem,calc(100dvh-17.5rem),48rem)]"
+export const CONSOLE_HEIGHT =
+  "h-[clamp(26rem,calc(100dvh-17.5rem),48rem)] xl:h-auto xl:min-h-[26rem] xl:flex-1"
 
 /**
  * A shell inside the running release — or, for a game server, the game's own
@@ -124,7 +126,7 @@ function DockerConsole() {
   const root = runsAsRoot(DEFAULT_CHOICE.runAs, detail?.user)
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
       <Pane className={CONSOLE_HEIGHT}>
         <XtermPane
           key={service.containerId}

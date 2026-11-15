@@ -299,7 +299,10 @@ export function RunPage() {
   if (initial.loading && !snapshot) {
     return (
       <Page>
-        <PageContext eyebrow="Deployments" title={`Deployment #${route.run}`} />
+        <PageContext
+          back={{ href: `/deploy/${route.id}/deployments`, label: "Deployments" }}
+          title={`Deployment #${route.run}`}
+        />
         <LoadingPanel rows={7} plain />
       </Page>
     )
@@ -307,7 +310,10 @@ export function RunPage() {
   if (initial.error || !snapshot) {
     return (
       <Page>
-        <PageContext eyebrow="Deployments" title="Deployment unavailable" />
+        <PageContext
+          back={{ href: `/deploy/${route.id}/deployments`, label: "Deployments" }}
+          title="Deployment unavailable"
+        />
         {initial.error && <ErrorState error={initial.error} />}
         <Button variant="outline" size="sm" asChild className="w-fit">
           <Link href={`/deploy/${projectId}`}>

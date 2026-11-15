@@ -43,12 +43,7 @@ import { AccessPromise, AccessTag } from "@/components/deploy/first-sign-in"
 import { deploymentName } from "@/components/deploy/vocabulary"
 import { ProductLogo, ProductLogos, hasProductLogo, imageProduct } from "@/components/product-logo"
 import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
-import {
-  YOUR_TEMPLATES_EMPTY,
-  isUserTemplate,
-  splitCatalogue,
-  templateProvenance,
-} from "@/components/deploy/templates"
+import { isUserTemplate, splitCatalogue, templateProvenance } from "@/components/deploy/templates"
 import { breakpointQuery } from "@/lib/breakpoints"
 import { useSourceInspection } from "./use-source-inspection"
 import { templateInputErrors } from "./template-inputs"
@@ -441,20 +436,25 @@ export function SourceTemplate({
             containerClassName="sm:w-full"
           />
           {catalogue.data && (
-            // The shelves, as the Git page's filters are drawn: a chip narrows
-            // the catalogue to one shelf and says how many are on it.
+            // The shelves, as the fleet's filters are drawn: a chip narrows
+            // the catalogue to one shelf and says how many are on it, and a
+            // shelf with nothing on it gets no chip unless it is the one
+            // chosen — a filter that can only return nothing is furniture.
             <ChipStrip role="group" aria-label="Template topics">
               <FilterChip selected={topic === "all"} onClick={() => setTopic("all")}>
                 All <ChipCount>{matched}</ChipCount>
               </FilterChip>
-              <FilterChip
-                selected={topic === "yours"}
-                onClick={() => setTopic(topic === "yours" ? "all" : "yours")}
-              >
-                Yours <ChipCount>{yoursMatched.length}</ChipCount>
-              </FilterChip>
+              {(yoursMatched.length > 0 || topic === "yours") && (
+                <FilterChip
+                  selected={topic === "yours"}
+                  onClick={() => setTopic(topic === "yours" ? "all" : "yours")}
+                >
+                  Yours <ChipCount>{yoursMatched.length}</ChipCount>
+                </FilterChip>
+              )}
               {TOPICS.map((shelf) => {
                 const count = shelves.find((one) => one.key === shelf.key)?.entries.length ?? 0
+                if (count === 0 && topic !== shelf.key) return null
                 return (
                   <FilterChip
                     key={shelf.key}
@@ -503,18 +503,13 @@ export function SourceTemplate({
                     ))}
                   </ChoiceGrid>
                 ) : (
-                  // The two ways to make one, where the reader is looking for
-                  // one: a running deployment's Save as template, and a
-                  // Compose file or an exported definition on the Templates
-                  // page.
-                  <EmptyNote>
-                    {YOUR_TEMPLATES_EMPTY}{" "}
-                    <Link
-                      href="/deploy/templates"
-                      className="rounded-sm text-foreground underline underline-offset-4 focus-ring"
-                    >
-                      Open Templates
-                    </Link>
+                  // One line and the way to make one: the Templates page says
+                  // how, from a Compose file or a running deployment.
+                  <EmptyNote as="div" dense className="text-left">
+                    Templates you add appear here.{" "}
+                    <Button size="xs" variant="outline" className="ml-1.5" asChild>
+                      <Link href="/deploy/templates">Open Templates</Link>
+                    </Button>
                   </EmptyNote>
                 )}
               </section>
