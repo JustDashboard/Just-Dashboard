@@ -36,7 +36,6 @@ import type {
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
@@ -74,6 +73,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { engineProduct } from "@/components/proxy/marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The proxy's alerts: rules over the readings the overview shows, told to the
@@ -847,7 +847,7 @@ function AlertsPicture({
   engine?: string
   onAdd?: (kind: ProxyAlertKind) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const router = useRouter()
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
@@ -922,7 +922,7 @@ function AlertsPicture({
           >
             {areas}
           </div>
-          <div ref={hub} className="relative z-10 mt-10 flex">
+          <div ref={hub} className="relative z-raised mt-10 flex">
             <WireHost size="md" />
           </div>
           <div
@@ -1001,7 +1001,7 @@ function PictureArea({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {drawn}
         </div>
         <span className="sr-only">{`${area.title}: ${words}`}</span>

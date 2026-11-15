@@ -241,9 +241,9 @@ export function WeekStrip({
             )}
           >
             {day.name}
-            {i > 0 && <span className="ml-1 text-muted-foreground/70">{day.date}</span>}
+            {i > 0 && <span className="ml-1 text-faint">{day.date}</span>}
           </span>
-          <div className="relative h-5 overflow-hidden rounded-[4px] bg-muted/40">
+          <div className="relative h-5 overflow-hidden rounded-sm bg-muted/40">
             {[25, 50, 75].map((left) => (
               <span
                 key={left}
@@ -258,7 +258,7 @@ export function WeekStrip({
                 <span
                   key={`spread:${at}`}
                   aria-hidden
-                  className="absolute inset-y-1 rounded-[2px]"
+                  className="absolute inset-y-1 rounded-xs"
                   style={{
                     left: `${place(at, day.from, day.until)}%`,
                     width: `${place(at + spread, day.from, day.until) - place(at, day.from, day.until)}%`,
@@ -269,7 +269,7 @@ export function WeekStrip({
             {day.dense ? (
               <span
                 aria-hidden
-                className="absolute inset-y-1 rounded-[2px]"
+                className="absolute inset-y-1 rounded-xs"
                 style={{
                   left: `${place(day.times[0], day.from, day.until)}%`,
                   right: 0,

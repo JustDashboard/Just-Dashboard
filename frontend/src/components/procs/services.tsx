@@ -250,7 +250,7 @@ export function Services() {
         },
       ]}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         {header}
 
         <HostIdentity
@@ -451,11 +451,11 @@ export function Services() {
                 ? `Showing ${ROWS} of ${visible.length} matching — search to narrow`
                 : `${plural(visible.length, "service")} matching`}
             </span>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>failed first, then by name</span>
             {missing > 0 && (
               <>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span
                   className="numeric"
                   title="Named by another unit, with no unit file on this host"
@@ -466,7 +466,7 @@ export function Services() {
             )}
             {!list.data.ratesReady && (
               <>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span>processor shares arrive with the second read</span>
               </>
             )}
@@ -503,7 +503,7 @@ function UnitRows({ rows, ...rest }: RowsProps & { rows: SystemdUnit[] }) {
   return (
     <>
       <div className="hidden min-w-0 xl:block">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead>Service</TableHead>
@@ -753,7 +753,7 @@ function CpuReading({ unit }: { unit: SystemdUnit }) {
   const value = unit.cpuPercent ?? 0
   const tone = cpuTone(value)
   if (!unit.cpuReady) {
-    return <p className="text-right font-mono text-muted-foreground/60">—</p>
+    return <p className="text-right font-mono text-faint">—</p>
   }
   return (
     <div className="flex items-center justify-end gap-2">
@@ -782,7 +782,7 @@ function CpuReading({ unit }: { unit: SystemdUnit }) {
 function MemoryReading({ unit, heaviest }: { unit: SystemdUnit; heaviest: number }) {
   const memory = unit.memoryBytes ?? 0
   if (memory === 0) {
-    return <p className="text-right font-mono text-muted-foreground/60">—</p>
+    return <p className="text-right font-mono text-faint">—</p>
   }
   return (
     <div

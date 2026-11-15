@@ -34,7 +34,7 @@ export function AdminOnly({ title, children }: { title: string; children: React.
   const { can, loading } = useAuth()
   if (loading || can("system.admin")) return <>{children}</>
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title={title} />
       <Closed />
     </Page>

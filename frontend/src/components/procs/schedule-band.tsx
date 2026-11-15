@@ -174,7 +174,7 @@ export function ScheduleBand({
               >
                 <span
                   aria-hidden
-                  className="size-2 rounded-[3px]"
+                  className="size-2 rounded-xs"
                   style={{ background: KIND[key].color }}
                 />
                 {KIND[key].label}
@@ -436,7 +436,7 @@ function DayChart({
               data-hour={col.hour}
               onMouseEnter={() => onHour(i)}
               className={cn(
-                "relative flex flex-col-reverse gap-[2px] rounded-[4px] p-[2px] transition-colors",
+                "relative flex flex-col-reverse gap-[2px] rounded-sm p-[2px] transition-colors",
                 i === 0 ? "bg-row-hover" : "bg-surface-sunken",
                 hour === i && "bg-row-hover ring-1 ring-border",
                 col.hour === 0 &&
@@ -454,7 +454,7 @@ function DayChart({
                   onMouseLeave={() => onPoint(null)}
                   onClick={() => onOpen(lane)}
                   className={cn(
-                    "h-[10px] w-full shrink-0 cursor-pointer rounded-[2px] transition-opacity",
+                    "h-[10px] w-full shrink-0 cursor-pointer rounded-xs transition-opacity",
                     pointed
                       ? pointed === lane.key
                         ? "ring-1 ring-foreground/70"
@@ -550,7 +550,7 @@ function UpNextRow({
         title={next !== undefined ? longClock(next, zone) : undefined}
       >
         {at?.day && <span className="text-hint text-muted-foreground">{at.day}</span>}
-        <span className={cn("font-medium", soonest ? "text-foreground" : "text-foreground/90")}>
+        <span className={cn("font-medium", soonest ? "text-foreground" : "text-muted-foreground")}>
           {at?.time ?? "—"}
         </span>
       </span>
@@ -577,7 +577,7 @@ function UpNextRow({
       <span className="hidden min-w-0 items-center gap-2 text-hint text-muted-foreground md:flex">
         <span
           aria-hidden
-          className="size-2 shrink-0 rounded-[3px]"
+          className="size-2 shrink-0 rounded-xs"
           style={{ background: KIND[lane.kind].color }}
         />
         <span className="truncate">{KIND[lane.kind].one}</span>
@@ -621,7 +621,7 @@ export function NextUp({ lanes, zone }: { lanes: ScheduleLane[]; zone?: string }
         <p className="flex min-w-0 items-center gap-1.5 text-body sm:justify-end">
           <span
             aria-hidden
-            className="size-2 shrink-0 rounded-[3px]"
+            className="size-2 shrink-0 rounded-xs"
             style={{ background: KIND[best.lane.kind].color }}
           />
           <span className="truncate font-medium">{best.lane.name}</span>

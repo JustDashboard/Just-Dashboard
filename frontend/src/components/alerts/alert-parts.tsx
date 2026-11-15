@@ -349,7 +349,7 @@ export function PictureChannel({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {drawn}
         </div>
         {channel && <span className="sr-only">{`${channel.name}: ${hint}`}</span>}

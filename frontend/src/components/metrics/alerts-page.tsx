@@ -48,7 +48,6 @@ import {
 } from "@/lib/host-alerts"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
@@ -84,6 +83,7 @@ import {
   isFiring,
   pictureTargets,
 } from "@/components/alerts/alert-parts"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The host's alerts: rules over the machine's own readings — its CPU and
@@ -854,7 +854,7 @@ function AlertsPicture({
   waiting?: boolean
   onAdd?: (kind: HostAlertKind) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const router = useRouter()
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
@@ -944,7 +944,7 @@ function AlertsPicture({
           >
             {areas}
           </div>
-          <div ref={hub} className="relative z-10 mt-10 flex">
+          <div ref={hub} className="relative z-raised mt-10 flex">
             <WireHost size="md" />
           </div>
           <div
@@ -1029,7 +1029,7 @@ function PictureArea({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {drawn}
         </div>
         <span className="sr-only">{`${area.title}: ${words}`}</span>

@@ -88,7 +88,7 @@ function Defaults() {
   )
   const waiting = !data && loading
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext
         eyebrow={
           <Link

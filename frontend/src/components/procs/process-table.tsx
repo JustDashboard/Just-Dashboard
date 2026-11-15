@@ -280,7 +280,7 @@ export function LiveProcesses() {
         },
       ]}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         <PageContext eyebrow="Processes" title="Live" />
 
         {/* Held open before the metrics socket lands, so the band under it does
@@ -476,7 +476,7 @@ export function LiveProcesses() {
                   ? `Showing the ${data.processes.length} heaviest of ${data.total} matching`
                   : `${plural(data.total, "process", "processes")} matching`}
               </span>
-              <span className="text-muted-foreground/40">·</span>
+              <span className="text-faint">·</span>
               <span>
                 sorted by {SORT_LABEL[data.focus.sort]}
                 {data.focus.reason && ` because ${data.focus.reason}`}
@@ -488,7 +488,7 @@ export function LiveProcesses() {
               )}
               {!data.ratesReady && (
                 <>
-                  <span className="text-muted-foreground/40">·</span>
+                  <span className="text-faint">·</span>
                   <span>rates arrive with the second sample</span>
                 </>
               )}
@@ -555,7 +555,7 @@ function ProcessRows({ rows, ratesReady, ...rest }: RowsProps & { ratesReady: bo
       {/* The outer columns take the gutter from their own cell padding, so
         the first column starts in the title's column. */}
       <div className="hidden min-w-0 xl:block">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead className="w-24">PID</TableHead>

@@ -266,7 +266,7 @@ function ProcessPicture({ process: row, gone, tree, inspect, onOpen, onTab }: Ov
           <span className="numeric">
             PID {parent.pid}
             {chain.length > 0 && (
-              <span className="text-muted-foreground/70">
+              <span className="text-faint">
                 {" "}
                 · under {chain.map((link) => link.name).join(" › ")}
               </span>

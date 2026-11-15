@@ -35,12 +35,12 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { del } from "@/lib/api"
 import { plural } from "@/lib/format"
 import type { SystemGroup } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const BACK = (
   <Link
@@ -76,7 +76,7 @@ function SystemGroups() {
   const router = useRouter()
   const search = useSearchParams()
   const { confirm, dialog } = useConfirm()
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   const [showSystem, setShowSystem] = useViewState("system-groups.show-system", false)
   const [query, setQuery] = useSessionState("system-groups.query", "")
   const [scope, setScope] = useSessionState<GroupScope>("system-groups.scope", "all")
@@ -122,7 +122,7 @@ function SystemGroups() {
   ]
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow={BACK} title="Groups" />
 
       <HostIdentity
@@ -290,14 +290,14 @@ function GroupRow({ group, wide, verbs }: { group: SystemGroup; wide: boolean; v
               title={reach.text || undefined}
               className={cn("w-88 truncate", REACH_INK[reach.tone])}
             >
-              {reach.text || <span className="text-muted-foreground/60">Nothing by itself</span>}
+              {reach.text || <span className="text-faint">Nothing by itself</span>}
             </span>
             <span
               data-slot="group-members"
               className="flex w-60 min-w-0 items-center gap-2.5 overflow-hidden whitespace-nowrap"
             >
               {people.length === 0 ? (
-                <span className="text-muted-foreground/60">Nobody</span>
+                <span className="text-faint">Nobody</span>
               ) : (
                 <>
                   {people.slice(0, 3).map((member) => (

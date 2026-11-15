@@ -428,7 +428,7 @@ export function JobPage() {
                 ) : (
                   // One frame round the rail and the run it shows, the run
                   // page's Details: the rail decides what the inspector holds.
-                  <div className="grid min-w-0 overflow-hidden rounded-xl border bg-card lg:h-[min(80vh,48rem)] lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+                  <div className="grid min-w-0 overflow-hidden rounded-xl border bg-card lg:h-[min(80svh,48rem)] lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
                     <div className="min-h-0 overflow-y-auto p-2 max-lg:max-h-80 max-lg:border-b lg:border-r">
                       <RunRail
                         runs={runList}

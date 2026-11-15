@@ -152,7 +152,7 @@ function Scheduled() {
     : undefined
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Processes" title="Scheduled" />
 
       {host && (
@@ -245,7 +245,7 @@ function Scheduled() {
               sources={cronSources}
               storageKey="processes.cron.log"
               readings="chips"
-              paneClassName="h-[min(70vh,36rem)] min-h-80"
+              paneClassName="h-[min(70svh,36rem)] min-h-80"
             />
           ) : (
             // Only a host without the journal gets here: on one with it,
