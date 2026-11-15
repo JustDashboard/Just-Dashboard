@@ -25,7 +25,12 @@ export function worthRetrying(error: Error): ApiError {
   })
 }
 
-/** A read that failed, where the content would be, with the way to try again. */
+/**
+ * A read that failed, where the content would be, with the way to try again.
+ *
+ * @deprecated use `ErrorState` with `retryable`, which offers the retry
+ * whatever the server marked; this no longer rewraps the error to do it.
+ */
 export function ReadError({
   error,
   onRetry,
@@ -35,5 +40,5 @@ export function ReadError({
   onRetry: () => void
   className?: string
 }) {
-  return <ErrorState error={worthRetrying(error)} onRetry={onRetry} className={className} />
+  return <ErrorState error={error} onRetry={onRetry} retryable className={className} />
 }
