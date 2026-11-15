@@ -48,6 +48,7 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
+import { useFullscreen } from "@/hooks/use-fullscreen"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
@@ -89,12 +90,11 @@ import {
   DiagramSchemaPicker,
   FIT,
   FIT_PADDING,
-  FLOAT,
   Legend,
   NoteDialog,
   Saved,
-  ZoomBar,
 } from "@/components/database/diagram/chrome"
+import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
 import {
   DIAGRAM_COLORS,
   isArranged,
@@ -201,8 +201,10 @@ export function ErDiagram() {
   // The list of schemas to choose from; the catalogue is the route that has it.
   const catalog = useCatalog(id, schema)
   const memory = useDiagramMemory({ connId: id, schema, canSave: can("service.control") })
-  const [fullscreen, setFullscreen] = useState(false)
-  const [immersive, setImmersive] = useState(false)
+  // Full screen: the browser's own where it is offered, and an overlay where
+  // it is refused; Escape leaves the overlay once the canvas has nothing
+  // transient left to clear (its own handler takes the press first).
+  const screen = useFullscreen(root)
 
   // A document written when a table was its bare name is re-keyed once the
   // picture says which table each name was.
@@ -214,35 +216,6 @@ export function ErDiagram() {
     // would keep the mark that says it still needs re-keying.
     if (graph && doc?.legacy) update(() => migrateDocument(doc, graph.tables))
   }, [graph, doc, update])
-
-  // Fullscreen: the browser's own where it is offered, and a fixed overlay
-  // where it is refused (an iframe, a browser that asks and is told no) — the
-  // operator asked for the whole window and gets it either way.
-  const toggleFullscreen = useCallback(() => {
-    if (fullscreen || immersive) {
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
-      setImmersive(false)
-      setFullscreen(false)
-      return
-    }
-    const el = root.current
-    if (el?.requestFullscreen) {
-      el.requestFullscreen().then(
-        () => setFullscreen(true),
-        () => setImmersive(true),
-      )
-    } else {
-      setImmersive(true)
-    }
-  }, [fullscreen, immersive])
-  useEffect(() => {
-    const onChange = () => {
-      setFullscreen(document.fullscreenElement === root.current && root.current !== null)
-      if (!document.fullscreenElement) setImmersive(false)
-    }
-    document.addEventListener("fullscreenchange", onChange)
-    return () => document.removeEventListener("fullscreenchange", onChange)
-  }, [])
 
   const picker = engine.can("schemas") ? (
     <DiagramSchemaPicker schemas={catalog.data?.schemas} current={schema} />
@@ -257,7 +230,7 @@ export function ErDiagram() {
       data-slot="diagram"
       className={cn(
         "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-        immersive && "fixed inset-0 z-50 p-3",
+        screen.immersive && "fixed inset-0 z-immersive p-3",
       )}
     >
       {/* Framed: a canvas is a working region with its own scroll (§2), under
@@ -279,9 +252,8 @@ export function ErDiagram() {
                 reset={memory.reset}
                 picker={picker}
                 refresh={read.refresh}
-                full={fullscreen || immersive}
-                onFullscreen={toggleFullscreen}
-                onLeaveImmersive={() => setImmersive(false)}
+                full={screen.full}
+                onFullscreen={screen.toggle}
               />
             </ReactFlowProvider>
           ) : (
@@ -385,7 +357,6 @@ function Canvas({
   refresh,
   full,
   onFullscreen,
-  onLeaveImmersive,
 }: {
   root: React.RefObject<HTMLDivElement | null>
   graph: DbSchemaGraph
@@ -398,7 +369,6 @@ function Canvas({
   refresh: () => void
   full: boolean
   onFullscreen: () => void
-  onLeaveImmersive: () => void
 }) {
   const { conn, engine, select, href, goto } = useDatabase()
   const flow = useReactFlow()
@@ -730,8 +700,12 @@ function Canvas({
       target.closest("[role=dialog],[role=menu]") !== null
     if (e.key === "Escape") {
       if (typing) return
-      if (focus || pickedEdge) focusTable(null)
-      else onLeaveImmersive()
+      // A focused table is cleared first; with nothing to clear, the press
+      // goes on to the full screen, which leaves (`useFullscreen`).
+      if (focus || pickedEdge) {
+        e.preventDefault()
+        focusTable(null)
+      }
       return
     }
     // A whiteboard's zoom keys, as on the server's map: Ctrl or ⌘ with + and
@@ -1178,7 +1152,12 @@ function Canvas({
               {full ? <FullscreenClose /> : <Fullscreen />}
             </IconAction>
           </div>
-          <ZoomBar onFit={() => fitPicture(FIT.duration, true)} onTidy={tidy} />
+          <CanvasZoom
+            slot="diagram-zoom"
+            onFit={() => fitPicture(FIT.duration, true)}
+            onTidy={tidy}
+            tidyLabel="Tidy: lay every table out again"
+          />
           <Legend schemas={qualified ? schemas : undefined} />
         </div>
 

@@ -1,12 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { ReactFlowProvider } from "@xyflow/react"
 import { Page, PageContext } from "@/components/page"
 import { Pane } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useFullscreen } from "@/hooks/use-fullscreen"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { kindOf } from "@/lib/server-map"
@@ -69,40 +70,8 @@ export function unreadKinds(kinds: MapKindReading[], drawn: ReadonlySet<string>)
     .map((k) => ({ key: k.key, label: `${kindOf(k.key)?.label ?? k.key}s`, reason: k.reason }))
 }
 
-/**
- * Full screen for a canvas: the browser's own where it is offered, and a
- * fixed overlay where it is refused, as the diagram does.
- */
-export function useFullscreen(root: RefObject<HTMLDivElement | null>) {
-  const [fullscreen, setFullscreen] = useState(false)
-  const [immersive, setImmersive] = useState(false)
-  const toggle = useCallback(() => {
-    if (fullscreen || immersive) {
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
-      setImmersive(false)
-      setFullscreen(false)
-      return
-    }
-    const el = root.current
-    if (el?.requestFullscreen) {
-      el.requestFullscreen().then(
-        () => setFullscreen(true),
-        () => setImmersive(true),
-      )
-    } else {
-      setImmersive(true)
-    }
-  }, [fullscreen, immersive, root])
-  useEffect(() => {
-    const onChange = () => {
-      setFullscreen(document.fullscreenElement === root.current && root.current !== null)
-      if (!document.fullscreenElement) setImmersive(false)
-    }
-    document.addEventListener("fullscreenchange", onChange)
-    return () => document.removeEventListener("fullscreenchange", onChange)
-  }, [root])
-  return { full: fullscreen || immersive, immersive, toggle }
-}
+/** @deprecated import `useFullscreen` from `@/hooks/use-fullscreen`. */
+export { useFullscreen }
 
 /**
  * The server map: every system the server runs — each deployment, Compose
@@ -140,7 +109,7 @@ export function ServerMapPage() {
         ref={root}
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-          screen.immersive && "fixed inset-0 z-50 p-3",
+          screen.immersive && "fixed inset-0 z-immersive p-3",
         )}
       >
         <Pane className="min-h-0 flex-1 max-lg:rounded-none max-lg:border-0">
