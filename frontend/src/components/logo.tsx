@@ -121,7 +121,7 @@ export function LogoStacked({ className }: { className?: string }) {
  * footnote to the name and should look like one. Tabular digits so it does
  * not shift when 0.5 becomes 0.10.
  */
-export function LogoVersion({ className }: { className?: string }) {
+function LogoVersion({ className }: { className?: string }) {
   return (
     <span className={cn("numeric shrink-0 text-hint text-muted-foreground", className)}>
       {VERSION}

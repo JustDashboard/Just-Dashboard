@@ -1,7 +1,6 @@
-import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { Tone } from "@/components/tone"
-import { ArrowRight, Filter } from "@/components/icons"
+import { Filter } from "@/components/icons"
 import { rowReveal } from "@/components/icon-action"
 import { Meter } from "@/components/meter"
 
@@ -114,55 +113,13 @@ export function TileBand({ center, children }: { center?: boolean; children?: Re
 }
 
 /**
- * A stat tile that is also a destination.
- *
- * The arrow is the whole point: a tile with a hover wash and nothing else is a
- * surface that reacts without saying what pressing it does. It appears through
- * `rowReveal` rather than a hand-written `group-hover`, which is what makes it
- * permanently visible on a touch screen — where there is no hover to reveal it
- * with, and where a row of these is often the page's main navigation.
- *
- * This lived in the Docker overview and was retyped, without the arrow and
- * with a hover the tile could no longer show, on the proxy overview. Once,
- * here, beside the tile it wraps.
- */
-export function StatLink({
-  href,
-  label,
-  children,
-}: {
-  href: string
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <Link
-      href={href}
-      aria-label={label}
-      // The wash lands on the tile rather than on this anchor: a `StatTile`
-      // paints nothing of its own, so the hover class the caller passes it
-      // (`group-hover:bg-row-hover`) is what answers the pointer. The hint is
-      // the tile's last line and the arrow sits over its right end, so it
-      // gives the arrow its width back rather than truncating under it.
-      className="group relative block min-w-0 focus-ring-inset [&_[data-slot=stat-tile]>p:last-child]:pr-5"
-    >
-      {children}
-      <ArrowRight
-        aria-hidden
-        className={cn("absolute right-4 bottom-4 size-3.5 text-muted-foreground", rowReveal())}
-      />
-    </Link>
-  )
-}
-
-/**
  * A stat tile that narrows what is under it.
  *
- * `StatLink`'s shape for a figure that is a question rather than a place: a
+ * A tile for a figure that is a question rather than a place: a
  * log's "Auth failures 12" is the filter those twelve lines answer, and a
  * press applies it to the pane below instead of leaving the page. The mark
  * that appears is the funnel every "only lines like this" carries, for the
- * same reason the link's is an arrow — a tile that washes on hover and says
+ * same reason a link's is an arrow — a tile that washes on hover and says
  * nothing of what a press does is a surface that only reacts. `pressed` is
  * the figure's filter being the one on screen.
  */
@@ -210,7 +167,7 @@ export function StatButton({
  *
  * Every tile keeps the same inset, the first in a row included. The first
  * column used to give up its left padding to line its name up with the title,
- * and on a `StatLink` that put the hover wash flush against the name: one tile
+ * and on a tile that washes on hover that put the wash flush against the name: one tile
  * of the row drawn tighter than the others beside it.
  *
  * `framed` restores the box, for the one place a run of figures sits inside
