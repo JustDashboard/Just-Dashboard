@@ -222,8 +222,17 @@ export function EventsPage() {
     return foldBursts(foldRestarts(kept).filter((entry) => matches(entry, reading, back)))
   }, [inWindow, kinds, search, container, reading, back])
   const shown = everything ? entries : entries.slice(0, FEED_ROWS)
+  // Every event a row stands for, the OOM note folded into an exit included,
+  // so the title says what the All chip says (PGH-32).
   const eventCount = entries.reduce(
-    (sum, entry) => sum + (entry.kind === "event" ? 1 : entry.events.length),
+    (sum, entry) =>
+      sum +
+      (entry.kind === "loop"
+        ? entry.events.length
+        : entry.kind === "burst"
+          ? entry.events.length
+          : 1) +
+      (entry.kind !== "loop" && entry.oom ? 1 : 0),
     0,
   )
   const filterKey = [range, kinds.join(","), search, reading, container].join("\u0000")
@@ -350,49 +359,47 @@ export function EventsPage() {
           <EmptyState {...quietReading(since, to, listening)} />
         ) : (
           <>
-            <div className="space-y-3">
-              {/* The window the whole page reads over, on the first reading's
-                  line, as Runtime's is (PGH-27); the header keeps its verdict. */}
-              <div className="flex items-center justify-end">
+            <EventBand
+              counts={{
+                failures: tally.failures,
+                restarts: tally.restarts,
+                changes: tally.changes.length,
+                external: tally.external.length,
+              }}
+              hints={{
+                failures:
+                  tally.failed.length > 0
+                    ? tally.failed
+                        .slice(0, 3)
+                        .map((row) => (row.oom ? `${row.name} out of memory` : row.name))
+                        .join(" · ")
+                    : "every exit was clean",
+                restarts: restartHint(tally.looping, activity),
+                changes: changeHint(tally.changes),
+                external:
+                  tally.external.length > 0
+                    ? `${[...new Set(tally.external.map((e) => e.name))].slice(0, 3).join(", ")}`
+                    : "everything is explained",
+              }}
+              reading={reading}
+              onReading={toggleReading}
+              notable={notable}
+              from={from}
+              to={to}
+              words={win.words}
+              selected={container}
+              onContainer={selectContainer}
+              // The window the whole page reads over, on the first reading's
+              // line, as Runtime's is (PGH-27); the header keeps its verdict.
+              windowPicker={
                 <WindowPicker
                   label="Window"
                   windows={WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
                   value={win.value}
                   onChange={setRange}
                 />
-              </div>
-              <EventBand
-                counts={{
-                  failures: tally.failures,
-                  restarts: tally.restarts,
-                  changes: tally.changes.length,
-                  external: tally.external.length,
-                }}
-                hints={{
-                  failures:
-                    tally.failed.length > 0
-                      ? tally.failed
-                          .slice(0, 3)
-                          .map((row) => (row.oom ? `${row.name} out of memory` : row.name))
-                          .join(" · ")
-                      : "every exit was clean",
-                  restarts: restartHint(tally.looping, activity),
-                  changes: changeHint(tally.changes),
-                  external:
-                    tally.external.length > 0
-                      ? `${[...new Set(tally.external.map((e) => e.name))].slice(0, 3).join(", ")}`
-                      : "everything is explained",
-                }}
-                reading={reading}
-                onReading={toggleReading}
-                notable={notable}
-                from={from}
-                to={to}
-                words={win.words}
-                selected={container}
-                onContainer={selectContainer}
-              />
-            </div>
+              }
+            />
 
             {/* Framed, because it is a table: the grid owns a scroll region and
                 the edge is what says so (§2). */}

@@ -49,6 +49,7 @@ export function EventBand({
   words,
   selected,
   onContainer,
+  windowPicker,
 }: {
   counts: Record<EventReading, number>
   /** A few words after each kind's name: who failed, who came back. */
@@ -63,6 +64,8 @@ export function EventBand({
   words: string
   selected: string
   onContainer: (key: string) => void
+  /** The page's window picker, on the first reading's line. */
+  windowPicker?: React.ReactNode
 }) {
   const kinds = Object.keys(READING_LABEL) as EventReading[]
   const total = kinds.reduce((sum, kind) => sum + counts[kind], 0)
@@ -125,9 +128,11 @@ export function EventBand({
         list="What happened"
         fixed
         figure={
-          <span className="numeric flex h-7 items-center text-hint text-muted-foreground">
-            {total > 0 ? `${total} in ${words}` : words}
-          </span>
+          windowPicker ?? (
+            <span className="numeric flex h-7 items-center text-hint text-muted-foreground">
+              {total > 0 ? `${total} in ${words}` : words}
+            </span>
+          )
         }
         message={
           total === 0
