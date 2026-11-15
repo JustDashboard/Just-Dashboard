@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils"
 import type { Tone } from "@/components/tone"
+import { SectionLink } from "@/components/section-link"
 
 /**
  * The one content block in the dashboard.
@@ -34,6 +35,7 @@ import type { Tone } from "@/components/tone"
  */
 export function Panel({
   plain,
+  framed,
   interactive,
   className,
   children,
@@ -41,17 +43,36 @@ export function Panel({
 }: React.ComponentProps<"section"> & {
   /** No frame: title, hairline, content — for a block that is its own section. */
   plain?: boolean
+  /**
+   * A frame, said out loud. A block is plain unless it can say why it needs
+   * an edge (a table's own scrolling, a danger zone), and this is where it
+   * says so. Framed is still the default; it flips to plain once every caller
+   * that keeps a frame carries this prop, and `plain` then goes.
+   */
+  framed?: boolean
   /** The panel is a destination. Its border answers the pointer. */
   interactive?: boolean
 }) {
+  const isPlain = framed === undefined ? Boolean(plain) : !framed
   return (
     <section
       data-slot="panel"
-      data-plain={plain ? "" : undefined}
+      data-plain={isPlain ? "" : undefined}
+      data-framed={isPlain ? undefined : ""}
       className={cn(
         "group/panel flex min-w-0 flex-col",
-        plain ? "" : "overflow-hidden rounded-xl border bg-card text-card-foreground",
-        interactive && !plain && "transition-colors hover:border-border-strong",
+        isPlain ? "" : "overflow-hidden rounded-xl border bg-card text-card-foreground",
+        // On a phone a frame inside a page runs to the screen's edges. The
+        // page's 20px gutter, then a border, then the panel's own padding left
+        // a list 318 of 390px, and names were cut a word early. Without its
+        // sides the panel's padding is the page's gutter, so its rows line up
+        // with everything above them, and its ground and hairlines still say
+        // where the block begins. A panel that is a destination keeps its
+        // card, because the card is what you press.
+        !isPlain &&
+          !interactive &&
+          "in-data-[slot=page]:max-sm:-mx-5 in-data-[slot=page]:max-sm:rounded-none in-data-[slot=page]:max-sm:border-x-0",
+        interactive && !isPlain && "transition-colors hover:border-border-strong",
         className,
       )}
       {...props}
@@ -60,6 +81,14 @@ export function Panel({
     </section>
   )
 }
+
+/**
+ * A section head's title: the 15px surface title at 600, the weight every
+ * other surface title (a dialog's, a sheet's, a form section's) already had.
+ * At 500 a panel's name read a step quieter than the dialog it opened.
+ */
+const HEAD_TITLE =
+  "flex min-w-0 items-center gap-1.5 text-title leading-tight font-semibold tracking-tight"
 
 /**
  * A panel's header: what this block is, and what you can do to it.
@@ -73,17 +102,40 @@ export function Panel({
  *
  * Icons still carry meaning elsewhere — a `Status`'s verdict, a `Notice`'s
  * severity, a verb on a button — because there the glyph *is* the message.
+ *
+ * **The one section head.** In a plain panel this is what a section is: a
+ * title and a hairline (D6). `Section` and `FormSection` draw it too, so the
+ * Overview's Resources and its Top processes are one head rather than two,
+ * and the count, the way on and the verbs have one place each at the end.
  */
 export function PanelHeader({
   title,
   eyebrow,
+  level = 2,
+  count,
+  link,
   actions,
   advanced,
+  plain,
   className,
   children,
 }: {
   title?: React.ReactNode
   eyebrow?: React.ReactNode
+  /**
+   * The heading element, and only that: an h3 looks exactly like an h2. A
+   * head under another section head (a group of panels, a page that is a
+   * form) is one level down, so a screen reader's outline keeps its order.
+   */
+  level?: 2 | 3
+  /**
+   * How many there are: tabular, the hint size, muted, at the far end of the
+   * title line before the actions. It stays outside the heading, so the
+   * heading's name is the name alone.
+   */
+  count?: React.ReactNode
+  /** The way on to the page this block stands for, last at the head's end. */
+  link?: { href: string; label: string }
   actions?: React.ReactNode
   /**
    * Marks a panel that assumes the reader already knows the thing it operates
@@ -97,9 +149,16 @@ export function PanelHeader({
    * valid thing to do.
    */
   advanced?: boolean
+  /**
+   * A head drawn outside a `Panel` (a `Section`, a `FormSection`), which has
+   * no panel around it to say it is plain. Inside a panel, the panel decides.
+   */
+  plain?: boolean
   className?: string
   children?: React.ReactNode
 }) {
+  const Heading = level === 3 ? "h3" : "h2"
+  const counted = count !== undefined && count !== null && count !== false
   return (
     <header
       data-slot="panel-header"
@@ -107,32 +166,42 @@ export function PanelHeader({
         "flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline px-5 py-3",
         // Plain: the title sits on the page's own edge, and the hairline is
         // the only rule between it and the rows beneath.
-        "group-data-[plain]/panel:min-h-0 group-data-[plain]/panel:px-0 group-data-[plain]/panel:pt-0 group-data-[plain]/panel:pb-3",
+        plain
+          ? "min-h-0 px-0 pt-0 pb-3"
+          : "group-data-[plain]/panel:min-h-0 group-data-[plain]/panel:px-0 group-data-[plain]/panel:pt-0 group-data-[plain]/panel:pb-3",
         className,
       )}
     >
       <div className="min-w-0">
         {eyebrow && <p className="eyebrow mb-0.5">{eyebrow}</p>}
         {title && (
-          <h2 className="flex min-w-0 items-center gap-1.5 text-title leading-tight font-medium tracking-tight">
+          <Heading className={HEAD_TITLE}>
             <span className="truncate">{title}</span>
             {advanced && (
               <span
-                className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground/80 uppercase"
+                className="caps shrink-0"
                 title="Assumes you already administer this directly. Nothing here needs your attention unless you came looking for it."
               >
                 Advanced
               </span>
             )}
-          </h2>
+          </Heading>
         )}
       </div>
       {children}
       {/* Never wider than the header: a phone's 16px field grew the history's
           filter past the header, and a row that cannot shrink scrolled the
           page sideways instead of wrapping its own controls. */}
-      {actions && (
-        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1.5">{actions}</div>
+      {(counted || actions || link) && (
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1.5">
+          {counted && (
+            <span data-slot="panel-count" className="numeric mr-1 text-hint text-muted-foreground">
+              {count}
+            </span>
+          )}
+          {actions}
+          {link && <SectionLink href={link.href}>{link.label}</SectionLink>}
+        </div>
       )}
     </header>
   )
@@ -285,6 +354,61 @@ export function PaneFooter({ className, ...props }: React.ComponentProps<"div">)
       )}
       {...props}
     />
+  )
+}
+
+/**
+ * A titled group inside a pane beside the work: the files inspector's
+ * Details and Contents, the map inspector's Ports, a remote session's
+ * Clipboard.
+ *
+ * Four inspector columns drew this four ways (two eyebrow heads, a semibold
+ * h2, an unruled eyebrow; the rule above in one and below in the others), so
+ * moving between them read as moving between products. One title style, the
+ * eyebrow, because a pane's groups are labels over a column of facts rather
+ * than sections of a page; one rule, under each group and not under the last;
+ * one padding.
+ */
+export function PaneSection({
+  title,
+  count,
+  aside,
+  level = 3,
+  className,
+  children,
+}: {
+  /** The group's name, which also names the region for a screen reader. */
+  title: string
+  /** How many the group holds, beside its name. */
+  count?: number
+  /** One control at the head's end: a copy, a toggle, a small verb. */
+  aside?: React.ReactNode
+  /** The heading element only; a pane whose own head is an h3 takes 4. */
+  level?: 2 | 3 | 4
+  className?: string
+  children?: React.ReactNode
+}) {
+  const Heading = level === 2 ? "h2" : level === 4 ? "h4" : "h3"
+  return (
+    <section
+      data-slot="pane-section"
+      aria-label={title}
+      className={cn(
+        "min-w-0 space-y-2.5 border-b border-hairline px-4 py-3.5 last:border-b-0",
+        className,
+      )}
+    >
+      <div className="flex min-h-6 items-center justify-between gap-2">
+        <Heading className="flex min-w-0 items-center gap-2">
+          <span className="eyebrow truncate">{title}</span>
+          {count !== undefined && (
+            <span className="numeric text-hint text-muted-foreground">{count}</span>
+          )}
+        </Heading>
+        {aside}
+      </div>
+      {children}
+    </section>
   )
 }
 
