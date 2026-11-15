@@ -1,10 +1,14 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
+import { breakpointQuery } from "@/lib/breakpoints"
+import { useIsPhone } from "@/hooks/use-mobile"
 import type { HostInfo } from "@/lib/types"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Cpu, type Icon } from "@/components/icons"
 import { Bone } from "@/components/bone"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { FactDot, FactLine, hasFacts } from "@/components/fact-line"
 
@@ -151,7 +155,7 @@ export function IdentityHeader({
         state={loading && state === true ? <Bone className="w-24 text-xs" /> : state}
         command={
           loading && command === true ? (
-            <Skeleton className="h-(--control-compact) w-28 rounded-md" />
+            <Skeleton className="h-(--control-compact) w-28 rounded-md max-sm:size-8" />
           ) : (
             command
           )
@@ -239,8 +243,11 @@ export const HostIdentity = IdentityHeader
 function factRun(facts: React.ReactNode) {
   if (!hasFacts(facts)) return facts
   // The rows a wrap makes are the line's own 4px apart, the gap its bones
-  // wait at, so a line whose facts wrap is as tall loaded as loading.
-  return <FactLine className="w-full [&>span]:gap-y-1">{facts}</FactLine>
+  // wait at, so a line whose facts wrap is as tall loaded as loading. On a
+  // phone it takes what the line leaves, so a state leading it keeps its place.
+  return (
+    <FactLine className="w-full max-sm:w-auto max-sm:flex-1 [&>span]:gap-y-1">{facts}</FactLine>
+  )
 }
 
 /** The facts' place while they are read: one bone in the line's own height. */
@@ -255,16 +262,19 @@ function FactsBone() {
  * facts on the second, the command and its `⋯` menu at the far end across
  * both.
  *
- * On a phone the tile and the title have the first row to themselves, the
- * state takes the next, the command and its menu a row of their own under
- * it, and the facts run the full width at the foot. Beside the title, "View
- * deployment" cut the project's address to eleven characters on every deploy
- * page; the name is the one part of the line that must never give way. The
- * command's row comes before the facts, so facts that wrap to more lines once
- * they are read never move it; the state's row keeps a line's height and the
- * command's row a control's whenever the line has a place for verbs, so a
- * loading line that passes `menu={false}` or `command` is as tall as the line
- * it becomes, with its command where it will be (D11).
+ * On a phone it is one row and one line of facts, and nothing else. The row
+ * is the tile a step smaller (32px), the name, and the verbs at the far end
+ * as icon buttons: the command drawn as its icon alone, its words kept as its
+ * name and said in a tooltip, then `⋯`. Every verb keeps its 44px press box
+ * (`hit-area`) without growing the row. The state stands after the name when
+ * both fit; when they do not, it leads the facts line, so the name is the
+ * last thing to give way. The facts are one line that never wraps: what does
+ * not fit is left off whole, at a fact's edge, never cut inside a word.
+ *
+ * The row has a control's height and the facts a line's whatever is in
+ * them, so a loading line is as tall as the line it becomes, and props that
+ * once reserved a row for the verbs (`menu={false}`, `command` while
+ * `loading`, `foot`) leave the height alone (D11).
  */
 function ProjectLine({
   tile,
@@ -294,11 +304,23 @@ function ProjectLine({
   className?: string
 }) {
   const Line = label ? "section" : "div"
-  // A line that has a place for verbs (even `menu={false}`, a place with
-  // nothing in it yet) keeps a control's height for them at its foot on a
-  // phone, so a line drawn before its verbs are known is as tall as the one
-  // that replaces it.
-  const footed = command !== undefined || menu !== undefined || aside !== undefined
+  const nameRef = useRef<HTMLDivElement>(null)
+  const titleRef = useRef<HTMLParagraphElement>(null)
+  const stateRef = useRef<HTMLDivElement>(null)
+  const stateLeadsFacts = useStateLeadsFacts(nameRef, titleRef, stateRef)
+  const stateBox = state !== undefined && (
+    <div
+      ref={stateRef}
+      data-slot="identity-state"
+      className={cn(
+        "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:shrink-0 max-sm:flex-nowrap max-sm:empty:hidden",
+        // In the facts' muted line, the state keeps the ink it has beside the name.
+        stateLeadsFacts && "text-foreground",
+      )}
+    >
+      {state}
+    </div>
+  )
   const line = (
     <Line
       aria-label={label}
@@ -310,46 +332,48 @@ function ProjectLine({
         className,
       )}
     >
-      <div className="flex sm:row-span-2">{tile}</div>
+      {/* A step smaller on a phone, whatever picture the tile holds. */}
+      <div className="flex max-sm:[zoom:0.8] sm:row-span-2">{tile}</div>
       <div
+        ref={nameRef}
         className={cn(
-          "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:contents",
-          foot && "@max-2xl:col-span-2",
+          "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:flex-nowrap",
+          foot && "sm:@max-2xl:col-span-2",
         )}
       >
         {/* A flex box, so a title that is a link or an address sits on the
-            row's centre rather than on the baseline of a taller line box. */}
+            row's centre rather than on the baseline of a taller line box; on
+            a phone a block that truncates, so a name too long for the row
+            ends in an ellipsis rather than running under the verbs. */}
         <p
-          className={cn(
-            "flex max-w-full min-w-0 text-base font-semibold tracking-tight",
-            footed && "max-sm:col-span-2",
-          )}
+          ref={titleRef}
+          className="flex max-w-full min-w-0 text-base font-semibold tracking-tight max-sm:block max-sm:truncate"
         >
           {title}
         </p>
-        {state !== undefined && (
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:order-2 max-sm:col-span-3 max-sm:min-h-4">
-            {state}
-          </div>
-        )}
+        {!stateLeadsFacts && stateBox}
       </div>
       <div
         className={cn(
           "flex shrink-0 items-center gap-2 sm:row-span-2",
-          footed
-            ? "max-sm:order-3 max-sm:col-span-3 max-sm:mt-1 max-sm:min-h-(--control-compact) max-sm:flex-wrap"
-            : "max-sm:order-1",
-          // Important, so the row of its own wins over the phone's place for
-          // it whichever of the two rules the sheet happens to write last.
+          PHONE_VERBS,
+          // Important, so the row of its own wins over the line's place for it
+          // whichever of the two rules the sheet happens to write last. From
+          // `sm` only: on a phone the verbs keep the name's row.
           foot &&
-            "@max-2xl:order-last! @max-2xl:col-span-3 @max-2xl:row-span-1! @max-2xl:mt-1.5 @max-2xl:flex-wrap",
+            "sm:@max-2xl:order-last! sm:@max-2xl:col-span-3 sm:@max-2xl:row-span-1! sm:@max-2xl:mt-1.5 sm:@max-2xl:flex-wrap",
         )}
       >
         {aside}
-        {command}
+        {command ? <CommandTip>{command}</CommandTip> : command}
         {menu}
       </div>
-      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:order-4 sm:col-span-1 sm:col-start-2">
+      {/* On a phone one line that never grows: what wraps falls past its
+          foot and is clipped, a whole fact at a time. A `FactLine` is held to
+          the line too, so its own wrapped rows never stand it taller than the
+          state beside it and pull the state off the line's centre. */}
+      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:h-4 max-sm:overflow-clip max-sm:[overflow-clip-margin:2px] sm:col-span-1 sm:col-start-2 max-sm:[&>[data-slot=fact-line]]:h-4">
+        {stateLeadsFacts && stateBox}
         {facts}
       </div>
     </Line>
@@ -357,6 +381,114 @@ function ProjectLine({
   // The line measures itself, not the window (§12): a rail beside it takes a
   // column of its own, so a laptop's worth of window is a tablet's of line.
   return foot ? <div className="@container min-w-0">{line}</div> : line
+}
+
+/**
+ * The verbs on a phone: every button a 32px square on the name's row, its
+ * press box still 44px under a finger (`hit-area`, 12px apart so no two
+ * boxes overlap), and a button with an icon drawn as the icon alone. Its
+ * words stay in the button at no size (`font-size: 0`, which is no step of
+ * the type scale but the words taking no room), so they are still its
+ * accessible name; `CommandTip` says them on hover and focus.
+ */
+const PHONE_VERBS = cn(
+  "max-sm:gap-3",
+  // `data-size` is every `Button`'s, the menu's trigger among them, whose
+  // `data-slot` is the dropdown's.
+  "max-sm:[&_[data-size]]:hit-area max-sm:[&_[data-size]]:[--control-h:2rem]",
+  "max-sm:[&_[data-size]:has(svg)]:w-(--control-h) max-sm:[&_[data-size]:has(svg)]:gap-0 max-sm:[&_[data-size]:has(svg)]:px-0 max-sm:[&_[data-size]:has(svg)]:[font-size:0]",
+)
+
+/**
+ * Whether, on a phone, the state leads the facts line rather than following
+ * the name: when the name at its full width, the gap and the state together
+ * are wider than the name's cell. Measured before paint, on every render and
+ * whenever the cell or the state changes size, so the name is only ever cut
+ * when it is too long for the row on its own. Off a phone it is always
+ * beside the name.
+ */
+function useStateLeadsFacts(
+  nameRef: React.RefObject<HTMLDivElement | null>,
+  titleRef: React.RefObject<HTMLParagraphElement | null>,
+  stateRef: React.RefObject<HTMLDivElement | null>,
+) {
+  const phone = useIsPhone()
+  const [leads, setLeads] = useState(false)
+  const measure = useCallback(() => {
+    const cell = nameRef.current
+    const words = titleRef.current
+    const mark = stateRef.current
+    if (!phone || !cell || !words || !mark) return setLeads(false)
+    const room = cell.clientWidth
+    const stateWidth = mark.getBoundingClientRect().width
+    const need = naturalWidth(words) + (stateWidth > 0 ? STATE_GAP : 0) + stateWidth
+    setLeads(need > room + 0.5)
+  }, [phone, nameRef, titleRef, stateRef])
+  // Every render: a new title or state changes what is needed without
+  // changing a size the observer sees.
+  useLayoutEffect(measure)
+  useEffect(() => {
+    if (!phone) return
+    const observer = new ResizeObserver(() => measure())
+    if (nameRef.current) observer.observe(nameRef.current)
+    if (stateRef.current) observer.observe(stateRef.current)
+    // A web font landing changes the name's width and nothing else.
+    document.fonts?.ready.then(() => measure())
+    return () => observer.disconnect()
+  }, [phone, measure, nameRef, stateRef])
+  return leads
+}
+
+/** `gap-x-3` between the name and its state. */
+const STATE_GAP = 12
+
+/** An element's width at its content's full length, however its box is held now. */
+function naturalWidth(element: HTMLElement) {
+  const { flex, width, maxWidth } = element.style
+  element.style.flex = "none"
+  element.style.width = "max-content"
+  element.style.maxWidth = "none"
+  const natural = element.getBoundingClientRect().width
+  element.style.flex = flex
+  element.style.width = width
+  element.style.maxWidth = maxWidth
+  return natural
+}
+
+/**
+ * The command's words in a tooltip, on a phone where the command is drawn as
+ * its icon alone; from `sm`, where the words are on the button, it never
+ * opens. Its own box is `contents` from `sm`, so the line is laid out there
+ * exactly as it was without it.
+ */
+function CommandTip({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [words, setWords] = useState<string | null>(null)
+  return (
+    <TooltipProvider>
+      <Tooltip
+        open={words !== null}
+        onOpenChange={(open) => setWords(open ? iconWords(ref.current) : null)}
+      >
+        <TooltipTrigger asChild>
+          <span ref={ref} className="flex shrink-0 items-center gap-3 sm:contents">
+            {children}
+          </span>
+        </TooltipTrigger>
+        {words !== null && <TooltipContent>{words}</TooltipContent>}
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/** What the command's icon-only buttons say, or nothing when none is drawn as an icon alone. */
+function iconWords(box: HTMLElement | null) {
+  if (!box || !window.matchMedia(breakpointQuery("sm", "below")).matches) return null
+  const words = Array.from(box.querySelectorAll<HTMLElement>("[data-size]"))
+    .filter((button) => button.getClientRects().length > 0 && button.querySelector("svg"))
+    .map((button) => button.textContent?.trim())
+    .filter(Boolean)
+  return words.length > 0 ? words.join(" · ") : null
 }
 
 /**
