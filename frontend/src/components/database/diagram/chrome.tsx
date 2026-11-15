@@ -4,7 +4,6 @@ import { MenuItemText } from "@/components/ui/menu-item-text"
 
 import { useEffect, useId, useRef, useState } from "react"
 import Link from "next/link"
-import { useReactFlow, useStore } from "@xyflow/react"
 import {
   ChevronDown,
   Crosshair,
@@ -12,16 +11,13 @@ import {
   Key,
   Linked,
   LockClosed,
-  Minus,
-  Plus,
-  RotateCounterClockwise,
   Trash,
 } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { KEYCAP } from "@/components/command-search/keycaps"
+import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
 import { Field } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import {
@@ -156,64 +152,26 @@ export function Saved({
   )
 }
 
-/** A control floating on the canvas, drawn as the server map draws its own. */
-export const FLOAT =
-  "absolute flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5"
+/**
+ * A control floating on the canvas, drawn as the server map draws its own.
+ *
+ * @deprecated import `FLOAT` from `@/components/canvas-zoom`.
+ */
+export { FLOAT }
 
 /**
- * The bar at the foot of the canvas, as the server's map has it: out, how
- * far in the picture is drawn (pressed, the real size), in, Fit, and — while
- * something has been moved — putting every table back where the layout would.
+ * The bar at the foot of the canvas, as the server's map has it.
  *
- * It took the place of three glyphs in a card at the top of the canvas and a
- * minimap in the corner opposite. A whiteboard in this product is zoomed and
- * fitted from one place, and where the reader is in the picture is said by
- * the percentage rather than by a second, smaller picture.
+ * @deprecated use `CanvasZoom` from `@/components/canvas-zoom`.
  */
 export function ZoomBar({ onFit, onTidy }: { onFit: () => void; onTidy?: () => void }) {
-  const flow = useReactFlow()
-  const percent = useStore((state) => Math.round(state.transform[2] * 100))
   return (
-    <div data-slot="diagram-zoom" className={cn(FLOAT, "bottom-3 left-3")}>
-      <IconAction
-        label="Zoom out"
-        className="size-7"
-        onClick={() => void flow.zoomOut({ duration: 150 })}
-      >
-        <Minus />
-      </IconAction>
-      <Button
-        size="xs"
-        variant="ghost"
-        title="Back to the real size (Ctrl 0)"
-        aria-label={`Zoom ${percent}%: back to the real size`}
-        className="numeric h-7 min-w-12 px-1.5 text-hint"
-        onClick={() => void flow.zoomTo(1, { duration: 150 })}
-      >
-        {percent}%
-      </Button>
-      <IconAction
-        label="Zoom in"
-        className="size-7"
-        onClick={() => void flow.zoomIn({ duration: 150 })}
-      >
-        <Plus />
-      </IconAction>
-      <Button
-        size="xs"
-        variant="ghost"
-        title="Fit the picture to the canvas (F)"
-        className="h-7 px-2 text-hint"
-        onClick={onFit}
-      >
-        Fit
-      </Button>
-      {onTidy && (
-        <IconAction label="Tidy: lay every table out again" className="size-7" onClick={onTidy}>
-          <RotateCounterClockwise />
-        </IconAction>
-      )}
-    </div>
+    <CanvasZoom
+      slot="diagram-zoom"
+      onFit={onFit}
+      onTidy={onTidy}
+      tidyLabel="Tidy: lay every table out again"
+    />
   )
 }
 

@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import {
   ReactFlow,
   useReactFlow,
-  useStore,
   useStoreApi,
   type Edge,
   type Node,
@@ -20,9 +19,6 @@ import {
   FullscreenClose,
   Information,
   Layers,
-  Minus,
-  Plus,
-  RotateCounterClockwise,
   ServerMap,
   SidebarRightClose,
   SidebarRightOpen,
@@ -46,6 +42,7 @@ import {
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
+import { CanvasZoom, CanvasZoomWord, FLOAT } from "@/components/canvas-zoom"
 import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
 import { edgeTypes, type WireData } from "@/components/map/edges"
 import { MapInspector, UnreadNotices } from "@/components/map/inspector"
@@ -85,10 +82,6 @@ const FLY = { padding: 0.04, maxZoom: 1 }
  * a system's head offers one way on, to its page.
  */
 const BARE = "(max-width: 1023px)"
-
-/** The ground of a control that floats on the canvas. */
-const FLOAT =
-  "absolute flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5"
 
 const clampZoom = (z: number) => Math.min(ZOOM.max, Math.max(ZOOM.min, z))
 
@@ -693,6 +686,9 @@ export function MapCanvas({
     } else if (e.key === "Enter" && chosenNode) {
       router.push(chosenNode.item.href)
     } else if (e.key === "Escape") {
+      // A choice is cleared first; with none, the press goes on to the full
+      // screen, which leaves (`useFullscreen`).
+      if (chosen || kinds) e.preventDefault()
       setChosen(null)
       setKinds(null)
     }
@@ -792,12 +788,13 @@ export function MapCanvas({
             />
           )}
           {systems.length > 0 && !bare && (
-            <ZoomButtons
+            <CanvasZoom
               onFit={() =>
                 focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: 300 })
               }
-              onAll={showAll}
+              extra={<CanvasZoomWord onClick={showAll}>All</CanvasZoomWord>}
               onTidy={isArranged(doc) ? tidy : undefined}
+              tidyLabel="Tidy up: put every system and every box back where the map puts it"
             />
           )}
           {!bare && (
@@ -930,62 +927,6 @@ export function MapCanvas({
           active={pane}
           onPick={setPane}
         />
-      )}
-    </div>
-  )
-}
-
-function ZoomButtons({
-  onFit,
-  onAll,
-  onTidy,
-}: {
-  onFit: () => void
-  onAll: () => void
-  /** Only while something has been moved: with nothing to put back it would be noise. */
-  onTidy?: () => void
-}) {
-  const flow = useReactFlow()
-  const percent = useStore((s) => Math.round(s.transform[2] * 100))
-  return (
-    <div className={cn(FLOAT, "bottom-3 left-3")}>
-      <IconAction
-        label="Zoom out"
-        className="size-7"
-        onClick={() => void flow.zoomOut({ duration: 150 })}
-      >
-        <Minus />
-      </IconAction>
-      <Button
-        size="xs"
-        variant="ghost"
-        title="Back to the real size (Ctrl 0)"
-        className="numeric h-7 min-w-12 px-1.5 text-hint"
-        onClick={() => void flow.zoomTo(1, { duration: 150 })}
-      >
-        {percent}%
-      </Button>
-      <IconAction
-        label="Zoom in"
-        className="size-7"
-        onClick={() => void flow.zoomIn({ duration: 150 })}
-      >
-        <Plus />
-      </IconAction>
-      <Button size="xs" variant="ghost" className="h-7 px-2 text-hint" onClick={onFit}>
-        Fit
-      </Button>
-      <Button size="xs" variant="ghost" className="h-7 px-2 text-hint" onClick={onAll}>
-        All
-      </Button>
-      {onTidy && (
-        <IconAction
-          label="Tidy up: put every system and every box back where the map puts it"
-          className="size-7"
-          onClick={onTidy}
-        >
-          <RotateCounterClockwise />
-        </IconAction>
       )}
     </div>
   )
