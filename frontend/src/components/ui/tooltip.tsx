@@ -47,6 +47,15 @@ function watchScrolls() {
 }
 
 /**
+ * The name of an icon control, for a pointer that rests on it and a keyboard
+ * that lands on it: "Copy", "Remove the route to 10.0.0.0/8". Nothing more.
+ *
+ * A tooltip cannot be opened on a touch screen — a tap closes it — so it never
+ * carries anything a reader needs: an explanation, a reason, a definition is an
+ * `Explain` (`components/explain.tsx`), which opens on a press too. Its content
+ * is hoverable, as Radix has it by default: this wrapper used to turn that
+ * off, so a pointer moving onto the bubble to read it closed it (WCAG 1.4.13).
+ *
  * Radix closes a tooltip when anything around its trigger scrolls, since a
  * tooltip a pointer opened is then no longer under the pointer. A keyboard is
  * another matter: tabbing to a trigger below the fold opens its tooltip and
@@ -57,7 +66,6 @@ function watchScrolls() {
  * pointer leaving and a scroll the reader makes later close it as before.
  */
 function Tooltip({
-  disableHoverableContent = true,
   open,
   defaultOpen = false,
   onOpenChange,
@@ -89,7 +97,6 @@ function Tooltip({
     <FocusedContext.Provider value={noteFocus}>
       <TooltipPrimitive.Root
         data-slot="tooltip"
-        disableHoverableContent={disableHoverableContent}
         open={open ?? shown}
         onOpenChange={change}
         {...props}
