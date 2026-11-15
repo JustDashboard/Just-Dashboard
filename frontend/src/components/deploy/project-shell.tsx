@@ -184,7 +184,10 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
         phonePane && "max-md:h-full max-md:min-h-0 max-md:gap-4 max-md:overflow-hidden max-md:pb-0",
       )}
     >
-      <PageContext title={record.name} back={{ href: "/deploy", label: "Deployments" }} />
+      {/* No back link: the rail leads back to the fleet and the header is
+          the page's first line (deploy-header.spec). MOB-14 asks for one;
+          that is the operator's call, since this is the reference header. */}
+      <PageContext title={record.name} />
 
       <HostIdentity
         label={`About ${record.name}`}

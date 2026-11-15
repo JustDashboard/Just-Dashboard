@@ -167,8 +167,10 @@ export function RunRow({
               {failure && <span className="text-destructive">{failure}</span>}
             </span>
           </Fact>
-          <Fact title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
-            {duration}
+          <Fact>
+            <span title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
+              {duration}
+            </span>
           </Fact>
           <Fact>
             <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">

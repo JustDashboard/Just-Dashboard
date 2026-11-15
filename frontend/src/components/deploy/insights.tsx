@@ -78,7 +78,7 @@ function chartDay(date: string) {
 
 /** The charts' grid, and a chart's place while its days are read: its head, its bars and its axis. */
 const CHARTS = "grid min-w-0 gap-x-10"
-const CHART_WAITING = "h-[10.375rem] w-full rounded-lg"
+const CHART_WAITING = "h-[10.875rem] w-full rounded-lg"
 
 type Day = DeploymentInsights["daily"][number]
 type DayLine = { text: string; fill?: string }
