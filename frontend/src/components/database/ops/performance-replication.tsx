@@ -17,20 +17,14 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { readReplication } from "@/components/database/ops/performance-api"
-import {
-  Named,
-  NoFigure,
-  NotAvailable,
-  Notes,
-  Stale,
-  ViewRead,
-} from "@/components/database/ops/performance-parts"
+import { Named, NoFigure, NotAvailable, Notes } from "@/components/database/ops/performance-parts"
 import type {
   DbReplicaSource,
   DbReplicationSlot,
 } from "@/components/database/ops/performance-types"
 import { ReplicationPicture } from "@/components/database/ops/replication-picture"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /** How far behind something is. `-1` is the server's "unknown", which is not zero. */
 function Lag({ seconds, size }: { seconds?: number; size?: number }) {
@@ -65,7 +59,8 @@ export function ReplicationView() {
   return (
     <Panel plain aria-label="Replication">
       <PanelHeader title="Replication" actions={<Stale poll={replication} />} />
-      <ViewRead
+      <Read
+        patience
         poll={replication}
         what="the replication state"
         locking={engine.can("locks")}
@@ -266,7 +261,7 @@ export function ReplicationView() {
             </PanelBody>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

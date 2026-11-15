@@ -5,13 +5,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
 import { sectionHref } from "@/components/database/engine"
-import {
-  CouldNotRead,
-  FactRow,
-  FactRows,
-  NotUpdating,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { FactRow, FactRows } from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
 import { EngineMark } from "@/components/database/kit"
 import type { WatchedJob } from "@/components/database/ops/backups-job"
@@ -60,7 +54,7 @@ import {
 } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ScheduleBuilder, scheduleExpression, scheduleFields } from "@/components/schedule-builder"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -82,6 +76,7 @@ import { describeCron } from "@/lib/cron"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { BackupJob, Job } from "@/lib/types"
+import { Stale } from "@/components/database/kit/read"
 
 /** The width of the panel from which a base backup is a row of a table rather than a block of lines. */
 const TABLE_FROM = 600
@@ -360,7 +355,7 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
         }
         actions={
           <>
-            {staleOf(pitr) && <NotUpdating error={staleOf(pitr)!} />}
+            <Stale poll={pitr} />
             {roomy && commands}
           </>
         }
@@ -372,7 +367,7 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
       {!data ? (
         pitr.error ? (
           <div className="pt-4">
-            <CouldNotRead what="point-in-time recovery" error={pitr.error} onRetry={pitr.refresh} />
+            <ErrorState what="point-in-time recovery" error={pitr.error} onRetry={pitr.refresh} />
           </div>
         ) : (
           <LoadingPanel plain rows={3} />

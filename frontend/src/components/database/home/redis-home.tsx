@@ -1,7 +1,6 @@
 "use client"
 
 import { ActivityLines } from "@/components/database/home/activity-lines"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestCommands } from "@/components/database/home/busiest"
 import { REDIS_VIEWS } from "@/components/database/home/charts"
 import { LargestNamespacesBlock } from "@/components/database/home/largest"
@@ -21,6 +20,7 @@ import { Key } from "@/components/icons"
 import { usePoll } from "@/hooks/use-poll"
 import { plural } from "@/lib/format"
 import { useMemo } from "react"
+import { ErrorState } from "@/components/state"
 
 export function KeyValueHome() {
   const { id, engine, href } = useDatabase()
@@ -86,7 +86,7 @@ export function KeyValueHome() {
     <>
       <StateRegion />
       {unread && (
-        <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
+        <ErrorState what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
       <HomePicture
         holdings={engine.can("serverInfo") ? holdings : []}

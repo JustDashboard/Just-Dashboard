@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation"
 import { usePoll } from "@/hooks/use-poll"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { Panel, PanelHeader } from "@/components/panel"
-import { CouldNotRead, NotUpdating } from "@/components/database/home/blocks"
 import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
 import { statementHref } from "@/components/database/ops/performance-address"
 import { readStatements } from "@/components/database/ops/performance-api"
 import { millis, shareWords, statementKeys } from "@/components/database/ops/performance-figures"
 import { oneLine } from "@/components/database/ops/queries"
+import { Stale } from "@/components/stale"
+import { ErrorState } from "@/components/state"
 
 /** How many statements the list holds. */
 const TOP = 15
@@ -104,7 +105,7 @@ export function StatementsPanel({
         title={title}
         actions={
           <>
-            {data && statements.error && <NotUpdating error={statements.error} />}
+            {data && statements.error && <Stale error={statements.error} />}
             {data?.supported && (
               <span className="numeric text-hint text-muted-foreground">
                 {millis(data.totalMs)} of statement time counted
@@ -116,7 +117,7 @@ export function StatementsPanel({
       <div className="pt-3">
         {!data ? (
           statements.error ? (
-            <CouldNotRead
+            <ErrorState
               what="the statement statistics"
               error={statements.error}
               onRetry={statements.refresh}

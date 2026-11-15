@@ -37,9 +37,7 @@ import {
   NoFigure,
   NotAvailable,
   Notes,
-  Stale,
   StatementLine,
-  ViewRead,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { useStops, type Stops } from "@/components/database/ops/performance-stops"
@@ -53,6 +51,7 @@ import { clientOf, type KnownClient } from "@/components/database/clients"
 import { useKnownClients } from "@/components/database/use-known-clients"
 import { ProductGlyph } from "@/components/product-logo"
 import { ProjectFavicon } from "@/components/project-mark"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /**
  * Who is holding whom up.
@@ -102,7 +101,7 @@ export function LocksView({ activity }: { activity: PollState<DbActivityResponse
     <Panel plain aria-label="Locks" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
       {stops.dialog}
       <PanelHeader title="Who is waiting on whom" actions={<Stale poll={locks} />} />
-      <ViewRead poll={locks} what="the locks" skeleton={<LoadingPanel plain rows={4} />}>
+      <Read patience poll={locks} what="the locks" skeleton={<LoadingPanel plain rows={4} />}>
         {(data) => {
           if (!data.supported) {
             return (
@@ -156,7 +155,7 @@ export function LocksView({ activity }: { activity: PollState<DbActivityResponse
             </PanelBody>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

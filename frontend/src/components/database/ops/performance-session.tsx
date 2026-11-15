@@ -12,7 +12,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { EmptyNote, EmptyState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -21,7 +21,6 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { DbClientMark } from "@/components/database/client-mark"
 import type { KnownClient } from "@/components/database/clients"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { EngineMark } from "@/components/database/kit"
 import { useKnownClients } from "@/components/database/use-known-clients"
 import {
@@ -211,7 +210,7 @@ function Session({ pid }: { pid: string | null }) {
             </DetailTabs>
           </>
         ) : activity.error && !activity.data ? (
-          <CouldNotRead what="the sessions" error={activity.error} onRetry={activity.refresh} />
+          <ErrorState what="the sessions" error={activity.error} onRetry={activity.refresh} />
         ) : activity.data && !activity.data.supported ? (
           <EmptyState
             mark={<EngineMark engine={engine} size="md" />}

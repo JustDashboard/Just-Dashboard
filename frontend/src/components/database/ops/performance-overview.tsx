@@ -1,7 +1,7 @@
 "use client"
 
 import { ViewChart, HistoryRange } from "@/components/database/home/activity"
-import { Block, NotUpdating } from "@/components/database/home/blocks"
+import { Block } from "@/components/database/home/blocks"
 import { offeredViews } from "@/components/database/home/charts"
 import { chartEvents } from "@/components/database/home/events"
 import { gauge, heldSeconds, type Sample } from "@/components/database/home/samples"
@@ -16,6 +16,7 @@ import type { PollState } from "@/hooks/use-poll"
 import { duration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
+import { Stale } from "@/components/stale"
 
 /**
  * The Overview: who is on the server right now, then what it has done over
@@ -104,7 +105,7 @@ export function OverviewView({
                 <>kept for {keptFor(retentionHours)}</>
               )}
             </TitleFact>
-            {error && samples.length > 0 && <NotUpdating error={error} />}
+            {error && samples.length > 0 && <Stale error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }

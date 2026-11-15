@@ -36,8 +36,6 @@ import {
   Notes,
   ObjectName,
   ScopeChips,
-  Stale,
-  ViewRead,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import {
@@ -57,6 +55,7 @@ import {
 } from "@/components/database/ops/performance-words"
 import type { DbIndexStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 const FLAGS: { id: IndexFlag; chip: string; words: (count: number) => string }[] = [
   {
@@ -204,7 +203,8 @@ export function IndexesView() {
           </TitleAside>
         )}
       </PanelHeader>
-      <ViewRead
+      <Read
+        patience
         poll={stats}
         what="the indexes"
         locking={engine.can("locks")}
@@ -387,7 +387,7 @@ export function IndexesView() {
             </div>
           )
         }
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

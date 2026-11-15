@@ -1,7 +1,6 @@
 "use client"
 
 import { ActivityLines } from "@/components/database/home/activity-lines"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { SlowOperations } from "@/components/database/home/busiest"
 import { MONGO_VIEWS } from "@/components/database/home/charts"
 import { LargestCollectionsBlock } from "@/components/database/home/largest"
@@ -21,6 +20,7 @@ import { Layers } from "@/components/icons"
 import { usePoll } from "@/hooks/use-poll"
 import { bytes } from "@/lib/format"
 import { useMemo } from "react"
+import { ErrorState } from "@/components/state"
 
 export function DocumentHome() {
   const { id, conn, engine, href } = useDatabase()
@@ -67,7 +67,7 @@ export function DocumentHome() {
     <>
       <StateRegion />
       {unread && (
-        <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
+        <ErrorState what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
       <HomePicture
         holdings={engine.can("collections") ? holdings : []}

@@ -1,7 +1,6 @@
 "use client"
 
 import { ActivityLines } from "@/components/database/home/activity-lines"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestStatements, FileFacts } from "@/components/database/home/busiest"
 import { CLICKHOUSE_VIEWS, SQL_VIEWS } from "@/components/database/home/charts"
 import { LargestTablesBlock, type LargestTables } from "@/components/database/home/largest"
@@ -18,7 +17,7 @@ import type { DbServerStats, DbTableStats } from "@/components/database/home/typ
 import { useSamples } from "@/components/database/home/use-samples"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { Layers } from "@/components/icons"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import type { DbOverview } from "@/lib/types"
 import { useMemo } from "react"
@@ -66,7 +65,7 @@ export function SqlHome() {
         </Notice>
       )}
       {unread && (
-        <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
+        <ErrorState what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
       <HomePicture
         holdings={holdings}

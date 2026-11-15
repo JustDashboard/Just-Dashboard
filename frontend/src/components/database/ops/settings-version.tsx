@@ -26,11 +26,10 @@ import { SettingSection } from "@/components/settings/setting-card"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { Segments } from "@/components/segments"
 import { FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineGlyph, EngineMark } from "@/components/database/kit"
 import { transferPrefix } from "@/components/database/ops/backups-model"
@@ -363,7 +362,7 @@ function VersionSection({
     >
       {!upgrade ? (
         error ? (
-          <CouldNotRead what="which release it runs" error={error} onRetry={onRetry} />
+          <ErrorState what="which release it runs" error={error} onRetry={onRetry} />
         ) : (
           // The picture's own height, so the read landing moves nothing under it.
           <div className="flex items-center gap-3.5 py-4 lg:justify-center" aria-hidden>

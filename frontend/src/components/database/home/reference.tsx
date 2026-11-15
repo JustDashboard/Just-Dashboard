@@ -25,15 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { sectionHref } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
-import {
-  Block,
-  BlockLink,
-  CardsSkeleton,
-  NotUpdating,
-  Quiet,
-  Read,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { Block, BlockLink, CardsSkeleton, Quiet } from "@/components/database/home/blocks"
 import { nameHue } from "@/components/database/home/kinds"
 import { read, record } from "@/components/database/home/read"
 import { compact } from "@/components/database/home/readings"
@@ -46,6 +38,8 @@ import type {
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { settingsPageHref } from "@/components/database/shell/settings-pages"
+import { Stale } from "@/components/stale"
+import { Read, staleOf } from "@/components/database/kit/read"
 
 /**
  * What a database runs as, where it is reachable from and what is kept of it:
@@ -396,7 +390,7 @@ export function ReachableFrom() {
             <span className="min-w-0 truncate">{exposure.word}</span>
           )}
           <InfoTip label={`What “${exposure.word}” means`}>{exposure.sentence}</InfoTip>
-          {stale && <NotUpdating error={stale} />}
+          {stale && <Stale error={stale} />}
         </>
       }
       facts={
@@ -586,7 +580,7 @@ export function BackupsLine({
                 {plural(data.files.length, "dump")} · {bytes(kept)}
               </span>
             )}
-            {stale && <NotUpdating error={stale} />}
+            {stale && <Stale error={stale} />}
           </span>
         ) : backups.error ? (
           <span className="font-normal text-muted-foreground">The dumps could not be read</span>
@@ -757,6 +751,7 @@ export function ServerDatabases() {
       }
     >
       <Read
+        rise
         poll={list}
         what="the server's databases"
         skeleton={<CardsSkeleton className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" />}
@@ -994,6 +989,7 @@ export function Keyspaces({ server }: { server: PollState<RedisServer> }) {
       }
     >
       <Read
+        rise
         poll={server}
         what="the keyspace"
         skeleton={<CardsSkeleton className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" />}

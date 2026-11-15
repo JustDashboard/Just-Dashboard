@@ -21,7 +21,6 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag } from "@/components/database/kit"
 import { dropAccountRequest } from "@/components/database/ops/access-drop"
@@ -64,6 +63,7 @@ import {
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
 
 const SHOW_WORDS: Record<AccountShow, string> = {
   "": "",
@@ -324,7 +324,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
                   It may have been dropped, or the name in the link is misspelt.
                 </NoSuchAccount>
               ) : detail.error ? (
-                <CouldNotRead what="the account" error={detail.error} onRetry={detail.refresh} />
+                <ErrorState what="the account" error={detail.error} onRetry={detail.refresh} />
               ) : (
                 <GrantsSkeleton />
               )

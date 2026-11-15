@@ -10,7 +10,7 @@ import { FormSections } from "@/components/form"
 import { Trash } from "@/components/icons"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,7 +21,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { errorMessage, put } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag } from "@/components/database/kit"
 import { useAccessFilter } from "@/components/database/ops/access-filter"
@@ -231,7 +230,7 @@ export function RedisAccount({ name }: { name: string }) {
               <ServerDown what="Its users" />
             ) : !acl.data ? (
               acl.error ? (
-                <CouldNotRead what="the user" error={acl.error} onRetry={acl.refresh} />
+                <ErrorState what="the user" error={acl.error} onRetry={acl.refresh} />
               ) : (
                 <Panel plain aria-hidden>
                   <PanelHeader title="Rule" />
@@ -263,7 +262,7 @@ export function RedisAccount({ name }: { name: string }) {
               ) : acl.data ? (
                 gone
               ) : acl.error ? (
-                <CouldNotRead what="the user" error={acl.error} onRetry={acl.refresh} />
+                <ErrorState what="the user" error={acl.error} onRetry={acl.refresh} />
               ) : null}
             </AccountPane>
           )}

@@ -4,11 +4,12 @@ import { useMemo } from "react"
 import { bytes } from "@/lib/format"
 import type { PollState } from "@/hooks/use-poll"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
-import { Block, BlockLink, Quiet, Read, staleOf } from "@/components/database/home/blocks"
+import { Block, BlockLink, Quiet } from "@/components/database/home/blocks"
 import { byKeyType, keyType, nameHue } from "@/components/database/home/kinds"
 import { compact, type Part } from "@/components/database/home/readings"
 import type { MongoCollections, RedisTree } from "@/components/database/home/types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, staleOf } from "@/components/database/kit/read"
 
 /** How many rows the block ranks. */
 const TOP = 6
@@ -132,7 +133,7 @@ export function LargestTablesBlock({
         </>
       }
     >
-      <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
+      <Read rise poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
             <Quiet>
@@ -193,7 +194,7 @@ export function LargestCollectionsBlock({
       stale={staleOf(poll)}
       actions={<BlockLink href={href("data")}>All {nouns.objects}</BlockLink>}
     >
-      <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
+      <Read rise poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
             <Quiet>
@@ -274,7 +275,7 @@ export function LargestNamespacesBlock({ poll }: { poll: PollState<RedisTree> })
         </>
       }
     >
-      <Read poll={poll} what="the keyspace" skeleton={<RankSkeleton rows={6} />}>
+      <Read rise poll={poll} what="the keyspace" skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
             <Quiet>Database {data.db} holds no keys.</Quiet>

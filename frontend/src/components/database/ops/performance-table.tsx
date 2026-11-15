@@ -12,14 +12,13 @@ import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SplitBar, percent as share } from "@/components/rank-list"
-import { EmptyNote, EmptyState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { compact } from "@/components/database/home/readings"
 import { EngineMark } from "@/components/database/kit"
 import { parseTableSegment, tableHref } from "@/components/database/ops/performance-address"
@@ -222,7 +221,7 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
             </DetailTabs>
           </>
         ) : stats.error && !stats.data ? (
-          <CouldNotRead what={`the ${objects}`} error={stats.error} onRetry={stats.refresh} />
+          <ErrorState what={`the ${objects}`} error={stats.error} onRetry={stats.refresh} />
         ) : stats.data && !stats.data.supported ? (
           <EmptyState
             mark={<EngineMark engine={engine} size="md" />}

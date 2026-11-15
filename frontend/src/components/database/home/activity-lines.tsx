@@ -7,12 +7,13 @@ import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { TileTrend } from "@/components/sparkline"
 import { WireMark } from "@/components/wire/wire"
 import { HistoryRange } from "@/components/database/home/activity"
-import { BlockLink, NotUpdating } from "@/components/database/home/blocks"
+import { BlockLink } from "@/components/database/home/blocks"
 import { offeredViews, type ChartView } from "@/components/database/home/charts"
 import { lineReading } from "@/components/database/home/lines"
 import type { Sample } from "@/components/database/home/samples"
 import { HISTORY_RANGES, SAMPLE_EVERY_MS, keptFor } from "@/components/database/home/use-samples"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Stale } from "@/components/stale"
 
 /** What a view measures, drawn on its mark. One that is new takes the layers. */
 const GLYPH: Record<string, Icon> = {
@@ -92,7 +93,7 @@ export const ActivityLines = memo(function ActivityLines({
         title="Activity"
         actions={
           <>
-            {error && samples.length > 0 && <NotUpdating error={error} />}
+            {error && samples.length > 0 && <Stale error={error} />}
             {/* How long the record goes back, on the line that picks the
                 window; how it is collected is on the pointer. */}
             <span

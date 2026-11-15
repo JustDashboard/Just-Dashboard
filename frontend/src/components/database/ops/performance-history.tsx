@@ -53,9 +53,7 @@ import {
   NoFigure,
   NotAvailable,
   SortHead,
-  Stale,
   StatementLine,
-  ViewRead,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { Fig, FigureLine, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
@@ -67,6 +65,7 @@ import type {
   DbStatementHistorySort,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /** How many statements the list asks for. The server's cap is 200. */
 const TOP = 50
@@ -190,7 +189,8 @@ export function StatementHistoryView() {
           </TitleAside>
         )}
       </PanelHeader>
-      <ViewRead
+      <Read
+        patience
         poll={history}
         what="the statement history"
         skeleton={<LoadingPanel plain rows={8} />}
@@ -297,7 +297,7 @@ export function StatementHistoryView() {
             </div>
           )
         }
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }
@@ -419,13 +419,14 @@ export function StatementRecorded({
       ) : (
         <>
           {entry && <RecordedFigures entry={entry} facts={data} />}
-          <ViewRead
+          <Read
+            patience
             poll={detail}
             what="the statement's history"
             skeleton={<LoadingPanel plain rows={4} />}
           >
             {(answer) => <Charts rows={rows} facts={answer} events={events} />}
-          </ViewRead>
+          </Read>
         </>
       )}
     </div>

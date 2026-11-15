@@ -42,8 +42,6 @@ import {
   ObjectName,
   ScopeChips,
   SortHead,
-  Stale,
-  ViewRead,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import {
@@ -79,6 +77,7 @@ import {
 } from "@/components/database/ops/performance-words"
 import type { DbTableStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /**
  * What each table weighs and how it is being kept: its rows and its size by
@@ -222,7 +221,8 @@ export function TablesView() {
           </TitleAside>
         )}
       </PanelHeader>
-      <ViewRead
+      <Read
+        patience
         poll={stats}
         what={`the ${objects}`}
         locking={engine.can("locks")}
@@ -467,7 +467,7 @@ export function TablesView() {
             </div>
           )
         }
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

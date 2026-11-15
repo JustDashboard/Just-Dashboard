@@ -1,12 +1,7 @@
 "use client"
 
 import { useConfirm } from "@/components/confirm-dialog"
-import {
-  CardsSkeleton,
-  CouldNotRead,
-  NotUpdating,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { CardsSkeleton } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { dropAccountRequest } from "@/components/database/ops/access-drop"
@@ -42,7 +37,7 @@ import { FormNote } from "@/components/form"
 import { Key, Trash, UserPlus } from "@/components/icons"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -51,6 +46,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { plural } from "@/lib/format"
 import { useMemo, useState } from "react"
+import { Stale } from "@/components/database/kit/read"
 
 /**
  * A SQL server's accounts: who can sign in, what each is, and what each was
@@ -202,7 +198,7 @@ export function SqlAccess() {
           title="Accounts"
           actions={
             <>
-              {staleOf(roles) && <NotUpdating error={staleOf(roles)!} />}
+              <Stale poll={roles} />
               {readOnly && <ProtectedTag />}
               <SearchInput
                 aria-label="Filter the accounts"
@@ -242,7 +238,7 @@ export function SqlAccess() {
         <PanelBody>
           {!data ? (
             roles.error ? (
-              <CouldNotRead what="the accounts" error={roles.error} onRetry={roles.refresh} />
+              <ErrorState what="the accounts" error={roles.error} onRetry={roles.refresh} />
             ) : (
               <CardsSkeleton count={4} />
             )

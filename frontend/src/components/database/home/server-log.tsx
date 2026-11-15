@@ -13,14 +13,9 @@ import { LEVEL_WORD, LogText } from "@/components/logs/log-text"
 import { resumeFrom, unseen, type Resume } from "@/components/logs/resume"
 import { Well } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import {
-  Block,
-  BlockLink,
-  CouldNotRead,
-  Quiet,
-  RowsSkeleton,
-} from "@/components/database/home/blocks"
+import { Block, BlockLink, Quiet, RowsSkeleton } from "@/components/database/home/blocks"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
 
 /** How many of the newest lines the tail asks for, and keeps. */
 const KEPT = 200
@@ -54,7 +49,7 @@ export function ServerLog() {
   if (found.error && !found.data) {
     return (
       <Block title="Server log" actions={link}>
-        <CouldNotRead
+        <ErrorState
           what="where this server writes its log"
           error={found.error}
           onRetry={found.refresh}

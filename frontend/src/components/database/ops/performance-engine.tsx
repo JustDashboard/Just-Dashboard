@@ -30,12 +30,7 @@ import {
   readSqliteFile,
 } from "@/components/database/ops/performance-api"
 import { MaintenanceList, useMaintenance } from "@/components/database/ops/performance-maintenance"
-import {
-  NoFigure,
-  Stale,
-  StatementLine,
-  ViewRead,
-} from "@/components/database/ops/performance-parts"
+import { NoFigure, StatementLine } from "@/components/database/ops/performance-parts"
 import {
   Fig,
   ShareCell,
@@ -45,6 +40,7 @@ import {
 } from "@/components/database/ops/performance-words"
 import type { ChPartition } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /** How much smaller a partition is on disk than its data. */
 function ratio(partition: Pick<ChPartition, "bytes" | "uncompressedBytes">): string | undefined {
@@ -87,7 +83,7 @@ export function PartsView() {
           </TitleAside>
         )}
       </PanelHeader>
-      <ViewRead poll={parts} what="the parts" skeleton={<LoadingPanel plain rows={5} />}>
+      <Read patience poll={parts} what="the parts" skeleton={<LoadingPanel plain rows={5} />}>
         {(data) => {
           const shown = data.partitions.filter((entry) => !table || entry.table === table)
           const listed = data.parts.filter((entry) => !table || entry.table === table)
@@ -230,7 +226,7 @@ export function PartsView() {
             </div>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }
@@ -249,7 +245,7 @@ export function MergesView() {
     <div className="space-y-8">
       <Panel plain aria-label="Merges">
         <PanelHeader title="Merges running" actions={<Stale poll={merges} />} />
-        <ViewRead poll={merges} what="the merges" skeleton={<LoadingPanel plain rows={3} />}>
+        <Read patience poll={merges} what="the merges" skeleton={<LoadingPanel plain rows={3} />}>
           {(data) => (
             <PanelBody flush className="@container animate-rise group-data-[plain]/panel:-mx-4">
               {data.merges.length === 0 ? (
@@ -312,12 +308,17 @@ export function MergesView() {
               )}
             </PanelBody>
           )}
-        </ViewRead>
+        </Read>
       </Panel>
 
       <Panel plain aria-label="Mutations">
         <PanelHeader title="Mutations" actions={<Stale poll={mutations} />} />
-        <ViewRead poll={mutations} what="the mutations" skeleton={<LoadingPanel plain rows={3} />}>
+        <Read
+          patience
+          poll={mutations}
+          what="the mutations"
+          skeleton={<LoadingPanel plain rows={3} />}
+        >
           {(data) => (
             <PanelBody flush className="@container animate-rise group-data-[plain]/panel:-mx-4">
               {data.mutations.length === 0 ? (
@@ -377,7 +378,7 @@ export function MergesView() {
               )}
             </PanelBody>
           )}
-        </ViewRead>
+        </Read>
       </Panel>
     </div>
   )
@@ -413,7 +414,7 @@ export function FileView() {
       {maintenance.dialogs}
       <Panel plain aria-label="The file">
         <PanelHeader title="The file" actions={<Stale poll={file} />} />
-        <ViewRead poll={file} what="the file" skeleton={<LoadingPanel plain rows={8} />}>
+        <Read patience poll={file} what="the file" skeleton={<LoadingPanel plain rows={8} />}>
           {(data) => (
             <PanelBody className="animate-rise space-y-5">
               <DetailList>
@@ -495,13 +496,14 @@ export function FileView() {
               )}
             </PanelBody>
           )}
-        </ViewRead>
+        </Read>
       </Panel>
 
       <Panel plain aria-label="Maintenance">
         <PanelHeader title="Check and maintain" />
         <PanelBody>
-          <ViewRead
+          <Read
+            patience
             poll={maintenance.list}
             what="what can be run on the file"
             skeleton={<LoadingPanel plain rows={4} />}
@@ -516,7 +518,7 @@ export function FileView() {
                 <MaintenanceList verbs={verbs} maintenance={maintenance} on="the whole file" />
               )
             }
-          </ViewRead>
+          </Read>
         </PanelBody>
       </Panel>
     </div>

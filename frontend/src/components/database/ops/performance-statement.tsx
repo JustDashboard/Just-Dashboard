@@ -22,13 +22,12 @@ import { WireMark } from "@/components/wire/wire"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { TileTrend } from "@/components/sparkline"
 import { ReadingLine } from "@/components/reading-line"
-import { EmptyState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
 import { CodeView, EngineMark } from "@/components/database/kit"
@@ -230,11 +229,7 @@ function Statement({ address }: { address: string | null }) {
             </DetailTabs>
           </>
         ) : statements.error && !data ? (
-          <CouldNotRead
-            what="the statements"
-            error={statements.error}
-            onRetry={statements.refresh}
-          />
+          <ErrorState what="the statements" error={statements.error} onRetry={statements.refresh} />
         ) : (
           <NotListed data={data} back={back} />
         )}

@@ -51,9 +51,7 @@ import {
   NoFigure,
   NotAvailable,
   SessionState,
-  Stale,
   StatementLine,
-  ViewRead,
   useAsk,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
@@ -67,6 +65,7 @@ import type {
   DbSessionStatus,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /**
  * How wide the view has to be for the sessions to be a table. Measured on
@@ -162,7 +161,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
           </>
         }
       />
-      <ViewRead poll={activity} what="the sessions" skeleton={<LoadingPanel plain rows={6} />}>
+      <Read patience poll={activity} what="the sessions" skeleton={<LoadingPanel plain rows={6} />}>
         {(data) => {
           if (!data.supported) {
             return (
@@ -260,7 +259,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
             </div>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }
@@ -569,7 +568,8 @@ function RunningQueries() {
     <Panel plain aria-label="Running queries" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
       {dialog}
       <PanelHeader title="Running queries" actions={<Stale poll={queries} />} />
-      <ViewRead
+      <Read
+        patience
         poll={queries}
         what="the running queries"
         skeleton={<LoadingPanel plain rows={4} />}
@@ -599,7 +599,10 @@ function RunningQueries() {
                           {stopper(query)}
                         </span>
                       </div>
-                      <StatementLine text={query.query} className="text-hint text-muted-foreground" />
+                      <StatementLine
+                        text={query.query}
+                        className="text-hint text-muted-foreground"
+                      />
                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
                         {progress(query)}
                         <span className="numeric">
@@ -662,7 +665,7 @@ function RunningQueries() {
             </PanelBody>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

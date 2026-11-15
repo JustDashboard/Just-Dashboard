@@ -13,10 +13,9 @@ import {
   type ServiceLogsView,
 } from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import type { Engine } from "@/components/database/engine"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { SectionFrame } from "@/components/database/kit"
 import { DatabaseQueries } from "@/components/database/ops/queries-view"
 import { queryNoun } from "@/components/database/ops/queries"
@@ -74,7 +73,7 @@ export function Logs() {
       {found.error && !latest ? (
         // Where the server's log is could not be found out: said, with the
         // way to ask again, rather than left to the next poll.
-        <CouldNotRead
+        <ErrorState
           what="where this server writes its log"
           error={found.error}
           onRetry={found.refresh}

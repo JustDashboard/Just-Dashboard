@@ -2,7 +2,6 @@
 
 import { useConfirm } from "@/components/confirm-dialog"
 import { sectionHref, type Engine } from "@/components/database/engine"
-import { CouldNotRead, NotUpdating, staleOf } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineMark, ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { CopyDatabase } from "@/components/database/ops/backups-copy"
@@ -44,7 +43,7 @@ import {
   Trash,
 } from "@/components/icons"
 import { Panel, PanelHeader } from "@/components/panel"
-import { EmptyState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
@@ -68,6 +67,7 @@ import { notify } from "@/lib/toast"
 import type { BackupJob, DbConnection, Job } from "@/lib/types"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Stale } from "@/components/database/kit/read"
 
 /** The width of the list itself from which a dump is a row of a table rather than a block of lines. */
 const TABLE_FROM = 600
@@ -396,7 +396,7 @@ export function Backups() {
           }
           actions={
             <>
-              {staleOf(backups) && <NotUpdating error={staleOf(backups)!} />}
+              <Stale poll={backups} />
               {readOnly && <ProtectedTag />}
               {mayDump && (
                 <Button
@@ -416,7 +416,7 @@ export function Backups() {
         {!data ? (
           backups.error ? (
             <div className="pt-4">
-              <CouldNotRead what="the dumps" error={backups.error} onRetry={backups.refresh} />
+              <ErrorState what="the dumps" error={backups.error} onRetry={backups.refresh} />
             </div>
           ) : (
             <DumpsSilhouette table={width === 0 || width >= TABLE_FROM} />

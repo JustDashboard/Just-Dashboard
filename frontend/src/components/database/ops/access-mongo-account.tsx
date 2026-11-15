@@ -18,7 +18,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { errorMessage, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { nameHue } from "@/components/database/home/kinds"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag } from "@/components/database/kit"
@@ -42,6 +41,7 @@ import {
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
 
 const userKey = (user: Pick<MongoUser, "user" | "db">) => `${user.db}.${user.user}`
 
@@ -230,7 +230,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
               <ServerDown what="Its users" />
             ) : !users.data ? (
               users.error ? (
-                <CouldNotRead what="the user" error={users.error} onRetry={users.refresh} />
+                <ErrorState what="the user" error={users.error} onRetry={users.refresh} />
               ) : (
                 <Panel plain aria-hidden>
                   <PanelHeader title="Roles" />

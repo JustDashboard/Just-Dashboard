@@ -16,8 +16,6 @@ import {
   FactRows,
   FactsSkeleton,
   Quiet,
-  Read,
-  staleOf,
 } from "@/components/database/home/blocks"
 import { housekeeping } from "@/components/database/home/housekeeping"
 import { statementVerb } from "@/components/database/home/kinds"
@@ -32,6 +30,7 @@ import type {
 import { useStatementsSetup } from "@/components/database/ops/statements-setup"
 import { setupStart } from "@/components/database/ops/statements-setup-model"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, staleOf } from "@/components/database/kit/read"
 
 /** How many rows a ranked block shows. */
 const TOP = 6
@@ -171,7 +170,12 @@ export function BusiestStatements() {
         )
       }
     >
-      <Read poll={statements} what={`the busiest ${words}`} skeleton={<RankSkeleton rows={TOP} />}>
+      <Read
+        rise
+        poll={statements}
+        what={`the busiest ${words}`}
+        skeleton={<RankSkeleton rows={TOP} />}
+      >
         {(data) =>
           data.supported && items.length === 0 ? (
             <Quiet>
@@ -288,7 +292,7 @@ export function BusiestCommands() {
         </>
       }
     >
-      <Read poll={stats} what="the command statistics" skeleton={<RankSkeleton rows={TOP} />}>
+      <Read rise poll={stats} what="the command statistics" skeleton={<RankSkeleton rows={TOP} />}>
         {() =>
           items.length === 0 ? (
             <Quiet>
@@ -375,7 +379,7 @@ export function SlowOperations() {
         </>
       }
     >
-      <Read poll={profiler} what="the profiler" skeleton={<RankSkeleton rows={TOP} />}>
+      <Read rise poll={profiler} what="the profiler" skeleton={<RankSkeleton rows={TOP} />}>
         {(data) =>
           items.length > 0 ? (
             <RankList items={items} />
@@ -432,7 +436,7 @@ export function FileFacts() {
       stale={staleOf(file)}
       actions={<BlockLink href={href("settings")}>Settings</BlockLink>}
     >
-      <Read poll={file} what="the file" skeleton={<FactsSkeleton rows={7} />}>
+      <Read rise poll={file} what="the file" skeleton={<FactsSkeleton rows={7} />}>
         {(data) => (
           <FactRows>
             <FactRow label="Path" className="font-mono wrap-anywhere">

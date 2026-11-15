@@ -43,9 +43,7 @@ import {
 import {
   NoFigure,
   NotAvailable,
-  Stale,
   StatementLine,
-  ViewRead,
   useAsk,
   useReturnFocus,
   RETURNS_FOCUS,
@@ -56,6 +54,7 @@ import { useStatementsSetup } from "@/components/database/ops/statements-setup"
 import { setupStart } from "@/components/database/ops/statements-setup-model"
 import type { DbStatementSort, DbStatements } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /** How many statements the list asks for, and how many when the reader wants more. The server's cap is 200. */
 const TOP = 50
@@ -212,7 +211,12 @@ export function StatementsView() {
         )}
         {narrow && filterBox}
       </PanelHeader>
-      <ViewRead poll={statements} what="the statements" skeleton={<LoadingPanel plain rows={8} />}>
+      <Read
+        patience
+        poll={statements}
+        what="the statements"
+        skeleton={<LoadingPanel plain rows={8} />}
+      >
         {(answer) =>
           !answer.supported ? (
             <div className="pt-4">
@@ -336,7 +340,7 @@ export function StatementsView() {
             </div>
           )
         }
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

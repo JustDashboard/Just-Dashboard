@@ -21,18 +21,14 @@ import {
   consumerWord,
 } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
-import {
-  Block,
-  BlockLink,
-  CardsSkeleton,
-  CouldNotRead,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { Block, BlockLink, CardsSkeleton } from "@/components/database/home/blocks"
 import { copyTone } from "@/components/database/home/holdings"
 import { read } from "@/components/database/home/read"
 import type { DbBackups } from "@/components/database/home/types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
+import { staleOf } from "@/components/database/kit/read"
+import { ErrorState } from "@/components/state"
 
 /** One thing the database holds, as the right lane draws it: a schema, a keyspace, a collection. */
 export type Holding = {
@@ -153,7 +149,7 @@ export function HomePicture({
       }
     >
       {topology.error && !topology.data ? (
-        <CouldNotRead what="what uses it" error={topology.error} onRetry={topology.refresh} />
+        <ErrorState what="what uses it" error={topology.error} onRetry={topology.refresh} />
       ) : !topology.data ? (
         <CardsSkeleton count={2} />
       ) : (

@@ -11,7 +11,7 @@ import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { LegendLine } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
-import { Block, CardsSkeleton, staleOf } from "@/components/database/home/blocks"
+import { Block, CardsSkeleton } from "@/components/database/home/blocks"
 import { Lane, pulseFor } from "@/components/database/home/picture"
 import { DbClientMark } from "@/components/database/client-mark"
 import { clientOf, type KnownClient } from "@/components/database/clients"
@@ -29,6 +29,7 @@ import type {
   DbSessionStatus,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { staleOf } from "@/components/database/kit/read"
 
 /** How many clients the left lane draws before the rest are counted. */
 const SHOWN = 6

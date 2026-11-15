@@ -10,7 +10,7 @@ import { GroupRule } from "@/components/choice-row"
 import { FormNote } from "@/components/form"
 import { SearchInput } from "@/components/search-input"
 import { ProductLogo } from "@/components/product-logo"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
@@ -23,7 +23,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu } from "@/components/verbs"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import {
   CategoryGlyph,
@@ -296,7 +295,7 @@ function Extensions() {
         </FormNote>
       ) : !data ? (
         list.error ? (
-          <CouldNotRead what="the extensions" error={list.error} onRetry={list.refresh} />
+          <ErrorState what="the extensions" error={list.error} onRetry={list.refresh} />
         ) : (
           <LoadingRows rows={4} />
         )
@@ -510,7 +509,7 @@ function Modules() {
         </FormNote>
       ) : !modules ? (
         server.error ? (
-          <CouldNotRead what="the modules" error={server.error} onRetry={server.refresh} />
+          <ErrorState what="the modules" error={server.error} onRetry={server.refresh} />
         ) : (
           <LoadingRows rows={2} />
         )

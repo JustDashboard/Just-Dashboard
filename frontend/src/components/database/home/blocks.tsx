@@ -5,9 +5,7 @@ import { ArrowRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Stale } from "@/components/stale"
-import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { PollState } from "@/hooks/use-poll"
 
 /**
  * One block of a database's home: a title, a hairline, what was read.
@@ -63,64 +61,6 @@ export function BlockLink({ href, children }: { href: string; children: React.Re
       {children} <ArrowRight className="size-3" />
     </Link>
   )
-}
-
-/**
- * A reading that is the one before: the poll after it failed.
- *
- * @deprecated use `Stale` from `@/components/stale` (its mark is this).
- */
-export function NotUpdating({ error }: { error: Error }) {
-  return <Stale error={error} />
-}
-
-/**
- * A read that failed with nothing to show in its place: "Could not read
- * <what>", the server's words, and always the retry.
- *
- * @deprecated use `ErrorState` with `what`, which this is. It was an amber
- * notice of its own, and dropped what `ErrorState` says for an item that is
- * gone, a server that asked for a pause and a module the host does not have.
- */
-export function CouldNotRead({
-  what,
-  error,
-  onRetry,
-  className,
-}: {
-  /** What the block would have shown: "the busiest statements". */
-  what: string
-  error: Error
-  onRetry: () => void
-  className?: string
-}) {
-  return <ErrorState what={what} error={error} onRetry={onRetry} className={className} />
-}
-
-/**
- * The three answers of one read, in one place: what it holds once it has
- * answered — and for as long as it has, whatever the polls after it do — the
- * failure when it never has, and the silhouette until either.
- */
-export function Read<T>({
-  poll,
-  what,
-  skeleton,
-  children,
-}: {
-  poll: PollState<T>
-  what: string
-  skeleton: React.ReactNode
-  children: (data: T) => React.ReactNode
-}) {
-  if (poll.data !== undefined) return <div className="animate-rise">{children(poll.data)}</div>
-  if (poll.error) return <ErrorState what={what} error={poll.error} onRetry={poll.refresh} />
-  return <>{skeleton}</>
-}
-
-/** The failure a block's header reports while its content stays: a poll that failed over data. */
-export function staleOf<T>(poll: PollState<T>): Error | undefined {
-  return poll.data !== undefined ? poll.error : undefined
 }
 
 /** A list of rows that has not arrived: a mark, two lines, a figure. */

@@ -33,13 +33,12 @@ import { laneStyle } from "@/components/logs/log-text"
 import { Address } from "@/components/deploy/request-marks"
 import { FactDot } from "@/components/identity-header"
 import { PaneFooter, Well } from "@/components/panel"
-import { EmptyState, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { engineFor, type Engine } from "@/components/database/engine"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { EngineGlyph } from "@/components/database/kit"
 import { StatementsPanel } from "@/components/database/ops/statements-panel"
 import type { DbSettingChange } from "@/components/database/ops/settings-parameters-model"
@@ -283,7 +282,7 @@ export function DatabaseQueries({
             )}
             {result.error && !result.data ? (
               <div className="p-6">
-                <CouldNotRead
+                <ErrorState
                   what={`the ${noun.many}`}
                   error={result.error}
                   onRetry={result.refresh}

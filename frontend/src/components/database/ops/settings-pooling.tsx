@@ -17,13 +17,12 @@ import { WireHost, WireLabel, WireMark, WireNode } from "@/components/wire/wire"
 import { Field, FieldRow, FormFact, FormNote, InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Detail, DetailList } from "@/components/detail-list"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
 import { EngineGlyph, EngineMark } from "@/components/database/kit"
 import { firewallOutcome } from "@/components/database/ops/settings-model"
@@ -92,7 +91,7 @@ export function PoolingSections({ confirm }: { confirm: (request: ConfirmRequest
     return (
       <SettingSection id="pooler" title="Connection pooler">
         {poll.error ? (
-          <CouldNotRead what="the pooler" error={poll.error} onRetry={poll.refresh} />
+          <ErrorState what="the pooler" error={poll.error} onRetry={poll.refresh} />
         ) : (
           <LoadingRows rows={3} />
         )}
@@ -336,7 +335,7 @@ function PoolerSection({
       >
         <PoolerPicture pooler={pooler} stats={stats} changing={saving} />
         {statsError && (
-          <CouldNotRead what="the pooler's statistics" error={statsError} onRetry={onStatsRetry} />
+          <ErrorState what="the pooler's statistics" error={statsError} onRetry={onStatsRetry} />
         )}
         {pooler.state === "missing" && (
           <Notice tone="warning" title="The pooler's container is gone">

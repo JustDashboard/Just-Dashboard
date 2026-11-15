@@ -9,13 +9,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { DbClientMark } from "@/components/database/client-mark"
 import { clientOf } from "@/components/database/clients"
-import {
-  BlockLink,
-  CardsSkeleton,
-  NotUpdating,
-  Read,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { BlockLink, CardsSkeleton } from "@/components/database/home/blocks"
 import {
   concernOf,
   orderSessions,
@@ -31,6 +25,7 @@ import {
 import type { DbActivity } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useKnownClients } from "@/components/database/use-known-clients"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /** How often the sessions are read while the view is on screen: Performance's own pace. */
 const SESSIONS_POLL = 5000
@@ -76,7 +71,7 @@ export function AccountSessions({
         title="Sessions"
         actions={
           <>
-            {staleOf(activity) && <NotUpdating error={staleOf(activity)!} />}
+            <Stale poll={activity} />
             {count !== undefined && count > 0 && (
               <span className="numeric text-hint text-muted-foreground">{count}</span>
             )}

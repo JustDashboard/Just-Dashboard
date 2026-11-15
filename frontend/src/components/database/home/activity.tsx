@@ -1,6 +1,5 @@
 "use client"
 
-import { NotUpdating } from "@/components/database/home/blocks"
 import {
   CHART_UNITS,
   drawnRows,
@@ -19,6 +18,7 @@ import { duration } from "@/lib/format"
 import type { MetricEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { memo, useMemo } from "react"
+import { Stale } from "@/components/stale"
 
 /**
  * Recorded engine activity, available before this page is opened.
@@ -82,7 +82,7 @@ export const Activity = memo(function Activity({
                 ? `${duration(held)} recorded, kept for ${keptFor(retentionHours)}`
                 : `kept for ${keptFor(retentionHours)}`}
             </span>
-            {error && samples.length > 0 && <NotUpdating error={error} />}
+            {error && samples.length > 0 && <Stale error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }
