@@ -502,7 +502,7 @@ export function EventsPage() {
                 title={
                   <>
                     Containers
-                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                       {rows.length}
                     </span>
                   </>
@@ -547,7 +547,7 @@ export function EventsPage() {
                 title={
                   <>
                     Events
-                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                       {entries.length}
                     </span>
                   </>

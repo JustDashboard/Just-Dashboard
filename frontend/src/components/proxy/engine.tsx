@@ -229,7 +229,7 @@ export function EngineIdentity({
           {version && (
             <>
               {" "}
-              <span className="font-mono text-body font-normal text-muted-foreground">
+              <span className="font-mono text-body leading-none font-normal text-muted-foreground">
                 {version}
               </span>
             </>

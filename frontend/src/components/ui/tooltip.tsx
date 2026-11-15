@@ -64,11 +64,19 @@ function watchScrolls() {
  * comes with a scroll, while the trigger still holds the focus that opened
  * it a moment ago, is that scroll and is not followed. Escape, a blur, a
  * pointer leaving and a scroll the reader makes later close it as before.
+ *
+ * Hoverable only while it is open. Radix keeps a closing bubble mounted for
+ * its fade, and a hoverable one still listens for the pointer leaving its
+ * trigger: a press closed the tip, the pointer moved straight on to the next
+ * control, and the bubble that was fading out marked the pointer as on its way
+ * to it, so the next control's own tip did not open until the pointer moved
+ * again. A closed tip has nothing to move onto, so it keeps no grace area.
  */
 function Tooltip({
   open,
   defaultOpen = false,
   onOpenChange,
+  disableHoverableContent,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
   const focused = React.useRef<Focused | null>(null)
@@ -99,6 +107,7 @@ function Tooltip({
         data-slot="tooltip"
         open={open ?? shown}
         onOpenChange={change}
+        disableHoverableContent={disableHoverableContent || !(open ?? shown)}
         {...props}
       />
     </FocusedContext.Provider>

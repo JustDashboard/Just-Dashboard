@@ -1365,10 +1365,12 @@ function CopyDetail({
     <Detail label={label} className={cn("group flex items-start gap-1", className)}>
       <span className="min-w-0 flex-1">{shown ?? (value || "—")}</span>
       {value && (
+        // 24 wide, the press box itself: at 20 the box reached 2px past the
+        // button, and past the end of a value that fills its line.
         <IconAction
           label={`Copy ${label}`}
           reveal
-          className="-my-1 size-5"
+          className="-my-1 size-6"
           onClick={() => void copyText(value, `${label} copied`)}
         >
           <Copy />
