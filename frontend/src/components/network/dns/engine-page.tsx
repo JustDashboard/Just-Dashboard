@@ -630,6 +630,8 @@ function Identity({
             <Status tone="unknown" label="Reading" />
           )
         }
+        // The verbs' place, so on a phone the line holds the row they land on.
+        menu={false}
         facts={
           <IdentityFacts loading={!failed}>
             <span>the engine could not be read</span>
