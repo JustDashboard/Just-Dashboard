@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, ArrowUpRight, Cross } from "@/components/icons"
+import { ArrowRight, ArrowUpRight } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import {
   hubHost,
@@ -12,11 +12,10 @@ import {
   noticeTone,
   owedNotices,
 } from "@/lib/hub-link"
-import { cn } from "@/lib/utils"
 import { useShellHub } from "@/hooks/use-hub-link"
 import { LogoGlyph } from "@/components/logo"
+import { RailNotice, RailNoticeHead, type RailNoticeTone } from "@/components/rail-notice"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /** Notices read on this screen, so the card clears per browser as the update notice's does. */
 const DISMISSED_KEY = "jd.hub.notices.dismissed"
@@ -76,105 +75,74 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
     writeDismissed(next)
   }
 
-  const tone = noticeTone(notice.level)
+  const level = noticeTone(notice.level)
+  const tone: RailNoticeTone = level === "default" ? "brand" : level
   const href = noticeHref(notice.href, hub.url)
 
-  if (collapsed) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Link
-            href="/dashboard/hub"
-            aria-label={`${hubSays(hub.name)}: ${notice.title}`}
-            className={cn(
-              "flex size-8 items-center justify-center rounded-lg focus-ring transition-colors",
-              tone === "default" && "bg-plot-brand text-brand hover:bg-plot-brand-hover",
-              tone === "warning" && "bg-plot-warning text-warning",
-              tone === "danger" && "bg-plot-danger text-destructive hover:bg-plot-danger-hover",
-            )}
-          >
-            <LogoGlyph small className="h-4 w-auto" />
-          </Link>
-        </TooltipTrigger>
-        <TooltipContent side="right">
-          {hubSays(hub.name)}: {notice.title}
-        </TooltipContent>
-      </Tooltip>
-    )
-  }
-
   return (
-    <section
-      aria-label="From Just Hub"
-      data-slot="hub-notice"
-      className={cn(
-        "relative min-w-0 animate-rise overflow-hidden rounded-lg border",
-        tone === "default" && "border-sidebar-border bg-card",
-        tone === "warning" && "border-rule-warning bg-wash-warning",
-        tone === "danger" && "border-rule-danger bg-wash-danger",
-      )}
+    <RailNotice
+      tone={tone}
+      collapsed={collapsed}
+      label={`${hubSays(hub.name)}: ${notice.title}`}
+      href="/dashboard/hub"
+      glyph={<LogoGlyph small className="h-4 w-auto" />}
+      section="From Just Hub"
+      slot={collapsed ? undefined : "hub-notice"}
+      // Keyed on the notice so the next one arrives rather than repainting in place (§11).
+      contentKey={notice.id}
     >
-      {/* Keyed on the notice so the next one arrives rather than repainting in place (§11). */}
-      <div key={notice.id} className="space-y-2.5 p-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <Mark tone={tone} />
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-hint leading-tight text-muted-foreground">
-              <HubSays name={hub.name} />{" "}
-              <span className="whitespace-nowrap">· {relativeTime(notice.at)}</span>
-            </p>
-            <p className="line-clamp-2 text-xs leading-snug font-semibold break-words">
-              {notice.title}
-            </p>
-          </div>
-          <button
-            type="button"
-            aria-label={`Dismiss ${notice.title}`}
-            onClick={() => dismiss(notice.id)}
-            className="-mr-1 shrink-0 rounded-sm p-0.5 text-muted-foreground focus-ring transition-colors hover:text-foreground"
-          >
-            <Cross className="size-3" />
-          </button>
-        </div>
-        {notice.body && (
-          <p className="line-clamp-3 text-hint leading-snug break-words text-muted-foreground">
-            {notice.body}
-          </p>
-        )}
-        {(href || owed.length > 1) && (
-          <div className="flex flex-col gap-1">
-            {href && (
-              <Button
-                asChild
-                size="sm"
-                variant="ghost"
-                className="h-auto min-h-8 w-full justify-between py-1.5"
-              >
-                <a href={href} target="_blank" rel="noopener noreferrer" title={href}>
-                  {/* The host is the part that matters (§8.10), so it has a line of its own
+      <RailNoticeHead
+        tone={tone}
+        mark={<LogoGlyph small className="h-4 w-auto" />}
+        onDismiss={() => dismiss(notice.id)}
+        dismissLabel={`Dismiss ${notice.title}`}
+      >
+        <p className="text-hint leading-tight text-muted-foreground">
+          <HubSays name={hub.name} />{" "}
+          <span className="whitespace-nowrap">· {relativeTime(notice.at)}</span>
+        </p>
+        <p className="line-clamp-2 text-xs leading-snug font-semibold break-words">
+          {notice.title}
+        </p>
+      </RailNoticeHead>
+      {notice.body && (
+        <p className="line-clamp-3 text-hint leading-snug break-words text-muted-foreground">
+          {notice.body}
+        </p>
+      )}
+      {(href || owed.length > 1) && (
+        <div className="flex flex-col gap-1">
+          {href && (
+            <Button
+              asChild
+              size="sm"
+              variant="ghost"
+              className="h-auto min-h-8 w-full justify-between py-1.5"
+            >
+              <a href={href} target="_blank" rel="noopener noreferrer" title={href}>
+                {/* The host is the part that matters (§8.10), so it has a line of its own
                     rather than being what a narrow rail cuts. */}
-                  <span className="flex min-w-0 flex-col items-start text-left">
-                    <span>Open in Just Hub</span>
-                    <span className="max-w-full truncate text-hint font-normal text-muted-foreground">
-                      {hubHost(href)}
-                    </span>
+                <span className="flex min-w-0 flex-col items-start text-left">
+                  <span>Open in Just Hub</span>
+                  <span className="max-w-full truncate text-hint font-normal text-muted-foreground">
+                    {hubHost(href)}
                   </span>
-                  <ArrowUpRight />
-                </a>
-              </Button>
-            )}
-            {owed.length > 1 && (
-              <Button asChild size="sm" variant="ghost" className="w-full justify-between">
-                <Link href="/dashboard/hub#notices">
-                  {owed.length - 1} more from Just Hub
-                  <ArrowRight />
-                </Link>
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    </section>
+                </span>
+                <ArrowUpRight />
+              </a>
+            </Button>
+          )}
+          {owed.length > 1 && (
+            <Button asChild size="sm" variant="ghost" className="w-full justify-between">
+              <Link href="/dashboard/hub#notices">
+                {owed.length - 1} more from Just Hub
+                <ArrowRight />
+              </Link>
+            </Button>
+          )}
+        </div>
+      )}
+    </RailNotice>
   )
 }
 
@@ -194,23 +162,6 @@ function HubSays({ name }: { name: string }) {
         {name}
       </span>
       ) says
-    </span>
-  )
-}
-
-/** The hub's J on a tile in the notice's tone, as the update notice draws the dashboard's. */
-function Mark({ tone }: { tone: ReturnType<typeof noticeTone> }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-lg border",
-        tone === "default" && "border-rule-brand bg-wash-brand text-brand",
-        tone === "warning" && "border-rule-warning bg-wash-warning text-warning",
-        tone === "danger" && "border-rule-danger bg-wash-danger text-destructive",
-      )}
-    >
-      <LogoGlyph small className="h-4 w-auto" />
     </span>
   )
 }

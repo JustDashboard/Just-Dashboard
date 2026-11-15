@@ -33,10 +33,7 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
-      className={cn(
-        "fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
-        className,
-      )}
+      className={cn(OVERLAY_GROUND, className)}
       {...props}
     />
   )
@@ -47,10 +44,18 @@ function DialogOverlay({
  * centred on the 43px title strip `Modal` draws — it was a bare 16px glyph,
  * the smallest thing to hit on a surface whose fields are 44px. It answers the
  * pointer with a wash, as every control with no face of its own does (§2),
- * rather than an opacity step. `ui/sheet.tsx` draws the same one.
+ * rather than an opacity step. `ui/sheet.tsx` draws this one too: one class,
+ * so the two strips cannot drift apart on where their cross sits.
  */
-const CLOSE =
+export const OVERLAY_CLOSE =
   "absolute top-0.5 right-1 flex size-10 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none sm:top-1.5 sm:right-2 sm:size-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+
+/**
+ * The dim ground under every overlay that takes the page — dialog and sheet —
+ * fading on the overlay duration (`--duration-base`).
+ */
+export const OVERLAY_GROUND =
+  "fixed inset-0 z-overlay bg-black/50 duration-base data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
 
 /**
  * The dialog is `fixed` and centred, so content taller than the window hangs
@@ -75,20 +80,39 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100svh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg focus-ring duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          "fixed top-[50%] left-[50%] z-overlay grid max-h-[calc(100svh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg focus-ring duration-base data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className,
         )}
         {...props}
       >
         {children}
         {showCloseButton && (
-          <DialogPrimitive.Close data-slot="dialog-close" className={CLOSE}>
+          <DialogPrimitive.Close data-slot="dialog-close" className={OVERLAY_CLOSE}>
             <Cross />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Content>
     </DialogPortal>
+  )
+}
+
+/**
+ * The content element with none of the centred box's face: for `StageModal`,
+ * a viewer that takes the whole window on its own ground. It keeps the
+ * dialog's semantics — focus held inside, Escape, the accessible title — and
+ * leaves every visual to the caller.
+ */
+function DialogBareContent({
+  className,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Content>) {
+  return (
+    <DialogPrimitive.Content
+      data-slot="dialog-content"
+      className={cn("fixed inset-0 z-overlay outline-none", className)}
+      {...props}
+    />
   )
 }
 
@@ -151,6 +175,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogBareContent,
   DialogClose,
   DialogContent,
   DialogDescription,

@@ -1,14 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Check } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 
-import { Field, FormFacts } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { Field } from "@/components/form"
+import { DialogSubject, Modal, ModalDescription } from "@/components/modal"
 import type { OperationReading } from "@/components/operation-progress"
 
 export type ConfirmRequest = {
@@ -60,6 +60,12 @@ export type ConfirmRequest = {
  * ordinary destructive act, and the same dialog with a phrase to type for the
  * resource kinds named in ConfirmRequest.phrase.
  *
+ * It is an alert dialog (`Modal variant="alert"`): announced as one, with its
+ * sentence as the description a screen reader reads after the title, and a
+ * press outside it is not an answer — only Cancel, the cross or Escape put it
+ * away. The keyboard lands on Cancel, the answer that loses nothing, unless
+ * there is a phrase to type, when it lands in the phrase.
+ *
  * Either way the server re-decides, so this is a usability guard against a
  * mis-click rather than the enforcement point.
  */
@@ -93,6 +99,7 @@ function ConfirmBody({
   const [busy, setBusy] = useState(false)
   const [startedAt, setStartedAt] = useState(0)
   const [progress, setProgress] = useState<OperationReading>({ label: "" })
+  const cancel = useRef<HTMLButtonElement>(null)
   const matches = !request.phrase || typed === request.phrase
 
   const run = async () => {
@@ -120,10 +127,22 @@ function ConfirmBody({
       open
       onOpenChange={(open) => !busy && onOpenChange(open)}
       title={request.title}
+      variant="alert"
+      // Announced as a dialog a little longer: some three hundred browser
+      // spec lines find a confirmation as `getByRole("dialog")`, and to
+      // Playwright an `alertdialog` is not one. The role flips in this one
+      // line, together with the specs that move with it.
+      role="dialog"
+      initialFocus={request.phrase ? "first" : cancel}
       progress={busy && { ...progress, startedAt }}
       footer={
         <>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button
+            ref={cancel}
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={busy}
+          >
             Cancel
           </Button>
           {/*
@@ -143,17 +162,9 @@ function ConfirmBody({
       }
     >
       <div className="space-y-4">
-        {request.subject && (
-          <div className="flex min-w-0 items-center gap-3">
-            {request.subject.mark}
-            <div className="min-w-0 space-y-0.5">
-              <p className="truncate text-body font-medium">{request.subject.name}</p>
-              {request.subject.facts && <FormFacts>{request.subject.facts}</FormFacts>}
-            </div>
-          </div>
-        )}
+        {request.subject && <DialogSubject {...request.subject} />}
 
-        <div className="space-y-2 text-body leading-relaxed">{request.description}</div>
+        <ModalDescription>{request.description}</ModalDescription>
 
         {request.phrase && (
           // A field like every other in the product (§7), where it had been the

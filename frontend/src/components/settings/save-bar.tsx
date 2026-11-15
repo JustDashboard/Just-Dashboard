@@ -9,14 +9,9 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react"
-import { createPortal } from "react-dom"
-import { CheckCircle } from "@/components/icons"
-import { cn } from "@/lib/utils"
-import { StatusDot } from "@/components/status-dot"
+import { FloatingBar, SaveKey, saveShortcut, useFloatingBarHost } from "@/components/floating-bar"
 import { Button } from "@/components/ui/button"
-import { TextShimmer } from "@/components/ui/text-shimmer"
 import { appliesLine, pendingLine, type SettingApplies } from "@/components/settings/save-bar-words"
 
 /**
@@ -54,8 +49,10 @@ import { appliesLine, pendingLine, type SettingApplies } from "@/components/sett
  *
  * A proxy site's form keeps a bar of its own (`proxy/site-settings.tsx`): it
  * is one draft with two saves whose difference matters (reload or not), where
- * this bar is many forms and one command. The two share where they float and
- * the shortcut's keycap (`useSaveBarHost`, `saveShortcut`).
+ * this bar is many forms and one command. The two are one surface,
+ * `FloatingBar` (`components/floating-bar.tsx`), which also puts them in the
+ * bottom stack, so a dock rises above the bar and a focused field is kept
+ * clear of it.
  */
 
 export type { SettingApplies } from "@/components/settings/save-bar-words"
@@ -111,19 +108,15 @@ function sameEntry(a: EntryState | undefined, b: EntryState) {
   )
 }
 
-// The content area beside the rail, which the bar centres on. It is in the
-// document for the whole life of the shell, so it never needs re-reading.
-const subscribe = () => () => {}
-const contentArea = () => document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]')
-const noContentArea = () => null
+/**
+ * Where a floating save bar is drawn: the content area, once in the browser.
+ *
+ * @deprecated use `useFloatingBarHost` from `@/components/floating-bar`.
+ */
+export const useSaveBarHost = useFloatingBarHost
 
-/** Where a floating save bar is drawn: the content area, once in the browser. */
-export function useSaveBarHost() {
-  return useSyncExternalStore(subscribe, contentArea, noContentArea)
-}
-
-/** The Save shortcut's keycap. Read once a bar is on screen, which is only ever in the browser. */
-export const saveShortcut = () => (/Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘S" : "Ctrl S")
+/** @deprecated import `saveShortcut` from `@/components/floating-bar`. */
+export { saveShortcut }
 
 export function SaveBarProvider({
   children,
@@ -263,7 +256,6 @@ function SaveBar({
   onSave: () => void
   onDiscard: () => void
 }) {
-  const host = useSaveBarHost()
   const all = Object.values(entries)
   const dirty = all.filter((entry) => entry.dirty)
   const changes = dirty.reduce((sum, entry) => sum + Math.max(entry.changes, 1), 0)
@@ -283,7 +275,7 @@ function SaveBar({
     return () => window.removeEventListener("keydown", onKey)
   }, [dirty.length, onSave])
 
-  if ((!host && !inline) || !visible) return null
+  if (!visible) return null
 
   // Every write went through. A form can look dirty for a moment longer —
   // until its saved value is read back — and that is not an edit left over.
@@ -293,51 +285,29 @@ function SaveBar({
   const verb = shown.find((entry) => entry.verb)?.verb ?? "Save"
   const note = shown.find((entry) => entry.note)?.note
 
-  const bar = (
-    <div
-      className={cn(
-        "pointer-events-none z-40 flex justify-center",
-        inline ? "sticky bottom-4" : "absolute inset-x-0 bottom-4 px-3 md:bottom-6",
-      )}
-    >
-      <div
-        role="region"
-        aria-label="Save changes"
-        aria-live="polite"
-        className="pointer-events-auto flex w-full max-w-xl animate-rise items-center gap-3 rounded-xl border border-border-strong bg-popover py-2.5 pr-2.5 pl-4 text-popover-foreground shadow-lg"
-      >
-        {/* Keyed on what it is saying, so each change of state arrives
-            (§11) rather than being repainted under the reader's eye. */}
-        <div
-          key={done ? "done" : saving ? "saving" : "dirty"}
-          className="min-w-0 flex-1 animate-rise"
-        >
-          <p className="flex min-w-0 items-center gap-2 text-body leading-snug font-medium">
-            {done ? (
-              <CheckCircle aria-hidden className="size-4 shrink-0 text-success" />
-            ) : (
-              <StatusDot tone="warning" />
-            )}
-            {done ? (
-              <span>Saved</span>
-            ) : saving ? (
-              <TextShimmer>
-                {changes === 1 ? "Saving 1 change…" : `Saving ${changes} changes…`}
-              </TextShimmer>
-            ) : (
-              <span className="numeric">
-                {changes === 1 ? "1 unsaved change" : `${changes} unsaved changes`}
-              </span>
-            )}
-          </p>
-          <p className="mt-0.5 pl-4 text-xs text-muted-foreground max-sm:line-clamp-2 sm:truncate">
-            {done
-              ? (note ?? appliesLine(shown.map((entry) => entry.applies)))
-              : pendingLine(shown, invalid)}
-          </p>
-        </div>
-        {!done && (
-          <div className="flex shrink-0 items-center gap-1.5">
+  return (
+    <FloatingBar
+      position={inline ? "sticky" : "viewport"}
+      state={done ? "saved" : saving ? "saving" : "dirty"}
+      headline={
+        done
+          ? "Saved"
+          : saving
+            ? changes === 1
+              ? "Saving 1 change…"
+              : `Saving ${changes} changes…`
+            : changes === 1
+              ? "1 unsaved change"
+              : `${changes} unsaved changes`
+      }
+      note={
+        done
+          ? (note ?? appliesLine(shown.map((entry) => entry.applies)))
+          : pendingLine(shown, invalid)
+      }
+      actions={
+        !done && (
+          <>
             <Button
               type="button"
               variant="ghost"
@@ -354,23 +324,15 @@ function SaveBar({
               pending={saving}
               disabled={invalid}
               onClick={onSave}
+              aria-keyshortcuts="Control+S Meta+S"
               className="max-sm:h-10"
             >
               {verb}
-              <kbd
-                aria-hidden
-                className={cn(
-                  "ml-0.5 font-sans text-hint font-normal opacity-60 max-sm:hidden",
-                  saving && "hidden",
-                )}
-              >
-                {saveShortcut()}
-              </kbd>
+              <SaveKey hidden={saving} />
             </Button>
-          </div>
-        )}
-      </div>
-    </div>
+          </>
+        )
+      }
+    />
   )
-  return inline || !host ? bar : createPortal(bar, host)
 }
