@@ -119,8 +119,8 @@ describe("FieldChecks", () => {
     )
     expect(attr(html, "field-checks", "aria-live")).toBe("polite")
     expect(html).not.toContain('role="alert"')
-    expect(html).toMatch(/12 characters or more<span class="sr-only">, met<\/span>/)
-    expect(html).toMatch(/a digit<span class="sr-only">, not yet<\/span>/)
+    expect(html).toMatch(/12 characters or more<\/span><span class="sr-only">, met<\/span>/)
+    expect(html).toMatch(/a digit<\/span><span class="sr-only">, not yet<\/span>/)
     // A change is read as the whole rule, not the bare word.
     expect(html.match(/aria-atomic="true"/g)).toHaveLength(2)
   })

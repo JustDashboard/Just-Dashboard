@@ -27,6 +27,16 @@ import { WireMark } from "@/components/wire/wire"
  * `BarReading`'s line under a band is another thing with its own slot
  * (`bar-reading-line`): a spec that counts the one must not count the other.
  */
+/**
+ * A reading line's height, for a cell that stands in a run of them without
+ * being one — the Overview's one-disk storage band. 10 + 14 + 17.875 + 15.125
+ * + 10: the padding, the eyebrow's micro line, the reading and its detail. The
+ * band had it as `min-h-17`, the 68 the lines were while the eyebrow sat on a
+ * 15px line; when the micro step took its own 14px line the lines became 67
+ * and the band did not, so a server's sixth cell grew a pixel when it landed.
+ */
+export const readingLineHeight = "min-h-[4.1875rem]"
+
 export function ReadingLine({
   href,
   onPress,
@@ -67,7 +77,7 @@ export function ReadingLine({
       <span className="hidden w-32 shrink-0 sm:block 2xl:w-48">{trend}</span>
     </>
   )
-  const shape = "flex min-w-0 items-center gap-3.5 rounded-lg px-2 py-2.5"
+  const shape = cn("flex min-w-0 items-center gap-3.5 rounded-lg px-2 py-2.5", readingLineHeight)
   if (!href && onPress)
     return (
       <div

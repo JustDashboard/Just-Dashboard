@@ -341,7 +341,7 @@ export function LiveProcesses() {
               <>
                 Processes
                 {data && (
-                  <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                  <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                     {data.available}
                   </span>
                 )}

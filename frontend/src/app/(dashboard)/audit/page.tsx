@@ -499,7 +499,12 @@ export default function AuditPage() {
                                   {(entry.target || entry.detail) && (
                                     <>
                                       {" · "}
-                                      <span className={cn(entry.target && "font-mono")}>
+                                      {/* Mono sits lower on the line than the sans
+                                          beside it and grew the line a pixel; on
+                                          no line of its own, it cannot. */}
+                                      <span
+                                        className={cn(entry.target && "font-mono leading-none")}
+                                      >
                                         {entry.target || entry.detail}
                                       </span>
                                     </>
