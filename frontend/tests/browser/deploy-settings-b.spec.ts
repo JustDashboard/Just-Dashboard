@@ -1602,7 +1602,7 @@ test.describe("Automation", () => {
     await expect(page.getByText("Enabled", { exact: true }).first()).toBeVisible()
 
     await page.getByRole("button", { name: "Runs", exact: true }).click()
-    const runsSheet = page.getByRole("dialog", { name: "Nightly backup runs" })
+    const runsSheet = page.getByRole("dialog", { name: "Nightly backup · history" })
     await expect(runsSheet).toBeVisible()
     await expect(runsSheet.getByText("#4 Deploy", { exact: true })).toBeVisible()
     await page.keyboard.press("Escape")
@@ -1791,7 +1791,7 @@ test.describe("Automation", () => {
     await page.getByRole("button", { name: "Actions for Deploy hook" }).click()
     await page.getByRole("menuitem", { name: "Deliveries" }).click()
 
-    await expect(page.getByRole("heading", { name: "Deliveries · Deploy hook" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Deploy hook · history" })).toBeVisible()
     const sheet = page.getByRole("dialog")
     await expect(sheet.getByText("Accepted", { exact: true })).toBeVisible()
     await expect(sheet.getByText("Ignored", { exact: true })).toBeVisible()

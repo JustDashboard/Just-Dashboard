@@ -1244,7 +1244,6 @@ function Fanout({
             <ChannelGlyph channel={channel} />
           </WireMark>
         ),
-        eyebrow: "Channel",
         title,
         name: `${title}: ${hint}`,
         hint,
@@ -1257,7 +1256,6 @@ function Fanout({
       mark: (size) => (
         <WirePlaceholder size={size} product={channelProduct(item.kind)} fallback={Envelope} />
       ),
-      eyebrow: "Not added",
       title: <span className="text-muted-foreground">{item.title}</span>,
       name: item.title,
       hint: item.hint,
@@ -1295,6 +1293,8 @@ function Fanout({
         max: PICTURE_TARGETS,
         more: { words: (hidden) => plural(hidden, "more channel") },
         loadingRows: 3,
+        // A channel is its service and a line of detail: no eyebrow over it.
+        loadingLines: { eyebrow: false },
       }}
     />
   )
