@@ -14,13 +14,12 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentSharedVariable, DeploymentVariable } from "@/lib/types"
 import { InitialsMark } from "@/components/user-avatar"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { ProductGlyph, variableProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { EmptyState, ErrorState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -260,8 +259,10 @@ export function SharedVariables({
     return verbs
   }
 
+  // The server's page has one Add, in the primary face its sibling sections'
+  // Adds have; inside a project's settings it is a section's verb, outline.
   const addButton = canEdit && (
-    <Button size="sm" variant="outline" onClick={add}>
+    <Button size="sm" variant={scope.kind === "server" ? "default" : "outline"} onClick={add}>
       <Plus className="size-3.5" /> Add variable
     </Button>
   )
@@ -271,7 +272,7 @@ export function SharedVariables({
       {variables.error && !list ? (
         <ErrorState error={variables.error} onRetry={variables.refresh} />
       ) : !list ? (
-        <LoadingRows rows={3} />
+        <ChoiceListSkeleton rows={3} />
       ) : list.length === 0 ? (
         <EmptyState
           icon={Linked}
