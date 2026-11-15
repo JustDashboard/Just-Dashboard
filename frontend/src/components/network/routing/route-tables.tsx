@@ -165,7 +165,14 @@ export function RoutesTable({
           )
         }
       >
-        <ChipStrip aria-label="Routing table" className="mr-auto">
+        {/* On a phone the chips take the head's second row, beside the note,
+            as their place does while the routes are read: a framed panel is
+            the screen's width there, and the chips fitted beside the title,
+            so the head grew shorter when the routes landed. */}
+        <ChipStrip
+          aria-label="Routing table"
+          className="mr-auto max-sm:grow max-sm:basis-[calc(100%-2rem)]"
+        >
           <FilterChip selected={scope === undefined} onClick={() => setChosen(undefined)}>
             All <ChipCount>{covering.length}</ChipCount>
           </FilterChip>
