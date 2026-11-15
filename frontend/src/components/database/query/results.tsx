@@ -2,7 +2,8 @@
 
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
-import { useEffect, useId, useRef, useState } from "react"
+import { useId, useRef, useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { ChevronDown, Download, Sparkles, StopCircle, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DbExportFormat } from "@/lib/types"
@@ -468,12 +469,7 @@ function Waiting({ run, onCancel }: { run: Run; onCancel: () => void }) {
 
 /** Milliseconds since `since`, ticking while mounted. */
 export function useElapsed(since: number): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 250)
-    return () => clearInterval(timer)
-  }, [])
-  return Math.max(0, now - since)
+  return Math.max(0, useNow(250) - since)
 }
 
 /**

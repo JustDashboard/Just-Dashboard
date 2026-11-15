@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { cn } from "@/lib/utils"
 import { duration } from "@/lib/format"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -30,11 +31,7 @@ export function OperationProgress({
   showCount = true,
 }: OperationReading & { startedAt?: number | string }) {
   const [mountedAt] = useState(() => Date.now())
-  const [now, setNow] = useState(mountedAt)
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useNow()
   const parsed = typeof startedAt === "string" ? Date.parse(startedAt) : startedAt
   const since = parsed !== undefined && Number.isFinite(parsed) ? parsed : mountedAt
   const measured = total !== undefined && total > 0 && completed !== undefined

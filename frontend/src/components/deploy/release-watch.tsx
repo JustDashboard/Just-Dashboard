@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight } from "@/components/icons"
@@ -199,7 +200,7 @@ export function useReleaseWatch(projectId: number, environmentId: number, enable
     { enabled },
   )
   const watch = read.data?.watch ?? null
-  const now = useNow(Boolean(watch) && watch?.state !== "closed")
+  const now = useNow(1000, Boolean(watch) && watch?.state !== "closed")
   return { base, watch, now, shown: watchShown(watch, now), refresh: read.refresh }
 }
 
@@ -258,13 +259,3 @@ function BeforeAndAfter({ watch }: { watch: RollbackWatch }) {
   )
 }
 
-/** The time, ticking each second while a window counts down. */
-function useNow(ticking: boolean) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!ticking) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [ticking])
-  return now
-}

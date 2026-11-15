@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { useAuth } from "@/hooks/use-auth"
 import { del, errorMessage, post } from "@/lib/api"
 import {
@@ -60,7 +61,7 @@ export function DNSServiceReview({
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const kind = "resources" in review ? "provision" : "change"
-  const [now, setNow] = useState(Date.now)
+  const now = useNow()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const submitted = useRef(false)
@@ -80,11 +81,6 @@ export function DNSServiceReview({
   useLayoutEffect(() => {
     live.current = { problem, review, mayRemove, connection, attempted }
   })
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-
   const apply = () => {
     if (problem || busy || submitted.current) return
     confirm({

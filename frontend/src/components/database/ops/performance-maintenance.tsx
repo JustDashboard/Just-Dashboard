@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { StopCircle, Wrench } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { duration } from "@/lib/format"
@@ -413,11 +414,7 @@ function MaintenanceRun({
 
 /** How long the run has been going, counted by the second. Not announced: it changes every second. */
 function Elapsed({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useNow()
   return (
     <span aria-hidden className="numeric text-muted-foreground">
       {duration(Math.max(0, (now - since) / 1000))}

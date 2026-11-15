@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import {
   Box,
   Check,
@@ -414,17 +413,6 @@ export function formatDuration(seconds: number | undefined) {
   // Past two days, hours beside a relative time in days read as two units for one span.
   if (hours >= 48) return `${Math.floor(hours / 24)}d ${hours % 24}h`
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`
-}
-
-/** A clock for a figure that ticks while something is in flight. */
-export function useNow(intervalMs = 1000, enabled = true) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!enabled) return
-    const timer = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(timer)
-  }, [intervalMs, enabled])
-  return now
 }
 
 // ---------------------------------------------------------------------------
