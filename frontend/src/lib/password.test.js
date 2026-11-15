@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { passwordChecks } from "./password"
+import { generatePassword, PASSWORD_ALPHABET, passwordChecks } from "./password"
 
 test("twelve bytes and three classes, as the server counts them", () => {
   expect(passwordChecks("")).toEqual({ long: false, classes: 0, mixed: false, ok: false })
@@ -14,4 +14,16 @@ test("length is bytes, not characters", () => {
   // Six characters, twelve bytes in UTF-8.
   expect(passwordChecks("ăîșțâă").long).toBe(true)
   expect(passwordChecks("ăîșțâ").long).toBe(false)
+})
+
+test("a made password is the length asked for, drawn from the shared alphabet", () => {
+  const made = generatePassword(30)
+  expect(made).toHaveLength(30)
+  for (const char of made) expect(PASSWORD_ALPHABET).toContain(char)
+  expect(generatePassword()).toHaveLength(30)
+  expect(generatePassword(20)).toHaveLength(20)
+  // Nothing a reader copying it by eye confuses.
+  expect(PASSWORD_ALPHABET).not.toMatch(/[Il1O0]/)
+  // Two draws are not the same password.
+  expect(generatePassword(30)).not.toBe(generatePassword(30))
 })

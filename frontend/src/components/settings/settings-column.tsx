@@ -8,23 +8,32 @@ import { Tag } from "@/components/tag"
 import { Switch } from "@/components/ui/switch"
 
 /**
- * The settings column for a page that is not a deployment's: the dashboard's
- * own Configuration, and the account's Profile, Security and Workspace.
- *
- * `components/settings/setting-card.tsx` draws the column for a project, around a
- * configuration it reads itself. These pages have their own reads, so this is
- * the same column with nothing loaded in it: one centred run of
+ * The column every settings page is drawn in: one centred run of
  * `SettingSection`s at the fields' width, what is pending at its head, and
  * room at its foot for the floating save bar (`SaveBarProvider`, which the
  * page puts around it), so the bar never lies over the last field.
+ *
+ * The dashboard's own Configuration and the account's Profile, Security and
+ * Workspace put their sections in it directly; a deployment's settings come
+ * through `SettingsPage` (`settings-page.tsx`), which reads the configuration
+ * first, and a database's through its `SettingsFrame`. One column, so their
+ * widths and the save bar's room cannot drift apart.
  */
 export function SettingsColumn({
   strip,
+  sectioned = true,
   className,
   children,
 }: {
   /** A `PendingStrip`, or nothing: what is saved or typed and not in force yet. */
   strip?: React.ReactNode
+  /**
+   * False when the children are the column's whole content already — a
+   * strip and a `FormSections` drawn by one wrapper that has to hold both, as
+   * a database's `SettingsPending` does: the pages under it report to the
+   * strip above them through it.
+   */
+  sectioned?: boolean
   className?: string
   children: React.ReactNode
 }) {
@@ -34,7 +43,7 @@ export function SettingsColumn({
       className={cn("mx-auto w-full max-w-3xl min-w-0 space-y-8 pb-20", className)}
     >
       {strip}
-      <FormSections>{children}</FormSections>
+      {sectioned ? <FormSections>{children}</FormSections> : children}
     </div>
   )
 }
