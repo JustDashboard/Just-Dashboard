@@ -1455,7 +1455,8 @@ function BackupPolicy({
 
       <OptionList>
         <OptionRow
-          title="Backup before deploy — the release waits for this job to finish"
+          title="Backup before deploy"
+          hint="The release waits for this job to finish"
           checked={Boolean(config.requiredBeforeDeploy)}
           disabled={!canAdmin}
           onCheckedChange={(requiredBeforeDeploy) =>
@@ -1463,7 +1464,8 @@ function BackupPolicy({
           }
         />
         <OptionRow
-          title="Require restore evidence — refuse a release until a restore is verified"
+          title="Require restore evidence"
+          hint="A release is refused until a restore is verified"
           checked={Boolean(config.requireRestoreTest)}
           disabled={!canAdmin}
           onCheckedChange={(requireRestoreTest) =>
