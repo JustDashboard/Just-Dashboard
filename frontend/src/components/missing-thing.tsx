@@ -188,7 +188,7 @@ export function MissingThing({
  * (`lead`); a line to copy shows the line beside its button, because the
  * reader should see what they are about to paste.
  */
-export function MissingStepControl({
+function MissingStepControl({
   step,
   lead,
   size = "page",

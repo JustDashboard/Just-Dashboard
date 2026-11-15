@@ -1,0 +1,22 @@
+function Glyph(props: { className?: string }) {
+  return <svg {...props} />
+}
+
+export function Demo() {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+      <div className="grid grid-cols-[auto_minmax(0,_1fr)]" />
+      <div className="sm:grid-cols-[auto_minmax(0,1fr)_auto]" />
+      <div className="xl:grid-rows-[minmax(0,1fr)]" />
+      <aside className="w-[18rem]" />
+      <aside className="lg:w-[22rem]" />
+      <div className="h-[min(75svh,40rem)] max-h-[calc(100svh-13rem)]" />
+      <Glyph className="mr-1 inline size-3 align-[-2px]" />
+      <span className="inline-flex items-center gap-1 align-[-2px]" />
+      <code className="font-mono text-[0.92em]" />
+      <span className="text-[0.9em]" />
+      <div className="xl:grid-cols-[minmax(0,1fr)_24rem]" />
+      <div className="xl:grid-cols-[minmax(0,1fr)_22rem]" />
+    </div>
+  )
+}

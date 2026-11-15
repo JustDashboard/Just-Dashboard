@@ -3,7 +3,7 @@
 import { LogoGlyph } from "@/components/logo"
 import { ProductLogo } from "@/components/product-logo"
 import { FileText } from "@/components/icons"
-import { driftReading, type DriftRow, type DriftStatus } from "@/lib/network-drift"
+import { driftReading, type DriftRow, type DriftStatus } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 
 /** A comparison's status as a fill: the state hues, and the meter's track for nothing to compare. */

@@ -1,11 +1,11 @@
 "use client"
 
 import { Globe, Location, Plus, Servers } from "@/components/icons"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { ExternalCheck, ExternalVantage } from "@/lib/network-external"
+import type { ExternalCheck, ExternalVantage } from "@/lib/network/external"
 import {
   approvedServices,
   checkOutcome,

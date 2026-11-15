@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { Hash, Plus, RefreshClockwise } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -23,7 +23,7 @@ import {
   type IPAMPreview,
   type IPAMReservation,
   type IPAMView,
-} from "@/lib/network-ipam"
+} from "@/lib/network/ipam"
 import { IPAMPools } from "@/components/network/ipam/ipam-pools"
 import { IPAMPreviewField } from "@/components/network/ipam/ipam-preview"
 import { IPAMCoverageTable, IPAMReservations } from "@/components/network/ipam/ipam-reservations"

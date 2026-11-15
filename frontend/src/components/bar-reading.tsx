@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { ArrowRight, Filter } from "@/components/icons"
 import { rowReveal } from "@/components/icon-action"
-import { LandedFigures } from "@/components/overview/readings"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { LandedFigures } from "@/components/live-figure"
+import { Sparkline } from "@/components/sparkline"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import {
   pushTrails,

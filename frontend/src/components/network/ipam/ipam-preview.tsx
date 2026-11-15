@@ -6,7 +6,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { previewReading, type IPAMPreview } from "@/lib/network-ipam"
+import { previewReading, type IPAMPreview } from "@/lib/network/ipam"
 import { ownerProduct } from "@/components/network/ipam/reading"
 
 /** Only a known overlap is a refusal; incomplete coverage is a caution, not a pass. */

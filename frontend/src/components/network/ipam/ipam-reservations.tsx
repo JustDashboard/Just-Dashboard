@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation"
 import { ArrowRight, Bridge, Copy, Globe, Layers, Trash, type Icon } from "@/components/icons"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
@@ -28,7 +28,7 @@ import {
   type IPAMCoverage,
   type IPAMOwner,
   type IPAMReservation,
-} from "@/lib/network-ipam"
+} from "@/lib/network/ipam"
 
 const OWNER_PRODUCT: Partial<Record<IPAMOwner, string>> = {
   docker_network: "docker",

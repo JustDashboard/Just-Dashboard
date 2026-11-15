@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Hint } from "./explain"
 import { EMPTY_NETWORK, networkCreation, type NetworkDraft } from "./network-create-reading"
 import { IPAMReservationPicker } from "@/components/network/ipam-reservation-picker"
-import type { IPAMReservation } from "@/lib/network-ipam"
+import type { IPAMReservation } from "@/lib/network/ipam"
 
 export function NewNetworkDialog({
   open,

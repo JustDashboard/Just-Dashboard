@@ -7,9 +7,9 @@ import { errorMessage } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useUsagePing } from "@/hooks/use-usage-ping"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingSection } from "@/components/settings/setting-card"
 import { Well } from "@/components/panel"
-import { SwitchRow, SwitchRows } from "@/components/settings-column"
+import { SwitchRow, SwitchRows } from "@/components/settings/settings-column"
 import { Status } from "@/components/status-dot"
 
 /**

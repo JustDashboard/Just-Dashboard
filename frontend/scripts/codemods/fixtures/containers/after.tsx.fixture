@@ -1,0 +1,14 @@
+export function Demo() {
+  return (
+    <div className="@container">
+      <div className="grid @xl:grid-cols-2" />
+      <div className="@xl/detail:flex" />
+      <div className="@max-stack:flex-col" />
+      <div className="@max-xl/strip:hidden" />
+      <div className="@4xl:grid-cols-3 @5xl:gap-4" />
+      <div className="@max-[34rem]:block" />
+      <div className="@max-[46rem]:hidden" />
+      <div className="@min-[900px]:flex" />
+    </div>
+  )
+}

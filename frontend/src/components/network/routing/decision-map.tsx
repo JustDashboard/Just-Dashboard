@@ -5,8 +5,8 @@ import { Route as RouteGlyph, StopCircle } from "@/components/icons"
 import type { NetworkRouting } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireMark, WireNode } from "@/components/deploy/wire"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { WireMark, WireNode } from "@/components/wire/wire"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { addressFamily, decisionRules, decisionTables, type RouteFamily } from "./decision-reading"
 import { parseTarget, replyHighlight, ruleSelectors, ruleThen } from "./route-reading"
@@ -17,7 +17,7 @@ import { AnswerLine, TargetField, type RouteLookup, type RouteQuestion } from ".
  * on the left in the order they are asked — priority first — and the tables
  * they send a packet to on the right, each with how many routes it holds.
  * Two columns wired to each other, which is not the shape `WireFlow` draws
- * (things through one hub), so it is laid by hand on `deploy/wire`.
+ * (things through one hub), so it is laid by hand on `components/wire/wire`.
  *
  * Its head is the question: the family, and the address a packet is going
  * to. With nothing asked, the rule and table behind this browser's replies

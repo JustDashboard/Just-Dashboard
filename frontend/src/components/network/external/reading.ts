@@ -1,11 +1,11 @@
 import type { DotTone } from "@/components/status-dot"
-import type { WireLine } from "@/components/wire-flow-model"
+import type { WireLine } from "@/components/wire/wire-flow-model"
 import {
   activeCheck,
   type ExternalCheck,
   type ExternalStage,
   type ExternalVantage,
-} from "@/lib/network-external"
+} from "@/lib/network/external"
 
 /**
  * What one check says about a path, in the words the picture, the identity

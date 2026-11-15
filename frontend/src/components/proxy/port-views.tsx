@@ -7,7 +7,7 @@ import { errorMessage, post } from "@/lib/api"
 import { plural, timestamp } from "@/lib/format"
 import type { PortIdentification } from "@/lib/types"
 import { Field, FormSection } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import {
   ownerLabel,

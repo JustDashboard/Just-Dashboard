@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { egressEventReading, type EgressEvent, type EgressGroup } from "@/lib/network-egress"
+import { egressEventReading, type EgressEvent, type EgressGroup } from "@/lib/network/egress"
 import { Disclosure } from "@/components/form"
 import { TONE_TEXT } from "@/components/network/egress/marks"
 

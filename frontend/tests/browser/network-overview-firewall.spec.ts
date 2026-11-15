@@ -11,7 +11,7 @@ import {
 import { gateway, overrides as gatewayOverrides } from "./network-gateway-fixture"
 import { mockHostLogs } from "./host-logs-fixture"
 import { risen } from "./risen"
-import type { DriftReport } from "../../src/lib/network-drift"
+import type { DriftReport } from "../../src/lib/network/drift"
 
 /**
  * What the overhaul of the Network overview, Firewall, Gateway and Drift

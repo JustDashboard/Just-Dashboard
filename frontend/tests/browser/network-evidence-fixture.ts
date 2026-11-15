@@ -4,9 +4,9 @@
  * narrow it, and the captures in a pull request draw it. Documentation
  * addresses only (RFC 5737, RFC 3849, RFC 4193).
  */
-import type { ExternalCheck, ExternalVantage } from "../../src/lib/network-external"
-import type { IPAMView } from "../../src/lib/network-ipam"
-import type { FlowReport, FlowRow } from "../../src/lib/network-flows"
+import type { ExternalCheck, ExternalVantage } from "../../src/lib/network/external"
+import type { IPAMView } from "../../src/lib/network/ipam"
+import type { FlowReport, FlowRow } from "../../src/lib/network/flows"
 
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString()
 

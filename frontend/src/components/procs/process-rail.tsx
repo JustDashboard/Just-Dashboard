@@ -5,10 +5,10 @@ import { Cpu } from "@/components/icons"
 import { bytes, percent } from "@/lib/format"
 import type { ProcessRow } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { ProductLogo, processProduct } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { cpuTone, ownerName, processKey, processStateTone } from "@/components/procs/shared"
 
 /**

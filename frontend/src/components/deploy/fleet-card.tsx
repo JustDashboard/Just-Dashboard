@@ -14,10 +14,10 @@ import type {
   TrafficPulse,
 } from "@/lib/types"
 import type { useConfirm } from "@/components/confirm-dialog"
-import { CONTROL, ChoiceRow } from "@/components/flow"
+import { CONTROL, ChoiceRow } from "@/components/choice-row"
 import { SourcePull } from "@/components/git/glyphs"
 import { BranchChip, CommitLine, ShortSha } from "@/components/git/marks"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { Sparkline } from "@/components/sparkline"
 import { ProductGlyph, ProductGlyphs, hostProduct, imageProducts } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -26,7 +26,7 @@ import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { useProjectStart, useProjectVerbs } from "@/components/deploy/project-verbs"
 import { MiniReleasePath } from "@/components/deploy/run-pipeline"
 import { RunActorMark, RunStrip } from "@/components/deploy/run-marks"
@@ -45,8 +45,8 @@ import {
   shortRevision,
   sourceProduct,
   stepName,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { FAILING_NOTICE, failingTone } from "@/components/deploy/fleet"
 
 /**

@@ -1,13 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef } from "react"
+import { useNow } from "@/hooks/use-now"
 import { ChevronDown } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { FormFact, Statement } from "@/components/form"
 import { Well } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
@@ -648,17 +649,6 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
   )
 }
 
-/** The time now, ticking each second while something is being timed. */
-function useNow(ticking: boolean): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!ticking) return
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [ticking])
-  return now
-}
-
 /**
  * A table's maintenance command in flight, said in the table's head whichever
  * reading is open: what is running, for how long, and the one way to end it.
@@ -667,7 +657,7 @@ export function MaintenanceBand({ schema, table }: { schema: string; table: stri
   const { id } = useDatabase()
   const key = maintenanceKey(id, schema, table)
   const { run } = useMaintenance(key)
-  const now = useNow(run !== undefined)
+  const now = useNow(1000, run !== undefined)
   if (!run) return null
   return (
     <div

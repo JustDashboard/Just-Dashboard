@@ -7,8 +7,8 @@ import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { DbTopoEdge, DbTopoNode, DbTopology } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { useNow } from "@/components/deploy/vocabulary"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { useNow } from "@/hooks/use-now"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { Status, StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { describeEdge, edgeRank } from "@/components/database/fleet/fleet"
@@ -54,7 +54,7 @@ const SHOWN = 5
 
 /**
  * How the database is used, drawn as three lanes in the wiring vocabulary the
- * rest of the product speaks (`deploy/wire`, the fleet's map, a project's
+ * rest of the product speaks (`components/wire/wire`, the fleet's map, a project's
  * Runtime): what reads it on the left, the database in the middle, and on
  * the right what it holds and where its copies go.
  *

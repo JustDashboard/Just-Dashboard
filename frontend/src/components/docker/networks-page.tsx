@@ -7,13 +7,15 @@ import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { platformProduct } from "@/components/product-logo"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
@@ -411,7 +413,7 @@ export function Networks() {
                 title={
                   <>
                     Networks
-                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                       {networks.length}
                     </span>
                   </>
@@ -529,7 +531,7 @@ export function Networks() {
                 title={
                   <>
                     Containers
-                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                       {containers.length}
                     </span>
                   </>

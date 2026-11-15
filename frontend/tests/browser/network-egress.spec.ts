@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { admin, json, mockNetwork, type Mutation } from "./network-fixture"
 import { risen } from "./risen"
-import type { EgressGroup, EgressView } from "../../src/lib/network-egress"
+import type { EgressGroup, EgressView } from "../../src/lib/network/egress"
 
 /**
  * Egress groups against a mocked API: the list as one card a group, and a

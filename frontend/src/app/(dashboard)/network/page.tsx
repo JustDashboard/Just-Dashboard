@@ -17,12 +17,12 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { HostIdentity, HostFact, FactDot } from "@/components/metrics/host-identity"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { TileTrend } from "@/components/sparkline"
+import { HostIdentity, HostFact, FactDot } from "@/components/identity-header"
+import { ChartPanel } from "@/components/chart-panel"
 import { NetworkFact } from "@/components/client-mark"
-import { LiveBytes, StreamState } from "@/components/overview/readings"
-import { WireMark } from "@/components/deploy/wire"
+import { LiveBytes, StreamState } from "@/components/live-figure"
+import { WireMark } from "@/components/wire/wire"
 import {
   Topology as TopologyPicture,
   TopologyLoading,

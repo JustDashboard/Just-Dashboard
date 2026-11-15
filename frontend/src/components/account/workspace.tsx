@@ -5,10 +5,16 @@ import { Check } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
 import { PURPOSES, pressPurpose, purposeShown, type SectionKey } from "@/lib/sidebar-sections"
 import { cn } from "@/lib/utils"
-import { NAV, hideableSections, shownFor, type NavChild, type NavEntry } from "@/components/nav"
+import {
+  NAV,
+  hideableSections,
+  shownFor,
+  type NavChild,
+  type NavEntry,
+} from "@/components/shell/nav"
 import { ChoiceCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
-import { SwitchRow, SwitchRows } from "@/components/settings-column"
+import { SwitchRow, SwitchRows } from "@/components/settings/settings-column"
 import { Tag } from "@/components/tag"
 
 const NOTHING_HIDDEN: ReadonlySet<string> = new Set()

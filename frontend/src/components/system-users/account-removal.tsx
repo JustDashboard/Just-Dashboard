@@ -2,10 +2,11 @@
 
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FormFact, FormFacts, FormNote, OptionRow } from "@/components/form"
 import { Modal } from "@/components/modal"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { useAccount } from "@/components/system-users/account-page"
 import { AccountMark } from "@/components/system-users/marks"
 import { Button } from "@/components/ui/button"

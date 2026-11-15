@@ -9,7 +9,7 @@ import { listenLabel, protocolLabel, stateStatus, upstreamAddress } from "@/lib/
 import { ProductGlyph, hasProductLogo, portProduct } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import {
   hourWords,
   restrictionWords,

@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { ChevronLeft, ChevronRight } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {

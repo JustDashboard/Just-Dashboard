@@ -11,7 +11,7 @@ import {
 } from "@/components/database/home/charts"
 import { chartRows, gauge, heldSeconds, type Sample } from "@/components/database/home/samples"
 import { SAMPLE_EVERY_MS, keptFor, rangesWithin } from "@/components/database/home/use-samples"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import { ChartReading } from "@/components/metrics/chart-reading"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"

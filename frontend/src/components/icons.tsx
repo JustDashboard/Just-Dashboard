@@ -28,7 +28,6 @@ import {
   ArrowsUpDownIcon,
   BackspaceIcon,
   Bars3BottomLeftIcon,
-  Bars3Icon,
   BellIcon,
   BoldIcon,
   BookmarkIcon,
@@ -76,7 +75,6 @@ import {
   FilmIcon,
   FingerPrintIcon,
   FolderIcon,
-  FolderMinusIcon,
   FolderOpenIcon,
   FolderPlusIcon,
   FunnelIcon,
@@ -131,7 +129,6 @@ import {
   SquaresPlusIcon,
   StarIcon,
   StopCircleIcon,
-  SunIcon,
   SwatchIcon,
   TagIcon,
   TableCellsIcon,
@@ -148,7 +145,6 @@ import {
   XCircleIcon,
   XMarkIcon,
   BookOpenIcon,
-  MoonIcon,
   RocketLaunchIcon,
 } from "@heroicons/react/24/solid"
 import { cn } from "@/lib/utils"
@@ -448,7 +444,6 @@ export const Globe: Icon = adapt(GlobeAltIcon, "Globe")
 export const Database: Icon = adapt(CircleStackIcon, "Database")
 export const Layout: Icon = adapt(RectangleGroupIcon, "Layout")
 export const Table: Icon = adapt(TableCellsIcon, "Table")
-export const Footer: Icon = adapt(Bars3Icon, "Footer")
 export const ListOrdered: Icon = adapt(NumberedListIcon, "ListOrdered")
 export const ListUnordered: Icon = adapt(ListBulletIcon, "ListUnordered")
 export const Monorepo: Icon = adapt(Square3Stack3DIcon, "Monorepo")
@@ -536,8 +531,6 @@ export const TabletDevice: Icon = adapt(DeviceTabletIcon, "TabletDevice")
    this product does not have. A pinned session is a bookmark — the thing kept
    where you left it. */
 export const BlendMode: Icon = adapt(SwatchIcon, "BlendMode")
-export const Sun: Icon = adapt(SunIcon, "Sun")
-export const Moon: Icon = adapt(MoonIcon, "Moon")
 export const Eye: Icon = adapt(EyeIcon, "Eye")
 export const EyeOff: Icon = adapt(EyeSlashIcon, "EyeOff")
 export const Star: Icon = adapt(StarIcon, "Star")
@@ -562,7 +555,6 @@ export const FileZip: Icon = adapt(ArchiveBoxArrowDownIcon, "FileZip")
 export const FolderClosed: Icon = adapt(FolderIcon, "FolderClosed")
 export const FolderOpen: Icon = adapt(FolderOpenIcon, "FolderOpen")
 export const FolderPlus: Icon = adapt(FolderPlusIcon, "FolderPlus")
-export const FolderMinus: Icon = adapt(FolderMinusIcon, "FolderMinus")
 export const PreviewDocument: Icon = adapt(DocumentMagnifyingGlassIcon, "PreviewDocument")
 export const Image: Icon = adapt(PhotoIcon, "Image")
 export const Video: Icon = adapt(FilmIcon, "Video")

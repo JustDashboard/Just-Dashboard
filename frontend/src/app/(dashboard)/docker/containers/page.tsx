@@ -22,13 +22,14 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, platformName } from "@/components/metrics/host-identity"
-import { StreamState } from "@/components/overview/readings"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { FactDot, platformName } from "@/components/identity-header"
+import { StreamState } from "@/components/live-figure"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState } from "@/components/state"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
@@ -407,7 +408,7 @@ export default function ContainersPage() {
             title={
               <span className="inline-flex items-center gap-1.5">
                 Containers
-                <span className="numeric text-body font-normal text-muted-foreground">
+                <span className="numeric text-body leading-none font-normal text-muted-foreground">
                   {containers.length}
                 </span>
                 <ExplainIcon name="container" />

@@ -6,11 +6,11 @@ import { cn } from "@/lib/utils"
 import { duration, plural } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { Disclosure, FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { LoadingPanel } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import {
@@ -52,7 +52,7 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { clientOf, type KnownClient } from "@/components/database/clients"
 import { useKnownClients } from "@/components/database/use-known-clients"
 import { ProductGlyph } from "@/components/product-logo"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { ProjectFavicon } from "@/components/project-mark"
 
 /**
  * Who is holding whom up.

@@ -27,12 +27,13 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ShellWords } from "@/components/deploy/run-evidence"
-import { useNow } from "@/components/deploy/vocabulary"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { useNow } from "@/hooks/use-now"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { IconAction } from "@/components/icon-action"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { HUE, LiveBytes, LiveFigure, SeriesKey } from "@/components/overview/readings"
-import { Detail, DetailList, Section } from "@/components/page"
+import { TileTrend } from "@/components/sparkline"
+import { HUE, LiveBytes, LiveFigure, SeriesKey } from "@/components/live-figure"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Section } from "@/components/section"
 import { Well } from "@/components/panel"
 import {
   ProductGlyph,

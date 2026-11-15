@@ -9,12 +9,8 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { Segments } from "@/components/deploy/settings/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { Segments } from "@/components/segments"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"

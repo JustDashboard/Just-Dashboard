@@ -35,14 +35,15 @@ import type {
 } from "@/lib/types"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, Hold, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { Hold, LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldCheck,
@@ -74,7 +75,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { AccountFace, GitHubAppPanel, projectsUsing } from "@/components/deploy/github-app-card"
 import { SourceBranch } from "@/components/git/glyphs"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { useGitHubApp } from "@/hooks/use-github"
 
 /**

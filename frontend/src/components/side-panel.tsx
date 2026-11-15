@@ -21,17 +21,22 @@ const WIDTHS = {
 } as const
 
 /**
- * The detail surface: a container's stats, a repository's history, a vhost's
- * config, a backup's runs.
+ * The sheet: a small add or edit form that opens over the page it belongs to,
+ * such as a credential, a channel, a webhook or a mount.
+ *
+ * It is not where an item's detail goes. Since 0.8.7 an item's detail is a page
+ * of its own, with its views in `?tab=` and a rail of its siblings from `xl`
+ * (docs/internal/frontend/standard.md, D9), and the address that opened a sheet
+ * redirects to that page.
  *
  * Its header is the title and the actions, with no icon plot in front of them —
  * see the note at `PanelHeader`.
  *
  * Eight places opened a Sheet and each laid its own header out — some padded,
  * some not, some with the title in the body. They are one component now, so a
- * detail view opens the same way whichever page you came from, and the body is
- * the only part that scrolls: the title and the actions stay put while you
- * read down a long log.
+ * sheet opens the same way whichever page you came from, and the body is the
+ * only part that scrolls: the title and the actions stay put while you read
+ * down a long form.
  *
  * **What goes inside one.** The frame being one component was not enough: the
  * deploy sheets each put a different body in it — a Select for a kind, a

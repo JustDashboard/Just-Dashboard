@@ -7,7 +7,7 @@ import {
   readDNSList,
   readDNSProvision,
   type DNSServiceProvision,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import type { DNSView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"

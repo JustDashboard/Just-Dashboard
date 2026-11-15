@@ -1,7 +1,7 @@
 "use client"
 
 import type { NetworkChangeStatus } from "@/lib/types"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Notice } from "@/components/state"

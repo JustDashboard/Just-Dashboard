@@ -56,7 +56,7 @@ const EMPTY: SharedSnapshot = { answered: false }
 
 type Clock = { now: () => number; random: () => number }
 
-export class SharedPoll {
+class SharedPoll {
   private snapshot: SharedSnapshot = EMPTY
   private readers = new Set<SharedReader>()
   private listeners = new Set<() => void>()

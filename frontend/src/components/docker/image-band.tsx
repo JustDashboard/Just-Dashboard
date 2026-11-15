@@ -2,7 +2,7 @@
 
 import { Box, Database, Layers, RefreshClockwise, Trash, Wrench } from "@/components/icons"
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
-import { LiveBytes } from "@/components/overview/readings"
+import { LiveBytes } from "@/components/live-figure"
 import { ProductGlyphs, imageProducts } from "@/components/product-logo"
 import { Term } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"

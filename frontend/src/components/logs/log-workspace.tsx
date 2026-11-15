@@ -32,9 +32,9 @@ import {
   isFilterActive,
   resolveRange,
   TIME_RANGES,
-} from "@/lib/log-filter"
-import { LOG_FIELDS } from "@/lib/log-fields"
-import { STACK_LENS, lensFor, type LogLens } from "@/lib/log-lenses"
+} from "@/lib/log/filter"
+import { LOG_FIELDS } from "@/lib/log/fields"
+import { STACK_LENS, lensFor, type LogLens } from "@/lib/log/lenses"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import type { Tone } from "@/components/tone"
 import type { Verb } from "@/components/verbs"
@@ -55,7 +55,8 @@ import { oneService, unitJournalLens } from "@/components/logs/logs-model"
 import { RetentionNote } from "@/components/logs/retention-note"
 import { resumeFrom, unseen, type Resume } from "@/components/logs/resume"
 import { TimeWindow } from "@/components/logs/time-window"
-import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Pane } from "@/components/panel"
 

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { usePoll } from "@/hooks/use-poll"
 import { del, get, post } from "@/lib/api"
-import { wakeDeviceProblem, type WakeDevice } from "@/lib/network-diagnostics"
+import { wakeDeviceProblem, type WakeDevice } from "@/lib/network/diagnostics"
 import { NetworkReadWarning } from "../read-warning"
 import type { ToolRun } from "./use-tool-run"
 

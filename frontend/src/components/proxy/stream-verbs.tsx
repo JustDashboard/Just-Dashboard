@@ -33,7 +33,7 @@ import {
   testStatus,
   testSummary,
 } from "@/lib/streams"
-import { investigateHref } from "@/lib/network-investigator"
+import { investigateHref } from "@/lib/network/investigator"
 import type { useConfirm } from "@/components/confirm-dialog"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"

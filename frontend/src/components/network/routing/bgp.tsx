@@ -10,7 +10,7 @@ import type { PollState } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { WireHost, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WirePlaceholder } from "@/components/wire/wire"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -257,7 +257,9 @@ function Counted({ title, count }: { title: string; count: number }) {
   return (
     <>
       {title}
-      <span className="numeric ml-2 text-body font-normal text-muted-foreground">{count}</span>
+      <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
+        {count}
+      </span>
     </>
   )
 }

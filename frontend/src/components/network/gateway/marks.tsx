@@ -4,7 +4,7 @@ import { Globe, Servers } from "@/components/icons"
 import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { LinkGlyph, linkProduct } from "@/components/network/marks"
 import { targetProduct } from "@/components/network/gateway/reading"
 

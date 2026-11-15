@@ -1,6 +1,6 @@
 "use client"
 
-import type { EgressGroup, EgressMemberView } from "@/lib/network-egress"
+import type { EgressGroup, EgressMemberView } from "@/lib/network/egress"
 import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Lifebuoy, LockClosed, Router } from "@/components/icons"

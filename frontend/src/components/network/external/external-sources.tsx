@@ -1,7 +1,7 @@
 "use client"
 
 import { Key, Location, Play, Plus, Trash } from "@/components/icons"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { relativeTime } from "@/lib/format"
-import type { ExternalVantage } from "@/lib/network-external"
+import type { ExternalVantage } from "@/lib/network/external"
 import { sourceState } from "@/components/network/external/reading"
 
 /**

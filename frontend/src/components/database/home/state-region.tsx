@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
+import { useNow } from "@/hooks/use-now"
 import { duration } from "@/lib/format"
 import { Notice } from "@/components/state"
 import { BorderBeam } from "@/components/ui/border-beam"
@@ -95,11 +96,7 @@ function ChangeNotice({ change }: { change: PowerChange }) {
  * out every second.
  */
 function Elapsed({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useNow()
   return (
     <span aria-hidden className="numeric whitespace-nowrap">
       {duration(Math.max(0, (now - since) / 1000))} so far.

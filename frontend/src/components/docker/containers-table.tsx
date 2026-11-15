@@ -3,13 +3,13 @@
 import { Box, ChevronDown, ChevronUp } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { useNow } from "@/components/deploy/vocabulary"
-import { HUE } from "@/components/overview/readings"
-import { RowLink } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { HUE } from "@/components/live-figure"
+import { RowLink } from "@/components/row-link"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Status, StatusDot } from "@/components/status-dot"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { Sparkline } from "@/components/sparkline"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   stickyTableHeader,

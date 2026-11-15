@@ -4,12 +4,13 @@ import { useState } from "react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, FieldRow } from "@/components/form"
 import { Modal } from "@/components/modal"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { put } from "@/lib/api"
 import { plural } from "@/lib/format"
-import { diagnosticRetentionProblem, type DiagnosticRetention } from "@/lib/network-diagnostics"
+import { diagnosticRetentionProblem, type DiagnosticRetention } from "@/lib/network/diagnostics"
 
 /** The policy as the identity line says it: "keeps 100 for 7 days". */
 export function retentionWords(policy: DiagnosticRetention) {

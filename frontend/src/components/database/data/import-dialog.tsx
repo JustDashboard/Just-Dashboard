@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { DbImportFormat } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import {
   Field,
   FieldRow,

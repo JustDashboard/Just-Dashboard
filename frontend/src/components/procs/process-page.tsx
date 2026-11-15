@@ -14,9 +14,9 @@ import { useSessionState, useViewState } from "@/lib/view-state"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { rowReveal, IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import {
   ProductGlyph,
@@ -25,9 +25,11 @@ import {
   processProduct,
   unitProduct,
 } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { VerbBar } from "@/components/verbs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"

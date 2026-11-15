@@ -5,7 +5,7 @@ import type { InterfaceReading, ProtectionSetting } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { FormSection, InfoTip } from "@/components/form"
 import { Row, RowList } from "@/components/row-list"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { choiceWord } from "@/components/network/protection/reading"
 
 type Which = "differ" | "every"

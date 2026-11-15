@@ -13,14 +13,17 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { RowLink } from "@/components/row-link"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductLogo, ProductLogos, hasProductLogo, pm2Product } from "@/components/product-logo"
 import { Row, RowList, ROW_BLEED } from "@/components/row-list"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, LoadingPanel } from "@/components/state"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
+import { EmptyState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions, VerbMenu } from "@/components/verbs"
@@ -352,7 +355,7 @@ function PM2Applications() {
             title={
               <>
                 Applications
-                <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                   {apps.length}
                 </span>
               </>

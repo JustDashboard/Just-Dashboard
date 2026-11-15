@@ -135,19 +135,28 @@ strategy, and feature ownership behind those rules.
   guides: preview isolation, tailnet-only deployments and identity-aware access, staging and promotion,
   backup coverage, restore verification, recipes, Git policy, database networks, request observability,
   notifications, the GitHub App and permanent deletion.
-- [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,
-  no lift, the colour roles, the component vocabulary, and which surface to reach for.
-- [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, the sections an
-  account keeps out of its sidebar, the first-run question and sign-in, layout primitives,
-  accessibility, Monaco, and charts.
-- [`frontend/features-terminal.md`](frontend/features-terminal.md) — Docker/security/package feature UX and
-  the terminal workspace, renderer, shortcuts, clipboard, reconnect, and layout behavior.
-- [`frontend/feature-map.md`](frontend/feature-map.md) — every route area, its user-facing
-  responsibility, component owner, and cross-feature handoffs.
-- [`frontend/workspace-interactions.md`](frontend/workspace-interactions.md) — page-owned keyboard commands,
-  history, focus/scroll restoration, held live lists and pinned metric moments.
-- [`frontend/data-theming.md`](frontend/data-theming.md) — API and WebSocket clients, polling, metrics state,
-  confirmations, and self-update state.
+- [`frontend/README.md`](frontend/README.md) — build a page in five steps, and the map of the
+  frontend guides.
+- [`frontend/standard.md`](frontend/standard.md) — the operator's decisions and the deploy standard
+  (D1 to D14), each with the lint rule, spec or convention that holds it. It wins over every other
+  frontend page.
+- [`frontend/foundations/`](frontend/foundations/README.md) — tokens and scales: colour, surfaces,
+  type, spacing, motion, words, layout and the phone.
+- [`frontend/components/`](frontend/components/README.md) — the component catalogue, one page per
+  family; [`frontend/contributing-a-component.md`](frontend/contributing-a-component.md) for adding
+  one.
+- [`frontend/patterns/`](frontend/patterns/README.md) and [`frontend/recipes/`](frontend/recipes/README.md)
+  — rules that span components (registers, the identity line, data flow, keyboard and place), and
+  one recipe per page shape.
+- [`frontend/decisions/`](frontend/decisions/README.md) — why each page looks as it does, by section.
+- [`frontend/design-system.md`](frontend/design-system.md) — the index from each `§n` the code cites
+  to its page.
+- [`frontend/shell.md`](frontend/shell.md) — App Router shell, navigation, the sections an account
+  keeps out of its sidebar, the first-run question and sign-in, the hub link, command search and
+  Monaco.
+- [`frontend/features/`](frontend/features/README.md) — every route area, its user-facing
+  responsibility, component owner and specs, one file per section (the terminal workspace is in
+  [`features/workspace.md`](frontend/features/workspace.md#the-terminal-panel)).
 
 ## Contributor reference
 

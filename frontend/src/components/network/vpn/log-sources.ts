@@ -1,5 +1,5 @@
 import type { VPNView } from "@/lib/types"
-import { dockerSource, journalSource } from "@/lib/log-sources"
+import { dockerSource, journalSource } from "@/lib/log/sources"
 import type { ServiceLogSource } from "@/components/logs/service-logs"
 
 /**

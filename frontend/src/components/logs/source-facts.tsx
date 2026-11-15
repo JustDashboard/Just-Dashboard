@@ -1,7 +1,7 @@
 import { Fragment } from "react"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { LogSource } from "@/lib/types"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { ProductLogos, imageProducts } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"

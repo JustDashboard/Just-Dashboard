@@ -3,7 +3,7 @@ import { json, mockHost } from "./host-fixture"
 
 /**
  * The logs console, coloured. The shapes themselves are unit-tested in
- * `src/lib/log-tokens.test.js`; this checks what a reader sees: the failure
+ * `src/lib/log/tokens.test.js`; this checks what a reader sees: the failure
  * and the status found without reading, a structured line drawn as its message
  * and fields, the line's own timestamp and this host's name not repeated
  * beside the time column, the sources drawn as their products — and all of it

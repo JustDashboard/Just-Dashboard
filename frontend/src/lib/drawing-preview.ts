@@ -1,4 +1,4 @@
-import type { DrawingElement } from "@/lib/boards"
+import type { DrawingElement } from "@/lib/board/boards"
 
 export type Box = { x: number; y: number; w: number; h: number }
 

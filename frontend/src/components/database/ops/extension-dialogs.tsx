@@ -22,8 +22,8 @@ import { del, errorMessage } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
-import { Segments } from "@/components/deploy/settings/segments"
-import { GroupRule } from "@/components/flow"
+import { Segments } from "@/components/segments"
+import { GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldRow,
@@ -34,7 +34,7 @@ import {
   Statement,
 } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import {
   Select,
   SelectContent,

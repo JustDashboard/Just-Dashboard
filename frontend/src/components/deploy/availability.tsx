@@ -9,9 +9,10 @@ import { usePoll } from "@/hooks/use-poll"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { StatusDot } from "@/components/status-dot"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import {
   WINDOW_SHORT,
   availabilityLead,

@@ -14,11 +14,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Panel, PanelBody } from "@/components/panel"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"

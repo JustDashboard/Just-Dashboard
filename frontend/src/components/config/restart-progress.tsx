@@ -15,7 +15,7 @@ import { configPhaseLabel } from "@/hooks/use-self-config"
 import { Disclosure } from "@/components/form"
 import { RunPhases, phaseStates, type RunPhase } from "@/components/run-phases"
 import { RunTranscript } from "@/components/run-transcript"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 /**

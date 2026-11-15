@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { admin, json, mockNetwork } from "./network-fixture"
 import { risen } from "./risen"
-import type { CaptureList, CaptureRun } from "../../src/lib/network-captures"
+import type { CaptureList, CaptureRun } from "../../src/lib/network/captures"
 
 const id = "c".repeat(32)
 const incident = "d".repeat(32)

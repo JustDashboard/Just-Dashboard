@@ -6,7 +6,7 @@ import { API_BASE } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { DeploymentDomainRoute, DeploymentSummary } from "@/lib/types"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { ProjectMark, projectFavicon } from "@/components/deploy/project-mark"
+import { ProjectMark, projectFavicon } from "@/components/project-mark"
 import { WorkloadMark, deploymentURL, hostOf } from "@/components/deploy/vocabulary"
 
 /**

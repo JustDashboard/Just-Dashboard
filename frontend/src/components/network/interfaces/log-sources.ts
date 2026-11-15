@@ -1,5 +1,5 @@
 import type { SystemdUnit } from "@/lib/types"
-import { journalSource, kernelSource } from "@/lib/log-sources"
+import { journalSource, kernelSource } from "@/lib/log/sources"
 import type { ServiceLogSource } from "@/components/logs/service-logs"
 
 /** The daemons that bring links up, and so say why one did not. */

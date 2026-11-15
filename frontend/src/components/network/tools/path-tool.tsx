@@ -17,8 +17,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { errorMessage, get, post } from "@/lib/api"
-import { pathDraftFromQuery, pathRequest, type PathDraft } from "@/lib/network-investigator"
-import type { PathResult, PathSources } from "@/lib/network-investigator-types"
+import { pathDraftFromQuery, pathRequest, type PathDraft } from "@/lib/network/investigator"
+import type { PathResult, PathSources } from "@/lib/network/investigator-types"
 import { cn } from "@/lib/utils"
 import { ToolEmpty, ToolHead } from "./tool-frame"
 import { PATH_TOOL } from "./tool-links"

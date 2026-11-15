@@ -5,7 +5,7 @@ import { plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DeploymentEngineRun } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { InitialsMark, UserAvatar } from "@/components/account/user-avatar"
+import { InitialsMark, UserAvatar } from "@/components/user-avatar"
 import { OutcomeStrip, type OutcomeTone } from "@/components/outcome-strip"
 import { ProductLogo, gitProviderProduct, hostProduct } from "@/components/product-logo"
 import {

@@ -3,7 +3,8 @@
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext } from "@/components/page"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { DockerUnreachableState } from "@/components/docker/unreachable-state"
 import type { DockerPing } from "@/components/docker/unreachable"
 

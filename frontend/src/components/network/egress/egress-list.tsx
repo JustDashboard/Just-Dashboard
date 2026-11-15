@@ -10,11 +10,11 @@ import {
   type EgressDraft,
   type EgressGroup,
   type EgressView,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import { cn } from "@/lib/utils"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Lifebuoy, Plus } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"

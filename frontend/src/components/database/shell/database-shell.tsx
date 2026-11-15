@@ -3,7 +3,7 @@
 import { Fragment } from "react"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { FactDot } from "@/components/metrics/host-identity"
+import { FactDot } from "@/components/identity-header"
 import { EngineMark } from "@/components/database/kit/engine-mark"
 import { EnvironmentTag, ProtectedTag } from "@/components/database/kit/environment-tag"
 import { ConnectPopover } from "@/components/database/shell/connect-popover"

@@ -1,4 +1,4 @@
-import type { NavScope } from "@/components/nav-scope"
+import type { NavScope } from "@/components/shell/nav-scope"
 import type { DbCapabilities, DbConnection, DbDriver, DbFlavor } from "@/lib/types"
 import { groupSections, type Engine, type SectionId } from "@/components/database/engine"
 import { settingsPageHref, settingsPages } from "@/components/database/shell/settings-pages"

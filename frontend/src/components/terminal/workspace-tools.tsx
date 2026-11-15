@@ -10,13 +10,15 @@ import type { FileContent, GitDetect, GitFileChange, GitStatus } from "@/lib/typ
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { CodeEditor } from "@/components/code-editor"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileTree, type ConfirmRequest } from "@/components/files/file-tree"
 import { DiffView } from "@/components/files/diff-view"
 import { GitTools } from "@/components/terminal/git-tools"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Pane, PaneHeader } from "@/components/panel"
 
 type Overlay = { kind: "file"; path: string } | null

@@ -14,7 +14,7 @@ import type {
 import { Globe, ListUnordered, Pencil, RefreshClockwise, Trash } from "@/components/icons"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormNote } from "@/components/form"
 import { DimActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"

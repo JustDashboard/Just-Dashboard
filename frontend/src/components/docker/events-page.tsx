@@ -21,18 +21,20 @@ import { useSessionState } from "@/lib/view-state"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { socketReading } from "@/components/deploy/request-marks"
 import { InfoTip } from "@/components/form"
-import { FactDot } from "@/components/metrics/host-identity"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { SeriesKey } from "@/components/overview/readings"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { FactDot } from "@/components/identity-header"
+import { TileTrend } from "@/components/sparkline"
+import { SeriesKey } from "@/components/live-figure"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -500,7 +502,7 @@ export function EventsPage() {
                 title={
                   <>
                     Containers
-                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                       {rows.length}
                     </span>
                   </>
@@ -545,7 +547,7 @@ export function EventsPage() {
                 title={
                   <>
                     Events
-                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                    <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                       {entries.length}
                     </span>
                   </>

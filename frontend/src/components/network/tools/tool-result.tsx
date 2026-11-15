@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { hasEvidence, resultReading, type DiagnosticResult } from "@/lib/network-diagnostics"
+import { hasEvidence, resultReading, type DiagnosticResult } from "@/lib/network/diagnostics"
 import { Well } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"

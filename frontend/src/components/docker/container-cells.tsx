@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import type { Container, ContainerStats } from "@/lib/types"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Meter, utilisationTone } from "@/components/meter"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { Sparkline } from "@/components/sparkline"
 import { Status } from "@/components/status-dot"
 import { copyText } from "@/lib/clipboard"
 

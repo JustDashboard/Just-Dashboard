@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react"
 import type { DbFleetEntry } from "@/lib/types"
-import { GroupRule } from "@/components/flow"
+import { GroupRule } from "@/components/choice-row"
 import type { FleetGroup } from "@/components/database/fleet/fleet"
 import { useColumns } from "@/components/database/fleet/use-columns"
 

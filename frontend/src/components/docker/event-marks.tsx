@@ -18,7 +18,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DockerEvent } from "@/lib/types"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 import { ProductGlyph, ProductLogo, imageProduct } from "@/components/product-logo"
 import { isCleanExit } from "@/components/deploy/traffic-strip"
 

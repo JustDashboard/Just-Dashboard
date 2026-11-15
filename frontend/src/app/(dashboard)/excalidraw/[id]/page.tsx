@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
 import { Page } from "@/components/page"
-import { LoadingPanel } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 
 // The workspace draws its own page: the editor is a workbench held to the
 // window, and a drawing that is not there is an ordinary reading page.

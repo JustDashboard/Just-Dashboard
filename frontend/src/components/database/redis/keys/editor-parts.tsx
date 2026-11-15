@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Cross } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { globEscape, hasGlob } from "@/components/database/redis/bytes"
 
 /** The strip between a key's head and its value: the editor's filter and its commands. */

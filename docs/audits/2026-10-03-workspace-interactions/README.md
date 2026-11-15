@@ -2,7 +2,7 @@
 
 Processes, Git, Logs, Docker containers, Packages, Backups, deployment setup, Audit/Security and
 Metrics now preserve the context of reading, inspecting and navigating. The complete behavior and
-storage rules are in [the interaction contract](../../internal/frontend/workspace-interactions.md).
+storage rules are in [the interaction contract](../../internal/frontend/patterns/keyboard-and-place.md).
 
 ## Proof
 

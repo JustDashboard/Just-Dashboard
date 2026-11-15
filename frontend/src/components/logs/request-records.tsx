@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
-import { dockerSource } from "@/lib/log-sources"
+import { dockerSource } from "@/lib/log/sources"
 import type {
   DeploymentFleet,
   DeploymentRelease,
@@ -15,7 +15,7 @@ import type {
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Globe } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import type { LogWindow } from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
 import { tabClasses } from "@/components/tabs"
@@ -30,7 +30,7 @@ import {
 import { containerAt, type Lead } from "@/components/deploy/logs-model"
 import type { ProjectDetail } from "@/components/deploy/project-context"
 import { serviceProduct } from "@/components/deploy/service-product"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { siteLogPlan } from "@/components/proxy/site-log-plan"
 import { FailedRequestLines } from "@/components/proxy/site-logs"
 import { requestRecords, type RequestRecord } from "@/components/logs/service-views-model"

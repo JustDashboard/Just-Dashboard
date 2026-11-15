@@ -3,9 +3,9 @@
 import { useId, useState } from "react"
 import { ArrowDown, ArrowUp, Cross, Filter as FilterIcon, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field } from "@/components/form"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {

@@ -32,10 +32,10 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Status, type DotTone } from "@/components/status-dot"
 import { JobConsole, useJobConsole } from "@/components/job-console"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { engineProduct } from "@/components/proxy/marks"
 import type { Verb } from "@/components/verbs"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -229,7 +229,7 @@ export function EngineIdentity({
           {version && (
             <>
               {" "}
-              <span className="font-mono text-body font-normal text-muted-foreground">
+              <span className="font-mono text-body leading-none font-normal text-muted-foreground">
                 {version}
               </span>
             </>

@@ -2,7 +2,7 @@
 
 import { Suspense } from "react"
 import { Page } from "@/components/page"
-import { LoadingPanel } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { ConnectionsPanel } from "@/components/network/connections-panel"
 
 export default function NetworkConnectionsPage() {

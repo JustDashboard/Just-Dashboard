@@ -7,7 +7,8 @@ import type { SitePage, SitePageName } from "@/lib/types"
 import { CodeEditor } from "@/components/code-editor"
 import { Modal } from "@/components/modal"
 import { Pane } from "@/components/panel"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 /** What each page is called where the form lists it. */

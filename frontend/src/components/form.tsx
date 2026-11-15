@@ -1,16 +1,16 @@
 "use client"
 
-import { useId, useState } from "react"
+import { Children, createContext, isValidElement, useContext, useId, useState } from "react"
 
-import { Check, ChevronDown, Copy, Information, Minus } from "@/components/icons"
+import { Check, ChevronDown, Copy, Minus, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
 import type { Tone } from "@/components/tone"
+import { Explain } from "@/components/explain"
 import { Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /**
  * The form vocabulary for a task surface.
@@ -32,6 +32,72 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * schema-editing dialog owes the person pressing its button.
  */
 
+/**
+ * What a `Field` tells the control inside it: the id its label points at,
+ * the ids of the lines under it, and whether its value is wrong.
+ *
+ * The hint and the error used to be two paragraphs nothing pointed at, so a
+ * screen reader tabbing back to a field heard neither, and the red edge keyed
+ * on `aria-invalid` appeared only where a caller remembered to set it. The
+ * controls read this with `useFieldControl` and set the attributes
+ * themselves, so a `Field` is wired however deep its control sits — inside an
+ * `InputGroup`, behind a `Select`'s trigger.
+ */
+export type FieldControl = {
+  /** For the control, when the `Field` was given no `htmlFor` to match. */
+  id?: string
+  /** The label's own id, for a group (segments, radios) a `for` cannot name. */
+  labelId: string
+  /** The hint, the error and the checks under the field, as one idref list. */
+  describedBy?: string
+  invalid: boolean
+  /** The id a `FieldChecks` in this field takes. */
+  checksId: string
+}
+
+const FieldContext = createContext<FieldControl | null>(null)
+
+/** The field this control sits in, or null outside one. */
+export function useField(): FieldControl | null {
+  return useContext(FieldContext)
+}
+
+type ControlAria = {
+  id?: string
+  "aria-describedby"?: string
+  "aria-invalid"?: React.AriaAttributes["aria-invalid"]
+}
+
+/**
+ * A control's own props with its field's wiring merged in. What the caller
+ * set wins: its id, its `aria-invalid`, and its own describing ids, which come
+ * first in the list.
+ */
+export function useFieldControl<P extends ControlAria>(props: P): P {
+  const field = useContext(FieldContext)
+  if (!field) return props
+  return {
+    ...props,
+    id: props.id ?? field.id,
+    "aria-describedby": joinIds(props["aria-describedby"], field.describedBy),
+    "aria-invalid": props["aria-invalid"] ?? (field.invalid || undefined),
+  }
+}
+
+function joinIds(...lists: (string | undefined)[]): string | undefined {
+  const ids = [...new Set(lists.flatMap((list) => list?.split(/\s+/) ?? []).filter(Boolean))]
+  return ids.length > 0 ? ids.join(" ") : undefined
+}
+
+/** Whether a `FieldChecks` is drawn directly in this node, so the field can point at it. */
+function holdsChecks(node: React.ReactNode): boolean {
+  let found = false
+  Children.forEach(node, (child) => {
+    if (isValidElement(child) && child.type === FieldChecks) found = true
+  })
+  return found
+}
+
 /** One labelled control, its hint, and — when the value is wrong — why. */
 export function Field({
   label,
@@ -44,6 +110,10 @@ export function Field({
   children,
 }: {
   label: React.ReactNode
+  /**
+   * The control's id, when the caller sets it. Without one the field makes
+   * an id and hands it to the control through `useFieldControl`.
+   */
   htmlFor?: string
   /** What goes here, in one line. Replaced by the error while there is one. */
   hint?: React.ReactNode
@@ -60,29 +130,112 @@ export function Field({
   className?: string
   children: React.ReactNode
 }) {
+  const base = useId()
+  const ids = {
+    control: htmlFor ?? `${base}control`,
+    label: `${base}label`,
+    hint: `${base}hint`,
+    error: `${base}error`,
+    checks: `${base}checks`,
+  }
+  const shownHint = !error && hint ? hint : null
+  // Checks drawn as the hint are read as the hint; drawn beside the control
+  // they are read after it.
+  const checksBeside = holdsChecks(children)
+  const control: FieldControl = {
+    // A field given `htmlFor` names a control that has that id already; a
+    // second control in it must not take the same one.
+    id: htmlFor ? undefined : ids.control,
+    labelId: ids.label,
+    describedBy: joinIds(
+      error ? ids.error : undefined,
+      shownHint ? ids.hint : undefined,
+      checksBeside ? ids.checks : undefined,
+    ),
+    invalid: Boolean(error),
+    checksId: ids.checks,
+  }
   return (
-    <div className={cn("min-w-0 space-y-1.5", className)}>
-      <div className="flex min-w-0 items-center justify-between gap-3">
-        {/* The tip sits beside the label rather than inside it: a button is
-            a labelable element, and a label may not contain one. */}
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Label htmlFor={htmlFor} className="min-w-0 text-body font-medium">
-            {label}
-          </Label>
-          {info && <InfoTip>{info}</InfoTip>}
+    <FieldContext.Provider value={control}>
+      <div className={cn("min-w-0 space-y-1.5", className)}>
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          {/* The tip sits beside the label rather than inside it: a button is
+              a labelable element, and a label may not contain one. */}
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Label id={ids.label} htmlFor={ids.control} className="min-w-0 text-body font-medium">
+              {label}
+            </Label>
+            {info && <Explain label="What this setting does">{info}</Explain>}
+          </div>
+          {trailing && (
+            // A switch up here is its own control, not the one the label names.
+            <FieldContext.Provider value={null}>
+              <div className="flex shrink-0 items-center gap-2">{trailing}</div>
+            </FieldContext.Provider>
+          )}
         </div>
-        {trailing && <div className="flex shrink-0 items-center gap-2">{trailing}</div>}
+        {children}
+        {error ? (
+          // Rises in rather than appearing (§11): a refusal is news. The
+          // glyph says so to a reader who does not see the red.
+          <p
+            id={ids.error}
+            role="alert"
+            className="flex animate-rise items-start gap-1 text-hint leading-relaxed text-destructive"
+          >
+            <Warning aria-hidden className="mt-0.75 size-3 shrink-0" />
+            <span className="min-w-0">{error}</span>
+          </p>
+        ) : (
+          shownHint &&
+          (holdsChecks(shownHint) ? (
+            // A run of checks is a block of its own and cannot sit in a <p>.
+            <div id={ids.hint} className="text-hint leading-relaxed text-muted-foreground">
+              {shownHint}
+            </div>
+          ) : (
+            <p id={ids.hint} className="text-hint leading-relaxed text-muted-foreground">
+              {shownHint}
+            </p>
+          ))
+        )}
       </div>
+    </FieldContext.Provider>
+  )
+}
+
+/**
+ * The rules a field's value has to meet, as one line that speaks when one of
+ * them changes.
+ *
+ * Every form that drew `FieldCheck`s wrapped them in its own
+ * `aria-live="polite"` line — seven of them by hand — and still announced
+ * nothing about state, because a rule changing from unmet to met changed a
+ * colour and an aria-hidden glyph. The live region lives here now, each check
+ * says its state in words, and inside a `Field` the line is one of the
+ * things its control is described by. Polite, never `role="alert"`: a rule
+ * being met is news, not an interruption.
+ */
+export function FieldChecks({
+  id,
+  className,
+  children,
+}: {
+  id?: string
+  className?: string
+  children: React.ReactNode
+}) {
+  const field = useContext(FieldContext)
+  return (
+    <span
+      id={id ?? field?.checksId}
+      data-slot="field-checks"
+      aria-live="polite"
+      aria-atomic="false"
+      className={cn("flex flex-wrap gap-x-4 gap-y-1", className)}
+    >
       {children}
-      {error ? (
-        // Rises in rather than appearing (§11): a refusal is news.
-        <p role="alert" className="animate-rise text-hint leading-relaxed text-destructive">
-          {error}
-        </p>
-      ) : (
-        hint && <p className="text-hint leading-relaxed text-muted-foreground">{hint}</p>
-      )}
-    </div>
+    </span>
   )
 }
 
@@ -95,20 +248,21 @@ export function Field({
  * the reader hears of a rule. The Security page drew it for a new password and
  * the credential and channel forms wanted it for a name, a token and an
  * address, which is one shape three times — so it is here, beside the field
- * it belongs under. Put a run of them in a wrapper with `aria-live="polite"`,
- * never `role="alert"`: a rule being met is news, not an interruption.
+ * it belongs under. Put a run of them in a `FieldChecks`, which is the live
+ * region; each one is atomic, so a change is read as the whole rule and its
+ * new state, "12 characters or more, met", rather than the bare word.
  */
 export function FieldCheck({ met, children }: { met: boolean; children: React.ReactNode }) {
   const Mark = met ? Check : Minus
+  const tone = met ? "text-success" : "text-muted-foreground"
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 text-hint transition-colors",
-        met ? "text-success" : "text-muted-foreground",
-      )}
-    >
-      <Mark aria-hidden className="size-3" />
-      {children}
+    <span aria-atomic="true" className="inline-flex items-center gap-1 text-hint">
+      <Mark aria-hidden className={cn("size-3 transition-colors", tone)} />
+      {/* Its own element, carrying the tone, so the visible words are exactly
+          the rule and are what turns green; the state word beside it is for a
+          screen reader. */}
+      <span className={cn("transition-colors", tone)}>{children}</span>
+      <span className="sr-only">{met ? ", met" : ", not yet"}</span>
     </span>
   )
 }
@@ -116,6 +270,8 @@ export function FieldCheck({ met, children }: { met: boolean; children: React.Re
 /**
  * The ⓘ a `Field` draws for its `info`, for a label a form lays out itself —
  * or a fact outside a form, which names what it explains in `label`.
+ *
+ * @deprecated use `Explain` from `@/components/explain`, which this now is.
  */
 export function InfoTip({
   label = "What this setting does",
@@ -124,22 +280,7 @@ export function InfoTip({
   label?: string
   children: React.ReactNode
 }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={label}
-          className="rounded-sm text-faint focus-ring transition-colors hover:text-foreground"
-        >
-          <Information className="size-3.5" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs text-xs leading-relaxed text-balance">
-        {children}
-      </TooltipContent>
-    </Tooltip>
-  )
+  return <Explain label={label}>{children}</Explain>
 }
 
 /** Two or three fields on one line; one under another on a phone. */

@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { BranchChip } from "@/components/git/marks"
 import { useProject } from "@/components/deploy/project-context"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { DEPLOYMENT_NAME, sourceLine, sourceProduct } from "@/components/deploy/vocabulary"
 
 const NAME_ERROR =

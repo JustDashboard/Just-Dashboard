@@ -1,5 +1,5 @@
 import { Fragment } from "react"
-import { FactDot } from "@/components/metrics/host-identity"
+import { FactDot } from "@/components/identity-header"
 
 /**
  * An identity line's facts in groups. From `sm` they read as one run with a

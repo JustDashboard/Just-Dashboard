@@ -3,11 +3,11 @@
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Cross, Filter } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,7 +28,7 @@ import {
   driftSorted,
   type DriftDomain,
   type DriftRow,
-} from "@/lib/network-drift"
+} from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { DriftMark, ShortDigest } from "@/components/network/drift/marks"
 
@@ -111,7 +111,7 @@ export function DriftTable({
         title={
           <>
             Comparisons
-            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
               {rows.length}
             </span>
           </>

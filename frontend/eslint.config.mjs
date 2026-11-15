@@ -176,13 +176,15 @@ const eslintConfig = defineConfig([
   {
     // Where a value is *defined* rather than consumed. The generated shadcn
     // primitives own the control faces; `logo.tsx` owns the wordmark's own ramp;
-    // `components/metrics/` owns the chart palette; `icon-action.tsx` owns the
-    // reveal rule itself.
+    // `components/metrics/`, with the sparkline and the chart panel it shares,
+    // owns the chart palette; `icon-action.tsx` owns the reveal rule itself.
     files: [
       "src/components/ui/**",
       "src/components/icon-action.tsx",
       "src/components/logo.tsx",
       "src/components/metrics/**",
+      "src/components/sparkline.tsx",
+      "src/components/chart-panel.tsx",
       "src/components/logs/histogram.tsx",
       "src/components/git/graph-panel.tsx",
       "src/components/database/diagram/**",

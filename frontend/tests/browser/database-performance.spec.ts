@@ -2580,6 +2580,10 @@ test("an engine that keeps run times gives the history its percentiles and the r
   await expect(await explained(page, history, "How these figures are made")).toContainText(
     "ClickHouse's query log holds every finished query",
   )
+  // The explanation stays while the pointer rests on its mark (it is hoverable,
+  // WCAG 1.4.13) and sits over the first row, so the pointer leaves it first.
+  await page.mouse.move(0, 0)
+  await expect(page.getByRole("tooltip")).toHaveCount(0)
   await history.getByRole("row").nth(1).click()
   const recorded = detailView(page)
   await expect(recorded.getByText("99 in 100 within", { exact: true }).first()).toBeVisible()

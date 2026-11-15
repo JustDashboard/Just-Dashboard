@@ -3,7 +3,7 @@
 import { policyWords, scopeName } from "@/lib/account-link"
 import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
 import { Reading, ReadingList } from "@/components/account-link/reading"
-import { Section } from "@/components/page"
+import { Section } from "@/components/section"
 
 /**
  * The automatic-update policy, read-only. The site — or, on Settings → Hub, the hub — stores and

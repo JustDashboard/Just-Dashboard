@@ -7,7 +7,7 @@ import { copyText } from "@/lib/clipboard"
 import type { ContainerDetail, PortRoute } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Panel, PanelHeader, PanelToolbar } from "@/components/panel"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { EmptyNote, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -36,7 +36,7 @@ import {
   type EnvKind,
 } from "@/components/docker/container"
 import { CODE } from "@/components/deploy/run-evidence"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { hueFor, LANES } from "@/lib/hue"
 
 /** What a firewall's verdict means for a port Docker published, in words. */

@@ -1,6 +1,6 @@
 import { Suspense } from "react"
 import { Page, PageContext } from "@/components/page"
-import { LoadingPanel } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { NewProject } from "@/components/deploy/new-project"
 
 function first(value: string | string[] | undefined) {

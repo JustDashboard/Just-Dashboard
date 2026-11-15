@@ -461,7 +461,7 @@ ride on the session's `user` (`needsOnboarding`, `hiddenSections`). The holder a
 like a path segment, since the list of sections belongs to the frontend's nav registry — stores them
 sorted without repeats, and clears `needs_onboarding`. The list narrows what the shell draws and
 nothing the account may do; every route still answers by role. See
-[the shell](../frontend/shell-design.md#sections-an-account-keeps-out-of-its-sidebar).
+[the shell](../frontend/shell.md#sections-an-account-keeps-out-of-its-sidebar).
 
 State is SQLite in `JD_DATA_DIR`, schema as `CREATE TABLE IF NOT EXISTS` blocks in `internal/store`
 (the `schema` block in `store.go`, joined from per-feature schema files, and the few `Open` applies after

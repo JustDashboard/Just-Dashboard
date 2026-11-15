@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { Box } from "@/components/icons"
 import { clock } from "@/lib/format"
-import { dockerSource, stackSource } from "@/lib/log-sources"
+import { dockerSource, stackSource } from "@/lib/log/sources"
 import type { DeploymentRuntimeServices, DeploymentSourceKind } from "@/lib/types"
 import { ServiceLogs, type LogWindow, type ServiceLogSource } from "@/components/logs/service-logs"
 import { EmptyState } from "@/components/state"

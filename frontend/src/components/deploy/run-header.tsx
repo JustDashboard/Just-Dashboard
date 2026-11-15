@@ -15,7 +15,7 @@ import type {
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import {
   formatDuration,

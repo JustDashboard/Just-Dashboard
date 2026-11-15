@@ -23,7 +23,7 @@ import {
   stageReading,
   type ExternalCheck,
   type ExternalVantage,
-} from "@/lib/network-external"
+} from "@/lib/network/external"
 import {
   checkOutcome,
   checkTarget,
@@ -80,7 +80,7 @@ export function ExternalChecks({
           <>
             Checks
             {checks.length > 0 && (
-              <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+              <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                 {checks.length}
               </span>
             )}

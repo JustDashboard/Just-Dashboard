@@ -7,7 +7,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { DiffView } from "@/components/files/diff-view"
 import { PreviewHeader } from "@/components/git/preview-header"
 import type { PreviewContext } from "@/components/git/preview-panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 export function PartialPreview({

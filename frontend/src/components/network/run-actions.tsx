@@ -17,8 +17,8 @@ import {
   diagnosticNameProblem,
   diagnosticReading,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
-import { runRequestLine, runTool } from "@/lib/network-runs-view"
+} from "@/lib/network/diagnostics"
+import { runRequestLine, runTool } from "@/lib/network/runs-view"
 import { notify } from "@/lib/toast"
 import { StateTile, toolGlyph } from "./diagnostic-marks"
 

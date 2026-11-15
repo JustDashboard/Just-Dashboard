@@ -1011,7 +1011,9 @@ test("faded secondary text keeps 4.5:1 on every ground text is set on", async ({
     "text-muted-foreground/45",
     "text-muted-foreground/40",
   ]
-  const grounds = ["--background", "--card", "--popover", "--muted", "--surface-header"]
+  // The selection ground too: a selected row's faint figures sit on --accent,
+  // which 0.9.0 darkened so they keep 4.5:1 there.
+  const grounds = ["--background", "--card", "--popover", "--muted", "--surface-header", "--accent"]
   const measured = await page.evaluate(
     ({ inks, grounds }) => {
       const contrast = Reflect.get(window, "jdContrast") as (element: Element) => number

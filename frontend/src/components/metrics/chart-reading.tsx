@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import { Meter, utilisationTone } from "@/components/meter"
-import { SeriesKey } from "@/components/overview/readings"
+import { SeriesKey } from "@/components/live-figure"
 import type { Tone } from "@/components/tone"
 
 /**

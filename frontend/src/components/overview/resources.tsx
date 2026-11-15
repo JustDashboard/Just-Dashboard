@@ -5,13 +5,13 @@ import { bytes, percent, rate } from "@/lib/format"
 import type { MountStats, Snapshot } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Meter, utilisationTone } from "@/components/meter"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { TileTrend } from "@/components/sparkline"
 import { Bone } from "@/components/bone"
-import { ReadingLine, ReadingLines } from "@/components/reading-line"
+import { ReadingLine, ReadingLines, readingLineHeight } from "@/components/reading-line"
 import type { Tone } from "@/components/tone"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { Skeleton } from "@/components/ui/skeleton"
-import { CoreBars, HUE, LiveBytes, LiveFigure } from "./readings"
+import { CoreBars, HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
 import { Filesystem } from "./storage"
 
 /**
@@ -182,7 +182,10 @@ export function ResourceReadings({
         {/* A line's own height, so a server with one disk is six cells of one
             height and the bones that stand for them are too. */}
         {shown.length <= 1 && (
-          <Filesystems mounts={shown} className="flex min-h-17 flex-col justify-center px-2" />
+          <Filesystems
+            mounts={shown}
+            className={cn("flex flex-col justify-center px-2", readingLineHeight)}
+          />
         )}
       </ReadingLines>
       {shown.length > 1 && (

@@ -8,7 +8,7 @@ import type {
   ExcalidrawProps,
   SocketId,
 } from "@excalidraw/excalidraw/types"
-import { remember, unsent, type LiveMessage, type LivePeer } from "@/lib/board-live"
+import { remember, unsent, type LiveMessage, type LivePeer } from "@/lib/board/live"
 import { useSocket } from "@/hooks/use-socket"
 
 // A drag sends a scene frame per element version; a frame every 50 ms is

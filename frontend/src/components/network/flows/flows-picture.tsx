@@ -1,11 +1,11 @@
 "use client"
 
 import { Clock, ClockRewind, Cpu, Layers, Servers, type Icon } from "@/components/icons"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { plural } from "@/lib/format"
-import { flowBytes, observerReading, type FlowReport } from "@/lib/network-flows"
+import { flowBytes, observerReading, type FlowReport } from "@/lib/network/flows"
 import { UTCTime, dayWords } from "@/components/network/flows/marks"
 import type { FlowAnchor } from "@/components/network/flows/views"
 

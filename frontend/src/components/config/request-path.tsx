@@ -7,7 +7,7 @@ import type { DashboardConfigReport } from "@/lib/types"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import { cn } from "@/lib/utils"
 
 /**
@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
  * The list said what the stack is made of but not how it fits, and the one
  * fact a reader comes to this page with — *why can I (or can't I) reach it
  * from here* — is a path, so it is drawn as one in the wiring vocabulary the
- * deployment and database maps already speak (`deploy/wire`). Every mark is
+ * deployment and database maps already speak (`components/wire/wire`). Every mark is
  * the product itself: the browser this tab is, Tailscale when the address is
  * a tailnet name, the certificate's issuer on the proxy.
  *

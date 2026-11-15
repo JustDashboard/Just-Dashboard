@@ -2,7 +2,8 @@
 
 import Link from "next/link"
 import { ArrowRight, Database, Globe, Key, LockClosed } from "@/components/icons"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { SidePanel } from "@/components/side-panel"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"

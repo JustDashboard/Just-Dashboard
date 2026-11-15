@@ -1,0 +1,11 @@
+export function Demo() {
+  return (
+    <div className="h-[min(75vh,40rem)]">
+      <div className="max-h-[55vh] overflow-auto" />
+      <div className="lg:h-[min(80vh,48rem)]" />
+      <div className="h-[calc(100svh-20rem)]" />
+      <div className="min-h-screen" />
+      <div className="h-[100dvh]" />
+    </div>
+  )
+}

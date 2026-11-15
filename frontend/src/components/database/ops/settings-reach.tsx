@@ -18,14 +18,10 @@ import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { CidrText, cidrKind } from "@/components/config/allowlist"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingPicture } from "@/components/settings/setting-picture"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { Field, FormFact, FormNote, Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"

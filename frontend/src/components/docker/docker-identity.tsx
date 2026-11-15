@@ -2,7 +2,7 @@
 
 import { Box } from "@/components/icons"
 import type { HostInfo } from "@/lib/types"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { platformProduct } from "@/components/product-logo"
 import { WorkspaceHelp } from "@/components/workspace/workspace"
 

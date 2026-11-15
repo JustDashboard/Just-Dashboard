@@ -12,7 +12,7 @@ import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -151,7 +151,7 @@ export function RoutesTable({
         title={
           <>
             Routes
-            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
               {target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
             </span>
           </>
@@ -437,7 +437,7 @@ export function RulesTable({
         title={
           <>
             Policy rules
-            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
               {rules.length}
             </span>
           </>

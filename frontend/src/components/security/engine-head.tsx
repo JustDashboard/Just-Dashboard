@@ -1,9 +1,9 @@
 import { Bug } from "@/components/icons"
-import { HostIdentity } from "@/components/metrics/host-identity"
+import { HostIdentity } from "@/components/identity-header"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import type { EngineId } from "@/components/security/intrusion-model"
 
 /**

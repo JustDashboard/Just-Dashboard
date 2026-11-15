@@ -12,10 +12,11 @@ import { useViewState } from "@/lib/view-state"
 import type { Container, ContainerDetail, PortRoute } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { dockerSource, journalSource, stackSource } from "@/lib/log-sources"
+import { dockerSource, journalSource, stackSource } from "@/lib/log/sources"
 import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { ContainerUsageTab } from "@/components/docker/container-usage-tab"
 import { ContainerInspectTab } from "@/components/docker/container-inspect-tab"
 import { ContainerShellTab } from "@/components/docker/container-shell-tab"
@@ -35,10 +36,12 @@ import { ContainerStorageTab } from "@/components/docker/container-storage-tab"
 import { EnvironmentTable, NetworksTable, PortsTable } from "@/components/docker/container-tables"
 import { containerProduct } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Detail, DetailList, Page, PageContext } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Panel, PanelHeader, Well } from "@/components/panel"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { IconAction } from "@/components/icon-action"
 import { VerbMenu } from "@/components/verbs"
 import { ShellWords } from "@/components/deploy/run-evidence"
@@ -60,7 +63,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
  *
  * The tabs stayed *in* the page. They switch between views of one thing, which
  * is what the underlined tab is for; the route-level strip was retired in
- * 0.6.7 and this is not the reason to bring it back (`shell-design.md`). What
+ * 0.6.7 and this is not the reason to bring it back (`shell.md`). What
  * the panel took as a `focusTab` prop is `?tab=` now — the same job, and it
  * survives a reload and a shared link.
  *

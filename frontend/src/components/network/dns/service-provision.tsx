@@ -10,7 +10,7 @@ import {
   type DNSEngine,
   type DNSProvisionRequest,
   type DNSServiceProvision,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Field, FieldRow, OptionRow } from "@/components/form"
 import { Notice } from "@/components/state"

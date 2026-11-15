@@ -26,12 +26,14 @@ import {
   type ImageSort,
   type Use,
 } from "@/components/docker/images"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { FactDot, HostIdentity } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { VerbMenu } from "@/components/verbs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"

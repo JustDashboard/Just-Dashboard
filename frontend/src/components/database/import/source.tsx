@@ -3,7 +3,7 @@
 import { useId } from "react"
 import { Router } from "@/components/icons"
 import type { DbDriver } from "@/lib/types"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { Notice } from "@/components/state"

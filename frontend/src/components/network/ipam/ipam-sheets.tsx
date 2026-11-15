@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ownerLabel, type IPAMOwner, type IPAMPool } from "@/lib/network-ipam"
+import { ownerLabel, type IPAMOwner, type IPAMPool } from "@/lib/network/ipam"
 
 export type PoolDraft = { name: string; prefix: string; bits: string }
 export const newPoolDraft = (): PoolDraft => ({ name: "", prefix: "", bits: "24" })

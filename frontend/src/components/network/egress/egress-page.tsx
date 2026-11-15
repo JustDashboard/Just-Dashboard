@@ -10,17 +10,19 @@ import {
   type EgressDraft,
   type EgressGroup,
   type EgressView,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import type { PollState } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { ArrowLeft, ChevronDown, ChevronUp, Lifebuoy } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"

@@ -10,7 +10,7 @@ import { SourceBranch, SourceCommit } from "@/components/git/glyphs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { githubAvatarUrl } from "@/hooks/use-github"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 
 /**
  * The four marks a git surface repeats everywhere, drawn once.

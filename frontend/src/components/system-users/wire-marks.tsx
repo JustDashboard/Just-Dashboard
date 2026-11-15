@@ -1,8 +1,8 @@
 "use client"
 
 import { SettingsGear, Shield, ShieldCheck, UserMinus, Users } from "@/components/icons"
-import { InitialsMark } from "@/components/account/user-avatar"
-import { WireMark } from "@/components/deploy/wire"
+import { InitialsMark } from "@/components/user-avatar"
+import { WireMark } from "@/components/wire/wire"
 import { hasProductLogo, ProductGlyph } from "@/components/product-logo"
 import { accountProduct, groupProduct } from "@/components/system-users/marks"
 import type { SystemUser } from "@/lib/types"

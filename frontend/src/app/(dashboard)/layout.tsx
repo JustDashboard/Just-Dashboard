@@ -5,15 +5,15 @@ import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { MetricsStream, useHostName } from "@/hooks/use-metrics"
 import { SelfUpdateProvider } from "@/hooks/use-self-update"
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppSidebar } from "@/components/shell/app-sidebar"
 import { Logo, LogoStacked } from "@/components/logo"
-import { tabTitle } from "@/components/nav"
-import { useTabName } from "@/components/tab-title"
+import { tabTitle } from "@/components/shell/nav"
+import { useTabName } from "@/components/shell/tab-title"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
-import { CommandPaletteProvider, useCommandPalette } from "@/components/command-palette"
+import { CommandPaletteProvider, useCommandPalette } from "@/components/shell/command-palette"
 import { MagnifyingGlass } from "@/components/icons"
 import { Button } from "@/components/ui/button"
-import { NavScopeProvider } from "@/components/nav-scope"
+import { NavScopeProvider } from "@/components/shell/nav-scope"
 import { SavedFolderColours } from "@/components/files/folder-colour"
 import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
 import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
@@ -34,7 +34,7 @@ import { ServerSwitcher } from "@/components/hub-link/server-switcher"
  *
  * The address names the page and the page names the item: a detail page's
  * heading, or what it says with `useTabTitle`, goes before the section, so two
- * tabs on two containers read differently (`tabTitle`, `components/tab-title.tsx`).
+ * tabs on two containers read differently (`tabTitle`, `components/shell/tab-title.tsx`).
  *
  * The hub link's provider sits above the title because a linked server names
  * itself in the tab, and above the shell because the rail, the phone's strip
@@ -124,13 +124,13 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 <MetricsStream />
                 <AppSidebar />
                 <SidebarInset className="h-svh min-w-0 overflow-hidden">
-                  {/* The bar that used to run across the top of every page is gone —
-              `components/top-bar.tsx` is still there if it has to come back.
-              It carried a breadcrumb every page already states in its own
-              header. Below `md` the rail is a sheet with nothing left to open
-              it, so this one strip stays: the trigger, and the name of the
-              product it belongs to — or, on a server linked to a hub, the
-              server it is, which is the switcher to the others. */}
+                  {/* The bar that used to run across the top of every page is gone
+              (git history has it, as `components/top-bar.tsx`). It carried a
+              breadcrumb every page already states in its own header. Below
+              `md` the rail is a sheet with nothing left to open it, so this
+              one strip stays: the trigger, and the name of the product it
+              belongs to — or, on a server linked to a hub, the server it is,
+              which is the switcher to the others. */}
                   <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:hidden">
                     <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
                     {hub ? <ServerSwitcher hub={hub} strip /> : <Logo />}

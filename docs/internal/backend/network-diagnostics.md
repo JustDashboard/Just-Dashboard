@@ -261,7 +261,7 @@ Tools/Saved runs links join the two surfaces; no page arrival or reload emits a 
 an identity line (`HostIdentity`): what is running, how many runs are kept, the retention policy in
 words and how many failed, with **Run a tool** as its command and Refresh and **Retention policy**
 behind the menu. There is no `StatGrid`: the four tiles that counted run states are the list's
-filter chips (`runChips` in `lib/network-runs-view.ts`, which draws only the states that hold a
+filter chips (`runChips` in `lib/network/runs-view.ts`, which draws only the states that hold a
 run). Each run is one `ChoiceRow` at one height: the tool's glyph with the state's dot
 (`diagnostic-marks.tsx`), the name over the tool and its request in mono, when it was made, its
 typed outcome, and a menu with Rerun or Cancel run, Export JSON and Delete. On a phone the outcome
@@ -294,7 +294,7 @@ issue no diagnostic reads; their local subnet calculator remains accessible from
 List, result, and retention reads retain successful data on a failed later poll and show a dated
 retry warning. Initial failures show an error with Retry, so an unavailable backend is never shown as
 an empty successful inventory. Retention/count bounds and comparison compatibility are shared pure
-readings in `lib/network-diagnostics.ts`; backend authorization and validation remain authoritative.
+readings in `lib/network/diagnostics.ts`; backend authorization and validation remain authoritative.
 
 ## Verification
 
@@ -325,7 +325,7 @@ join, listener links, hop table, SSH trust, Wake-on-LAN devices/verification, ca
 subnet comparison and IPAM check (admin and reader), saved-run history/measurement changes and
 375/1280-pixel containment.
 
-`lib/network-diagnostics.test.js` covers compatible requests, terminal/unfinished evidence, byte and
+`lib/network/diagnostics.test.js` covers compatible requests, terminal/unfinished evidence, byte and
 retention limits, and the outcome labels. `tests/browser/network-runs.spec.ts` prepares 19 cases for
 409/500 launch retry with an IPv6 draft, save rejection, lifecycle persistence on reload, pending
 cancellation, explicit rerun/compare/export/delete, restart interruption without replay, each typed

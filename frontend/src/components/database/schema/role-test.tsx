@@ -7,7 +7,7 @@ import { plural } from "@/lib/format"
 import { Field, FormNote, Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { EmptyNote } from "@/components/state"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {

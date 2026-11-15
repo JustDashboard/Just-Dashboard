@@ -4,9 +4,9 @@ import { useRef } from "react"
 import { Box } from "@/components/icons"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { useProject } from "@/components/deploy/project-context"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { ProjectFavicon } from "@/components/project-mark"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { SettingPicture } from "@/components/settings/setting-picture"
 
 /**
  * What a release strategy does with the two releases a deployment has for a

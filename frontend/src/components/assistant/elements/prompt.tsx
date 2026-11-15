@@ -3,7 +3,7 @@
 import { useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { ArrowUp, Cross, Image as ImageGlyph } from "@/components/icons"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"

@@ -6,7 +6,7 @@ import { useId, useRef, useState } from "react"
 import { MoreHorizontal } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes } from "@/lib/format"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {

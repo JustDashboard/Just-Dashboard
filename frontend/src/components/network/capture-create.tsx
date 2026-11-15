@@ -22,8 +22,8 @@ import {
   type CaptureDraft,
   type CaptureInterface,
   type CaptureRun,
-} from "@/lib/network-captures"
-import type { DiagnosticRun } from "@/lib/network-diagnostics"
+} from "@/lib/network/captures"
+import type { DiagnosticRun } from "@/lib/network/diagnostics"
 import { NetworkReadWarning } from "./read-warning"
 
 function Pick({

@@ -8,7 +8,7 @@ import { plural } from "@/lib/format"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { DashboardMark } from "@/components/backups/marks"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import {
   LANE_WORDS,
   laneFilter,

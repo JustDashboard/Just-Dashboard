@@ -4,11 +4,11 @@ import { Bug, Globe } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { BlocksView } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
 import type { EngineId, EngineStanding } from "@/components/security/intrusion-model"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 
 /** What each engine reads, which is what tells the three apart. */
 const READS: Record<EngineId, string> = {

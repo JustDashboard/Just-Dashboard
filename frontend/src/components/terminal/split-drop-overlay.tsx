@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils"
-import type { SplitDirection } from "@/lib/terminal-layout"
+import type { SplitDirection } from "@/lib/terminal/layout"
 
 const sides = {
   left: "inset-y-0 left-0 w-1/2",

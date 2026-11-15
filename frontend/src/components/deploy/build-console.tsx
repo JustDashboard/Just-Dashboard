@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Copy, Download, Logs } from "@/components/icons"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
-import { SearchInput } from "@/components/page"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { SearchInput } from "@/components/search-input"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { IconAction } from "@/components/icon-action"
 import { Status } from "@/components/status-dot"
 import { TranscriptRow, useTranscriptDrip } from "@/components/transcript-line"
@@ -29,12 +29,12 @@ import {
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { clock, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
-import { downloadText } from "@/lib/metrics-export"
+import { downloadText } from "@/lib/metrics/export"
 import { transcriptLine, type TranscriptLine } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
 import type { DeploymentRunState, DeploymentStep, DeploymentSummary } from "@/lib/types"
 import { StepTile } from "@/components/deploy/run-evidence"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 
 /**
  * One `step.log` event as the stream delivers it: a chunk, not a line, from

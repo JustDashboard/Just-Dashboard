@@ -2,14 +2,10 @@
 
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Field, FieldRow, FormNote, FormSections, OptionRow } from "@/components/form"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { accountHref } from "@/components/system-users/access"
 import { useAccount } from "@/components/system-users/account-page"
 import { countChanged, validDays, validLimit, validWhole } from "@/components/system-users/fields"

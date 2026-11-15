@@ -28,7 +28,7 @@ import {
   Users,
   type Icon,
 } from "@/components/icons"
-import { InitialsMark, UserAvatar } from "@/components/account/user-avatar"
+import { InitialsMark, UserAvatar } from "@/components/user-avatar"
 import { DashboardMark } from "@/components/backups/marks"
 import { ProductLogo } from "@/components/product-logo"
 import { useAuth } from "@/hooks/use-auth"

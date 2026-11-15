@@ -14,10 +14,10 @@ import {
   shortId,
   type ImageStep,
 } from "@/components/docker/images"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Disclosure, InfoTip } from "@/components/form"
 import { rowReveal } from "@/components/icon-action"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelHeader, Well } from "@/components/panel"
 import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { RankList, SplitBar } from "@/components/rank-list"

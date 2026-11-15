@@ -15,17 +15,18 @@ import {
 import { cn } from "@/lib/utils"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
-import { lensFor } from "@/lib/log-lenses"
-import { journalIdSource, kernelSource } from "@/lib/log-sources"
+import { lensFor } from "@/lib/log/lenses"
+import { journalIdSource, kernelSource } from "@/lib/log/sources"
 import type { RequestRecord } from "@/components/logs/service-views-model"
 import { MissingLine } from "@/components/missing-thing"
 import { logKindMissing } from "@/components/missing-thing-model"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Pane, PaneHeader } from "@/components/panel"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { StatusDot } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
-import { ChipCount } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import {
   ProductLogo,
   ProductLogos,
@@ -33,7 +34,7 @@ import {
   imageProducts,
   platformProduct,
 } from "@/components/product-logo"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 
 /**
  * The groups, in the order somebody actually looks. The raw kind strings are

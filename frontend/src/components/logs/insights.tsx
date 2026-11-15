@@ -18,17 +18,18 @@ import {
   resolveRange,
   toggleField,
   type LogLevel,
-} from "@/lib/log-filter"
-import { fieldOf, isFilterable } from "@/lib/log-fields"
-import { groupScope, overviewFacets, overviewSplit, patternRegex } from "@/lib/log-insights"
-import { eventLabel, eventMeta, type LensGroup, type LogLens } from "@/lib/log-lenses"
+} from "@/lib/log/filter"
+import { fieldOf, isFilterable } from "@/lib/log/fields"
+import { groupScope, overviewFacets, overviewSplit, patternRegex } from "@/lib/log/insights"
+import { eventLabel, eventMeta, type LensGroup, type LogLens } from "@/lib/log/lenses"
 import { RankList, SplitBar, percent, type RankItem } from "@/components/rank-list"
 import { FAMILY_HUE, Facet } from "@/components/deploy/traffic-facets"
 import { LatencyReadings } from "@/components/deploy/latency-readings"
 import { FieldMark, FieldValue } from "@/components/logs/field-value"
 import { Histogram, SERIES_HUES } from "@/components/logs/histogram"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { TileTrend } from "@/components/sparkline"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { StatButton, StatGrid, StatTile, TileBand } from "@/components/stat-tile"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import {

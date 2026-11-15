@@ -51,9 +51,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Segments } from "@/components/deploy/settings/segments"
-import { SettingForm, SettingSection } from "@/components/deploy/settings/setting-card"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection } from "@/components/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
 import { AccessRules } from "@/components/proxy/access-rules"
 import { StreamRoutes } from "@/components/proxy/stream-routes"
 import { StreamServers } from "@/components/proxy/stream-servers"

@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test"
 import { admin, json, loaded, mockNetwork, type Mutation } from "./network-fixture"
 import { ipamEmpty, ipamView } from "./network-evidence-fixture"
 import { risen } from "./risen"
-import type { IPAMView } from "../../src/lib/network-ipam"
+import type { IPAMView } from "../../src/lib/network/ipam"
 const now = new Date().toISOString()
 const poolId = "a".repeat(32)
 const fixture: IPAMView = {

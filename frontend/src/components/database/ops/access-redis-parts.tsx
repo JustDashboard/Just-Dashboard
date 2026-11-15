@@ -3,7 +3,7 @@
 import { useId } from "react"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Field, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Textarea } from "@/components/ui/textarea"
 import { del } from "@/lib/api"

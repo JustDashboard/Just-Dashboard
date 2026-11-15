@@ -2,7 +2,7 @@
 
 import { bytes } from "@/lib/format"
 import type { QdiscStat, ShapeDevice } from "@/lib/types"
-import { delayLabel, type CakeTin } from "@/lib/network-traffic"
+import { delayLabel, type CakeTin } from "@/lib/network/traffic"
 import { Notice } from "@/components/state"
 import { Disclosure } from "@/components/form"
 import { Information } from "@/components/icons"

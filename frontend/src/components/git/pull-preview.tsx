@@ -22,7 +22,8 @@ import {
   pullStateOf,
 } from "@/components/git/pull-state"
 import { IconAction } from "@/components/icon-action"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"

@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { headers } from "next/headers"
 import { Toaster } from "@/components/ui/sonner"
 import { AuthProvider } from "@/hooks/use-auth"
@@ -14,6 +14,22 @@ import "./globals.css"
 export const metadata: Metadata = {
   description: "Self-hosted server management",
   robots: { index: false, follow: false },
+}
+
+// The page is drawn edge to edge on a phone, so the safe-area insets are real
+// numbers rather than always 0: the pane bar's `env(safe-area-inset-bottom)`
+// and the `pb-safe` utilities keep a bottom layer clear of the home indicator,
+// and the body keeps clear of the notch's sides (globals.css). The browser's
+// own bar takes the page's ground (`--background`, #0d0d0d) rather than its
+// white default, and its form controls and scrollbars are the dark ones before
+// any stylesheet arrives. `resizes-content` shrinks the layout above an open
+// keyboard on Android, so a composer or the terminal's key strip at the foot
+// of the `h-svh` shell stays in view while typing; iOS ignores it.
+export const viewport: Viewport = {
+  viewportFit: "cover",
+  themeColor: "#0d0d0d",
+  colorScheme: "dark",
+  interactiveWidget: "resizes-content",
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

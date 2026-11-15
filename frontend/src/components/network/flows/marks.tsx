@@ -1,4 +1,4 @@
-import { flowCounter } from "@/lib/network-flows"
+import { flowCounter } from "@/lib/network/flows"
 
 const FULL = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",

@@ -45,7 +45,7 @@ import type {
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { Disclosure, Field, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
 import {
   ArrowLeftRight,
@@ -60,7 +60,8 @@ import {
 } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ScheduleBuilder, scheduleExpression, scheduleFields } from "@/components/schedule-builder"
-import { LoadingPanel, Notice } from "@/components/state"
+import { Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"

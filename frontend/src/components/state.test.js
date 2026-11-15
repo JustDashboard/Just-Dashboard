@@ -5,7 +5,8 @@ import { ApiError } from "@/lib/api"
 import { failureReason } from "@/lib/toast"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { ErrorState, Hold, LoadingPanel, LoadingRows } from "./state"
+import { ErrorState } from "./state"
+import { Hold, LoadingPanel, LoadingRows } from "./loading"
 
 // What a failure is drawn as, read from the markup of a first render. The
 // pause a throttled read waits before it asks again needs a clock and a

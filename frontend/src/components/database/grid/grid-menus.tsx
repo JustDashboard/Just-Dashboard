@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChipCount } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {

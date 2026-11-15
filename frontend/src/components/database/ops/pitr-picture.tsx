@@ -2,8 +2,8 @@
 
 import { useRef } from "react"
 import { FolderOpen, Logs } from "@/components/icons"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { SettingPicture } from "@/components/settings/setting-picture"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { EngineGlyph } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"

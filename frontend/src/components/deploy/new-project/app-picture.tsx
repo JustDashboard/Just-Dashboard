@@ -4,7 +4,7 @@ import { useRef } from "react"
 import { GitHubMark } from "@/components/icons"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 
 /**
  * The GitHub App while it is not connected, as the Credentials page draws it,

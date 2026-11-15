@@ -8,7 +8,7 @@ import {
 } from "@excalidraw/excalidraw"
 import type { ExcalidrawImperativeAPI, LibraryItems } from "@excalidraw/excalidraw/types"
 import { ApiError, get, post, put } from "@/lib/api"
-import type { BoardLibrary } from "@/lib/boards"
+import type { BoardLibrary } from "@/lib/board/boards"
 import { notify } from "@/lib/toast"
 
 /**

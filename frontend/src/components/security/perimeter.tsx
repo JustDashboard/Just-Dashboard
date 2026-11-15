@@ -7,7 +7,7 @@ import { networkOf } from "@/lib/clients"
 import { plural } from "@/lib/format"
 import type { Connections, Exposure, Fail2banJail, FirewallStatus, LoginSession } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import {
   ProductGlyph,
@@ -15,7 +15,7 @@ import {
   hasProductLogo,
   processProduct,
 } from "@/components/product-logo"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { openings, refusesByDefault } from "@/components/network/firewall-reading"
@@ -40,7 +40,7 @@ type Line = {
 /**
  * The two ways onto this machine, drawn in the wiring vocabulary the
  * Configuration page's request path and the deployment maps speak
- * (`deploy/wire`): what a connection from the internet meets on its way to a
+ * (`components/wire/wire`): what a connection from the internet meets on its way to a
  * shell — the firewall, fail2ban, sshd, and then whoever is signed in — and
  * the way this browser reached the dashboard, through its allowlist.
  *

@@ -6,7 +6,7 @@ import { bytes, duration } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import {
   Disclosure,
   Field,

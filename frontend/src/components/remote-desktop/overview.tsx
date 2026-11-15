@@ -4,9 +4,9 @@ import Link from "next/link"
 import { useMemo, useState } from "react"
 import { Modal } from "@/components/modal"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList } from "@/components/flow"
+import { ChoiceList } from "@/components/choice-row"
 import { ArrowRight, Plus, RefreshClockwise, TerminalWindow } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { MissingThing } from "@/components/missing-thing"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -92,7 +92,7 @@ export function RemoteDesktopOverview() {
           {/* A phone has room for the name or the version, and the picture's
               hub says the version under it. */}
           {data && (
-            <span className="font-mono text-body font-normal text-muted-foreground max-sm:hidden">
+            <span className="font-mono text-body leading-none font-normal text-muted-foreground max-sm:hidden">
               {" "}
               guacd {data.engine.version}
             </span>

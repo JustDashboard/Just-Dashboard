@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { errorMessage, get, type Query } from "@/lib/api"
 import { plural } from "@/lib/format"
-import { useLogView } from "@/lib/log-view"
+import { useLogView } from "@/lib/log/view"
 import type { LogLine, LogSearchResult } from "@/lib/types"
 import { LogRow, eventColumnFor } from "@/components/logs/log-console"
 

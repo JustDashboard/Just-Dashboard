@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils"
 import { ApiError, get } from "@/lib/api"
 import { minuteSpan } from "@/lib/format"
 import type { LogLine, LogSource } from "@/lib/types"
-import { EMPTY_FILTER, filterEquals, resolveRange } from "@/lib/log-filter"
-import { STACK_LENS, lensFor, withLensDefaults, type LogLens } from "@/lib/log-lenses"
+import { EMPTY_FILTER, filterEquals, resolveRange } from "@/lib/log/filter"
+import { STACK_LENS, lensFor, withLensDefaults, type LogLens } from "@/lib/log/lenses"
 import { useSessionState } from "@/lib/view-state"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import type { Tone } from "@/components/tone"
@@ -25,7 +25,8 @@ import { askOf, emptiedFile, withAsk, type LogAsk } from "@/components/logs/logs
 import { SourceFacts } from "@/components/logs/source-facts"
 import { Pane } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
-import { EmptyState, LoadingRows } from "@/components/state"
+import { EmptyState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import {
   Select,
   SelectContent,

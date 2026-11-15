@@ -19,7 +19,7 @@ import {
   sshFingerprintProblem,
   sshKeyTypes,
   type SSHTrust,
-} from "@/lib/network-diagnostics"
+} from "@/lib/network/diagnostics"
 import { notify } from "@/lib/toast"
 import type { HeldResult } from "./use-tool-run"
 

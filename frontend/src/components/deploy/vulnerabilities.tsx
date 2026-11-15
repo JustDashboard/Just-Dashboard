@@ -18,12 +18,13 @@ import type {
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { ProductGlyph, hasProductLogo, imageProduct } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import {
   SEVERITIES,
   SEVERITY_COLOR,

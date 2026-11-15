@@ -2,7 +2,7 @@
 
 import { ChevronDown } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import {
   DropdownMenu,
   DropdownMenuContent,

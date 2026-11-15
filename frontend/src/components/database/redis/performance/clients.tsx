@@ -8,9 +8,10 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingPanel } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import {
   Table,

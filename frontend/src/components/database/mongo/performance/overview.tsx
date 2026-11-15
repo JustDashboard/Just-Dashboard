@@ -3,12 +3,14 @@
 import { useMemo } from "react"
 import { bytes, duration, rate } from "@/lib/format"
 import type { PollState } from "@/hooks/use-poll"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import { ChartReadings, SeriesReading } from "@/components/metrics/chart-reading"
 import type { Series } from "@/components/metrics/metric-chart"
-import { Detail, DetailList, RowLink } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
+import { RowLink } from "@/components/row-link"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingRows } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import {
   Table,
   TableBody,

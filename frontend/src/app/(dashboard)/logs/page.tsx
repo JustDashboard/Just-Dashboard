@@ -15,9 +15,9 @@ import {
   levelsFromParam,
   readLogWindow,
   resolveRange,
-} from "@/lib/log-filter"
-import { STACK_LENS, lensFor, withLensDefaults } from "@/lib/log-lenses"
-import { journalSource } from "@/lib/log-sources"
+} from "@/lib/log/filter"
+import { STACK_LENS, lensFor, withLensDefaults } from "@/lib/log/lenses"
+import { journalSource } from "@/lib/log/sources"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"

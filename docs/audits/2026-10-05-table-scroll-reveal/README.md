@@ -4,7 +4,7 @@ A capped table sized to fit under its page's header is half below the fold whene
 at its top. The wheel over such a table now moves the page first, bringing the whole table container
 on screen, and only then scrolls its rows. Every `Table` in the product gets this through
 `ui/table.tsx`; see the shell notes in
-[`docs/internal/frontend/shell-design.md`](../../internal/frontend/shell-design.md).
+[`docs/internal/frontend/shell-design.md`](../../internal/frontend/shell.md).
 
 [Recording (MP4, 28 s)](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-05-table-scroll-reveal/processes-table-reveal.mp4) · [Inline GIF](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-05-table-scroll-reveal/processes-table-reveal.gif)
 

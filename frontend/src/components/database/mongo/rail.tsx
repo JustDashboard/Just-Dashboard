@@ -15,7 +15,7 @@ import {
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { IconAction, rowReveal } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { EmptyNote } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {

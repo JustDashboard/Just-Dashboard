@@ -2,10 +2,11 @@
 
 import { bytes, duration, relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { Meter } from "@/components/meter"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingPanel } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import {

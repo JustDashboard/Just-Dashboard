@@ -19,10 +19,10 @@ import {
   parsePredicate,
   toggleField,
   type LogLevel,
-} from "@/lib/log-filter"
-import { fieldOf, isFilterable } from "@/lib/log-fields"
-import { readingFilter } from "@/lib/log-insights"
-import type { LensView, LogLens } from "@/lib/log-lenses"
+} from "@/lib/log/filter"
+import { fieldOf, isFilterable } from "@/lib/log/fields"
+import { readingFilter } from "@/lib/log/insights"
+import type { LensView, LogLens } from "@/lib/log/lenses"
 import { FieldMark, FieldValue } from "@/components/logs/field-value"
 import {
   readingPressed,
@@ -31,7 +31,7 @@ import {
 } from "@/components/logs/lens-readings"
 import { LevelChips, presentLevels } from "@/components/logs/filter-bar"
 import { readingFor, readingShown, unaskedReadings } from "@/components/logs/logs-model"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"

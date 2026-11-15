@@ -1,5 +1,5 @@
 import { get } from "@/lib/api"
-import type { BoardSummary } from "@/lib/boards"
+import type { BoardSummary } from "@/lib/board/boards"
 import type {
   BackupJob,
   ComposeStack,

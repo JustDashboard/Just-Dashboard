@@ -4,10 +4,10 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ArrowRight, Home, Question } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { addressTail, nearestPage } from "@/components/missing-page-model"
 import { Button } from "@/components/ui/button"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 
 /**
  * An address no page claims, drawn as what it is: the address that was asked

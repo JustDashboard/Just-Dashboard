@@ -3,7 +3,7 @@
 import { Fragment, useMemo } from "react"
 import { ChevronRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { FactDot } from "@/components/metrics/host-identity"
+import { FactDot } from "@/components/identity-header"
 import { PaneFooter, PaneHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"

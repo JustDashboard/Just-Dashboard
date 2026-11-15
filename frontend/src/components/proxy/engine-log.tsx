@@ -3,12 +3,12 @@
 import { useMemo } from "react"
 import { get } from "@/lib/api"
 import type { LogSource } from "@/lib/types"
-import { dockerSource, fileSource, journalSource } from "@/lib/log-sources"
+import { dockerSource, fileSource, journalSource } from "@/lib/log/sources"
 import { usePoll } from "@/hooks/use-poll"
 import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import type { ProxyStatus } from "@/components/proxy/proxy-context"
 
 /** Where a host Caddy writes its requests, when its Caddyfile logs them to a file. */

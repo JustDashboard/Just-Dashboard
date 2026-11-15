@@ -10,7 +10,7 @@ import { SourceBranch } from "@/components/git/glyphs"
 import { RepoMark } from "@/components/git/languages"
 import { TreeState, branchLabel } from "@/components/git/marks"
 import { ChecksMark, PullStateMark } from "@/components/git/pull-state"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import { DimActions, IconAction } from "@/components/icon-action"
 
 /** The id the section is reached by, from a card's worktree count. */

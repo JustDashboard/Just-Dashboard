@@ -5,9 +5,9 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentFleet, DeploymentSummary } from "@/lib/types"
 import { CloudUpload, Rocket } from "@/components/icons"
 import { ProductLogo } from "@/components/product-logo"
-import { ProjectMark } from "@/components/deploy/project-mark"
-import { WirePlaceholder } from "@/components/deploy/wire"
-import type { WireFlowNode, WireLine } from "@/components/wire-flow"
+import { ProjectMark } from "@/components/project-mark"
+import { WirePlaceholder } from "@/components/wire/wire"
+import type { WireFlowNode, WireLine } from "@/components/wire/wire-flow"
 
 /**
  * What the section pages beside Notifications share in their pictures: the

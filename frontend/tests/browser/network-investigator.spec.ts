@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { admin, json, mockNetwork } from "./network-fixture"
 import { risen } from "./risen"
-import type { PathRequest, PathResult } from "../../src/lib/network-investigator-types"
+import type { PathRequest, PathResult } from "../../src/lib/network/investigator-types"
 
 const id = "a".repeat(64)
 const evidence = (

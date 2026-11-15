@@ -7,13 +7,13 @@ import type {
   DeploymentPendingState,
   DeploymentSummary,
 } from "@/lib/types"
-import { PROJECT_SETTINGS_NAV } from "@/components/nav"
+import { PROJECT_SETTINGS_NAV } from "@/components/shell/nav"
 import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useProject } from "@/components/deploy/project-context"
 import { PENDING_KIND_PAGE, sourceProduct } from "@/components/deploy/vocabulary"
-import { PendingStrip, type PendingItem } from "@/components/deploy/settings/pending-strip"
+import { PendingStrip, type PendingItem } from "@/components/settings/pending-strip"
 
 /**
  * Saved changes the live release does not have yet, named, each one a way

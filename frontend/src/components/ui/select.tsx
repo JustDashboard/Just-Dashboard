@@ -5,6 +5,7 @@ import { Check, ChevronDown, ChevronUp } from "@/components/icons"
 import { Select as SelectPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useFieldControl } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { MenuItemText } from "@/components/ui/menu-item-text"
 import {
@@ -46,19 +47,25 @@ function SelectValue({ ...props }: React.ComponentProps<typeof SelectPrimitive.V
 
 /**
  * The select's text is the field's text: the 13px body, and 16px on a phone
- * where `Input` goes to 16 for iOS's sake. It was 14px throughout, so a
- * `FieldRow` of an `Input` and a `Select` read in two sizes side by side (§8).
- * The phone size is the variant rather than the base so that a toolbar's
- * compact select, which passes `text-xs`, keeps it from `sm` up.
+ * or under a finger, where `Input` goes to 16 for iOS's sake. It was 14px
+ * throughout, so a `FieldRow` of an `Input` and a `Select` read in two sizes
+ * side by side (§8). The phone size is the variant rather than the base so
+ * that a toolbar's compact select, which passes `text-xs`, keeps it from `sm`
+ * up under a mouse.
+ *
+ * Its edge is the control edge, as a field's is: the trigger is the field of
+ * a choice, and the outline button's hairline is for a command.
  */
 function SelectTrigger({
   className,
   size = "default",
   children,
-  ...props
+  ...rest
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default"
 }) {
+  // Inside a `Field`: its id, its hint and error ids, and whether it is wrong.
+  const props = useFieldControl(rest)
   return (
     <SelectPrimitive.Trigger asChild {...props}>
       <Button
@@ -66,7 +73,7 @@ function SelectTrigger({
         variant="outline"
         size={size === "sm" ? "sm" : "default"}
         className={cn(
-          "w-fit min-w-0 justify-between text-body font-normal data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 *:data-[slot=select-value]:truncate max-sm:h-11 max-sm:text-base [&_svg:not([class*='text-'])]:text-muted-foreground",
+          "w-fit min-w-0 justify-between border-control-edge text-body font-normal data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 *:data-[slot=select-value]:truncate max-sm:h-11 max-sm:text-base pointer-coarse:text-base [&_svg:not([class*='text-'])]:text-muted-foreground",
           size === "sm" && "max-sm:h-10",
           className,
         )}

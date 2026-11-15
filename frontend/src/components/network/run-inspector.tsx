@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Status, StatusDot, type DotTone } from "@/components/status-dot"
@@ -12,8 +12,8 @@ import {
   hasEvidence,
   resultReading,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
-import { runTarget, runTool } from "@/lib/network-runs-view"
+} from "@/lib/network/diagnostics"
+import { runTarget, runTool } from "@/lib/network/runs-view"
 import { cn } from "@/lib/utils"
 import { PathReport } from "./path-report"
 import { ProbeEvidence } from "./tools/probe-evidence"

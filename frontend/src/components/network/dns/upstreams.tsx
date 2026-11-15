@@ -14,12 +14,8 @@ import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import {
   clearedLists,
   missingTLSNames,

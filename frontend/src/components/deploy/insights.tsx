@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RankList } from "@/components/rank-list"
 import { Rocket } from "@/components/icons"
@@ -19,7 +20,7 @@ import { formatDuration } from "@/components/deploy/vocabulary"
 import { causeTitle } from "@/components/deploy/failure-cause"
 import { deliveryFacts, deliveryLead } from "@/components/deploy/delivery-model"
 import { Fact, FactLine } from "@/components/deploy/fact-line"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -144,6 +145,10 @@ function DayBars({
             // Dates repeat when a window is longer than the recorded history;
             // the position is what makes a bar unique.
             key={`${day.date}-${index}`}
+            // A strip the pointer scrubs: a bubble the pointer could move onto
+            // held the last day open while it crossed to the next, and the
+            // next day's reading never came.
+            disableHoverableContent
             open={active === index}
             onOpenChange={(open) =>
               setActive((current) => (open ? index : current === index ? null : current))

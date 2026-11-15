@@ -15,7 +15,7 @@ import { hueFor, LANES } from "@/lib/hue"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
 import { IconAction, rowReveal } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {

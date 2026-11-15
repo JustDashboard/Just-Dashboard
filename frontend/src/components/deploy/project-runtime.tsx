@@ -46,10 +46,11 @@ import type {
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
-import { EmptyNote, EmptyState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
@@ -78,7 +79,7 @@ import {
 import type { ConfirmFn } from "@/components/docker/shared"
 import { JobCard } from "@/components/backups/job-card"
 import { useProject } from "@/components/deploy/project-context"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { ServiceDetails } from "@/components/deploy/runtime-details"
 import {
   isImageDigest,

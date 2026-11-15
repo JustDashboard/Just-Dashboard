@@ -9,8 +9,8 @@ import type { ApiToken, DashboardUser, SessionInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireNode, WirePlaceholder } from "@/components/deploy/wire"
-import { useNow } from "@/components/deploy/vocabulary"
+import { WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { useNow } from "@/hooks/use-now"
 import { activeNow, keyLine, sessionLine, usableKeys, type Line } from "@/components/account/access"
 import {
   AccountWireMark,
@@ -21,7 +21,7 @@ import {
   keyHint,
 } from "@/components/account/marks"
 import { ROLE_NAME } from "@/components/account/capabilities"
-import { displayNameOf } from "@/components/account/user-avatar"
+import { displayNameOf } from "@/components/user-avatar"
 
 /** How many marks each side of the picture draws before it counts the rest. */
 const SHOWN = 4

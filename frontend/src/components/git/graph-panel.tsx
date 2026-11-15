@@ -20,7 +20,7 @@ import { usePoll } from "@/hooks/use-poll"
 import type { GitPreview } from "@/components/git/preview-panel"
 import { SourceFork } from "@/components/git/glyphs"
 import { parseRefs, RefTags } from "@/components/git/ref-tags"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import {
   Select,
   SelectContent,
@@ -28,7 +28,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { PaneHeader } from "@/components/panel"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Button } from "@/components/ui/button"

@@ -2,7 +2,7 @@
 
 import { Connection, Globe, Router, type Icon } from "@/components/icons"
 import type { Exposure } from "@/lib/types"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Bone } from "@/components/bone"
 import { NetworkFact } from "@/components/client-mark"
 import { Status, type Verdict } from "@/components/status-dot"

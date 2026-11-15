@@ -57,7 +57,7 @@ in the place of the bar's one command. When changes cannot be saved, Back and
 in-board links ask before leaving without saving instead of doing nothing.
 
 A flush waits for every edit, including changes made while an earlier request was in flight.
-`lib/board-save.ts` drains successive snapshots against their acknowledged revisions, and editor-owned
+`lib/board/save.ts` drains successive snapshots against their acknowledged revisions, and editor-owned
 Back and resource-link navigation checks that the drawing is still clean before routing. A failed later save keeps the editor open with
 the leave choice. Reloading or closing the browser tab also warns while changes remain unsaved,
 including after a conflict or missing-drawing response; an explicit choice to leave without saving or
@@ -191,7 +191,7 @@ feature pages; they do not run a deployment or database mutation from a drawing.
 
 Excalidraw's own embed list includes tweets, gists and Reddit, which it draws with the provider's
 script inside the frame; this page's `script-src` admits nonce-bearing scripts alone, so those frames
-were always blank. `validateEmbeddable` (`lib/board-embeds.ts`) allows the dashboard's own resource
+were always blank. `validateEmbeddable` (`lib/board/embeds.ts`) allows the dashboard's own resource
 links and YouTube, Vimeo and Figma over https, and `frame-src` in `src/proxy.ts` names their players
 (`https://www.youtube.com`, `https://player.vimeo.com`, `https://www.figma.com`) from the same list.
 Excalidraw sandboxes those frames; they are other origins and cannot reach the dashboard.
@@ -244,6 +244,6 @@ diagram, Open and Help.
 The server's rules are held by `handlers_boards_test.go` and `handlers_boards_{files,library,merge,
 diagram,live}_test.go`: saves and conflicts, image storage, extraction and collection, the merge rule
 and tombstones, the library and its fetch's URL table, text to diagram against a fake provider, and the
-relay with real sockets. `lib/board-files.test.js`, `lib/board-embeds.test.js` and
-`lib/board-live.test.js` hold the editor's pure rules, and `tests/browser/boards-ui.spec.ts` drives the
+relay with real sockets. `lib/board/files.test.js`, `lib/board/embeds.test.js` and
+`lib/board/live.test.js` hold the editor's pure rules, and `tests/browser/boards-ui.spec.ts` drives the
 editor against a mock of the handlers, the live room included through a routed WebSocket.

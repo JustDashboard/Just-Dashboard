@@ -1,6 +1,6 @@
 import { Database, Globe } from "@/components/icons"
 import { ProductGlyph, ProductGlyphs } from "@/components/product-logo"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 
 /**
  * What Add a database draws beside the catalogue until an engine is picked:

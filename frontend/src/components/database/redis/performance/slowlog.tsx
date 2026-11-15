@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, LoadingPanel } from "@/components/state"
+import { EmptyState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import {
   Table,

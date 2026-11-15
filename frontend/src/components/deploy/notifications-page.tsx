@@ -40,13 +40,14 @@ import type {
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldCheck,
@@ -65,7 +66,7 @@ import {
   channelProduct,
   webhookProduct,
 } from "@/components/product-logo"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -81,8 +82,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { ProjectMark } from "@/components/deploy/project-mark"
-import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { ProjectMark } from "@/components/project-mark"
+import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { ChannelGlyph, channelMark, mailProduct } from "@/components/deploy/vocabulary"
 
 /**

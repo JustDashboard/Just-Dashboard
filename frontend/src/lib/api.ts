@@ -12,7 +12,7 @@
  */
 
 import { retryAfterMs } from "@/lib/backoff"
-import { networkPendingHeaders } from "@/lib/network-pending"
+import { networkPendingHeaders } from "@/lib/network/pending"
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
 

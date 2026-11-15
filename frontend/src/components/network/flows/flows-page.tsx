@@ -12,9 +12,10 @@ import {
   Trash,
 } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs } from "@/components/ui/tabs"
@@ -33,7 +34,7 @@ import {
   yesterdayUTC,
   type FlowReport,
   type FlowSettings,
-} from "@/lib/network-flows"
+} from "@/lib/network/flows"
 import { FlowsPicture } from "@/components/network/flows/flows-picture"
 import {
   FlowRowReading,

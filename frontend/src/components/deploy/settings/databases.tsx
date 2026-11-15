@@ -37,7 +37,7 @@ import type {
 import { JobCard } from "@/components/backups/job-card"
 import { destinationProduct } from "@/components/backups/marks"
 import { scheduleLabel } from "@/components/backups/shared"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, InfoTip, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
@@ -66,8 +66,8 @@ import {
   SettingSection,
   SettingsPage,
   settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+} from "@/components/settings/setting-card"
+import { SettingPicture } from "@/components/settings/setting-picture"
 import { PreviewBranchesForm } from "@/components/deploy/settings/preview-branches"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
@@ -78,9 +78,9 @@ import {
   MountMark,
 } from "@/components/deploy/vocabulary"
 import { volumeProduct } from "@/components/deploy/service-product"
-import { WireMark, WireNode } from "@/components/deploy/wire"
-import { ProjectMark } from "@/components/deploy/project-mark"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { WireMark, WireNode } from "@/components/wire/wire"
+import { ProjectMark } from "@/components/project-mark"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { useProject } from "@/components/deploy/project-context"

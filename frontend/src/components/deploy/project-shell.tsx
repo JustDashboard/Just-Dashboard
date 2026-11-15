@@ -34,12 +34,12 @@ import { ProductGlyph, buildMethodProduct, hasProductLogo } from "@/components/p
 import { BranchChip } from "@/components/git/marks"
 import { useProject } from "@/components/deploy/project-context"
 import { projectCommand, useProjectVerbs } from "@/components/deploy/project-verbs"
-import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/nav"
-import { useNavScope, type NavScope } from "@/components/nav-scope"
+import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/shell/nav"
+import { useNavScope, type NavScope } from "@/components/shell/nav-scope"
 import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
-import { HostIdentity } from "@/components/metrics/host-identity"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { HostIdentity } from "@/components/identity-header"
+import { ProjectMark } from "@/components/project-mark"
 import { PullRequestPicker } from "@/components/deploy/pull-request-picker"
 import { EnvironmentSwitch } from "@/components/deploy/environment-switch"
 import { AddStagingDialog } from "@/components/deploy/add-staging-dialog"
@@ -381,7 +381,7 @@ function Address({
       <span className="truncate">
         Private service
         {deployment.internalPort && (
-          <span className="font-mono text-body font-normal text-muted-foreground">
+          <span className="font-mono text-body leading-none font-normal text-muted-foreground">
             {" "}
             :{deployment.internalPort}
           </span>

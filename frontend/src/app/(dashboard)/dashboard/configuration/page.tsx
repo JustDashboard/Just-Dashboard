@@ -18,12 +18,12 @@ import { EndpointText, RequestPath } from "@/components/config/request-path"
 import { RestartProgress } from "@/components/config/restart-progress"
 import { UninstallDialog, UninstallProgress, UninstallRow } from "@/components/config/uninstall"
 import { UsagePingSection } from "@/components/config/usage-ping"
-import { PendingStrip } from "@/components/deploy/settings/pending-strip"
-import { SaveBarProvider, useSaveBarEntry } from "@/components/deploy/settings/save-bar"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { PendingStrip } from "@/components/settings/pending-strip"
+import { SaveBarProvider, useSaveBarEntry } from "@/components/settings/save-bar"
+import { SettingSection } from "@/components/settings/setting-card"
 import { Disclosure, Field, FieldRow } from "@/components/form"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
@@ -34,7 +34,7 @@ import {
   SettingsColumn,
   SwitchRow,
   SwitchRows,
-} from "@/components/settings-column"
+} from "@/components/settings/settings-column"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -79,7 +79,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * are rarely pressed on. The restart they start is watched under the path.
  *
  * **The settings** are one centred column of sections, as a project's
- * settings are (`deploy/settings/setting-card.tsx`), the certificate first
+ * settings are (`components/settings/setting-card.tsx`), the certificate first
  * because picking one fills the address, the interface and the allowlist
  * under it. They were two columns across the width, which set two unrelated
  * heads on one line and a helper sentence under every field; the sentences

@@ -23,9 +23,9 @@ import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { ChoiceList } from "@/components/flow"
-import { FactDot } from "@/components/metrics/host-identity"
+import { useNow } from "@/hooks/use-now"
+import { ChoiceList } from "@/components/choice-row"
+import { FactDot } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -326,7 +326,7 @@ export default function DockerOverviewPage() {
               <span className="inline-flex items-center gap-1.5">
                 Containers
                 {read && (
-                  <span className="numeric text-body font-normal text-muted-foreground">
+                  <span className="numeric text-body leading-none font-normal text-muted-foreground">
                     {containers.length}
                   </span>
                 )}
@@ -362,7 +362,7 @@ export default function DockerOverviewPage() {
                 <span className="inline-flex items-center gap-1.5">
                   Compose projects
                   {stacks.data && (
-                    <span className="numeric text-body font-normal text-muted-foreground">
+                    <span className="numeric text-body leading-none font-normal text-muted-foreground">
                       {active.length} of {detected.length} up
                     </span>
                   )}

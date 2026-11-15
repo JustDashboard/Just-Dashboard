@@ -19,7 +19,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { WIDE_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -218,7 +219,7 @@ export function StackPreview({
           title={
             <>
               Services
-              <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+              <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                 {services.length}
               </span>
             </>

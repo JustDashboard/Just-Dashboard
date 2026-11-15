@@ -5,7 +5,7 @@ import type {
   DiagnosticResult,
   DiagnosticRun,
   WakeDevice,
-} from "../../src/lib/network-diagnostics"
+} from "../../src/lib/network/diagnostics"
 import { TOOL_EVIDENCE } from "./fixtures/network-tool-results"
 import { admin, json, mockNetwork } from "./network-fixture"
 import { risen } from "./risen"

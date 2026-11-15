@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import { LANES, hueFor } from "@/lib/hue"
-import type { LogLevel } from "@/lib/log-filter"
+import type { LogLevel } from "@/lib/log/filter"
 import { CLASS_TEXT } from "@/lib/requests"
 import {
   leadingTime,
@@ -11,12 +11,12 @@ import {
   tokenize,
   type Span,
   type TokenKind,
-} from "@/lib/log-tokens"
+} from "@/lib/log/tokens"
 import type { LogLine } from "@/lib/types"
 import type { Tone } from "@/components/tone"
 
 /**
- * A log line, drawn by its shapes (`lib/log-tokens.ts`).
+ * A log line, drawn by its shapes (`lib/log/tokens.ts`).
  *
  * The colours are one map in one file, and they follow the product's rules
  * rather than a code editor's: the **status hues** go only to what is a
@@ -62,7 +62,7 @@ export const LEVEL_WORD: Record<LogLevel, string> = {
 }
 
 /**
- * An event as a word in the level column (`lib/log-lenses.ts`). The status
+ * An event as a word in the level column (`lib/log/lenses.ts`). The status
  * hues only for the tones that are verdicts; the rest recede, because on a
  * page of Postgres lines "checkpoint" is context and "deadlock" is the find.
  */

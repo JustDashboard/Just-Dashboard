@@ -10,7 +10,7 @@ import {
   RUN_CAP,
   wallClock,
 } from "@/lib/schedule"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { describeCron } from "@/lib/cron"
 import { KIND } from "@/components/procs/schedule-band"
 

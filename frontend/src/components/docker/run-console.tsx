@@ -5,7 +5,7 @@ import { CheckCircle, CrossCircle } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Pane, PaneHeader } from "@/components/panel"
 
 /**

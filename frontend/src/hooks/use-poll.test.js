@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, jest, test } from "bun:test"
-import { pollLoop } from "./use-poll"
+import { pollLoop } from "./poll-loop"
 
 /** A `document` that can be hidden and shown, and that counts its listeners. */
 function fakePage() {

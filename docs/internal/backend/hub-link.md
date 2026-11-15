@@ -217,7 +217,7 @@ says who listed it. Another server's endpoint, and the hub, open from the switch
 with `noopener noreferrer`, never in the dashboard's own tab. The Settings page calls `check` as an address is
 typed or filled and shows the machine under it, shows `hubMachine` on the request and the link (or that the test
 origin checks none) with the hub key's fingerprint to compare with the hub's Settings page, and leaves the scope
-unchosen after a `?connect=` link ([feature map](../frontend/feature-map.md)).
+unchosen after a `?connect=` link ([feature map](../frontend/features/README.md)).
 
 ## Local API
 

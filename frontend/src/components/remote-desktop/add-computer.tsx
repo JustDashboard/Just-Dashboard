@@ -4,8 +4,6 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 import {
-  ChoiceList,
-  ChoiceRow,
   FlowActions,
   FlowHeader,
   FlowPanel,
@@ -13,13 +11,14 @@ import {
   FlowPanelHeader,
   FlowSteps,
 } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow } from "@/components/form"
 import { ArrowLeft, ArrowRight, Check, Globe } from "@/components/icons"
 import { Page } from "@/components/page"
 import { ProductGlyph, ProductLogos } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { ErrorState, Notice } from "@/components/state"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"

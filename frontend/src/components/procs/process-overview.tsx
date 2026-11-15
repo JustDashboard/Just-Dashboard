@@ -16,10 +16,11 @@ import { bytes, duration, percent, plural, timestamp } from "@/lib/format"
 import type { ProcessInspect, ProcessLink, ProcessRow, ProcessTree } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ShellWords } from "@/components/deploy/run-evidence"
-import { useNow } from "@/components/deploy/vocabulary"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { useNow } from "@/hooks/use-now"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { IconAction } from "@/components/icon-action"
-import { Detail, DetailList, Section } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Section } from "@/components/section"
 import { Well } from "@/components/panel"
 import {
   ProductGlyph,
@@ -104,7 +105,7 @@ export function ProcessOverview(props: OverviewProps) {
             title={
               <>
                 Started by it
-                <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                   {children.length}
                 </span>
               </>

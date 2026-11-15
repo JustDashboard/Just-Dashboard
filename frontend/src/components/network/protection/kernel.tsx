@@ -10,17 +10,13 @@ import type { InterfaceReading, KernelProfile, ProtectionSetting } from "@/lib/t
 import { ConfirmDialog, useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
 import { EmptyNote } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import {
   Select,
   SelectContent,

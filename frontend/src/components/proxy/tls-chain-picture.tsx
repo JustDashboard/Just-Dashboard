@@ -4,11 +4,11 @@ import { createRef, useMemo, useRef, type RefObject } from "react"
 import Link from "next/link"
 import { Connection, Globe, LockClosed, LockOpen, ShieldCheck, type Icon } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import type { ChainKind, ChainNode, ChainTone } from "@/lib/tls-chain"
+import type { ChainKind, ChainNode, ChainTone } from "@/lib/tls/chain"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark } from "@/components/deploy/wire"
+import { WireHost, WireMark } from "@/components/wire/wire"
 import { sitePath } from "@/components/proxy/site-verbs"
 
 const GLYPH: Partial<Record<ChainKind, Icon>> = {

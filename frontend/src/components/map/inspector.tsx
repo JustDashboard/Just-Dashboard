@@ -24,7 +24,7 @@ import { VIA_LABEL, wireLabel } from "@/components/map/edges"
 import { ItemMark, KIND_GLYPH, TONE_DOT } from "@/components/map/marks"
 import type { UnreadNotice } from "@/components/map/unread"
 import { MissingLine } from "@/components/missing-thing"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { nodeKindLabel } from "@/components/map/nodes"
 
 type Point = (id: string | null) => void

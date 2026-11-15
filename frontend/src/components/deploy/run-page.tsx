@@ -32,9 +32,11 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
-import { Page, PageContext, Section } from "@/components/page"
-import { useTabTitle } from "@/components/tab-title"
-import { ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { Page, PageContext } from "@/components/page"
+import { Section } from "@/components/section"
+import { useTabTitle } from "@/components/shell/tab-title"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { StatusDot } from "@/components/status-dot"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -53,8 +55,8 @@ import {
   runStopped,
   stepName,
   stepOperation,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { BuildConsole, consoleRows, transcriptSummary } from "@/components/deploy/build-console"
 import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunDetails, initialStep } from "@/components/deploy/run-steps"

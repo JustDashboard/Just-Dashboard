@@ -7,7 +7,7 @@ import { certPathProduct, siteProduct } from "@/components/proxy/marks"
 import type { BackendKind } from "@/components/proxy/route-map"
 import { FEATURE_LABEL, activeOwner } from "@/components/proxy/site-details"
 import { isDown } from "@/components/proxy/site-filters"
-import { useProjectFavicon } from "@/components/deploy/project-mark"
+import { useProjectFavicon } from "@/components/project-mark"
 
 const BACKEND_GLYPH = { app: Box, files: FolderOpen, redirect: CornerUpRight, config: FileText }
 

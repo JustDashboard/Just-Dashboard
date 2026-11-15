@@ -18,10 +18,10 @@ import {
   type Icon,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
-import { evidenceCounts } from "@/lib/network-investigator"
-import type { PathEvidence, PathResult } from "@/lib/network-investigator-types"
+import { evidenceCounts } from "@/lib/network/investigator"
+import type { PathEvidence, PathResult } from "@/lib/network/investigator-types"
 
 type Basis = PathEvidence["basis"]
 

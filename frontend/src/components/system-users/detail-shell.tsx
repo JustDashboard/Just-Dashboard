@@ -5,7 +5,8 @@ import { useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
 import { ChevronDown, ChevronUp } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { WorkspaceHelp } from "@/components/workspace/workspace"
 
 /**

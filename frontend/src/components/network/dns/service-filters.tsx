@@ -6,13 +6,14 @@ import {
   DNS_SERVICE_BASE,
   type DNSConnection,
   type DNSNativeReading,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import {
   dnsFilterKindName,
   readDNSFilterView,
   type DNSFilterSection,
-} from "@/lib/network-dns-filters"
-import { ErrorState, LoadingPanel, Notice } from "@/components/state"
+} from "@/lib/network/dns-filters"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 function Reading({ label, value }: { label: string; value: DNSNativeReading }) {

@@ -6,8 +6,9 @@ import { ArrowUpRight, Wrench } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { relativeTime, timestamp } from "@/lib/format"
 import type { DeploymentEngineRun } from "@/lib/types"
-import { FactDot } from "@/components/metrics/host-identity"
-import { EmptyState, LoadingRows } from "@/components/state"
+import { FactDot } from "@/components/identity-header"
+import { EmptyState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import {
   Select,
   SelectContent,
@@ -16,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { BuildConsole } from "@/components/deploy/build-console"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import { useRunTranscript } from "@/components/deploy/run-stream"
 import {
@@ -26,8 +27,8 @@ import {
   runDurationSeconds,
   runSubject,
   runTitle,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 
 /**
  * What the builds said, beside what the running release says.

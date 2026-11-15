@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { get } from "@/lib/api"
-import { readDNSDHCPView, type DNSDHCPView } from "@/lib/network-dns-dhcp"
-import { DNS_SERVICE_BASE, type DNSConnection } from "@/lib/network-dns-services"
+import { readDNSDHCPView, type DNSDHCPView } from "@/lib/network/dns-dhcp"
+import { DNS_SERVICE_BASE, type DNSConnection } from "@/lib/network/dns-services"
 import { plural } from "@/lib/format"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"

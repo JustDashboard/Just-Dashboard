@@ -7,13 +7,13 @@ import { Modal } from "@/components/modal"
 import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import type { PathRequest } from "@/lib/network-investigator-types"
+import type { PathRequest } from "@/lib/network/investigator-types"
 import { post } from "@/lib/api"
 import {
   diagnosticNameProblem,
   type DiagnosticRequest,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
+} from "@/lib/network/diagnostics"
 import { runHref } from "@/components/network/saved-runs"
 
 /** Save an explicit new run from the draft; opening the dialog emits no probe. */

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { FindingList } from "@/components/finding-list"
 import { findingNavigation } from "@/lib/finding-destinations"
-import { Detail, DetailList, Metric, MetricStrip } from "@/components/page"
+import { Detail, DetailList, Metric, MetricStrip } from "@/components/detail-list"
 import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ import {
   formatMetric,
   stageTone,
   type DiagnosticResult,
-} from "@/lib/network-diagnostics"
+} from "@/lib/network/diagnostics"
 
 /**
  * The structured half of a diagnostic: the stages it went through, what it

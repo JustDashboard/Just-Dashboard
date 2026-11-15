@@ -14,11 +14,11 @@ import {
 } from "@/lib/schedule"
 import { useSessionState } from "@/lib/view-state"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot } from "@/components/metrics/host-identity"
+import { useNow } from "@/hooks/use-now"
+import { FactDot } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct, unitProduct } from "@/components/product-logo"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 
 const HOUR = 3600_000

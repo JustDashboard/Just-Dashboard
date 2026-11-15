@@ -17,7 +17,7 @@ import { copyText } from "@/lib/clipboard"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { IconAction } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {

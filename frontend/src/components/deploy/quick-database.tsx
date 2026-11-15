@@ -9,8 +9,10 @@ import type {
   DeploymentDatabaseConnectionFormat,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { ErrorState, Notice, Spinner } from "@/components/state"
-import { ChoiceGrid, EngineCard } from "@/components/choice-card"
+import { ErrorState, Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
+import { ChoiceGrid } from "@/components/choice-card"
+import { EngineCard } from "@/components/database/engine-card"
 import { engineOf } from "@/components/database/engine"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { RunPhases, phaseStates } from "@/components/run-phases"

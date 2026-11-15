@@ -7,7 +7,7 @@ import {
   type FlowSettings,
   type KernelObserverEvidence,
   type ObserverQuality,
-} from "@/lib/network-flows"
+} from "@/lib/network/flows"
 import { Panel, PanelHeader, PanelBody } from "@/components/panel"
 import { Disclosure, InfoTip } from "@/components/form"
 import { Status } from "@/components/status-dot"

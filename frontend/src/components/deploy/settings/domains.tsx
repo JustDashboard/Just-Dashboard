@@ -74,7 +74,7 @@ import {
   SettingSection,
   SettingsPage,
   settingStatus,
-} from "@/components/deploy/settings/setting-card"
+} from "@/components/settings/setting-card"
 import {
   draftChanges,
   useConfiguration,

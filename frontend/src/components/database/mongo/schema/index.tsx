@@ -1,7 +1,8 @@
 "use client"
 
 import { bytes } from "@/lib/format"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { grouped } from "@/components/database/data/view"
 import {
   CollectionKindTag,

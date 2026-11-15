@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { SearchInput } from "@/components/page"
-import { LoadingRows } from "@/components/state"
+import { SearchInput } from "@/components/search-input"
+import { LoadingRows } from "@/components/loading"
 import { GroupMark, REACH_INK } from "@/components/system-users/group-parts"
 import { groupPeople, groupReach } from "@/components/system-users/groups"
 import type { SystemGroup } from "@/lib/types"

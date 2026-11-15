@@ -10,7 +10,7 @@
 # committed, staged, unstaged and untracked alike — and runs:
 #
 #   - Prettier and ESLint on the changed frontend files, `tsc --noEmit`, and
-#     `bun test src` (under a second); ESLint on the whole tree when the rules
+#     `bun test src scripts` (under a second); ESLint on the whole tree when the rules
 #     or the dependencies changed (package.json, bun.lock, tsconfig.json, the
 #     ESLint configuration);
 #   - `go build ./...` and `go vet` on the changed packages, then the tests
@@ -440,7 +440,7 @@ if [ "${#lintable[@]}" -gt 0 ] || [ -n "$lint_all" ]; then
 			bunx eslint "${lintable[@]}"
 		fi
 		typecheck
-		bun test src
+		bun test src scripts
 	)
 fi
 

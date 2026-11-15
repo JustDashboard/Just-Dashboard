@@ -5,7 +5,7 @@ import { Field, FieldRow, FormNote } from "@/components/form"
 import { SidePanel } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { flowPolicyProblem, type FlowSettings } from "@/lib/network-flows"
+import { flowPolicyProblem, type FlowSettings } from "@/lib/network/flows"
 
 /**
  * How often the recorder samples and how long it keeps what it sampled. The

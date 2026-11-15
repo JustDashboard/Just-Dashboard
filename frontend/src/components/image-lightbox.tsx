@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Dialog as DialogPrimitive } from "radix-ui"
 import { ChevronLeft, ChevronRight, Cross, Download, External } from "@/components/icons"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 

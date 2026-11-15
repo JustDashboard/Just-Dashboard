@@ -1,7 +1,7 @@
 "use client"
 
 import { SaveRunSnapshot } from "./tools/save-run"
-import type { PathRequest } from "@/lib/network-investigator-types"
+import type { PathRequest } from "@/lib/network/investigator-types"
 
 export function SaveInvestigationRun({
   request,

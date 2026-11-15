@@ -17,7 +17,7 @@ import { notify } from "@/lib/toast"
 import type { NetworkLink } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {

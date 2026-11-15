@@ -1,0 +1,17 @@
+import { Page } from "@/components/page"
+import { cn } from "@/lib/utils"
+
+export default function Demo({ open, bindings }: { open: boolean; bindings: object }) {
+  return (
+    <>
+      <Page rise>a</Page>
+      <Page rise {...bindings}>
+        b
+      </Page>
+      <Page rise className="min-h-full px-4 md:px-8">c</Page>
+      <Page rise className={cn(open && "gap-0")}>d</Page>
+      <Page className={cn(open && "animate-rise")}>e</Page>
+      <div className="animate-rise">f</div>
+    </>
+  )
+}

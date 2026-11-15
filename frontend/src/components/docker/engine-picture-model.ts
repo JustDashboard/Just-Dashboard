@@ -1,6 +1,6 @@
 import { bytes, plural } from "@/lib/format"
 import type { ComposeStack, Container, DockerNetwork, VolumeDetail } from "@/lib/types"
-import type { WireState } from "@/components/wire-flow-model"
+import type { WireState } from "@/components/wire/wire-flow-model"
 import {
   containerBucket,
   exitCodeOf,

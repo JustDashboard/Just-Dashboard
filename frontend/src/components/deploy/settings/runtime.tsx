@@ -38,21 +38,21 @@ import {
   MAX_REQUEST_BODY_MB,
 } from "@/components/deploy/deployment-defaults"
 import { useProject } from "@/components/deploy/project-context"
-import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { ProjectFavicon } from "@/components/project-mark"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
   SettingForm,
   SettingSection,
   SettingsPage,
   settingStatus,
-} from "@/components/deploy/settings/setting-card"
+} from "@/components/settings/setting-card"
 import {
   LimitField,
   useContainerPeaks,
   type ContainerPeaks,
 } from "@/components/deploy/settings/limit-field"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { SettingPicture } from "@/components/settings/setting-picture"
 import { StrategyPicture } from "@/components/deploy/settings/strategy-picture"
 import { RollbackWatchForm } from "@/components/deploy/settings/rollback-watch"
 import {
@@ -78,7 +78,7 @@ import {
   sleepRefusal,
   type SleepDraft,
 } from "@/components/deploy/sleep-model"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import {
   DEFAULT_GRACE_SECONDS,
   DEFAULT_STOP_SIGNAL,

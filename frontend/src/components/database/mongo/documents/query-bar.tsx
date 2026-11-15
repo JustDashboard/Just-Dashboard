@@ -5,7 +5,7 @@ import { MenuItemText } from "@/components/ui/menu-item-text"
 import { ClockRewind, SettingsSliders } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { ChipCount } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,

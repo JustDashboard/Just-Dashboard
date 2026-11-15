@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { EMBED_FRAME_SOURCES } from "@/lib/board-embeds"
+import { EMBED_FRAME_SOURCES } from "@/lib/board/embeds"
 
 function webSocketSource(raw: string | undefined): string | undefined {
   if (!raw) return undefined

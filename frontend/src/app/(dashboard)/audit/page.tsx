@@ -7,8 +7,8 @@ import { useHeldList } from "@/components/workspace/held-list"
 import { CrossCircle, Download, FileText, Notes, RefreshClockwise } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { calendarDate, clock, plural, relativeTime, timestamp } from "@/lib/format"
-import { downloadText } from "@/lib/metrics-export"
-import type { MetricsState } from "@/lib/metrics-store"
+import { downloadText } from "@/lib/metrics/export"
+import type { MetricsState } from "@/lib/metrics/store"
 import { notify } from "@/lib/toast"
 import type { AuditEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -30,8 +30,9 @@ import {
   keyTitle,
   keyWords,
 } from "@/components/audit/marks"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductGlyph, platformProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
@@ -39,7 +40,7 @@ import { Address } from "@/components/security/marks"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { FaceRun } from "@/components/system-users/marks"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -498,7 +499,12 @@ export default function AuditPage() {
                                   {(entry.target || entry.detail) && (
                                     <>
                                       {" · "}
-                                      <span className={cn(entry.target && "font-mono")}>
+                                      {/* Mono sits lower on the line than the sans
+                                          beside it and grew the line a pixel; on
+                                          no line of its own, it cannot. */}
+                                      <span
+                                        className={cn(entry.target && "font-mono leading-none")}
+                                      >
                                         {entry.target || entry.detail}
                                       </span>
                                     </>
