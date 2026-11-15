@@ -5,8 +5,28 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { LoaderCircle } from "@/components/icons"
 
+/**
+ * The press box of a control smaller than a finger: 24px under a mouse and
+ * 44px under a finger, centred on the control, drawn by an `::after` so the
+ * row it sits in does not grow. The `min(0px, …)` keeps a control that is
+ * already big enough from reaching past its own edge.
+ *
+ * WP-01 adds the same box to globals.css as `@utility hit-area`; this is the
+ * spelling the primitives use until that lands, and the one place to swap.
+ */
+const hitAreaClasses =
+  "relative after:absolute after:inset-x-[min(0px,calc((100%-1.5rem)/2))] after:inset-y-[min(0px,calc((100%-1.5rem)/2))] pointer-coarse:after:inset-x-[min(0px,calc((100%-2.75rem)/2))] pointer-coarse:after:inset-y-[min(0px,calc((100%-2.75rem)/2))]"
+
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap focus-ring transition-all disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  // The label is the body size, the size of the field and the menu item beside
+  // it: a 14px word next to a 13px field read as two type scales in one row.
+  //
+  // The height is a custom property rather than an `h-*` per pointer so that a
+  // caller's own height still wins at every pointer: a `pointer-coarse:h-10`
+  // would survive a caller's `h-auto` and stand an inline text button 40px tall
+  // on a phone. Each size sets `--control-h` and its coarse step; `h-*`,
+  // `size-*` or `h-auto` from a caller replaces the one height class.
+  "inline-flex h-(--control-h) shrink-0 items-center justify-center gap-2 rounded-md text-body font-medium whitespace-nowrap focus-ring transition-all disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       // A button is a rectangle of ground with a border, and nothing else. The
@@ -23,23 +43,41 @@ const buttonVariants = cva(
         // pressable action wears its one colour, and the token carries the
         // hover and press steps so no call site re-mixes an opacity pair.
         default: "bg-brand text-brand-foreground hover:bg-brand-hover active:bg-brand-active",
-        destructive: "bg-destructive/85 text-white hover:bg-destructive active:bg-destructive/70",
+        //
+        // The danger face has the same three steps as opaque colours. At rest
+        // it is the red a sixth of the way to black, because white on the
+        // token itself is 3.9:1 and the label is 13px; hover lifts it to the
+        // token, press settles it past rest. The `var()` names are the tokens
+        // globals.css takes over (handoff to WP-01); the fallbacks are the
+        // same colours, so the face is right before and after.
+        destructive:
+          "bg-[var(--destructive-face,color-mix(in_oklab,var(--destructive)_85%,#000))] text-destructive-foreground hover:bg-destructive active:bg-[var(--destructive-active,color-mix(in_oklab,var(--destructive)_70%,#000))]",
         outline:
           "border border-input bg-control hover:bg-control-hover hover:text-accent-foreground active:bg-control-active",
+        /** @deprecated one caller (xterm-pane.tsx); use `outline`. Kept on the control steps until it moves. */
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/60",
+          "bg-secondary text-secondary-foreground hover:bg-control-hover active:bg-control-active",
         ghost: "hover:bg-accent hover:text-accent-foreground active:bg-menu-hover",
-        link: "text-primary underline-offset-4 hover:underline active:text-primary/80",
+        // Press steps the ink down to the muted one rather than fading it:
+        // text never takes an opacity.
+        link: "text-primary underline-offset-4 hover:underline active:text-muted-foreground",
       },
+      // One step per density, fine pointer then coarse (the control-size
+      // table in the foundations). Dense and compact stay short under a finger
+      // too, 32 and 40, so a toolbar keeps its proportions; the hit area makes
+      // up the rest of the 44 without growing the row they sit in.
+      //
+      // Icons follow the density: 12 dense, 14 compact, 16 regular and large.
       size: {
-        default: "h-9 px-4 py-2 has-[>svg]:px-3",
-        xs: "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
-        lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
-        icon: "size-9",
-        "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-8",
-        "icon-lg": "size-10",
+        default:
+          "px-4 py-2 [--control-h:2.25rem] has-[>svg]:px-3 pointer-coarse:[--control-h:2.75rem]",
+        xs: `gap-1 rounded-md px-2 text-xs [--control-h:1.5rem] has-[>svg]:px-1.5 pointer-coarse:[--control-h:2rem] [&_svg:not([class*='size-'])]:size-3 ${hitAreaClasses}`,
+        sm: `gap-1.5 rounded-md px-3 [--control-h:2rem] has-[>svg]:px-2.5 pointer-coarse:[--control-h:2.5rem] [&_svg:not([class*='size-'])]:size-3.5 ${hitAreaClasses}`,
+        lg: "rounded-md px-6 [--control-h:2.5rem] has-[>svg]:px-4 pointer-coarse:[--control-h:3rem]",
+        icon: "size-(--control-h) [--control-h:2.25rem] pointer-coarse:[--control-h:2.75rem]",
+        "icon-xs": `size-(--control-h) rounded-md [--control-h:1.5rem] pointer-coarse:[--control-h:2rem] [&_svg:not([class*='size-'])]:size-3 ${hitAreaClasses}`,
+        "icon-sm": `size-(--control-h) [--control-h:2rem] pointer-coarse:[--control-h:2.5rem] [&_svg:not([class*='size-'])]:size-3.5 ${hitAreaClasses}`,
+        "icon-lg": "size-(--control-h) [--control-h:2.5rem] pointer-coarse:[--control-h:3rem]",
       },
     },
     defaultVariants: {
@@ -114,4 +152,4 @@ function Button({
   )
 }
 
-export { Button, buttonVariants }
+export { Button, buttonVariants, hitAreaClasses }
