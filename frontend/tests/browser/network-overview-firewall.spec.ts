@@ -620,7 +620,7 @@ test("the gateway opens on its line: what is in force, what forwards, and admiss
   // What each kind carried is its section's own total.
   const forwards = page.locator("[data-slot=panel]").filter({ hasText: "Port forwards" })
   await expect(forwards.locator("[data-slot=panel-header]")).toContainText(
-    /^Port forwards4 · [\d.]+K packets · [\d.]+ MB since load/,
+    /^Port forwards4 · [\d.]+k packets · [\d.]+ MB since load/,
   )
 
   // The command and the menu make what the section heads made.
