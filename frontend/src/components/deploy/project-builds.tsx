@@ -6,7 +6,7 @@ import { ArrowUpRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { relativeTime, timestamp } from "@/lib/format"
 import type { DeploymentEngineRun } from "@/lib/types"
-import { FactDot } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
 import { ProjectEmpty } from "@/components/deploy/project-empty"
 import { LoadingRows } from "@/components/loading"
 import {
@@ -155,11 +155,12 @@ const RAIL_FROM = 900
 /** How a run in the picker ended, and when it was asked for. */
 function RunHint({ run }: { run: DeploymentEngineRun }) {
   return (
-    <span className="flex items-center gap-1.5">
-      <RunStatus state={run.state} operation={run.operation} className="shrink-0" />
-      <FactDot />
-      <span className="numeric">{relativeTime(run.requestedAt)}</span>
-    </span>
+    <FactLine nowrap>
+      <Fact>
+        <RunStatus state={run.state} operation={run.operation} className="shrink-0" />
+      </Fact>
+      <Fact className="numeric">{relativeTime(run.requestedAt)}</Fact>
+    </FactLine>
   )
 }
 
@@ -197,24 +198,17 @@ function BuildRow({
           </span>
           {subject && <span className="truncate text-hint text-muted-foreground">{subject}</span>}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-          <RunStatus
-            state={run.state}
-            operation={run.operation}
-            live={active}
-            className="shrink-0"
-          />
-          <FactDot />
-          <span className="numeric shrink-0">{formatDuration(runDurationSeconds(run, now))}</span>
-          <FactDot />
-          <time
-            dateTime={run.requestedAt}
-            title={timestamp(run.requestedAt)}
-            className="numeric truncate"
-          >
-            {relativeTime(run.requestedAt)}
-          </time>
-        </span>
+        <FactLine nowrap className="text-hint text-muted-foreground">
+          <Fact>
+            <RunStatus state={run.state} operation={run.operation} live={active} />
+          </Fact>
+          <Fact className="numeric">{formatDuration(runDurationSeconds(run, now))}</Fact>
+          <Fact className="numeric">
+            <time dateTime={run.requestedAt} title={timestamp(run.requestedAt)}>
+              {relativeTime(run.requestedAt)}
+            </time>
+          </Fact>
+        </FactLine>
       </span>
     </button>
   )
