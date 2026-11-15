@@ -11,11 +11,11 @@ import { LoaderCircle } from "@/components/icons"
  * row it sits in does not grow. The `min(0px, …)` keeps a control that is
  * already big enough from reaching past its own edge.
  *
- * WP-01 adds the same box to globals.css as `@utility hit-area`; this is the
- * spelling the primitives use until that lands, and the one place to swap.
+ * It is `@utility hit-area` in globals.css. The utility is emitted before the
+ * position utilities, so a caller's `absolute` or `sticky` still places the
+ * control.
  */
-const hitAreaClasses =
-  "relative after:absolute after:inset-x-[min(0px,calc((100%-1.5rem)/2))] after:inset-y-[min(0px,calc((100%-1.5rem)/2))] pointer-coarse:after:inset-x-[min(0px,calc((100%-2.75rem)/2))] pointer-coarse:after:inset-y-[min(0px,calc((100%-2.75rem)/2))]"
+const hitAreaClasses = "hit-area"
 
 const buttonVariants = cva(
   // The label is the body size, the size of the field and the menu item beside

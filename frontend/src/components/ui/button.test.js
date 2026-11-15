@@ -34,9 +34,9 @@ test("dense and compact sizes carry the 44px hit area, regular and large do not 
     expect(buttonVariants({ size })).toContain(hitAreaClasses)
   }
   for (const size of ["default", "lg", "icon", "icon-lg"]) {
-    expect(buttonVariants({ size })).not.toContain("after:absolute")
+    expect(buttonVariants({ size })).not.toContain(hitAreaClasses)
   }
-  expect(hitAreaClasses).toContain("pointer-coarse:after:inset-y-[min(0px,calc((100%-2.75rem)/2))]")
+  expect(hitAreaClasses).toBe("hit-area")
 })
 
 test("icons follow the density: 12 dense, 14 compact, 16 regular", () => {
