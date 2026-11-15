@@ -116,6 +116,7 @@ export function PanelHeader({
   link,
   actions,
   advanced,
+  hint,
   plain,
   className,
   children,
@@ -149,6 +150,15 @@ export function PanelHeader({
    * valid thing to do.
    */
   advanced?: boolean
+  /**
+   * @deprecated A line under the title, in the title's own column, for
+   * `FormSection`'s deprecated `hint` until its callers move. In the title's
+   * column the line holds still when the actions land: as a wrapped line of
+   * its own it sat under the actions' 32px row, and a section read while its
+   * actions were unknown moved 13px when they arrived. WP-39 deletes it with
+   * `FormSection hint`.
+   */
+  hint?: React.ReactNode
   /**
    * A head drawn outside a `Panel` (a `Section`, a `FormSection`), which has
    * no panel around it to say it is plain. Inside a panel, the panel decides.
@@ -187,6 +197,7 @@ export function PanelHeader({
             )}
           </Heading>
         )}
+        {hint}
       </div>
       {children}
       {/* Never wider than the header: a phone's 16px field grew the history's
