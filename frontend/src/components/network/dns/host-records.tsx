@@ -248,7 +248,7 @@ export function HostRecordsEditor({
               return (
                 <li
                   key={row.key}
-                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto] sm:items-start"
+                  className="grid min-w-0 grid-cols-main-end gap-2 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto] sm:items-start"
                 >
                   <Input
                     aria-label={`Address of record ${index + 1}`}

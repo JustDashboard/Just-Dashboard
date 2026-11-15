@@ -81,7 +81,7 @@ export function TrafficPage() {
   const setSpan = (next: TrafficSpan) => rewrite((query) => writeSpan(query, next))
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="Traffic" />
       {/* The strip's hairline is the identity line's: one rule under the
           header, as a process's page and a project's have. */}

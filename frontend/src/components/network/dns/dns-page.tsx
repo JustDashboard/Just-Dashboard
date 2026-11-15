@@ -239,7 +239,7 @@ export function DNSPage() {
   const panel = "min-w-0 pt-6 focus-ring data-[state=inactive]:hidden"
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="DNS" />
       {/* One block, as on a process's page: the strip's hairline is the line
           under the identity, rather than a second one a band of ground away. */}

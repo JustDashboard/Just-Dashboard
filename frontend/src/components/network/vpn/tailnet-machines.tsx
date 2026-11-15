@@ -238,8 +238,8 @@ function Machine({ machine: p }: { machine: TailscalePeer }) {
           className: "w-40",
           node: moved ? (
             <span className="numeric font-mono">
-              <span className="text-[var(--chart-5)]">↓ {bytes(p.rxBytes)}</span>{" "}
-              <span className="text-[var(--chart-2)]">↑ {bytes(p.txBytes)}</span>
+              <span className="text-chart-5">↓ {bytes(p.rxBytes)}</span>{" "}
+              <span className="text-chart-2">↑ {bytes(p.txBytes)}</span>
             </span>
           ) : (
             <span className="text-muted-foreground">nothing moved</span>

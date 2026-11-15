@@ -98,7 +98,7 @@ function DeviceRow({ link, points }: { link: NetworkLink; points?: NetworkLivePo
         // word raised the line a pixel, so a card with an address was taller.
         <span className={SECOND_LINE}>
           <AddressLine addresses={link.addresses} />
-          <span className="text-muted-foreground/50">·</span>
+          <span className="text-faint">·</span>
           <span className="truncate">{describeDevice(link, OWNER_LABEL)}</span>
         </span>
       }

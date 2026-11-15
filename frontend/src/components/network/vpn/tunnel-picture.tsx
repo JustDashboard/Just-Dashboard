@@ -157,9 +157,9 @@ function peerNode(tunnel: WGInterface, peer: WGPeer, onPeer: (peer: WGPeer) => v
         </span>
         {(peer.rxBytes > 0 || peer.txBytes > 0) && (
           <span className="numeric block font-mono text-micro">
-            <span className="text-[var(--chart-5)]">↓ {bytes(peer.rxBytes)}</span>
-            <span className="mx-1.5 text-muted-foreground/50">·</span>
-            <span className="text-[var(--chart-2)]">↑ {bytes(peer.txBytes)}</span>
+            <span className="text-chart-5">↓ {bytes(peer.rxBytes)}</span>
+            <span className="mx-1.5 text-faint">·</span>
+            <span className="text-chart-2">↑ {bytes(peer.txBytes)}</span>
           </span>
         )}
         {findings.length > 0 && <Findings findings={findings} label={`${name} findings`} />}

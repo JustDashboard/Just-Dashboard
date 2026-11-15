@@ -17,7 +17,7 @@ export function Cidr({ cidr, className }: { cidr: string; className?: string }) 
       {bits !== undefined && !host && (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="text-[var(--tag-pink)]">{bits}</span>
+          <span className="text-tag-pink">{bits}</span>
         </>
       )}
     </span>

@@ -222,7 +222,7 @@ function programNode(program: Program, onProgram: (name: string) => void): WireF
           <span key={p}>
             {i > 0 && <span className="text-muted-foreground">, </span>}
             <span className="text-muted-foreground">:</span>
-            <span className="text-[var(--tag-pink)]">{p}</span>
+            <span className="text-tag-pink">{p}</span>
           </span>
         ))}
         {program.ports.length > 4 && (

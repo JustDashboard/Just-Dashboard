@@ -181,7 +181,7 @@ export function ResolverChain({
               {!identity.bare || tlsName ? (
                 <span className="font-mono">
                   {address}
-                  {tlsName && <span className="text-muted-foreground/70">#{tlsName}</span>}
+                  {tlsName && <span className="text-faint">#{tlsName}</span>}
                 </span>
               ) : (
                 origin(up)

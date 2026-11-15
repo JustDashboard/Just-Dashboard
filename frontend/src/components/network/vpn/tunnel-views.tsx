@@ -139,8 +139,8 @@ export function TunnelTraffic({
                   ),
                 hint: (
                   <span className="font-mono">
-                    <span className="text-[var(--chart-5)]">↓ {bytes(peer.rxBytes)}</span>{" "}
-                    <span className="text-[var(--chart-2)]">↑ {bytes(peer.txBytes)}</span>
+                    <span className="text-chart-5">↓ {bytes(peer.rxBytes)}</span>{" "}
+                    <span className="text-chart-2">↑ {bytes(peer.txBytes)}</span>
                   </span>
                 ),
                 value: bytes(peer.rxBytes + peer.txBytes),

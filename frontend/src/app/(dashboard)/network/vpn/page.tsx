@@ -161,7 +161,7 @@ function NetworkVPNContent() {
 
   return (
     <SaveBarProvider>
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Network" title="VPN" />
         {/* One block, as on a process's page: the strip's hairline is the line
             under the identity, rather than a second one a band of ground away. */}
