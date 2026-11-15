@@ -199,7 +199,10 @@ export function FlowsTable({
                     onActivate={() => onSelect(key)}
                     className="h-11"
                   >
-                    <TableCell className="truncate">
+                    {/* The owner is a 20px body line: on the cell's own 12px
+                        padding it filled the 44 by itself, the hairline made
+                        a row 45 and the last row, which draws none, 44.5. */}
+                    <TableCell className="truncate py-2.5">
                       <span className="flex min-w-0 items-center gap-2">
                         <OwnerGlyph row={row} />
                         <button
