@@ -163,7 +163,7 @@ shape while it loads and nothing under the line moves when the words land (D11).
 
 - `src/components/identity-header.test.js`: the loading form, the phone's one row, the identity rung,
   `IdentityVerbs`.
-- `tests/browser/identity-header-phone.spec.ts`: on a phone the header is one row over one line of
+- `tests/browser/deploy-header.spec.ts`: on a phone the header is one row over one line of
   facts, no taller than before the verbs had a row, still while it loads, with the name whole where
   it fits.
 - `tests/browser/deploy-header.spec.ts`, `deploy-run.spec.ts`, `network-vpn-page.spec.ts`,
