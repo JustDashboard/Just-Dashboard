@@ -919,11 +919,13 @@ test.describe("Databases & backups", () => {
     expect(variablePuts[0].url).toContain("/variables/DATABASE_URL")
     // A new variable reaches the build too, the way a database linked while
     // creating the project does: a static env import or Prisma's config reads it there.
+    // The link goes as a reference: sent as a value, the server kept the characters.
     expect(variablePuts[0].body).toMatchObject({
-      value: "${{database.9}}",
+      reference: "${{database.9}}",
       sensitivity: "secret",
       scopes: ["runtime", "build"],
     })
+    expect(variablePuts[0].body).not.toHaveProperty("value")
 
     const orders = page.getByRole("link", { name: "orders-db", exact: true })
     await expect(orders).toHaveAttribute("href", "/databases/9")

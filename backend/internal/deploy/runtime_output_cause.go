@@ -48,6 +48,7 @@ var outputCauseTitles = map[string]string{
 	"runtime_loopback_bind":           "Application listens on localhost only",
 	"runtime_port_mismatch":           "Application listens on another port",
 	"runtime_start_exited":            "Start command exited",
+	"runtime_migration_silent":        "Migration failed without an error",
 	"runtime_sqlite_not_writable":     "SQLite database not writable",
 	"runtime_master_key_invalid":      "Credentials cannot be decrypted",
 	"runtime_auth_untrusted_host":     "Host not trusted by Auth.js",
@@ -346,10 +347,45 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 	if cause := djangoHiddenErrorCause(lines, context); cause != nil {
 		return cause
 	}
+	if tool := silentMigrationExit(containers); tool != "" {
+		return &OutputCause{Code: "runtime_migration_silent", Detail: tool, Fix: &CauseFix{Kind: fixReview, Field: "dependencies"}}
+	}
 	if startCommandExited(containers) {
 		return &OutputCause{Code: "runtime_start_exited", Fix: &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}}
 	}
 	return nil
+}
+
+// silentMigrationPatterns are a migration tool's last words when it exits
+// without saying why: drizzle-kit migrate prints its spinner and exits 1,
+// keeping the database's own error to itself, whatever refused it.
+var silentMigrationPatterns = map[string]*regexp.Regexp{
+	"drizzle-kit": regexp.MustCompile(`applying migrations\.\.\.\s*$`),
+}
+
+// silentMigrationExit names the migration tool a single container's start
+// command was running when it died with a failing exit code, its last line of
+// output the tool's own progress and nothing after it. The start command
+// applies the schema before the server (recipes.md, schema step), so the
+// server never started.
+func silentMigrationExit(containers []ContainerDiagnostics) string {
+	if len(containers) != 1 {
+		return ""
+	}
+	container := containers[0]
+	if container.State == "running" || container.ExitCode == 0 || len(container.Lines) == 0 {
+		return ""
+	}
+	last := ""
+	for index := len(container.Lines) - 1; index >= 0 && last == ""; index-- {
+		last = strings.TrimSpace(terminalEscapeRE.ReplaceAllString(container.Lines[index].Text, ""))
+	}
+	for tool, pattern := range silentMigrationPatterns {
+		if pattern.MatchString(last) {
+			return tool
+		}
+	}
+	return ""
 }
 
 // nodeScriptFileRE is a package-manager `run` of a file rather than a
@@ -552,6 +588,9 @@ func (c *OutputCause) sentence() string {
 		return "the application listens on port " + subject + ", not the configured internal port; set the internal port to " + subject + " or make the application listen on $PORT"
 	case "runtime_errors_hidden":
 		return "Django answered " + orDefault(subject, "an error") + " and logged nothing: with DEBUG off it sends errors to the admins' email, not to its output; add a LOGGING setting with a console handler to see the cause (the preflight finding django_errors_unlogged has one)"
+	case "runtime_migration_silent":
+		return "`" + orDefault(c.Detail, "the migration") + " migrate`, which the start command runs before the server, failed without printing why, so the server never started; " +
+			orDefault(c.Detail, "the tool") + " keeps the database's error to itself, and the usual cause is a database it cannot reach or that refuses its sign-in; check the project's linked database under Settings → Databases and the variable that holds its address"
 	case "runtime_start_exited":
 		return "the application's start command finished with exit code 0 instead of serving, so the container stopped; a start command must keep the server in the foreground — pm2 start, forever start, a trailing & and a one-off script all return at once (use pm2-runtime, or run the server directly)"
 	}

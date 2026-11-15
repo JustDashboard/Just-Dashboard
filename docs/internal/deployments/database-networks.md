@@ -2,7 +2,35 @@
 
 Deployment setup stores `${{database.ID}}` in the selected runtime variable and links the saved
 connection as a dependency. Execution resolves that identity through Databases using the current
-encrypted credentials. The explicit admin URL read remains audited and non-cacheable. It is read-only:
+encrypted credentials.
+
+The configure step writes the reference into the variable's own row (`onConnectDatabase`), so it
+reaches the draft as a supplied value, and supplied values are committed literal: a pasted or captured
+value that only reads like a reference stays the text it is. A supplied value that is the whole
+reference to a connection the same plan links — `${{database.5}}`, `.jdbc`, `.pooled`, `.url.app_cache`,
+by id — is the link, and `variableModes` (`linkedDatabaseReference`) commits it as a reference. The
+deploy-key commit guard reads the same modes, so a key's draft is refused it as before. Settings →
+Databases writes its link as the variable's `reference` (`databaseLinkWrite`), never as a value: a
+`PUT …/variables/NAME` with a value is literal by definition (`variableWriteMode`).
+
+From 0.7.2 until this was fixed both pages wrote the link as text: the application received the
+characters `${{database.5}}` and, with no `db-5.jd.internal` host among its variables, no network to
+the database, and a start command that migrates first exited before the server listened. As the server
+starts, before the engine claims a run, `repairLinkedDatabaseVariables` gives those links back, but only
+where a person provably made them, since a deploy key may never point a variable at a saved database
+and could have written the same text and dependency itself:
+
+- a project made on the new-deployment page (`RepairLinkedDatabaseLiterals`): its committing draft is
+  a person's (no key), staged exactly that value for that name and linked that connection, and the
+  variable's active revision is still commit's literal first one;
+- a link made from Settings (`LinkedDatabaseLiterals`, `personWroteVariable`): the audit trail holds a
+  `deploy.variable.update` of that variable in that environment by a session, hub session or the
+  assistant, with no key, as the revision was written, and none by a key then.
+
+In both the environment must still link the connection and the value must be its whole reference. The
+rewrite is a new revision with the same value as a reference (`created_by` `migration`), recorded as
+`deploy.variable.repair` by the system; the next deploy resolves it, while a retry replays the failed
+run's own snapshot. Anything the repair cannot prove stays literal until it is linked again. The explicit admin URL read remains audited and non-cacheable. It is read-only:
 it does not create a network, publish a port, or change the saved host DSN.
 
 `GET /databases/{id}/url` takes `format` (`url`, `jdbc`, `jdbc-mariadb`, `adonet`, `mysql2`) and
@@ -142,6 +170,13 @@ No hosted-provider account or live provider credentials are required by the loca
 
 ## Verification
 
+- `linked_database_reference_test.go` saves a draft the way the configure step does (the row in the
+  dotenv, the database as a dependency), commits it and checks the variable is a reference that
+  resolves, among the draft's references; that the same value without its link stays literal; and that
+  the repair gives a committed literal link back once and leaves a key's draft, a link removed since and
+  a value set since alone. `deployment_database_repair_test.go` repairs a Settings link a person's
+  session wrote once and leaves one a deploy key wrote, or one with no audit entry, literal;
+  `deploy-settings-b.spec.ts` checks the page sends the link as `reference`.
 - Component/API tests cover reference parsing, replacement identity, scoped status, stale observations,
   the reported engine and recorded reconciliation reason with its bound, safe removal plans,
   linked-database deletion, early preview credential refusal and generated-file containment.
