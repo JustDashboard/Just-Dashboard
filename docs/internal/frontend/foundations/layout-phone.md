@@ -68,7 +68,7 @@ column percentages stay arbitrary: they are layout.
 
 | Rule | Held by |
 | --- | --- |
-| No page spills sideways at 390. | spec `design-system.spec.ts` (phone widths); page specs at 390 |
+| No page spills sideways at 390. | page specs at 390 (`network-ui.spec.ts`: no sideways scroll on a phone); convention |
 | A page of several panels is one full-height pane over a bar at the foot (`PaneBar` and `paneShown` in `components/phone-panes.tsx`). Never stacked scrolling boxes. | unit `phone-panes.test.js` (no hand-drawn foot bar) |
 | An item's details are a page, not a stack of sheets. | D9 |
 | Lists become cards; nothing is cut off; a table is not scrolled sideways for its main reading. | convention |
