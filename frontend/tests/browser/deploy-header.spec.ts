@@ -141,9 +141,10 @@ test("on a phone the project header is one row over one line of facts, and holds
     return {
       tile: box(line.firstElementChild),
       title: box(title),
-      // The name is read whole: nothing in it is cut.
+      // The name is read whole: nothing drawn in it is cut (a screen
+      // reader's words, one pixel wide by design, are not drawn).
       cut: [title, ...Array.from(title.querySelectorAll("*"))].some(
-        (element) => element.scrollWidth > element.clientWidth + 0.5,
+        (element) => element.clientWidth > 1 && element.scrollWidth > element.clientWidth + 0.5,
       ),
       verbs: buttons.map((button) => ({
         ...box(button),
