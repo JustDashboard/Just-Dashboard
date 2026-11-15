@@ -35,6 +35,7 @@ import { StepTile } from "@/components/deploy/run-evidence"
 import { WireMark } from "@/components/wire/wire"
 import { saveText } from "@/lib/download"
 import { useBreakpoint } from "@/lib/breakpoints"
+import { elapsed, stampColumnCh } from "./build-stamp"
 
 /**
  * One `step.log` event as the stream delivers it: a chunk, not a line, from
@@ -107,16 +108,6 @@ export function transcriptSummary(rows: ConsoleRow[]) {
 /** A console row's element id: its persisted sequence and its line in that chunk. */
 function lineAnchor(id: string) {
   return `build-line-${id.replace(":", "-")}`
-}
-
-/** "+1:04", "+1:02:09": how far into the run a line was written. */
-function elapsed(ts: string, from: number) {
-  const seconds = Math.max(0, Math.round((new Date(ts).getTime() - from) / 1000))
-  if (Number.isNaN(seconds)) return ""
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = String(seconds % 60).padStart(2, "0")
-  return h > 0 ? `+${h}:${String(m).padStart(2, "0")}:${s}` : `+${m}:${s}`
 }
 
 /**
@@ -210,7 +201,7 @@ export function BuildConsole({
   // scroll and its event must not read as the reader leaving the end.
   const followedTo = useRef(0)
   const rail = useBreakpoint("2xl")
-  // On a phone the elapsed column is 48px of a 326px line, and its chip the
+  // On a phone the elapsed column is a sixth of a 326px line, and its chip the
   // one the toolbar's second row has no room for.
   const wide = useBreakpoint("sm")
   const stamped = time && wide
@@ -251,6 +242,12 @@ export function BuildConsole({
     return out
   }, [visible, stepById])
   const zero = new Date(startedAt).getTime()
+  // Sized from the longest stamp, so a line an hour in does not print over
+  // its text.
+  const stampCh = useMemo(
+    () => stampColumnCh(rows.map((row) => elapsed(row.ts, zero))),
+    [rows, zero],
+  )
 
   useEffect(() => {
     if (!follow || !body.current) return
@@ -323,7 +320,7 @@ export function BuildConsole({
           containerClassName="order-1 min-w-0 flex-1 max-sm:min-w-32 sm:max-w-64"
         />
         {stagePicker}
-        <ChipStrip className="order-4 flex-1 max-sm:mx-0 max-sm:px-0 sm:order-3 sm:flex-none">
+        <ChipStrip bleed={false} className="order-4 flex-1 sm:order-3 sm:flex-none">
           <FilterChip
             selected={errorsOnly}
             disabled={errors === 0 && !errorsOnly}
@@ -464,7 +461,8 @@ export function BuildConsole({
                             <time
                               dateTime={row.ts}
                               title={clock(row.ts)}
-                              className="numeric w-12 shrink-0 text-right text-faint select-none"
+                              style={{ width: `${stampCh}ch` }}
+                              className="numeric shrink-0 text-right text-faint select-none"
                             >
                               {elapsed(row.ts, zero)}
                             </time>
