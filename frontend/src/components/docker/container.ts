@@ -7,6 +7,7 @@ import type {
   PortRoute,
 } from "@/lib/types"
 import type { DotTone } from "@/components/status-dot"
+import { crashed, exitWords } from "@/components/docker/words"
 
 /**
  * The words one container's page reads its container in: the verdict at the
@@ -23,32 +24,6 @@ export type Verdict = {
   detail?: string
   /** Whether the dot breathes, because the state is being kept rather than remembered. */
   live: boolean
-}
-
-/**
- * An exit status in words. 0 is a program that finished; 130, 137 and 143 are
- * the signals a stop sends (interrupt, kill, terminate), so a container
- * somebody stopped reads as stopped. Anything else is the program's own
- * failure.
- */
-export function exitWords(code: number): string {
-  switch (code) {
-    case 0:
-      return "exited cleanly"
-    case 130:
-      return "interrupted"
-    case 137:
-      return "killed"
-    case 143:
-      return "stopped"
-    default:
-      return `exit ${code}`
-  }
-}
-
-/** Whether an exit was the program failing rather than being stopped. */
-export function crashed(code: number) {
-  return ![0, 130, 137, 143].includes(code)
 }
 
 /**

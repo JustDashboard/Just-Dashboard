@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import Link from "next/link"
 import { ChevronRight, Terminal } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -15,7 +14,8 @@ import { ProductGlyph } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Explain } from "@/components/explain"
 import { EventMark } from "@/components/docker/event-marks"
 
 /**
@@ -24,8 +24,8 @@ import { EventMark } from "@/components/docker/event-marks"
  * in its corner — the vocabulary a container's own Events view and a
  * deployment's feed already use (`event-marks.tsx`).
  *
- * A restart loop is one row ("restarted ×8 in 7 min · exit 1") that opens
- * onto the events it folds, where the page used to list sixteen lines of a
+ * A restart loop is one row ("restarted ×8 in 7 min · exit 1") whose events
+ * open in a popover off the row, where the page used to list sixteen lines of a
  * database dying and starting and push everything else off the screen, and
  * so is a container's run of events moments apart — the kill, exit, stop,
  * start and restart of one press of Restart (`foldBursts`). Every
@@ -69,7 +69,7 @@ export function EventFeed({
 
 /** One column template for every row, so a group's times, subjects and sources line up. */
 const ROW =
-  "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 md:grid-cols-[4.75rem_minmax(0,1fr)_minmax(0,11rem)_minmax(0,9.5rem)]"
+  "grid grid-cols-main-end items-center gap-x-4 gap-y-1 md:grid-cols-[4.75rem_minmax(0,1fr)_minmax(0,11rem)_minmax(0,9.5rem)]"
 
 function FeedRow({
   entry,
@@ -80,7 +80,6 @@ function FeedRow({
   arrived: boolean
   onContainer: (key: string) => void
 }) {
-  const [unfolded, setUnfolded] = useState(false)
   const loop = entry.kind === "loop" ? entry : undefined
   const event =
     entry.kind === "loop" ? entry.exit : entry.kind === "burst" ? entry.lead : entry.event
@@ -126,21 +125,7 @@ function FeedRow({
                   {clock(time)}
                 </span>
               )}
-              {folded && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  className="h-5 px-1.5 text-hint text-muted-foreground"
-                  aria-expanded={unfolded}
-                  onClick={() => setUnfolded(!unfolded)}
-                >
-                  <ChevronRight
-                    aria-hidden
-                    className={cn("size-3 transition-transform", unfolded && "rotate-90")}
-                  />
-                  {unfolded ? "Fold" : "Show"} the {folded.length} events
-                </Button>
-              )}
+              {folded && <FoldedEvents events={folded} />}
               <span className="numeric max-md:hidden" title={timestamp(time)}>
                 {relativeTime(time)}
               </span>
@@ -152,9 +137,27 @@ function FeedRow({
           <EventSource event={event} />
         </div>
       </div>
-      {folded && unfolded && (
-        <ul className="mb-1 ml-11 border-l border-hairline pl-3 md:ml-[7.75rem]">
-          {folded.map((member) => (
+    </li>
+  )
+}
+
+/**
+ * The events a folded row stands for, in a popover anchored to its button.
+ * They used to unfold as a list under the row and push the feed down; a row
+ * keeps one height in every state, so the detail opens beside it instead.
+ */
+function FoldedEvents({ events }: { events: DockerEvent[] }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button size="xs" variant="ghost" className="h-5 px-1.5 text-hint text-muted-foreground">
+          <ChevronRight aria-hidden className="size-3" />
+          Show the {events.length} events
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" aria-label={`The ${events.length} events`} className="w-96 p-0">
+        <ul className="max-h-80 overflow-y-auto px-3 py-2">
+          {events.map((member) => (
             <li
               key={eventKey(member)}
               className="flex min-w-0 items-baseline gap-2 py-0.5 text-xs text-muted-foreground"
@@ -166,8 +169,8 @@ function FeedRow({
             </li>
           ))}
         </ul>
-      )}
-    </li>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -246,65 +249,68 @@ export function EventSource({ event, className }: { event: DockerEvent; classNam
     </>
   )
 
-  return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          aria-label="Where this event came from"
-          className={cn(
-            "flex max-w-full min-w-0 cursor-help items-center gap-1.5 rounded-sm text-xs whitespace-nowrap focus-ring",
-            className,
-          )}
-        >
-          {label}
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 space-y-1.5 text-xs leading-relaxed">
-        {event.trigger ? (
-          <>
-            <p className="text-body font-medium">Triggered from this dashboard</p>
-            <p className="text-muted-foreground">
-              An audit entry for <b>{event.trigger.action}</b> by <b>{actor}</b> names the same
-              object within a minute of this event. That is a likely cause rather than a recorded
-              one — Docker does not say who asked.
-            </p>
-            <Link
-              href={`/audit?action=${encodeURIComponent(event.trigger.action)}`}
-              className="inline-block text-primary hover:underline"
-            >
-              Open the audit log
-            </Link>
-          </>
-        ) : event.source === "compose" ? (
-          <>
-            <p className="text-body font-medium">Compose owns this object</p>
-            <p className="text-muted-foreground">
-              It carries the labels compose writes, so this is part of the <b>{event.stack}</b>{" "}
-              project. Nothing in the audit log matches it, so it was run from a shell rather than
-              from here.
-            </p>
-          </>
-        ) : event.source === "daemon" ? (
-          <>
-            <p className="text-body font-medium">Docker did this on its own</p>
-            <p className="text-muted-foreground">
+  const [heading, why] = event.trigger
+    ? [
+        "Triggered from this dashboard",
+        <>
+          <p>
+            An audit entry for <b>{event.trigger.action}</b> by <b>{actor}</b> names the same object
+            within a minute of this event. That is a likely cause rather than a recorded one —
+            Docker does not say who asked.
+          </p>
+          <Link
+            href={`/audit?action=${encodeURIComponent(event.trigger.action)}`}
+            className="inline-block rounded-sm text-primary focus-ring hover:underline"
+          >
+            Open the audit log
+          </Link>
+        </>,
+      ]
+    : event.source === "compose"
+      ? [
+          "Compose owns this object",
+          <p key="why">
+            It carries the labels compose writes, so this is part of the <b>{event.stack}</b>{" "}
+            project. Nothing in the audit log matches it, so it was run from a shell rather than
+            from here.
+          </p>,
+        ]
+      : event.source === "daemon"
+        ? [
+            "Docker did this on its own",
+            <p key="why">
               Nobody asked for it — a restart policy firing, a health check changing verdict, or the
               kernel stopping a container.
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="text-body font-medium">External Docker action</p>
-            <p className="text-muted-foreground">
+            </p>,
+          ]
+        : [
+            "External Docker action",
+            <p key="why">
               Nothing in this dashboard&apos;s audit log matches this event, so it came from
               somewhere else: a shell on this server, a CI job, or another tool holding the Docker
               socket.
-            </p>
-          </>
+            </p>,
+          ]
+
+  // The shared toggletip: a mouse resting on the source opens it, and a tap
+  // pins it, which the hover card it was never did for a finger.
+  return (
+    <Explain
+      face="wrap"
+      label="Where this event came from"
+      entry={{ title: heading, body: <div className="space-y-1.5">{why}</div> }}
+    >
+      <button
+        type="button"
+        aria-label="Where this event came from"
+        className={cn(
+          "flex max-w-full min-w-0 cursor-help items-center gap-1.5 rounded-sm text-xs whitespace-nowrap focus-ring",
+          className,
         )}
-      </HoverCardContent>
-    </HoverCard>
+      >
+        {label}
+      </button>
+    </Explain>
   )
 }
 

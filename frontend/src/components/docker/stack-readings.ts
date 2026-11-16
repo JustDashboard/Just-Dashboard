@@ -6,6 +6,7 @@ import type {
   DockerEvent,
 } from "@/lib/types"
 import { hueFor, LANES } from "@/lib/hue"
+import { changeWords } from "@/components/docker/words"
 import type { DotTone } from "@/components/status-dot"
 
 /**
@@ -214,35 +215,4 @@ export function stackChanges(events: DockerEvent[]): StackChange[] {
     })
   }
   return out
-}
-
-function changeWords(event: DockerEvent): { verb: string; tone: DotTone } | undefined {
-  const action = event.action
-  if (action.startsWith("health_status")) {
-    return action.endsWith("unhealthy")
-      ? { verb: "unhealthy", tone: "danger" }
-      : { verb: "healthy", tone: "running" }
-  }
-  switch (action) {
-    case "start":
-      return { verb: "started", tone: "running" }
-    case "unpause":
-      return { verb: "resumed", tone: "running" }
-    case "restart":
-      return { verb: "restarted", tone: "warning" }
-    case "oom":
-      return { verb: "out of memory", tone: "danger" }
-    case "die":
-      return event.level === "error" && event.exitCode && event.exitCode !== "0"
-        ? { verb: `exited ${event.exitCode}`, tone: "danger" }
-        : { verb: "exited", tone: "stopped" }
-    case "stop":
-      return { verb: "stopped", tone: "stopped" }
-    case "pause":
-      return { verb: "paused", tone: "stopped" }
-    case "destroy":
-      return { verb: "removed", tone: "stopped" }
-    default:
-      return undefined
-  }
 }

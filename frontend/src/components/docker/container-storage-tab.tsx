@@ -20,7 +20,8 @@ import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
 import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
+import { FormNote } from "@/components/form"
+import { Definition } from "@/components/docker/explain"
 import { DatabaseStorageWarning, looksLikeDatabase } from "@/components/docker/shared"
 
 /**
@@ -263,7 +264,7 @@ function MountRow({
         {!mount.rw && <Tag>read-only</Tag>}
         {kind?.survives === false && <Tag tone="warning">not kept</Tag>}
       </span>
-      {kind && <ExplainIcon name={kind.term} />}
+      {kind && <Definition name={kind.term} />}
     </li>
   )
 }
@@ -340,9 +341,9 @@ function WritableLayer({ containerId }: { containerId: string }) {
       >
         <p>
           Nothing above is mounted at these, so they are in{" "}
-          <Term name="writableLayer">the container&apos;s own filesystem</Term>. They are not backed
-          up, and they are destroyed the next time this container is recreated — which includes
-          every image update.
+          <Definition name="writableLayer">the container&apos;s own filesystem</Definition>. They
+          are not backed up, and they are destroyed the next time this container is recreated —
+          which includes every image update.
         </p>
         <div className="mt-2 flex max-h-28 flex-wrap gap-1 overflow-auto">
           {roots.map((path) => (
@@ -432,11 +433,11 @@ function WritableLayerReportView({
         exactly. Stating the gap is more trustworthy than reconciling it
         silently.
       */}
-      <Hint>
+      <FormNote>
         Docker reports {bytes(report.total)} for the whole layer; the directories above account for{" "}
         {bytes(report.accounted)}. The two are measured differently — Docker counts the difference
         from the image, `du` counts allocated blocks — so they agree only approximately.
-      </Hint>
+      </FormNote>
 
       {report.unbacked.length > 0 && (
         <MigrationSuggestion containerId={containerId} entries={report.unbacked} />

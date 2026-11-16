@@ -21,7 +21,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Hint, Term } from "@/components/docker/explain"
+import { FormNote } from "@/components/form"
+import { Definition } from "@/components/docker/explain"
 import {
   bindingFamily,
   PublishedPathSheet,
@@ -91,9 +92,12 @@ export function PortsTable({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <Panel>
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+      >
         <PanelHeader
-          title={<Term name="port">Ports</Term>}
+          title={<Definition name="port">Ports</Definition>}
           actions={<span className="numeric text-hint text-muted-foreground">{rows.length}</span>}
         />
         <Table>
@@ -178,11 +182,11 @@ export function PortsTable({
         </Notice>
       )}
       {skippable && (
-        <Hint>
+        <FormNote>
           A port that is both published on every interface <em>and</em> proxied can be reached
           directly, skipping whatever the proxy site enforces in front of it. Binding it to
           127.0.0.1 leaves the proxy as the only way in.
-        </Hint>
+        </FormNote>
       )}
     </div>
   )
@@ -201,9 +205,12 @@ export function NetworksTable({
   if (detail.networkDetails.length === 0) return null
   const short = detail.id.slice(0, 12)
   return (
-    <Panel>
+    <Panel
+      // Framed: a table: the frame is the edge of its scroll (§2).
+      framed
+    >
       <PanelHeader
-        title={<Term name="network">Networks</Term>}
+        title={<Definition name="network">Networks</Definition>}
         actions={
           <span className="numeric text-hint text-muted-foreground">
             {detail.networkDetails.length}
@@ -341,7 +348,11 @@ export function EnvironmentTable({ env }: { env: string[] }) {
   }
 
   return (
-    <Panel className="max-h-full min-h-0 animate-rise">
+    <Panel
+      // Framed: a table: the frame is the edge of its scroll (§2).
+      framed
+      className="max-h-full min-h-0 animate-rise"
+    >
       <PanelHeader
         title="Environment"
         actions={

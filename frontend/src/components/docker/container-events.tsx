@@ -20,7 +20,6 @@ import { useLogView } from "@/lib/log/view"
 import type { DockerEvent, DockerEventFeed, LogLine, LogSearchResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { LogRow, eventColumnFor } from "@/components/logs/log-console"
@@ -37,6 +36,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { WrapDot, socketReading } from "@/components/deploy/request-marks"
 import { isCleanExit } from "@/components/deploy/traffic-strip"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** How many of the newest failures open onto their last lines by themselves. */
 const OPEN_FAILURES = 3
@@ -93,7 +93,7 @@ export function ContainerEvents({
     () => (containerId ? { container: containerId } : { stack }),
     [containerId, stack],
   )
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   // Polled as well as followed: the polled copy is the one the server laid
   // against the audit log, so "this dashboard" replaces "docker itself" once

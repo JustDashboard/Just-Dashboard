@@ -3,6 +3,7 @@
 import { External, Globe, LockClosed, Servers, Shield } from "@/components/icons"
 import type { PortExposure } from "@/lib/types"
 import { Tag } from "@/components/tag"
+import { Explain } from "@/components/explain"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
 /**
@@ -50,23 +51,28 @@ export function PortTag({ port, className }: { port: PortExposure; className?: s
     </Tag>
   )
 
+  // A port with no link is only its explanation, so it opens on the shared
+  // toggletip a tap reaches. A linked port keeps the hover card: a tap is the
+  // link's, and the label it opens on already says where it goes.
+  if (!url)
+    return (
+      <Explain face="wrap" label={port.label} entry={{ title: port.label, body: port.summary }}>
+        <button type="button" className="cursor-help rounded-sm focus-ring">
+          {body}
+        </button>
+      </Explain>
+    )
   return (
     <HoverCard openDelay={150}>
       <HoverCardTrigger asChild>
-        {url ? (
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="transition-opacity hover:opacity-80"
-          >
-            {body}
-          </a>
-        ) : (
-          <button type="button" className="cursor-help">
-            {body}
-          </button>
-        )}
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded-sm focus-ring transition-opacity hover:opacity-80"
+        >
+          {body}
+        </a>
       </HoverCardTrigger>
       <HoverCardContent className="w-80 space-y-1 text-xs leading-relaxed">
         <p className="text-body font-medium">{port.label}</p>
@@ -124,27 +130,29 @@ export function PortList({ ports, max = 3 }: { ports: PortExposure[]; max?: numb
         <PortTag key={`${port.hostIp}-${port.hostPort}-${i}`} port={port} />
       ))}
       {rest.length > 0 && (
-        <HoverCard openDelay={150}>
-          <HoverCardTrigger asChild>
-            <button
-              type="button"
-              onClick={(event) => event.stopPropagation()}
-              className="shrink-0 cursor-help rounded-sm text-micro font-medium text-muted-foreground focus-ring hover:text-foreground"
-            >
-              +{rest.length}
-            </button>
-          </HoverCardTrigger>
-          <HoverCardContent className="w-72 space-y-1.5">
-            <p className="text-hint text-muted-foreground">
-              {rest.length} more published port{rest.length === 1 ? "" : "s"}
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {rest.map((port, i) => (
-                <PortTag key={`${port.hostIp}-${port.hostPort}-rest-${i}`} port={port} />
-              ))}
-            </div>
-          </HoverCardContent>
-        </HoverCard>
+        <Explain
+          face="wrap"
+          label={`${rest.length} more published port${rest.length === 1 ? "" : "s"}`}
+          contentClassName="w-72"
+          entry={{
+            title: `${rest.length} more published port${rest.length === 1 ? "" : "s"}`,
+            body: (
+              <div className="flex flex-wrap gap-1">
+                {rest.map((port, i) => (
+                  <PortTag key={`${port.hostIp}-${port.hostPort}-rest-${i}`} port={port} />
+                ))}
+              </div>
+            ),
+          }}
+        >
+          <button
+            type="button"
+            onClick={(event) => event.stopPropagation()}
+            className="shrink-0 cursor-help rounded-sm text-micro font-medium text-muted-foreground focus-ring hover:text-foreground"
+          >
+            +{rest.length}
+          </button>
+        </Explain>
       )}
     </div>
   )

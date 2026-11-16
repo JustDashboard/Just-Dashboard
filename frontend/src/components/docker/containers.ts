@@ -1,6 +1,7 @@
 import type { DotTone } from "@/components/status-dot"
 import { foldRestarts, type EventEntry } from "@/lib/docker-events"
 import type { Container, ContainerStats, DockerEvent } from "@/lib/types"
+import { DELIBERATE_EXITS as DELIBERATE } from "@/components/docker/words"
 
 /**
  * The containers page's reading of each container, kept apart from the page
@@ -31,7 +32,6 @@ export const BUCKET_RANK: Record<ContainerBucket, number> = {
  * says so only when the kernel's OOM killer sent it, which the event log
  * knows and the listing does not.
  */
-const DELIBERATE = new Set([0, 130, 137, 143])
 
 /** The status in Docker's "Exited (137) 2 hours ago", or undefined when it gave none. */
 export function exitCodeOf(container: Pick<Container, "status">): number | undefined {
@@ -111,24 +111,6 @@ export function containerWord(container: Container, oomKilled = false): string {
     }
     default:
       return container.state
-  }
-}
-
-/** An exit status in words: what a 137 or a 143 means to somebody who has not memorised signals. */
-export function exitWords(code: number | undefined, oomKilled = false): string | undefined {
-  if (oomKilled) return "killed for memory"
-  if (code === undefined) return undefined
-  switch (code) {
-    case 0:
-      return "exited cleanly"
-    case 130:
-      return "interrupted"
-    case 137:
-      return "killed"
-    case 143:
-      return "stopped"
-    default:
-      return `exit ${code}`
   }
 }
 

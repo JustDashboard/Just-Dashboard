@@ -6,9 +6,9 @@ import { post } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { Hint, Term } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import { foldPull, pullShare, type PullFrame, type PullLayer } from "@/components/docker/images"
-import { Disclosure } from "@/components/form"
+import { Disclosure, FormNote } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
@@ -153,10 +153,10 @@ export function PullDialog({
           onChange={(e) => setRef(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && ref.trim() && !pull.active && start()}
         />
-        <Hint>
+        <FormNote>
           Leave the version off and you get <span className="font-mono">latest</span>, which is{" "}
-          <Term name="tag">whatever the publisher last pushed</Term>.
-        </Hint>
+          <Definition name="tag">whatever the publisher last pushed</Definition>.
+        </FormNote>
       </div>
       {started && (
         <section aria-label="Pull progress" className="space-y-3">
@@ -322,10 +322,10 @@ export function TagDialog({
           onChange={(e) => setTag(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
         />
-        <Hint>
+        <FormNote>
           The same layers under another name, so nothing is copied. Tag what a container runs before
           pulling its tag again and the old copy keeps a name to go back to.
-        </Hint>
+        </FormNote>
       </div>
     </Modal>
   )

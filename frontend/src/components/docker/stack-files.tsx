@@ -168,7 +168,12 @@ export function StackFiles({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 animate-rise flex-col gap-6 pb-4">
-      <Panel aria-label="What compose reads here" className="shrink-0">
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+        aria-label="What compose reads here"
+        className="shrink-0"
+      >
         <PanelHeader
           title="What compose reads here"
           actions={<span className="font-mono text-hint text-muted-foreground">{root}</span>}

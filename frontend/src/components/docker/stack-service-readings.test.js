@@ -4,7 +4,6 @@ import {
   bucketCounts,
   eventFacts,
   exitCodeOf,
-  exitWords,
   networkRates,
   networkShortName,
   serviceChanges,
@@ -14,6 +13,7 @@ import {
   stateDetail,
   waysIn,
 } from "./stack-service-readings"
+import { exitWords } from "./words"
 import { foldRestarts } from "@/lib/docker-events"
 
 const NOW = Date.UTC(2026, 9, 8, 12, 0, 0)

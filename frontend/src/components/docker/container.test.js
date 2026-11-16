@@ -2,10 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   companyOf,
   containerVerdict,
-  crashed,
   envKind,
   envPrefix,
-  exitWords,
   peak,
   portRows,
   reachWords,
@@ -15,6 +13,7 @@ import {
   trendOf,
   upWords,
 } from "./container"
+import { crashed, exitWords } from "./words"
 
 const container = (over) => ({
   id: "a",

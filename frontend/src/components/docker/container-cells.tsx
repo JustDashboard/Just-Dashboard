@@ -5,7 +5,7 @@ import { Copy, Layers } from "@/components/icons"
 import { bytes, duration, percent } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Container, ContainerStats } from "@/lib/types"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Explain } from "@/components/explain"
 import { Meter, utilisationTone } from "@/components/meter"
 import { Sparkline } from "@/components/sparkline"
 import { Status } from "@/components/status-dot"
@@ -235,9 +235,7 @@ function Reading({
   if (compact)
     return (
       <span className="flex min-w-0 cursor-help items-baseline gap-1.5 text-left whitespace-nowrap">
-        <span className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase">
-          {label}
-        </span>
+        <span className="caps shrink-0">{label}</span>
         <span
           className={cn(
             "numeric min-w-0 truncate font-mono text-hint",
@@ -269,9 +267,7 @@ function Reading({
         {value}
       </span>
       <span className="mt-1 flex min-w-0 items-center gap-1.5">
-        <span className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase">
-          {label}
-        </span>
+        <span className="caps shrink-0">{label}</span>
         {meter !== undefined ? (
           <>
             <Meter
@@ -334,38 +330,45 @@ export function CpuReading({
   const cores = stat.hostCpus ?? 0
   const ofLimit = limit > 0 ? (stat.cpuPercent / (limit * 100)) * 100 : stat.cpuPercent
 
+  // On the shared toggletip, so a finger's tap opens what a mouse's rest does.
   return (
-    <HoverCard openDelay={200}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className={cn("block min-w-0 rounded-sm focus-ring", !compact && "w-full")}
-        >
-          <Reading
-            label="CPU"
-            value={percent(stat.cpuPercent)}
-            meter={compact ? undefined : ofLimit}
-            // Against a quota, the bar's warning has to survive its removal.
-            tone={compact && limit > 0 && ofLimit >= 85 ? "warning" : undefined}
-            trend={trend}
-            compact={compact}
-          />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-72 space-y-1 text-xs leading-relaxed">
-        <p className="text-body font-medium">{percent(stat.cpuPercent)} of one core</p>
-        <p className="text-muted-foreground">
-          Docker counts one core as 100%, so a container using two cores fully reads as 200%.
-          {cores > 0 &&
-            ` This server has ${cores} core${cores === 1 ? "" : "s"}, so ${cores * 100}% is everything it has.`}
-        </p>
-        <p className="text-muted-foreground">
-          {limit > 0
-            ? `Limited to ${limit} core${limit === 1 ? "" : "s"}, so it is at ${percent(ofLimit)} of what it may use.`
-            : "No CPU limit is set, so it competes with everything else on this server."}
-        </p>
-      </HoverCardContent>
-    </HoverCard>
+    <Explain
+      face="wrap"
+      label="What this CPU figure means"
+      contentClassName="w-72"
+      entry={{
+        title: `${percent(stat.cpuPercent)} of one core`,
+        body: (
+          <div className="space-y-1">
+            <p>
+              Docker counts one core as 100%, so a container using two cores fully reads as 200%.
+              {cores > 0 &&
+                ` This server has ${cores} core${cores === 1 ? "" : "s"}, so ${cores * 100}% is everything it has.`}
+            </p>
+            <p>
+              {limit > 0
+                ? `Limited to ${limit} core${limit === 1 ? "" : "s"}, so it is at ${percent(ofLimit)} of what it may use.`
+                : "No CPU limit is set, so it competes with everything else on this server."}
+            </p>
+          </div>
+        ),
+      }}
+    >
+      <button
+        type="button"
+        className={cn("block min-w-0 rounded-sm focus-ring", !compact && "w-full")}
+      >
+        <Reading
+          label="CPU"
+          value={percent(stat.cpuPercent)}
+          meter={compact ? undefined : ofLimit}
+          // Against a quota, the bar's warning has to survive its removal.
+          tone={compact && limit > 0 && ofLimit >= 85 ? "warning" : undefined}
+          trend={trend}
+          compact={compact}
+        />
+      </button>
+    </Explain>
   )
 }
 
@@ -403,48 +406,48 @@ export function MemoryReading({
   const nearLimit = limited && stat.memPercent >= 85
 
   return (
-    <HoverCard openDelay={200}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className={cn("block min-w-0 rounded-sm focus-ring", !compact && "w-full")}
-        >
-          <Reading
-            label={label}
-            compact={compact}
-            tone={nearLimit ? "warning" : undefined}
-            value={
-              <>
-                {bytes(stat.memUsage)}
-                {limited && <span className="text-muted-foreground"> / {bytes(limit)}</span>}
-              </>
-            }
-            meter={limited ? stat.memPercent : undefined}
-            note={
-              stat.memHostPercent
-                ? `no limit · ${percent(stat.memHostPercent)} of host`
-                : "no limit"
-            }
-          />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-72 space-y-1 text-xs leading-relaxed">
-        <p className="text-body font-medium">{bytes(stat.memUsage)} in use</p>
-        {limited ? (
-          <p className="text-muted-foreground">
+    <Explain
+      face="wrap"
+      label="What this memory figure means"
+      contentClassName="w-72"
+      entry={{
+        title: `${bytes(stat.memUsage)} in use`,
+        body: limited ? (
+          <p>
             Limited to {bytes(limit)}, so it is at {percent(stat.memPercent)} of its allowance. The
             kernel kills it if it goes over, and Docker restarts it as though nothing happened.
           </p>
         ) : (
-          <p className="text-muted-foreground">
+          <p>
             No memory limit is set. Docker reports the whole machine as this container&apos;s limit
             when there is none, which is why the figure beside it is a share of the host rather than
             of a budget. Without a limit, the kernel chooses what to kill when memory runs out — and
             it is often not the container that caused the problem.
           </p>
-        )}
-      </HoverCardContent>
-    </HoverCard>
+        ),
+      }}
+    >
+      <button
+        type="button"
+        className={cn("block min-w-0 rounded-sm focus-ring", !compact && "w-full")}
+      >
+        <Reading
+          label={label}
+          compact={compact}
+          tone={nearLimit ? "warning" : undefined}
+          value={
+            <>
+              {bytes(stat.memUsage)}
+              {limited && <span className="text-muted-foreground"> / {bytes(limit)}</span>}
+            </>
+          }
+          meter={limited ? stat.memPercent : undefined}
+          note={
+            stat.memHostPercent ? `no limit · ${percent(stat.memHostPercent)} of host` : "no limit"
+          }
+        />
+      </button>
+    </Explain>
   )
 }
 

@@ -45,8 +45,8 @@ import {
 /** Each action's mark, in the colour of what it costs: the run console's verbs. */
 const MARK: Record<string, { icon: React.ComponentType<{ className?: string }>; text: string }> = {
   up: { icon: Play, text: "text-brand" },
-  update: { icon: ArrowCircleUp, text: "text-[var(--chart-2)]" },
-  restart: { icon: RotateClockwise, text: "text-[var(--tag-cyan)]" },
+  update: { icon: ArrowCircleUp, text: "text-chart-2" },
+  restart: { icon: RotateClockwise, text: "text-tag-cyan" },
   recreate: { icon: RefreshClockwise, text: "text-warning" },
   start: { icon: Play, text: "text-success" },
   stop: { icon: StopCircle, text: "text-muted-foreground" },
@@ -156,17 +156,12 @@ export function StackHistory({
       <div
         className={cn("grid min-w-0 gap-6", wide && "grid-cols-[22rem_minmax(0,1fr)] items-start")}
       >
-        <Panel aria-label="Deployments">
-          <PanelHeader
-            title={
-              <>
-                Deployments
-                <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                  {records.length}
-                </span>
-              </>
-            }
-          />
+        <Panel
+          // Framed: a rail of records with its own scroll, beside the one it opens.
+          framed
+          aria-label="Deployments"
+        >
+          <PanelHeader title="Deployments" count={records.length} />
           <PanelBody className="p-1.5">
             <Rail
               records={records}
@@ -310,7 +305,7 @@ function Rail({
                   <span className="truncate">{record.actor ?? "someone"}</span>
                   {record.gitCommit && (
                     <>
-                      <span className="text-muted-foreground/40">·</span>
+                      <span className="text-faint">·</span>
                       <span className="truncate font-mono">{record.gitCommit.slice(0, 7)}</span>
                       {record.gitDirty && (
                         <span
@@ -409,14 +404,14 @@ function Detail({
               </span>
               {record.actor && (
                 <span className="flex items-center gap-1.5">
-                  <span className="text-muted-foreground/40">·</span>
+                  <span className="text-faint">·</span>
                   <AuthorMark name={record.actor} />
                   <span className="text-foreground">{record.actor}</span>
                 </span>
               )}
               {record.gitCommit && (
                 <span className="flex items-center gap-1.5">
-                  <span className="text-muted-foreground/40">·</span>
+                  <span className="text-faint">·</span>
                   <GitBranch aria-hidden className="size-3" />
                   <span>
                     {record.gitBranch && `${record.gitBranch} @ `}
@@ -430,7 +425,7 @@ function Detail({
                 </span>
               )}
               <span className="flex items-center gap-1.5">
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span aria-hidden className="size-2 rounded-sm" style={{ background: hue }} />
                 <span className="font-mono">file {record.configHash.slice(0, 7)}</span>
               </span>
