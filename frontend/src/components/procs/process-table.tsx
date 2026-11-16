@@ -24,6 +24,7 @@ import { ROW_BLEED } from "@/components/row-list"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
+import { Meter } from "@/components/meter"
 import { Status, StatusDot } from "@/components/status-dot"
 import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -829,14 +830,8 @@ function MemoryReading({
 
 /** A reading's bar inside a cell, shared by Live, PM2 and Services for the same scale. */
 export function MiniBar({ value, color }: { value: number; color: string }) {
-  return (
-    <span aria-hidden className="h-1 w-8 shrink-0 overflow-hidden rounded-full bg-meter-track">
-      <span
-        className="block h-full rounded-full transition-[width] duration-700 ease-out"
-        style={{ width: `${Math.max(0, Math.min(value, 100))}%`, background: color }}
-      />
-    </span>
-  )
+  // The shared meter at a cell's size; the figure beside it says the value.
+  return <Meter size="cell" decorative value={value} color={color} />
 }
 
 /** The process as the product it is; a name this cannot place keeps a glyph. */

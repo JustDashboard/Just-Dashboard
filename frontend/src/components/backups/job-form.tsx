@@ -683,10 +683,7 @@ export function JobDialog({
           </OptionList>
         </FormSection>
 
-        <FormSection
-          title="Consistency"
-          hint="A file copied while it is being written is a file that may not open. These capture the moving parts at one instant."
-        >
+        <FormSection title="Consistency">
           <Field
             label="SQLite files to snapshot (one per line)"
             htmlFor="job-sqlite"
@@ -807,10 +804,7 @@ export function JobDialog({
           </fieldset>
         </FormSection>
 
-        <FormSection
-          title="Recovery check"
-          hint="Proves the archive restores by restoring it: a temporary copy, your application's checker, no network."
-        >
+        <FormSection title="Recovery check">
           <OptionList>
             <OptionRow
               title="Application recovery check"
