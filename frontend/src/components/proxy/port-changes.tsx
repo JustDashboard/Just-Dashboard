@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { Toolbar } from "@/components/toolbar"
+import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ProductLogo, portProduct, processProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
@@ -270,7 +271,19 @@ export function PortChanges({
   return (
     <Panel plain id="changes">
       <PanelHeader
-        title="Changes"
+        title={
+          history?.recordingSince ? (
+            <>
+              Changes
+              <InfoTip label="How the changes are kept">
+                Compared once a minute, kept {history.retentionDays} days, recording since{" "}
+                {calendarDate(history.recordingSince)}.
+              </InfoTip>
+            </>
+          ) : (
+            "Changes"
+          )
+        }
         actions={
           <Segments
             label="Changes from the last"
@@ -325,21 +338,14 @@ export function PortChanges({
         </Toolbar>
       )}
       <PanelBody flush>{body}</PanelBody>
-      {history?.recordingSince && (
+      {/* How the changes are kept is the title's ⓘ: as a footnote it said
+          again what the empty state above it had just said. */}
+      {history?.truncated && (
         <PanelFooter className="mt-3 text-hint text-muted-foreground">
           <span>
-            Compared once a minute, kept {history.retentionDays} days, recording since{" "}
-            {calendarDate(history.recordingSince)}
+            Only the newest {plural(history.events.length, "event")} of the {WINDOW_WORDS[hours]}{" "}
+            are listed
           </span>
-          {history.truncated && (
-            <>
-              <span className="text-faint">·</span>
-              <span>
-                Only the newest {plural(history.events.length, "event")} of the{" "}
-                {WINDOW_WORDS[hours]} are listed
-              </span>
-            </>
-          )}
         </PanelFooter>
       )}
     </Panel>

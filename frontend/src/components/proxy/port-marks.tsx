@@ -4,7 +4,7 @@ import { Router } from "@/components/icons"
 import type { Listener } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
-import { DashboardMark } from "@/components/backups/marks"
+import { DashboardMark } from "@/components/logo"
 import { useProjectFavicon } from "@/components/project-mark"
 import { Status } from "@/components/status-dot"
 import {
