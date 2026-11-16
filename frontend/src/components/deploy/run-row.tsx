@@ -175,10 +175,19 @@ export function RunRow({
           <Fact>
             <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
               <span className="numeric">{when}</span>
-              {stage}
-              {tags}
+              {!stage && tags}
             </span>
           </Fact>
+          {/* The stage is a fact of its own, so it is what wraps to the second
+              line: in one fact with the age, it took the age down with it. */}
+          {stage && (
+            <Fact>
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
+                {stage}
+                {tags}
+              </span>
+            </Fact>
+          )}
         </FactLine>
       )}
     </ChoiceRow>

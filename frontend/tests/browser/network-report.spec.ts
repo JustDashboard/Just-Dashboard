@@ -227,7 +227,12 @@ test("a failed second Firewall poll retains its rules and offers a dated retry",
     .filter({ hasText: "Showing the last known firewall state" })
   await expect(warning).toBeVisible()
   await expect(warning.getByText(/Last successful read:/)).toBeVisible()
-  await expect(page.getByRole("switch", { name: "Firewall enabled" })).toBeVisible()
+  // The last read stays on screen: the line still says it enforces, and its
+  // menu still offers to turn it off (no longer a bare switch beside it).
+  await expect(page.getByRole("region", { name: "About the firewall" })).toContainText("Active")
+  await page.getByRole("button", { name: "Firewall actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Disable" })).toBeVisible()
+  await page.keyboard.press("Escape")
   await warning.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(warning).toHaveCount(0)
 })
