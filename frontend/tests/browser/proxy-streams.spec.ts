@@ -2079,9 +2079,14 @@ test("a stream's page reads what it carried in words, with no tiles and no p-num
   await expect(lines.filter({ hasText: /^Turned away/ })).toContainText("3 denied")
   await expect(lines.filter({ hasText: /^Not forwarded/ })).toContainText("2 not forwarded")
   await expect(lines.filter({ hasText: /^Session length/ })).toContainText("half inside 2.4 s")
-  await expect(lines.filter({ hasText: /^Session length/ })).toContainText(
-    "9 in 10 inside 31.0 s · 99 in 100 inside 6m 50s · longest 2h 1m",
-  )
+  const length = lines
+    .filter({ hasText: /^Session length/ })
+    .getByText("9 in 10 inside 31.0 s · longest 2h 1m", { exact: true })
+  await expect(length).toBeVisible()
+  // Beside the rail the readings stand in two columns, and the detail still
+  // fits its line rather than being cut.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect.poll(() => length.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
   await expect(page.locator("[data-slot='page']")).not.toContainText(/\bp(50|90|99)\b/)
   const outcome = page.getByRole("heading", { name: "How sessions ended" }).locator("../../..")
   await expect(outcome.locator("[data-slot='rank-row']")).toHaveCount(3)
