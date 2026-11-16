@@ -45,7 +45,7 @@ import { IconAction } from "@/components/icon-action"
 import { Page } from "@/components/page"
 import { PaneHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -195,7 +195,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     (error instanceof ApiError && (error.code === "board_not_found" || error.status === 404))
   if (absent)
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <h1 className="sr-only">Drawing</h1>
         <EmptyState
           mark={<ProductLogo id="excalidraw" size="lg" />}
@@ -214,7 +214,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     )
   if (error)
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <h1 className="sr-only">Drawing</h1>
         {/* Reading a drawing changes nothing, so it is always worth asking again. */}
         <ErrorState
@@ -236,7 +236,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     )
   if (!board)
     return (
-      <Page fill className="max-w-none p-2 lg:p-3">
+      <Page fill="workspace">
         <h1 className="sr-only">Drawing</h1>
         <LoadingPanel />
       </Page>
@@ -641,7 +641,7 @@ function LoadedBoard({ board }: { board: Board }) {
   const said = SAVE_WORDS[saveState]
 
   return (
-    <Page fill className="max-w-none gap-0 p-0 lg:px-3 lg:py-3">
+    <Page fill="workspace">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Drawing: {name.trim() || board.name}</h1>
       <div
@@ -651,7 +651,7 @@ function LoadedBoard({ board }: { board: Board }) {
         {/* Two rows on a phone, on purpose: back, the name and the verbs, then
             the save state under the name. Wrapped wherever the next control
             ran out of room, the status landed between the buttons. */}
-        <PaneHeader className="grid min-h-12 grid-cols-[auto_minmax(0,1fr)_auto] gap-x-1.5 gap-y-0 px-2 py-1.5 sm:flex">
+        <PaneHeader className="grid min-h-12 grid-cols-start-main-end gap-x-1.5 gap-y-0 px-2 py-1.5 sm:flex">
           <IconAction label="Back to Excalidraw" onClick={() => void go("/excalidraw")}>
             <ArrowLeft />
           </IconAction>
@@ -775,7 +775,7 @@ function LoadedBoard({ board }: { board: Board }) {
             // canvas's place, since a 320px panel left a strip of canvas no
             // finger could draw on.
             <aside
-              className="absolute inset-0 z-10 flex min-h-0 flex-col border-hairline bg-card sm:relative sm:inset-auto sm:w-80 sm:shrink-0 sm:border-l"
+              className="absolute inset-0 z-raised flex min-h-0 flex-col border-hairline bg-card sm:relative sm:inset-auto sm:w-80 sm:shrink-0 sm:border-l"
               aria-label="Server items"
             >
               <PaneHeader className="h-10 py-0 pl-3">
@@ -806,9 +806,7 @@ function LoadedBoard({ board }: { board: Board }) {
                 </section>
                 <section>
                   <h3 className="eyebrow px-2 pt-1 pb-1.5">Deployments</h3>
-                  {projects.length === 0 && (
-                    <p className="px-2 text-hint text-muted-foreground">No projects yet</p>
-                  )}
+                  {projects.length === 0 && <EmptyNote dense>No projects yet.</EmptyNote>}
                   {projects.map((project) => (
                     <ResourceButton
                       key={project.id}

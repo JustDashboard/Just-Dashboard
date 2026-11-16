@@ -32,23 +32,23 @@ import type { Tone } from "@/components/tone"
  * reading, not that every word has a colour.
  */
 const KIND: Record<TokenKind, string> = {
-  time: "text-muted-foreground/60",
-  host: "text-muted-foreground/50",
+  time: "text-faint",
+  host: "text-faint",
   proc: "font-medium",
-  pid: "text-muted-foreground/50",
+  pid: "text-faint",
   level: "",
   key: "text-muted-foreground",
-  string: "text-[var(--tag-slate)]",
-  number: "text-[var(--tag-pink)]",
-  ip: "text-[var(--tag-violet)]",
-  url: "text-[var(--tag-cyan)]",
-  path: "text-[var(--tag-cyan)]",
-  method: "font-semibold text-[var(--tag-blue)]",
+  string: "text-tag-slate",
+  number: "text-tag-pink",
+  ip: "text-tag-violet",
+  url: "text-tag-cyan",
+  path: "text-tag-cyan",
+  method: "font-semibold text-tag-blue",
   status: "",
-  id: "text-muted-foreground/70",
+  id: "text-faint",
   bad: "font-medium text-destructive",
   good: "text-success",
-  punct: "text-muted-foreground/50",
+  punct: "text-faint",
 }
 
 /** A level as a word on the line, and in the console's level column. */
@@ -56,7 +56,7 @@ export const LEVEL_WORD: Record<LogLevel, string> = {
   critical: "font-semibold text-destructive",
   error: "font-semibold text-destructive",
   warn: "font-semibold text-warning",
-  info: "text-[var(--tag-blue)]",
+  info: "text-tag-blue",
   debug: "text-muted-foreground",
   unknown: "text-muted-foreground",
 }

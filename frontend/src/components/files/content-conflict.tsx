@@ -11,8 +11,8 @@ export function ContentConflict({
   busy?: boolean
 }) {
   return (
-    <div role="alert" className="shrink-0 p-3">
-      <Notice tone="warning" title="The file changed on disk">
+    <div className="shrink-0 p-3">
+      <Notice tone="warning" live="alert" title="The file changed on disk">
         Your draft is kept. Review it against the current file before saving, or discard it and
         reload the current file.
         <div className="mt-2 flex flex-wrap gap-2">

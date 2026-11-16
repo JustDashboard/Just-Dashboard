@@ -29,8 +29,8 @@ import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { ContentConflict } from "@/components/files/content-conflict"
-import { unifiedDiff } from "@/components/files/diff"
-import { DiffView } from "@/components/files/diff-view"
+import { unifiedDiff } from "@/lib/diff"
+import { DiffView } from "@/components/diff-view"
 import type { GitRun } from "@/components/git/run"
 import { PreviewHeader } from "@/components/git/preview-header"
 import { ConflictPreview } from "@/components/git/conflict-preview"
@@ -42,10 +42,10 @@ import { SubmodulePreview, LFSPreview, PatchPreview } from "@/components/git/ext
 import { ForgePreview } from "@/components/git/forge-preview"
 import { BlamePreview, RecoveryPreview, CommitSignature } from "@/components/git/inspect-panels"
 import { NameDialog } from "@/components/git/name-dialog"
-import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
+import { SourceBranch, SourceCommit, SourceMerge } from "@/components/git/glyphs"
 import { AuthorMark } from "@/components/git/marks"
 import { RefTags } from "@/components/git/ref-tags"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { VerbBar, type Verb } from "@/components/verbs"
@@ -579,8 +579,8 @@ function CommitPreview({
                   {c.changes.length} file{c.changes.length === 1 ? "" : "s"}
                 </span>
                 <span className="numeric font-mono">
-                  <span className="text-(--git-added)">+{c.insertions}</span>{" "}
-                  <span className="text-(--git-deleted)">−{c.deletions}</span>
+                  <span className="text-git-added">+{c.insertions}</span>{" "}
+                  <span className="text-git-deleted">−{c.deletions}</span>
                 </span>
                 {c.parents && c.parents.length > 0 && (
                   <span className="numeric font-mono">
@@ -603,7 +603,7 @@ function CommitPreview({
               <VerbBar verbs={verbs} />
             </div>
 
-            <div className="sticky top-0 z-10 flex h-8 items-center gap-2 border-b border-hairline bg-card px-3">
+            <div className="sticky top-0 z-raised flex h-8 items-center gap-2 border-b border-hairline bg-card px-3">
               <span className="eyebrow">Files</span>
               <span className="flex-1" />
               <button
@@ -631,9 +631,9 @@ function CommitPreview({
                 />
               ))}
               {c.changes.length === 0 && (
-                <li className="px-3 py-4 text-center text-hint text-muted-foreground">
+                <EmptyNote as="li" dense>
                   This commit changed no files.
-                </li>
+                </EmptyNote>
               )}
             </ul>
 
@@ -740,8 +740,8 @@ function ChangedFileRow({
         <Tag>binary</Tag>
       ) : (
         <span className="numeric shrink-0 font-mono text-micro">
-          <span className="text-(--git-added)">+{file.insertions}</span>{" "}
-          <span className="text-(--git-deleted)">−{file.deletions}</span>
+          <span className="text-git-added">+{file.insertions}</span>{" "}
+          <span className="text-git-deleted">−{file.deletions}</span>
         </span>
       )}
       <Tooltip>
@@ -822,10 +822,13 @@ function StashPreview({
         ctx.confirm({
           title: `Drop stash ${stash.index}`,
           confirmLabel: "Drop",
+          subject: {
+            mark: <SourceCommit className="size-5 text-muted-foreground" />,
+            name: `stash@{${stash.index}}`,
+            facts: <span className="truncate">{stash.message}</span>,
+          },
           description: (
-            <p className="text-destructive">
-              “{stash.message}” is thrown away. The changes it holds are not recoverable.
-            </p>
+            <p>“{stash.message}” is thrown away. The changes it holds are not recoverable.</p>
           ),
           action: async (c) => {
             await post("/git/stash/drop", { index: stash.index }, { confirm: c, query: q })
@@ -913,8 +916,8 @@ function ComparePreview({
               in{d.behind > 0 ? ` · ${base} is ${d.behind} ahead of ${head}` : ""} ·{" "}
               <span className="numeric">{d.files}</span> file{d.files === 1 ? "" : "s"} ·{" "}
               <span className="numeric font-mono">
-                <span className="text-(--git-added)">+{d.insertions}</span>{" "}
-                <span className="text-(--git-deleted)">−{d.deletions}</span>
+                <span className="text-git-added">+{d.insertions}</span>{" "}
+                <span className="text-git-deleted">−{d.deletions}</span>
               </span>
             </>
           ) : (
@@ -999,8 +1002,8 @@ export function CommitRow({ commit: c, onClick }: { commit: GitCommit; onClick: 
         </span>
         {(c.insertions > 0 || c.deletions > 0) && (
           <span className="numeric mt-px shrink-0 font-mono text-micro">
-            <span className="text-(--git-added)">+{c.insertions}</span>{" "}
-            <span className="text-(--git-deleted)">−{c.deletions}</span>
+            <span className="text-git-added">+{c.insertions}</span>{" "}
+            <span className="text-git-deleted">−{c.deletions}</span>
           </span>
         )}
       </button>

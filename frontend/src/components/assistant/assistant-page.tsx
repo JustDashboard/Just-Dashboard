@@ -347,7 +347,6 @@ function ServerChat({ settings }: { settings: ReturnType<typeof useAssistantSett
               ? `Ask about ${session.transcript.about.title}`
               : "Ask anything about this server"
           }
-          description="It can read the whole server — containers, deployments, services, logs, certificates and the firewall — and change what you ask it to, as you and under your role."
           placeholder={
             session.transcript.about
               ? `Ask about ${session.transcript.about.title}…`

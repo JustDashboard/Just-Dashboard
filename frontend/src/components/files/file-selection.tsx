@@ -23,7 +23,7 @@ export function FileSelection({
       data-slot="checkbox"
       data-state={checked ? "checked" : "unchecked"}
       className={cn(
-        "peer grid size-4 shrink-0 place-content-center rounded-[4px] border border-input bg-control focus-ring transition-shadow disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:data-[state=checked]:bg-primary",
+        "peer grid size-4 shrink-0 place-content-center rounded-sm border border-input bg-control focus-ring transition-shadow disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:data-[state=checked]:bg-primary",
         className,
       )}
       onClick={() => onCheckedChange(!checked)}

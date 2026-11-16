@@ -351,7 +351,7 @@ function AskButton({ busy, ready, onStop }: { busy: boolean; ready: boolean; onS
           transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
         >
           {busy ? (
-            <span className="block size-2.5 rounded-[2px] bg-current" />
+            <span className="block size-2.5 rounded-xs bg-current" />
           ) : (
             <ArrowUp className="size-4 [&_path]:stroke-[2.5]" />
           )}

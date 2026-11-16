@@ -102,9 +102,9 @@ export function LanguageList({
             {product ? (
               <ProductGlyph id={product} className="size-3.5" />
             ) : (
-              <span aria-hidden className="size-2 shrink-0 rounded-[2px] bg-(--tag-slate)" />
+              <span aria-hidden className="size-2 shrink-0 rounded-xs bg-tag-slate" />
             )}
-            <span className="whitespace-nowrap text-foreground/85">{l.name}</span>
+            <span className="whitespace-nowrap text-foreground">{l.name}</span>
             <span className="numeric shrink-0 text-muted-foreground">
               {languagePercent(l.share)}
             </span>

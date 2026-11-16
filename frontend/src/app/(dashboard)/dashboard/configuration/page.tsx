@@ -251,7 +251,6 @@ function Configuration() {
   if ((loading && !report) || (error && !(removing && report))) {
     return (
       <PageState
-        eyebrow="Settings"
         title="Configuration"
         error={error ?? undefined}
         // The identity line, the path and the column, at about their heights.
@@ -352,9 +351,9 @@ function Configuration() {
   const drift = report.drift ?? []
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {dialog}
-      <PageContext eyebrow="Settings" title="Configuration" />
+      <PageContext title="Configuration" />
 
       {/* The install's identity line, laid out as a project's: the address
           it answers at is the name with its state beside it, the checkout it
@@ -487,26 +486,6 @@ function Configuration() {
         </PanelBody>
       </Panel>
 
-      {run && (
-        <Panel plain className="animate-rise">
-          <PanelHeader title={running ? "Restarting" : "Last restart"} />
-          <PanelBody>
-            <RestartProgress
-              run={run}
-              log={report.log}
-              restarting={restarting}
-              onDismiss={
-                admin
-                  ? () => {
-                      dismiss().catch((err) => notify.error("Could not dismiss", errorMessage(err)))
-                    }
-                  : undefined
-              }
-            />
-          </PanelBody>
-        </Panel>
-      )}
-
       {/* One centred column, a section to a row, as a project's settings
           are. The certificate is first because picking one fills the
           address, the interface and the allowlist under it. */}
@@ -556,6 +535,28 @@ function Configuration() {
             )
           }
         >
+          {/* The restart is the column's first section, as a deploy's pending
+              strip is: it ran at the page inset above a centred column, so
+              the page had two left edges. The Stack picture stays the one
+              full-width block. */}
+          {run && (
+            <SettingSection title={running ? "Restarting" : "Last restart"}>
+              <RestartProgress
+                run={run}
+                log={report.log}
+                restarting={restarting}
+                onDismiss={
+                  admin
+                    ? () => {
+                        dismiss().catch((err) =>
+                          notify.error("Could not dismiss", errorMessage(err)),
+                        )
+                      }
+                    : undefined
+                }
+              />
+            </SettingSection>
+          )}
           <SettingSection
             title="Certificate"
             state={<CertificateState report={report} />}
@@ -731,7 +732,7 @@ function Configuration() {
             status={pending(["allowedCidrs", "require2fa"])}
             state={
               <>
-                {cidrs.length} {cidrs.length === 1 ? "network" : "networks"} allowed · two-factor{" "}
+                {plural(cidrs.length, "network")} allowed · two-factor{" "}
                 {draft.require2fa ? "required" : "optional"}
               </>
             }

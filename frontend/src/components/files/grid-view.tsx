@@ -137,7 +137,7 @@ const Tile = memo(function Tile({
     >
       <span
         role="presentation"
-        className={cn("absolute top-1.5 left-1.5 z-10", rowReveal(), selected && "opacity-100")}
+        className={cn("absolute top-1.5 left-1.5 z-raised", rowReveal(), selected && "opacity-100")}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >

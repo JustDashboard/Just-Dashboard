@@ -22,9 +22,9 @@ import { AheadBehind } from "@/components/git/ahead-behind"
 import { SourcePull } from "@/components/git/glyphs"
 import { SearchInput } from "@/components/search-input"
 import { ProductGlyph } from "@/components/product-logo"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
-import { StatusDot, type DotTone } from "@/components/status-dot"
+import { ChecksMark } from "@/components/git/pull-state"
 import { Tag } from "@/components/tag"
 import { ChipCount, FilterChip } from "@/components/chips"
 import { IconAction } from "@/components/icon-action"
@@ -301,15 +301,14 @@ function BranchList({
           </>
         )}
         {shownLocal.length + shownRemote.length === 0 && (
-          <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-            {needle ? (
-              <>
-                No branch matches <span className="font-medium text-foreground">{filter}</span>.
-              </>
-            ) : (
-              "No branches yet."
-            )}
-          </p>
+          <EmptyNote
+            dense
+            action={
+              needle ? { label: "Clear the filter", onClick: () => setFilter("") } : undefined
+            }
+          >
+            {needle ? <>Nothing matches “{filter}”.</> : "No branches yet."}
+          </EmptyNote>
         )}
       </div>
     </div>
@@ -358,12 +357,6 @@ function BranchRow({
       {action}
     </li>
   )
-}
-
-const CHECKS: Record<string, [DotTone, string]> = {
-  success: ["running", "Checks passed"],
-  failure: ["danger", "Checks failed"],
-  pending: ["warning", "Checks running"],
 }
 
 function PullList({
@@ -427,7 +420,6 @@ function PullList({
     <ul aria-label="Open pull requests" className="min-h-0 flex-1 overflow-y-auto py-1">
       {pulls.data.map((p) => {
         const here = p.head === current
-        const checks = p.checks ? CHECKS[p.checks] : undefined
         return (
           <li
             key={p.number}
@@ -446,11 +438,8 @@ function PullList({
                 <span className="min-w-0 truncate font-medium text-foreground" title={p.title}>
                   {p.title}
                 </span>
-                {checks && (
-                  <span role="img" aria-label={checks[1]} title={checks[1]} className="flex">
-                    <StatusDot tone={checks[0]} />
-                  </span>
-                )}
+                {/* Git's own mark, so a request's checks read the same here as on Git. */}
+                <ChecksMark checks={p.checks} />
               </p>
               <p
                 className="truncate text-micro text-muted-foreground"

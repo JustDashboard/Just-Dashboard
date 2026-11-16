@@ -1,5 +1,5 @@
 import type { AuditEntry } from "@/lib/types"
-import { plural } from "@/lib/format"
+import { grouped, plural } from "@/lib/format"
 import { auditSection, isMachine } from "@/components/audit/marks"
 
 const HOUR_MS = 3_600_000
@@ -120,7 +120,7 @@ export function hourWords(hour: DayHour) {
 export function failedWords(failed: number, total: number) {
   if (total === 0) return "Nothing was changed"
   if (failed === 0) return "Every change went through"
-  return `${failed.toLocaleString()} of ${total.toLocaleString()} failed`
+  return `${grouped(failed)} of ${grouped(total)} failed`
 }
 
 /** Who made the day's changes: "2 people and 3 automated changes". */

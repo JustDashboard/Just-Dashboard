@@ -111,7 +111,7 @@ export function ShortcutsDialog({
         </p>
       )}
 
-      <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
+      <div className="max-h-[55svh] space-y-4 overflow-y-auto pr-1">
         {groups.map(([group, specs]) => (
           <section key={group}>
             <p className="eyebrow mb-1.5">{group}</p>

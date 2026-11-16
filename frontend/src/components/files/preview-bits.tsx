@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import type { FilePreview } from "@/lib/types"
 import { LoadingRows } from "@/components/loading"
 import { Well } from "@/components/panel"
+import { Notice } from "@/components/state"
 import { fetchResponse } from "@/lib/api"
 
 /**
@@ -19,7 +20,7 @@ export function TextHead({ text, className }: { text: string; className?: string
   const lines = useMemo(() => text.replace(/\n$/, "").split("\n"), [text])
   return (
     <div className={cn("grid grid-cols-[auto_1fr] gap-x-3 p-2", className)}>
-      <div className="numeric shrink-0 text-right text-muted-foreground/60 select-none">
+      <div className="numeric shrink-0 text-right text-faint select-none">
         {lines.map((_, i) => (
           <div key={i}>{i + 1}</div>
         ))}
@@ -73,9 +74,9 @@ export function PdfPreview({
 
   if (failed) {
     return (
-      <p className="rounded-lg border border-dashed border-hairline p-4 text-center text-xs text-muted-foreground">
-        This PDF could not be loaded for preview. Download it to read it.
-      </p>
+      <Notice tone="warning" title="This PDF could not be previewed">
+        Download it to read it.
+      </Notice>
     )
   }
   if (!url) return <LoadingRows rows={2} />

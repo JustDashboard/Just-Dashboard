@@ -21,7 +21,7 @@ export function SplitDropOverlay({
       data-terminal-drop={direction}
       data-drop-blocked={blocked}
       className={cn(
-        "pointer-events-none absolute z-30 flex items-center justify-center rounded-md border-2 p-2",
+        "pointer-events-none absolute z-pane flex items-center justify-center rounded-md border-2 p-2",
         sides[direction],
         blocked ? "border-rule-danger bg-wash-danger" : "border-ring bg-wash-brand",
       )}
