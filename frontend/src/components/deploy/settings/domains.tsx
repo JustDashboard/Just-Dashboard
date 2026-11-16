@@ -959,7 +959,12 @@ function DomainRow({
                   type="button"
                   className={cn(
                     "inline-flex min-w-0 animate-rise items-center gap-1 rounded-sm focus-ring hover:underline",
-                    signInIncomplete ? "text-warning" : "text-muted-foreground",
+                    // A user name shared with another password is said in
+                    // the popover; the fact carries its ink, or the row
+                    // showed nothing of it until the fact was pressed.
+                    signInIncomplete || sharedWith.length > 0
+                      ? "text-warning"
+                      : "text-muted-foreground",
                   )}
                 >
                   <Key aria-hidden className="size-3 shrink-0" />
