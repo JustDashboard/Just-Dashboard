@@ -900,6 +900,30 @@ function GroupTable({
   const format = measured(group.measure)
   const byQuery = group.by === "fp" && values.some((v) => v.samples?.query)
 
+  // A table is for readings down its columns (D7): one or two values are a
+  // ranked line each, with what the columns said in words, not a framed head
+  // over a row.
+  if (values.length < FEW)
+    return (
+      <RankList
+        items={values.map((v) => ({
+          key: v.value,
+          label: <GroupValue value={v} by={group.by} byQuery={byQuery} lensId={lensId} />,
+          mono: false,
+          value: plural(v.count, "line"),
+          hint: [
+            v.errors > 0 && plural(v.errors, "error"),
+            timed && v.max !== undefined && `longest ${format(v.max)}`,
+            v.last && `seen ${relativeTime(v.last)}`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          title: `Only lines where ${fieldOf(group.by).label} is ${v.value}`,
+          onClick: () => onPick(v.value),
+        }))}
+      />
+    )
+
   return (
     <Table containerClassName="-mx-2 w-auto">
       <TableHeader>
@@ -955,6 +979,23 @@ function GroupTable({
         ))}
       </TableBody>
     </Table>
+  )
+}
+
+/** Fewer values than this are ranked lines rather than a table (D7). */
+const FEW = 3
+
+/** A pattern with its holes marked, as the line it stands for with the varying parts left out. */
+function PatternText({ pattern }: { pattern: string }) {
+  return (
+    <span className="block truncate font-mono text-xs" title={pattern}>
+      {pattern.split("<*>").map((part, i) => (
+        <span key={i}>
+          {i > 0 && <span className="text-faint">&lt;*&gt;</span>}
+          {part}
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -1018,6 +1059,24 @@ function GroupValue({
 function PatternTable({ facet, onPick }: { facet: LogFacet; onPick: (pattern: string) => void }) {
   const values = facet.values.slice(0, GROUP_ROWS)
   const errors = values.some((v) => v.errors > 0)
+  if (values.length < FEW)
+    return (
+      <RankList
+        items={values.map((v) => ({
+          key: v.value,
+          label: <PatternText pattern={v.value} />,
+          value: plural(v.count, "line"),
+          hint: [
+            v.errors > 0 && plural(v.errors, "error"),
+            v.last && `seen ${relativeTime(v.last)}`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          title: "Show the lines of this pattern in History",
+          onClick: () => onPick(v.value),
+        }))}
+      />
+    )
   return (
     <Table containerClassName="-mx-2 w-auto">
       <TableHeader>
@@ -1036,14 +1095,7 @@ function PatternTable({ facet, onPick }: { facet: LogFacet; onPick: (pattern: st
             title="Show the lines of this pattern in History"
           >
             <TableCell className={cn(CELL, "w-full max-w-0")}>
-              <span className="block truncate font-mono text-xs" title={v.value}>
-                {v.value.split("<*>").map((part, i) => (
-                  <span key={i}>
-                    {i > 0 && <span className="text-faint">&lt;*&gt;</span>}
-                    {part}
-                  </span>
-                ))}
-              </span>
+              <PatternText pattern={v.value} />
             </TableCell>
             <TableCell className={cn(FIGURE, "font-medium text-foreground")}>
               {grouped(v.count)}
