@@ -3,6 +3,7 @@ package deploy
 import (
 	"slices"
 	"sort"
+	"strings"
 )
 
 func (d *Draft) refreshEnvironmentKeys() {
@@ -125,9 +126,18 @@ func (d *Draft) variableValues(configuration PlanConfiguration) map[string]strin
 // Empty mode retains the shipped value-shape inference for old drafts.
 func (d *Draft) variableModes(configuration PlanConfiguration) map[string]string {
 	modes := map[string]string{}
+	linked := linkedDatabaseConnections(configuration.Dependencies)
 	for _, variable := range configuration.Variables {
 		mode := variable.ValueMode
-		if _, supplied := d.environment[variable.Name]; !supplied && variable.Reference != "" {
+		staged, supplied := d.environment[variable.Name]
+		if !supplied && variable.Reference != "" {
+			mode = "reference"
+		}
+		// The new-deployment page links a database by writing its reference
+		// into the variable's row, so it arrives as supplied text, which is
+		// otherwise kept literal. Read as the text, the application received
+		// `${{database.5}}` and no network to the database at all.
+		if supplied && linkedDatabaseReference(staged, linked) {
 			mode = "reference"
 		}
 		if mode == "" && (variable.Value != "" || variable.Generate > 0) {
@@ -136,6 +146,35 @@ func (d *Draft) variableModes(configuration PlanConfiguration) map[string]string
 		modes[variable.Name] = mode
 	}
 	return modes
+}
+
+// linkedDatabaseConnections are the saved database connections a plan links
+// as dependencies, by the id each dependency names.
+func linkedDatabaseConnections(dependencies []PlannedDependency) map[string]bool {
+	linked := map[string]bool{}
+	for _, dependency := range dependencies {
+		if dependency.Kind == "database" && dependency.ResourceKind == "database_connection" && dependency.ResourceID != "" {
+			linked[dependency.ResourceID] = true
+		}
+	}
+	return linked
+}
+
+// linkedDatabaseReference says a value is the whole reference to a database
+// connection the same plan links — `${{database.5}}`, `${{database.5.jdbc}}`,
+// `${{database.5.pooled}}` — by its id. Linking is the operator's own act in
+// this plan, so such a value is the link and never a captured value that only
+// reads like one, which every other supplied value is presumed to be.
+func linkedDatabaseReference(value string, linked map[string]bool) bool {
+	if len(linked) == 0 {
+		return false
+	}
+	reference, err := ParseVariableReference(value)
+	if err != nil || reference.Kind != "database" {
+		return false
+	}
+	id, _, _ := strings.Cut(reference.Target, ".")
+	return linked[id]
 }
 func variableWriteMode(request VariableWriteRequest) string {
 	if request.Reference != "" {

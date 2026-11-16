@@ -24,7 +24,7 @@ presses a verb itself (`verb.run()`); every component takes the wider `VerbSpec`
 | Field | What it is |
 | --- | --- |
 | `key`, `label`, `icon` | its id, its word, its glyph |
-| `short` | a shorter word for a named button in a narrow bar; the menu says `label` |
+| `short` | a shorter word for a named button in a narrow bar (`VerbBar`, the identity line's command from `IdentityVerbs`), which keeps `label` as its accessible name; the menu says `label` |
 | `run` | what pressing it does; a verb with `href` or `submenu` leaves it out |
 | `href`, `internal`, `download` | a verb that opens something is a link: through the router when `internal`, saved when `download` (a file name, or `true`) |
 | `inline` | drawn as a control of its own in a row or bar; the rest go behind the menu |

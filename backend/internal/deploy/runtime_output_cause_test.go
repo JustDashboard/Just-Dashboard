@@ -171,6 +171,20 @@ func TestApplicationOutputCauseNamesRuntimeFailures(t *testing.T) {
 			want:      OutputCause{Code: "runtime_env_missing", Subjects: []string{"DATABASE_URL"}, Fix: &CauseFix{Kind: fixAddVariable, Field: "variables.DATABASE_URL", Scope: "runtime"}},
 		},
 		{
+			// The failure this was found with, as the transcript kept it: drizzle-kit's
+			// spinner, then the container's exit, with no error anywhere.
+			name: "drizzle-kit migrate exiting without a word",
+			lines: []string{
+				"No config path provided, using default 'drizzle.config.ts'",
+				"Reading config file '/app/drizzle.config.ts'",
+				"Using 'postgres' driver for database querying",
+				"[\u28f7] applying migrations...\x1b[2K\x1b[1G[\u28f7] applying migrations...",
+			},
+			container: ContainerDiagnostics{State: "restarting", ExitCode: 1, RestartCount: 10},
+			want:      OutputCause{Code: "runtime_migration_silent", Detail: "drizzle-kit", Fix: &CauseFix{Kind: fixReview, Field: "dependencies"}},
+			sentence:  "`drizzle-kit migrate`, which the start command runs before the server, failed without printing why",
+		},
+		{
 			name:      "pm2 daemonized",
 			lines:     []string{"[PM2] Spawning PM2 daemon with pm2_home=/root/.pm2", "[PM2] Done."},
 			container: ContainerDiagnostics{State: "restarting", ExitCode: 0, RestartCount: 3},
@@ -223,6 +237,8 @@ func TestApplicationOutputCauseStaysSilentWithoutEvidence(t *testing.T) {
 		"a JavaScript reference error":           {3000, []string{"ReferenceError: API_URL is not defined"}},
 		"a request refused for its token":        {3000, []string{"Error: JWT is required to access /api/health"}},
 		"a variable warning it carried on after": {3000, []string{"WARNING: REDIS_URL is not set, caching disabled"}},
+		// Still running: the migration may yet finish and the server start.
+		"drizzle-kit migrating while it runs": {3000, []string{"[\u28f7] applying migrations..."}},
 	} {
 		cause := applicationOutputCause([]ContainerDiagnostics{{State: "running", Lines: runtimeLines(test.lines...)}},
 			runtimeCauseContext{runtime: RuntimePlanConfig{InternalPort: test.port}})
