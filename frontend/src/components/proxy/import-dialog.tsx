@@ -390,7 +390,7 @@ function ImportPreview({
   const existing = inspection.existing
   return (
     <div className="space-y-4">
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-body">
+      <dl className="grid grid-cols-start-main gap-x-4 gap-y-2 text-body">
         <dt className="text-muted-foreground">Saved as</dt>
         <dd className="font-mono text-xs">{inspection.name}</dd>
         <dt className="text-muted-foreground">Covers</dt>

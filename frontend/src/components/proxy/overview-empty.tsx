@@ -46,7 +46,7 @@ export function OverviewEmpty({
         tone === "success" && "border-rule-success",
       )}
     >
-      <div className="grid min-h-9 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 @xl:grid-cols-[auto_minmax(0,1fr)_auto]">
+      <div className="grid min-h-9 min-w-0 grid-cols-start-main items-center gap-x-3 @xl:grid-cols-start-main-end">
         <span className="row-span-2 flex self-start pt-0.5 @xl:row-span-1 @xl:self-center @xl:pt-0">
           {mark}
         </span>

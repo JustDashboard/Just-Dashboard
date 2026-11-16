@@ -119,18 +119,12 @@ export function AccessListsPanel() {
       <Panel plain id="access-lists" aria-label="Access lists" className="scroll-mt-6">
         <PanelHeader
           title="Access lists"
+          count={lists.length > 0 && plural(lists.length, "list")}
           actions={
-            <>
-              {lists.length > 0 && (
-                <span className="numeric text-hint text-muted-foreground">
-                  {plural(lists.length, "list")}
-                </span>
-              )}
-              <Button size="xs" variant="outline" onClick={() => openForm(null)} disabled={!data}>
-                <Plus className="size-3.5" />
-                New list
-              </Button>
-            </>
+            <Button size="xs" variant="outline" onClick={() => openForm(null)} disabled={!data}>
+              <Plus className="size-3.5" />
+              New list
+            </Button>
           }
         />
         <PanelBody flush className="pt-3">
@@ -800,17 +794,15 @@ function AccessListSheet({
           </FormNote>
         )}
         {refusal && (
-          <div role="alert">
-            <Notice tone="danger" icon={Warning} title="nginx refused it">
-              <p className="break-words">{refusal.message}</p>
-              <p>{editing ? "The list is as it was." : "Nothing was written."}</p>
-              {refusal.raw && (
-                <Disclosure quiet summary="nginx output">
-                  <Well className="max-h-60 break-all whitespace-pre-wrap">{refusal.raw}</Well>
-                </Disclosure>
-              )}
-            </Notice>
-          </div>
+          <Notice live="alert" tone="danger" icon={Warning} title="nginx refused it">
+            <p className="break-words">{refusal.message}</p>
+            <p>{editing ? "The list is as it was." : "Nothing was written."}</p>
+            {refusal.raw && (
+              <Disclosure quiet summary="nginx output">
+                <Well className="max-h-60 break-all whitespace-pre-wrap">{refusal.raw}</Well>
+              </Disclosure>
+            )}
+          </Notice>
         )}
       </fieldset>
     </SidePanel>

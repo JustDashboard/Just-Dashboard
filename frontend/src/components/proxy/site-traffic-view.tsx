@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
 import {
   ArrowRight,
   ArrowUp,
@@ -29,7 +28,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
 import { ChartPanel } from "@/components/chart-panel"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
 import { TileTrend } from "@/components/sparkline"
@@ -39,8 +39,7 @@ import { RankList, RankSkeleton, SplitBar } from "@/components/rank-list"
 import { ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabList } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -198,13 +197,13 @@ function TrafficPage() {
 
   if (engineMissing) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext title="Traffic" />
-        <HostIdentity
+        <IdentityHeader
           fallback={ChartActivity}
           title="Traffic"
           state={<Status tone="stopped" label="Not installed" />}
-          facts={<span>No reverse proxy on this host</span>}
+          facts={<Fact>No reverse proxy on this host</Fact>}
         />
         <EngineSetup status={status} admin={admin} onInstalled={refreshStatus} />
       </Page>
@@ -216,20 +215,18 @@ function TrafficPage() {
   const nginxSites = (vhosts.data ?? []).filter((v) => v.kind === "nginx")
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title="Traffic" />
-      <HostIdentity
+      <IdentityHeader
         mark={engineProduct(status)}
         fallback={ChartActivity}
         title="Traffic"
-        facts={
-          <IdentityFacts
-            sites={sites}
-            hour={hour}
-            error={summary.error}
-            observedAt={summary.data?.observedAt}
-          />
-        }
+        facts={identityFacts({
+          sites,
+          hour,
+          error: summary.error,
+          observedAt: summary.data?.observedAt,
+        })}
         // Laid out as a project's header: how the hour is answering beside
         // the name, the page's verbs behind `⋯`. Always a state, so the line
         // is one height on a phone before the hour is read and after.
@@ -254,7 +251,12 @@ function TrafficPage() {
       ) : (
         <div data-slot="traffic-hour" className="space-y-6">
           <HourReadings hour={hour} />
-          <HourChart hour={hour} />
+          {/* As tall as the chart and its legend, which a chart with nothing
+              to plot yet does not draw, so nothing under it moves when the
+              hour lands. */}
+          <div className="min-h-[281px]">
+            <HourChart hour={hour} />
+          </div>
         </div>
       )}
 
@@ -277,21 +279,14 @@ function TrafficPage() {
         </Panel>
       ) : !status || nginx ? (
         <Tabs value={tab} onValueChange={setTab} className="gap-0">
-          <TabsPrimitive.List
-            aria-label="Traffic views"
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            <TabsPrimitive.Trigger value="sites" className={tabClasses(tab === "sites", "h-10")}>
-              Sites
-              {sites && sites.length > 0 && <ChipCount>{sites.length}</ChipCount>}
-            </TabsPrimitive.Trigger>
-            <TabsPrimitive.Trigger value="errors" className={tabClasses(tab === "errors", "h-10")}>
-              Errors
-              {errorCount !== undefined && errorCount > 0 && (
-                <ChipCount>{errorCount.toLocaleString()}</ChipCount>
-              )}
-            </TabsPrimitive.Trigger>
-          </TabsPrimitive.List>
+          <ViewTabList
+            label="Traffic views"
+            value={tab}
+            views={[
+              { key: "sites", label: "Sites", count: sites?.length },
+              { key: "errors", label: "Errors", count: errorCount },
+            ]}
+          />
           <TabsContent value="sites" className="pt-4">
             <SitesView
               sites={sites}
@@ -323,8 +318,13 @@ function TrafficPage() {
   )
 }
 
-/** What the page covers, on the identity line: the hour, the sites, and how old the read is. */
-function IdentityFacts({
+/**
+ * What the page covers, on the identity line: the hour, the sites, and how old
+ * the read is. Called as a function, not drawn as a component, so the line
+ * receives the `Fact`s themselves: it reads only a `Fact` element as a fact,
+ * and a component's facts drew a dot before the first of them.
+ */
+function identityFacts({
   sites,
   hour,
   error,
@@ -335,45 +335,40 @@ function IdentityFacts({
   error: Error | undefined
   observedAt: string | undefined
 }) {
-  if (error) return <span className="text-warning">{"couldn't read the sites' access logs"}</span>
-  if (!sites || !hour) return <TextShimmer>{"Reading the sites' access logs…"}</TextShimmer>
+  if (error) return <Fact className="text-warning">{"couldn't read the sites' access logs"}</Fact>
+  if (!sites || !hour)
+    return (
+      <Fact>
+        <TextShimmer>{"Reading the sites' access logs…"}</TextShimmer>
+      </Fact>
+    )
   const unlogged = hour.unlogged
+  // A site with no access log is the fact that wants action, so it leads:
+  // a phone's one line of facts never clips it.
   return (
     <>
-      <span>last hour</span>
-      <FactDot />
-      <HostFact>
+      {unlogged.length > 0 && hour.sites > 0 && (
+        <Fact
+          className="text-warning"
+          title={unlogged.map((s) => `${s.site}: ${s.reason ?? "no log"}`).join("\n")}
+        >
+          {unlogged.length === hour.sites
+            ? "none keeps an access log"
+            : `${unlogged.length} with no access log`}
+        </Fact>
+      )}
+      <Fact>last hour</Fact>
+      <Fact>
         <Link href="/proxy/sites" className="rounded-sm hover:text-foreground hover:underline">
           {plural(hour.sites, "site")}
         </Link>
-      </HostFact>
-      {unlogged.length > 0 && hour.sites > 0 && (
-        <>
-          <FactDot />
-          <span
-            className="text-warning"
-            title={unlogged.map((s) => `${s.site}: ${s.reason ?? "no log"}`).join("\n")}
-          >
-            {unlogged.length === hour.sites
-              ? "none keeps an access log"
-              : `${unlogged.length} with no access log`}
-          </span>
-        </>
-      )}
+      </Fact>
       {!hour.complete && (
-        <>
-          <FactDot />
-          <span title="A log is longer than the part the dashboard holds, so its counts are floors">
-            counts are floors
-          </span>
-        </>
+        <Fact title="A log is longer than the part the dashboard holds, so its counts are floors">
+          counts are floors
+        </Fact>
       )}
-      {observedAt && (
-        <>
-          <FactDot />
-          <span>read {relativeTime(observedAt)}</span>
-        </>
-      )}
+      {observedAt && <Fact>read {relativeTime(observedAt)}</Fact>}
     </>
   )
 }
@@ -432,13 +427,14 @@ function HourReadings({ hour }: { hour: EdgeHour | undefined }) {
         )}
       </ReadingLine>
       <ReadingLine
+        // One tone for the tile and the line beside it, from the same
+        // threshold: under it a neutral tile and a grey line, over it the
+        // warning or danger tile and the line in that ink. A green tick
+        // stood beside a red line for an hour with 1% failed.
         mark={
-          hour ? (
-            <WireMark
-              size="md"
-              tone={tone === "default" ? "success" : tone === "danger" ? "danger" : "warning"}
-            >
-              {tone === "default" ? <CheckCircle aria-hidden /> : <Warning aria-hidden />}
+          hour && tone !== "default" ? (
+            <WireMark size="md" tone={tone === "danger" ? "danger" : "warning"}>
+              <Warning aria-hidden />
             </WireMark>
           ) : (
             <WireMark size="md">
@@ -458,7 +454,13 @@ function HourReadings({ hour }: { hour: EdgeHour | undefined }) {
             <TileTrend
               values={hour.points.map((p) => p.failed)}
               label="Requests answered 5xx a minute, last hour"
-              color="var(--destructive)"
+              color={
+                tone === "danger"
+                  ? "var(--destructive)"
+                  : tone === "warning"
+                    ? "var(--warning)"
+                    : "var(--muted-foreground)"
+              }
             />
           )
         }
@@ -560,15 +562,16 @@ function HourChart({ hour }: { hour: EdgeHour | undefined }) {
       title="Requests"
       actions={
         // Held while the hour is read, so the title line keeps its height.
+        // What a point is, every site added up, is the line's last fact.
         <span className="numeric truncate text-hint text-muted-foreground">
           {hour ? (
-            <>
-              {hour.total.toLocaleString()}
-              <span className="text-muted-foreground/50"> · </span>
-              <span className={cn(hour.failed > 0 && "text-destructive")}>
+            <FactLine nowrap>
+              <Fact>{hour.total.toLocaleString()}</Fact>
+              <Fact className={cn(hour.failed > 0 && "text-destructive")}>
                 {hour.failed.toLocaleString()} failed
-              </span>
-            </>
+              </Fact>
+              <Fact>a point a minute, every site</Fact>
+            </FactLine>
           ) : (
             "\u00a0"
           )}
@@ -579,19 +582,7 @@ function HourChart({ hour }: { hour: EdgeHour | undefined }) {
       height={CHART_HEIGHT}
       format={COUNT}
       showPeaks={false}
-      legend={false}
       note={hour ? "No requests in the last hour." : "Reading the sites' access logs…"}
-      footer={
-        <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
-          {SERIES.map((s) => (
-            <span key={s.key} className="flex items-center gap-1.5">
-              <span aria-hidden className="size-1.5 rounded-full" style={{ background: s.color }} />
-              {s.label}
-            </span>
-          ))}
-          <span className="ml-auto">One point is 1 min, every site added up.</span>
-        </span>
-      }
     />
   )
 }

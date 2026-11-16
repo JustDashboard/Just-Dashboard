@@ -2,6 +2,9 @@ import { Box, CornerUpRight, FileText, FolderOpen, ShieldCheck } from "@/compone
 import type { SiteUpstreamHealth, VHost } from "@/lib/types"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
+import { cn } from "@/lib/utils"
+import type { SiteTrafficReading } from "@/lib/types"
+import { errorRateTone, share, trafficLabel } from "@/components/proxy/site-traffic"
 import { Tag } from "@/components/tag"
 import { certPathProduct, siteProduct } from "@/components/proxy/marks"
 import type { BackendKind } from "@/components/proxy/route-map"
@@ -32,6 +35,34 @@ export function RouteMark({
       <span className="absolute -right-1 -bottom-1 flex size-4.5 items-center justify-center rounded-md border border-hairline bg-background">
         <ProductGlyph id={siteProduct(vhost)} className="size-3" />
       </span>
+    </span>
+  )
+}
+
+/**
+ * A site's last hour in words, as the Overview's routes and the Sites rows
+ * both say it: "295 req/h · 1.0% 5xx", in the warning or danger ink when the
+ * 5xx share says so. The Sites rows drew a growing bar against the busiest
+ * site's beside the count; a list row's reading is words (the band above the
+ * list already ranks the traffic).
+ */
+export function HourWords({ hour, className }: { hour: SiteTrafficReading; className?: string }) {
+  const tone = errorRateTone(hour.errorRate)
+  return (
+    <span
+      data-slot="site-hour"
+      className={cn(
+        "numeric text-hint whitespace-nowrap",
+        tone === "danger"
+          ? "text-destructive"
+          : tone === "warning"
+            ? "text-warning"
+            : "text-muted-foreground",
+        className,
+      )}
+      title={`${hour.requests.toLocaleString()} requests in the last hour, ${share(hour.errorRate)} answered 5xx`}
+    >
+      {trafficLabel(hour)}
     </span>
   )
 }

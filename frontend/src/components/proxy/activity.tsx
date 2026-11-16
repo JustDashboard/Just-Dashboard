@@ -1,12 +1,11 @@
 "use client"
 
-import Link from "next/link"
-import { ArrowRight } from "@/components/icons"
-import { errorMessage, get } from "@/lib/api"
+import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import type { AuditEntry } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ActionMark, ActionName, actorName } from "@/components/audit/marks"
@@ -42,31 +41,26 @@ export function RecentChanges() {
 
   return (
     <Panel plain>
-      <PanelHeader
-        title="Recent changes"
-        actions={
-          <Link
-            href="/audit"
-            className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-          >
-            Audit log <ArrowRight className="size-3" />
-          </Link>
-        }
-      />
+      <PanelHeader title="Recent changes" link={{ href: "/audit", label: "Audit log" }} />
       <PanelBody flush>
-        {activity.error ? (
-          <p className="text-hint text-muted-foreground" title={errorMessage(activity.error)}>
-            {"Couldn't read the audit log."}
-          </p>
+        {activity.error && !entries ? (
+          // A failed read is a failure with the way to ask again, not an
+          // empty list in grey with its reason in a tooltip.
+          <ErrorState
+            error={activity.error}
+            what="the audit log"
+            onRetry={activity.refresh}
+            className="mt-3"
+          />
         ) : !entries ? (
           <div className="space-y-3 py-1">
             <Skeleton className="h-4 w-56" />
             <Skeleton className="h-4 w-40" />
           </div>
         ) : entries.length === 0 ? (
-          <p className="text-hint text-muted-foreground">
+          <EmptyNote dense className="text-left">
             No proxy, certificate or package changes recorded yet.
-          </p>
+          </EmptyNote>
         ) : (
           <ul aria-label="Recent changes" className="animate-rise divide-y divide-hairline">
             {entries.map((entry) => (

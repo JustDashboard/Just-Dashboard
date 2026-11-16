@@ -294,9 +294,7 @@ function Lane({
         <p className={cn("eyebrow mb-4 lg:absolute lg:inset-x-0 lg:bottom-full", className)}>
           {title}
           {count > 0 && (
-            <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-              {count}
-            </span>
+            <span className="numeric ml-1.5 font-medium tracking-normal text-faint">{count}</span>
           )}
         </p>
         <ol className="flex flex-col gap-4" aria-label={title}>
