@@ -106,7 +106,7 @@ test("an administrator reaches Alerts from Metrics and adds a disk and a contain
 
   await page.getByRole("button", { name: "Add rule" }).click()
   let form = page.getByRole("dialog", { name: "Add alert" })
-  await form.getByRole("button", { name: /Disk filling up/ }).click()
+  await form.getByRole("radio", { name: /Disk filling up/ }).click()
   // A disk has a line and no minutes.
   await expect(form.getByLabel("Averaged over")).toHaveCount(0)
   await form.getByLabel("At or above").fill("101")
@@ -124,7 +124,7 @@ test("an administrator reaches Alerts from Metrics and adds a disk and a contain
 
   await page.getByRole("button", { name: "Add rule" }).click()
   form = page.getByRole("dialog", { name: "Add alert" })
-  await form.getByRole("button", { name: /Container down/ }).click()
+  await form.getByRole("radio", { name: /Container down/ }).click()
   await expect(form.getByLabel("At or above")).toHaveCount(0)
   await form.getByLabel("Down for").fill("5")
   await form.getByRole("button", { name: "Add alert" }).click()
@@ -370,10 +370,12 @@ test("with no rule the page offers what can be watched, a name and one fact each
   // A card opens the form on its kind.
   await cards.nth(2).click()
   const form = page.getByRole("dialog", { name: "Add alert" })
-  await expect(form.getByRole("button", { name: /Disk filling up/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  // The kind is one choice of the set, a named radiogroup.
+  await expect(
+    form
+      .getByRole("radiogroup", { name: "Alert kind" })
+      .getByRole("radio", { name: /Disk filling up/ }),
+  ).toHaveAttribute("aria-checked", "true")
   await form.getByRole("button", { name: "Cancel" }).click()
 
   // Nothing told and nobody to tell are each said with a mark and a way on.

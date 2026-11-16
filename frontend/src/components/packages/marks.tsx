@@ -327,7 +327,7 @@ export function managerProduct(manager: string | undefined): string | undefined 
 
 /** An upgrade's origin, as the archive that published it and the pocket it came from. */
 export function OriginFact({ origin, className }: { origin?: string; className?: string }) {
-  if (!origin) return <span className="text-muted-foreground/60">—</span>
+  if (!origin) return <span className="text-faint">—</span>
   // apt prints the architecture after the pocket; the table already says it.
   const text = origin.replace(/\s*\[[^\]]*\]$/, "")
   const product = originProduct(text)

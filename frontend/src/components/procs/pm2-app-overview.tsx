@@ -27,7 +27,7 @@ import { Detail, DetailList } from "@/components/detail-list"
 import { Section } from "@/components/section"
 import { Well } from "@/components/panel"
 import { ProductGlyph, hasProductLogo, pm2Product } from "@/components/product-logo"
-import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
+import { NoReading, ReadingLine, ReadingLines, ReadingMark } from "@/components/reading-line"
 import { Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -162,7 +162,13 @@ function AppNotices({ app, daemon, unsaved, onTab, onSave }: PM2OverviewProps) {
     )
   }
   if (notices.length === 0) return null
-  return <div className="grid min-w-0 gap-3 lg:grid-cols-2">{notices}</div>
+  // As many to a row as fit at 20rem each, so a lone callout takes the row
+  // rather than half of it beside nothing.
+  return (
+    <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(20rem,100%),1fr))] gap-3">
+      {notices}
+    </div>
+  )
 }
 
 /** The mark an application or one of its workers is drawn as: what runs it. */
@@ -461,30 +467,6 @@ function AppPicture({ app, lead, rows, reading, daemon, unsaved, onTab }: PM2Ove
         ),
       }}
     />
-  )
-}
-
-/** A reading's mark: the measure's own hue, or the tone of what is wrong with it. */
-function ReadingMark({
-  tone,
-  hue,
-  children,
-}: {
-  tone: "default" | "warning" | "danger"
-  hue?: string
-  children: React.ReactNode
-}) {
-  if (tone !== "default") {
-    return (
-      <WireMark size="md" tone={tone}>
-        {children}
-      </WireMark>
-    )
-  }
-  return (
-    <WireMark size="md" hue={hue}>
-      {children}
-    </WireMark>
   )
 }
 

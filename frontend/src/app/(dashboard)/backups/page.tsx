@@ -213,7 +213,7 @@ export default function BackupsPage() {
 
   return (
     <Workspace name="Backup jobs" refresh={refresh} search={false}>
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Protection" title="Backups" />
 
         <HostIdentity

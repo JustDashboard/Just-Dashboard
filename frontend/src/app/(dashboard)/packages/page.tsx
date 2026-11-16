@@ -17,7 +17,6 @@ import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { HostInfo, InstalledPackage, Job, PackageInventory, UpdateReport } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -54,6 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Reading register, design-system §15. The four summary tiles each moved to
@@ -136,7 +136,7 @@ function PackagesPage({ asked }: { asked: string | null }) {
     setView(next)
   }
   // From here a table has room for its columns; narrower, each package is a card.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const open = (name: string) => router.push(packageHref(name))
 
   const inventory = usePoll(
