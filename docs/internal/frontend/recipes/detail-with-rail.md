@@ -10,8 +10,9 @@ pages under `/docker`, a service and a PM2 application under `/processes`, an ac
 a package, a site, a stream and a certificate, the seven Network detail pages, and a database's
 account.
 
-**Components:** `DetailPage`, `StepArrows`, `BackLink`, `useSiblingSteps`, `stepCommands` and
-`useDetailTab` in `components/detail-page.tsx`. The rail is `Rail` in `components/rail.tsx`
+**Components:** `DetailPage`, `StepArrows`, `useSiblingSteps`, `stepCommands` and `useDetailTab`
+in `components/detail-page.tsx`, and `BackLink` in `components/page.tsx`
+([`../components/page-header.md`](../components/page-header.md)). The rail is `Rail` in `components/rail.tsx`
 ([`../components/rail.md`](../components/rail.md)). The view strip is `ViewTabs`
 ([`../components/tabs-chips-segments.md`](../components/tabs-chips-segments.md)).
 

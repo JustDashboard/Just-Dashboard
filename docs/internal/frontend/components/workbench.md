@@ -42,13 +42,16 @@ one pane, a bottom bar, details as pages).
 **Props.** `paneShown(shown, until)` on each pane: hidden below the break (`md` or `lg`) while it is
 not the one picked, untouched from the break up. `PaneBar({ label, stops, active, onPick, until })`:
 one 56px stop per pane, the glyph over its word, a `count` on the glyph's shoulder, clear of the
-home indicator, not drawn from the break up. `PaneBack` in the head of an opened page. The page
+home indicator, not drawn from the break up. It is a bar in the bottom stack
+([`overlays-confirm.md`](overlays-confirm.md)), so a dock opened over the page (held remote
+sessions, the assistant's conversations) rises above its stops instead of covering them; from the
+break up it measures nothing. `PaneBack` in the head of an opened page. The page
 keeps its own state for which pane is shown, and holds its frame to the window below the break
 (`Page fill`) so the pane has a height to be the whole of.
 
-**Accessibility.** The bar is a `nav` named by `label` holding a tablist, each stop a tab with
-`aria-selected` on the shown one and its count as a description; `PaneBack` is named "Back to the
-list" unless told otherwise.
+**Accessibility.** The bar is a `nav` named by `label` holding a button for each stop, the shown
+one `aria-current="page"` and its count as a description; `PaneBack` is named "Back to the list"
+unless told otherwise.
 
 **Example.** The ten pages on it are listed in
 [`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md): the Git workspace, the

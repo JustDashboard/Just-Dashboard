@@ -1,6 +1,8 @@
 "use client"
 
+import { useState } from "react"
 import { ArrowLeft } from "@/components/icons"
+import { useStackOccupant } from "@/components/dock"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
@@ -66,6 +68,12 @@ export type PaneStop<K extends string> = {
  * one — no arrow keys, no panels it named — so a screen reader announced a
  * widget that did not answer the keys it promised. Each stop is a Tab stop,
  * as a bar of buttons is.
+ *
+ * It is a bar in the bottom stack (`components/dock.tsx`), measured as it
+ * draws: a dock — the held remote sessions, the assistant's conversations —
+ * rises above its 56px rather than sitting on its stops, and so do toasts and
+ * the shell's scroll padding. From the break up it is not drawn, measures
+ * nothing, and the stack is as it was.
  */
 export function PaneBar<K extends string>({
   label,
@@ -84,8 +92,11 @@ export function PaneBar<K extends string>({
   until?: PaneBreak
   className?: string
 }) {
+  const [element, setElement] = useState<HTMLElement | null>(null)
+  useStackOccupant(element, "bar")
   return (
     <nav
+      ref={setElement}
       aria-label={label}
       data-slot="pane-bar"
       className={cn(
