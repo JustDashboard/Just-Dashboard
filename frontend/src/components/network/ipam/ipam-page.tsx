@@ -6,7 +6,7 @@ import { Hash, Plus, RefreshClockwise } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
-import { EmptyState, ErrorState } from "@/components/state"
+import { ErrorState, NeedsAdmin } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -123,8 +123,8 @@ export function AddressPlanningPage() {
   ]
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="Address planning" />
+    <Page rise>
+      <PageContext title="Address planning" />
       <HostIdentity
         fallback={Hash}
         title="Address planning"
@@ -187,10 +187,9 @@ export function AddressPlanningPage() {
         }
       />
       {!admin ? (
-        <EmptyState
-          icon={Hash}
-          title="Address planning needs an administrator"
-          description="Shared pools and private native-owner inventories require system administrator access. The local subnet calculator remains available to read accounts."
+        <NeedsAdmin
+          what="Address planning"
+          why="The subnet calculator works for every account."
           action={
             <Button asChild size="sm" variant="outline">
               <Link href="/network/tools?tool=subnet">Open the subnet calculator</Link>

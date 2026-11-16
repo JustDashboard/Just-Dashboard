@@ -7,6 +7,7 @@ import { Pencil, Plus, Trash } from "@/components/icons"
 import { del } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkRoute, NetworkRouting, NetworkRule } from "@/lib/types"
+import { breakpointQuery } from "@/lib/breakpoints"
 import { cn } from "@/lib/utils"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -48,7 +49,7 @@ const OWNER_WORD: Record<NetworkRoute["owner"], string> = {
 
 // From here the seven columns fit beside the rail; narrower, a route is two lines.
 const WIDE = "(min-width: 1100px)"
-const RULES_WIDE = "(min-width: 768px)"
+const RULES_WIDE = breakpointQuery("md")
 
 export type RouteTarget = {
   /** What was typed, trimmed. */
@@ -148,14 +149,8 @@ export function RoutesTable({
   return (
     <Panel aria-label="Routes" data-routing="routes">
       <PanelHeader
-        title={
-          <>
-            Routes
-            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-              {target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
-            </span>
-          </>
-        }
+        title="Routes"
+        count={target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
         actions={
           hiddenLocal > 0 && (
             <InfoTip label="What is not listed">
@@ -165,13 +160,14 @@ export function RoutesTable({
           )
         }
       >
-        {/* On a phone the chips take the head's second row, beside the note,
-            as their place does while the routes are read: a framed panel is
-            the screen's width there, and the chips fitted beside the title,
-            so the head grew shorter when the routes landed. */}
+        {/* On a phone the chips take the head's second row of their own, as
+            their place does while the routes are read, and the note stays
+            beside the title: a framed panel is the screen's width there, and
+            with the count out of the title the chips fitted beside it, so the
+            head grew shorter when the routes landed. */}
         <ChipStrip
           aria-label="Routing table"
-          className="mr-auto max-sm:grow max-sm:basis-[calc(100%-2rem)]"
+          className="mr-auto max-sm:order-last max-sm:basis-full"
         >
           <FilterChip selected={scope === undefined} onClick={() => setChosen(undefined)}>
             All <ChipCount>{covering.length}</ChipCount>
@@ -353,7 +349,7 @@ function Owner({ route, short }: { route: NetworkRoute; short?: boolean }) {
       <span className={cn("truncate", route.managed ? "text-brand" : "text-muted-foreground")}>
         {OWNER_WORD[route.owner]}
       </span>
-      {!short && <span className="text-muted-foreground/60">· {route.protocol}</span>}
+      {!short && <span className="text-faint">· {route.protocol}</span>}
     </span>
   )
 }
@@ -441,14 +437,8 @@ export function RulesTable({
   return (
     <Panel aria-label="Policy rules" data-routing="rules">
       <PanelHeader
-        title={
-          <>
-            Policy rules
-            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-              {rules.length}
-            </span>
-          </>
-        }
+        title="Policy rules"
+        count={rules.length}
         actions={
           onAdd && (
             <Button size="xs" variant="outline" onClick={onAdd}>

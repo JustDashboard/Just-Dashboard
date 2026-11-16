@@ -266,7 +266,7 @@ function OpeningName({ opening }: { opening: Opening }) {
       {opening.port ? (
         <span className="numeric shrink-0 font-mono font-normal">
           <span className="text-muted-foreground">:</span>
-          <span className="text-[var(--tag-pink)]">{opening.port}</span>
+          <span className="text-tag-pink">{opening.port}</span>
           {opening.protocol && <span className="text-muted-foreground">/{opening.protocol}</span>}
         </span>
       ) : (

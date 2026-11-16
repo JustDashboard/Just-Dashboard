@@ -17,7 +17,7 @@ export function Port({ port, className }: { port: string; className?: string }) 
   return (
     <span className={cn("font-mono", className)}>
       <span className="text-muted-foreground">:</span>
-      <span className="text-[var(--tag-pink)]">{port}</span>
+      <span className="text-tag-pink">{port}</span>
     </span>
   )
 }

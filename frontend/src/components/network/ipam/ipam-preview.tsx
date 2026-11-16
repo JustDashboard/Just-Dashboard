@@ -48,7 +48,9 @@ export function IPAMPreviewField({
           if (value.trim() && !busy) onPreview()
         }}
       >
-        <div className="relative min-w-0 flex-1 sm:max-w-sm">
+        {/* The whole row on a phone, so the placeholder is read whole; the
+            button wraps under it. */}
+        <div className="relative min-w-0 max-sm:basis-full sm:max-w-sm sm:flex-1">
           <MagnifyingGlass
             aria-hidden
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
