@@ -1,4 +1,4 @@
-import { bytes } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import type { DbHostCapacity, DbProvisionLimits } from "@/components/database/fleet/types"
 
 /**
@@ -29,7 +29,7 @@ export function sizeOf(value: number): string {
 
 export function coresWord(cpus: number): string {
   const n = Number(cpus.toFixed(2))
-  return `${n} ${n === 1 ? "core" : "cores"}`
+  return plural(n, "core")
 }
 
 /** The draft a form starts from: Docker's bytes in whole MiB, a quota to two places. */

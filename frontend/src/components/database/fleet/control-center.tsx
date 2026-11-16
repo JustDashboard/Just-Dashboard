@@ -1,6 +1,6 @@
 "use client"
 
-import { FoundList } from "@/components/database/connect/found-list"
+import { FoundList, ScanNotes } from "@/components/database/connect/found-list"
 import {
   connectsItself,
   foundShelves,
@@ -19,7 +19,6 @@ import { FleetBand } from "@/components/database/fleet/fleet-band"
 import { FleetCard } from "@/components/database/fleet/fleet-card"
 import { McpServer } from "@/components/database/fleet/mcp-server-dialog"
 import { MetricsExport } from "@/components/database/fleet/metrics-export-dialog"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { Shelves } from "@/components/database/fleet/shelves"
 import { useAddress, useTypedParam } from "@/components/database/fleet/use-address"
 import { useFleet, useInventory } from "@/components/database/fleet/use-fleet"
@@ -44,7 +43,7 @@ import { SearchInput } from "@/components/search-input"
 import { Section } from "@/components/section"
 import { ProductLogos } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
-import { EmptyState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -249,10 +248,10 @@ export function ControlCenter() {
       <Page rise>
         {/* The page's commands stay through a failed read: adding a database
             does not need the fleet to have answered. */}
-        <PageContext eyebrow="Apps" title="Databases" />
+        <PageContext title="All databases" />
         {opening(fleet.error ? "The databases could not be read" : "Reading the databases…")}
         {fleet.error ? (
-          <ReadFailed error={fleet.error} onRetry={fleet.refresh} every="30 seconds" />
+          <ErrorState error={fleet.error} onRetry={fleet.refresh} retryable every="30 seconds" />
         ) : (
           <div role="status" aria-label="Loading databases" className="flex flex-col gap-8">
             <div className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-3">
@@ -273,6 +272,7 @@ export function ControlCenter() {
       className="animate-rise"
       actions={
         <span className="flex items-center gap-3">
+          <ScanNotes inventory={inventory} />
           {inventory.scanError && (
             <span className="text-hint text-destructive">{inventory.scanError.message}</span>
           )}
@@ -296,7 +296,7 @@ export function ControlCenter() {
   if (entries.length === 0) {
     return (
       <Page rise>
-        <PageContext eyebrow="Apps" title="Databases" />
+        <PageContext title="All databases" />
         {/* The empty state under it holds the page's one command. */}
         {opening("No database is connected yet", null)}
         <EmptyState
@@ -379,7 +379,7 @@ export function ControlCenter() {
   return (
     <Page rise>
       {/* The commands are at the identity line's end, beside the verdict. */}
-      <PageContext eyebrow="Apps" title="Databases" />
+      <PageContext title="All databases" />
 
       <HostIdentity
         label="About the databases on this server"
