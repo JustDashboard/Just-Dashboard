@@ -162,7 +162,8 @@ export function TimersPanel({
                 <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
                 <TableHead className="hidden w-28 xl:table-cell">Last run</TableHead>
                 <TableHead className="w-24 md:w-32">State</TableHead>
-                <TableHead label="Actions" className="w-20 md:w-24" />
+                {/* Two 40px targets under a finger, so the ⋯ is not cut off. */}
+                <TableHead label="Actions" className="w-20 md:w-24 pointer-coarse:w-32" />
               </TableRow>
             </TableHeader>
             <TableBody>

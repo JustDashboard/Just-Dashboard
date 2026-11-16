@@ -243,7 +243,9 @@ export function CronJobsPanel({
                       <TableHead>Job</TableHead>
                       <TableHead className="hidden w-[30%] lg:table-cell">Schedule</TableHead>
                       <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
-                      <TableHead label="Actions" className="w-28 md:w-32" />
+                      {/* Under a finger each verb is a 40px target, so three of them need
+                          the wider column, or the ⋯ is cut off at the screen's edge. */}
+                      <TableHead label="Actions" className="w-28 md:w-32 pointer-coarse:w-44" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
