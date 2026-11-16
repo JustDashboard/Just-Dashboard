@@ -377,10 +377,14 @@ export function BarReading({
                   // The mark alone. A rule in the part's colour under each one
                   // read as a row of tabs; the line's tick already carries the
                   // colour, and the span lights when its mark is pointed at.
-                  // Scaled rather than resized, so every caller's mark grows
-                  // alike, whether a 14px glyph, a count or a tile.
+                  // Zoomed rather than resized, so every caller's mark grows
+                  // alike, whether a 14px glyph, a count or a tile. Zoom, not
+                  // a transform: a scale grew the drawing past its box, so a
+                  // mark with words ("2 stack is down") ate the gap after it
+                  // and the strip's gaps went uneven. A zoomed mark takes the
+                  // room it is drawn in.
                   const face = (
-                    <span className="flex min-w-3.5 scale-115 items-center justify-center">
+                    <span className="flex min-w-3.5 items-center justify-center [zoom:1.15]">
                       {part.mark}
                     </span>
                   )
