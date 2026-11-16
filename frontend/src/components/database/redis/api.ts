@@ -1,6 +1,10 @@
 import { del, downloadUrl, get, getText, post, type Query } from "@/lib/api"
 import { keyQuery, prefixQuery } from "@/components/database/redis/bytes"
-import { nodeAt, parseJsonDoc, type JsonNode } from "@/components/database/redis/keys/json-doc"
+import {
+  nodeAt,
+  parseJsonDoc,
+  type BareJsonNode as JsonNode,
+} from "@/components/database/kit/json-doc"
 import { noteRead } from "@/components/database/redis/own-reads"
 import { recordedSamples } from "@/components/database/redis/performance/samples"
 import type {

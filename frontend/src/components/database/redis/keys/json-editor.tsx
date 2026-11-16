@@ -36,8 +36,8 @@ import {
   nodeSize,
   parseJsonDoc,
   printJsonDoc,
-  type JsonNode,
-} from "@/components/database/redis/keys/json-doc"
+  type BareJsonNode as JsonNode,
+} from "@/components/database/kit/json-doc"
 import type { KeyEditorProps } from "@/components/database/redis/keys/key-pane"
 import { MemberDialog } from "@/components/database/redis/keys/member-dialog"
 import { ReadError } from "@/components/database/redis/read-error"
