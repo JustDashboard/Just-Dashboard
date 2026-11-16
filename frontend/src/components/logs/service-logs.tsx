@@ -120,12 +120,13 @@ export type ServiceLogsProps = {
    */
   onLeaveWindow?(): void
   /**
-   * The lens's readings: as tiles above the pane (`true`) for a page with no
-   * figures of its own, from `sm` up — on a phone they were the whole first
-   * screen; or as the figures on the lens row's chips (`"chips"`) where the
-   * section draws no tiles.
+   * The lens's readings: as reading lines above the pane (`"lines"`) for a
+   * page with no figures of its own, from `sm` up — on a phone they were the
+   * whole first screen; or as the figures on the lens row's chips
+   * (`"chips"`) where the section draws no lines of its own. `true` is the
+   * old name of `"lines"`, from when they were a row of tiles.
    */
-  readings?: boolean | "chips"
+  readings?: "lines" | "chips" | boolean
   /**
    * The lens's readings where the page draws them in a grid of its own: a
    * quick view one of them answers then carries no second count of its own.
@@ -457,7 +458,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
     setHanded((h) => ({ ...h, archives: true }))
   }
 
-  const asTiles = props.readings === true && wide && !sheet
+  const asTiles = (props.readings === "lines" || props.readings === true) && wide && !sheet
   const asChips = props.readings === "chips" && !sheet
   const readings = useLensReadings(sourceId, lens, {
     forcedLens: forced,

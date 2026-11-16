@@ -263,7 +263,10 @@ export function LensBar({
 
   return (
     <div className="flex shrink-0 items-center gap-1 border-b border-hairline pr-2">
-      <ChipStrip className="scroll-affordance flex-1 px-2 py-1.5 max-sm:mx-0 max-sm:my-0 max-sm:px-2 max-sm:py-1.5 sm:flex-nowrap sm:overflow-x-auto">
+      <ChipStrip
+        bleed={false}
+        className="scroll-affordance flex-1 px-2 py-1.5 sm:flex-nowrap sm:overflow-x-auto"
+      >
         {onDefaults && (
           <FilterChip
             selected

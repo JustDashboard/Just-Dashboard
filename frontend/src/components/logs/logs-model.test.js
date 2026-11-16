@@ -10,6 +10,7 @@ import {
   clockSkew,
   oneService,
   pulseOf,
+  readingLook,
   readingFor,
   readingShown,
   sameQuestion,
@@ -242,5 +243,32 @@ describe("pulseOf", () => {
   test("a stream with no times draws no pulse rather than a minute of silence", () => {
     expect(pulseOf([{ text: "x", level: "info" }], now)).toBeNull()
     expect(pulseOf([], now)).toBeNull()
+  })
+})
+
+describe("a lens reading said as a line", () => {
+  const danger = { id: "deadlocks", label: "Deadlocks", tone: "danger", hint: "" }
+  const plain = { id: "lines", label: "Lines", hint: "" }
+
+  test("takes its tone only once its figure is above zero", () => {
+    expect(readingLook(danger, 0).tone).toBeUndefined()
+    expect(readingLook(danger, 3).tone).toBe("danger")
+    expect(readingLook(plain, 3).tone).toBeUndefined()
+  })
+
+  test("draws its shape on a series hue, never the status red", () => {
+    expect(readingLook(danger, 3).hue).toBe("var(--chart-3)")
+    expect(readingLook(plain, 0).hue).toBe("var(--chart-1)")
+    for (const look of [readingLook(danger, 3), readingLook(plain, 3)]) {
+      expect(look.hue).not.toMatch(/destructive|danger|red/)
+    }
+  })
+
+  test("says its count over the window, or a rate for a per-minute reading", () => {
+    const window = { minutes: 60 }
+    expect(readingShown(plain, { value: 1204 }, window).text).toBe("1,204")
+    expect(readingShown(plain, { value: 7, capped: true }, window).text).toBe("7+")
+    expect(readingShown({ ...plain, figure: "per_minute" }, { value: 30 }, window).value).toBe(0.5)
+    expect(readingShown(plain, undefined, window).text).toBe("—")
   })
 })

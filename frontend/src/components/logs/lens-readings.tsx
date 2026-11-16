@@ -12,29 +12,15 @@ import {
   type ReadingFigure,
 } from "@/lib/log/insights"
 import type { LensReading, LogLens } from "@/lib/log/lenses"
-import {
-  READINGS_WINDOWS,
-  readingShown,
-  sameQuestion,
-  type ReadingsWindow,
-} from "@/components/logs/logs-model"
+import { READINGS_WINDOWS, sameQuestion, type ReadingsWindow } from "@/components/logs/logs-model"
 import { usePoll } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/hooks/use-column-width"
-import { TileTrend } from "@/components/sparkline"
-import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
-import { NumberTicker } from "@/components/ui/number-ticker"
+import { ReadingLines } from "@/components/reading-line"
+import { LensReadingLine } from "@/components/logs/lens-reading-line"
 
 const NO_READINGS: LensReading[] = []
 
 /** How often the figures are read again: a minute, as the Overview's tiles are. */
 const REFRESH = 60_000
-
-/**
- * The narrowest a reading's tile reads whole: its name, its figure and its
- * line. Five fit across the logs page's 1280px window, where at 200 they
- * broke three and two over a console left a third of its height.
- */
-const TILE_MIN = 180
 
 export type LensReadingTile = {
   reading: LensReading
@@ -56,9 +42,9 @@ export type LensReadingsState = {
  *
  * The readings on one key share a search, those on levels share another,
  * and a distinct count asks on its own (`lib/log/insights.ts`), so a lens's
- * five tiles cost two or three scans, read again each minute. A page with a
- * `StatGrid` of its own takes the tiles from here and draws them into it
- * with `ReadingTile`; `LensReadings` is the grid for a page without one.
+ * five readings cost two or three scans, read again each minute. A page that
+ * draws them among readings of its own takes them from here as
+ * `LensReadingLine`s; `LensReadings` is the run of them for a page without.
  * A page that draws only some of them names those (`only`), and the others
  * are not searched for: each is a scan a minute for a figure nobody sees.
  */
@@ -117,9 +103,11 @@ export function useLensReadings(
 }
 
 /**
- * The readings as the one row of figures a page without its own carries.
- * A press narrows the pane to the lines a figure counts, and pressing the
- * figure whose filter is on screen lets it go — the quick views' rule.
+ * The readings as lines over the pane, for a page without readings of its
+ * own: a container's logs, a stack's. A press narrows the pane to the lines a
+ * reading counts, and pressing the one whose filter is on screen lets it go —
+ * the quick views' rule. They were a row of `StatTile`s; a reading is said in
+ * words (D4), as Security says the same readings.
  */
 export function LensReadings({
   readings,
@@ -133,20 +121,13 @@ export function LensReadings({
   className?: string
 }) {
   const { tiles, window } = readings
-  const [ref, width] = useColumnWidth()
   if (tiles.length === 0) return null
-  // As many to a row as the column they stand in holds, in rows as even as
-  // they can be: five readings in a 700px column are three and two, where
-  // five across cut "Deadlocks & lock waits" to its first word.
-  const fit = width > 0 ? Math.max(2, Math.floor(width / TILE_MIN)) : 5
-  const rows = Math.ceil(tiles.length / Math.min(fit, 5))
-  const columns = Math.min(Math.max(Math.ceil(tiles.length / rows), 2), 5) as 2 | 3 | 4 | 5
   return (
-    <StatGrid ref={ref} columns={columns} dense className={className}>
+    <ReadingLines className={className}>
       {tiles.map((tile) => {
         const pressed = readingPressed(tile.reading, filter)
         return (
-          <ReadingTile
+          <LensReadingLine
             key={tile.reading.id}
             tile={tile}
             window={window}
@@ -161,82 +142,10 @@ export function LensReadings({
           />
         )
       })}
-    </StatGrid>
+    </ReadingLines>
   )
 }
 
 export function readingPressed(reading: LensReading, filter: LogFilterState) {
   return sameQuestion({ fields: fieldsOf(filter), levels: filter.levels }, reading)
-}
-
-/**
- * One reading as a tile: the figure over the window — a rate for a
- * per-minute reading, a count of addresses for a distinct one — in its tone
- * only once it is above zero, and the window's shape under it in a series
- * colour (§10: a danger reading's line is `--chart-3`, never the status red).
- * A reading the server writes only with a setting on says so when it is zero,
- * rather than reading as good news. The figure counts up when it lands and
- * glides to each minute's answer after, as a deployment's readings do.
- */
-export function ReadingTile({
-  tile,
-  window,
-  pressed,
-  onPick,
-}: {
-  tile: LensReadingTile
-  window: ReadingsWindow
-  pressed?: boolean
-  onPick?: () => void
-}) {
-  const { reading, figure } = tile
-  const words = window
-  const perMinute = reading.figure === "per_minute"
-  const { value, text: shown, decimals } = readingShown(reading, figure, window)
-  const hint =
-    figure && value === 0 && reading.requires
-      ? `Logged only with ${reading.requires} set`
-      : reading.hint
-  const content = (
-    <StatTile
-      label={reading.label}
-      value={
-        figure ? (
-          <span>
-            <NumberTicker value={value} decimalPlaces={decimals} />
-            {figure.capped && "+"}
-          </span>
-        ) : (
-          shown
-        )
-      }
-      trailing={figure ? (perMinute ? "per minute" : words.short) : undefined}
-      tone={figure && value > 0 ? (reading.tone ?? "default") : "default"}
-      trend={
-        figure?.series ? (
-          <TileTrend
-            values={figure.series}
-            color={reading.tone === "danger" ? "var(--chart-3)" : "var(--chart-1)"}
-            label={`${reading.label} over ${words.long}`}
-          />
-        ) : undefined
-      }
-      hint={hint}
-      className={onPick ? "h-full transition-colors group-hover:bg-row-hover" : undefined}
-    />
-  )
-  if (!onPick) return content
-  return (
-    <StatButton
-      label={
-        pressed
-          ? `Show every line again, not only the ${reading.label.toLowerCase()}`
-          : `Show the lines behind ${reading.label.toLowerCase()}`
-      }
-      pressed={pressed}
-      onClick={onPick}
-    >
-      {content}
-    </StatButton>
-  )
 }

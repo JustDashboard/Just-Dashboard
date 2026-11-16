@@ -122,6 +122,22 @@ export function readingShown(
 }
 
 /**
+ * How a lens reading with no look of its own is drawn as a line: in its tone
+ * once its figure is above zero, so the line that needs looking at is the
+ * amber or red one, and its window's shape on a series hue (§10: a danger
+ * reading's line is `--chart-3`, never the status red).
+ */
+export function readingLook(
+  reading: Pick<LensReading, "tone">,
+  value: number,
+): { tone?: LensReading["tone"]; hue: string } {
+  return {
+    tone: value > 0 ? reading.tone : undefined,
+    hue: reading.tone === "danger" ? "var(--chart-3)" : "var(--chart-1)",
+  }
+}
+
+/**
  * Whether a source is one service's stream — a container, a process, a
  * stack, an application's file, one unit's journal — whose lifecycle lines
  * mark its runs. A whole host's (the journal, the kernel, syslog) is every
