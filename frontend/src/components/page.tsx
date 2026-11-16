@@ -106,7 +106,10 @@ export function Page({
  * The way back to the list a page sits under: "← Containers". One drawing for
  * every page, where 24 files each kept the same link in a constant of their
  * own. `PageContext` draws it from `back`; a flow's header and `PageState`
- * take the same prop.
+ * take the same prop, and `DetailPage` draws it at the head of an item's
+ * page. A long list name ends in an ellipsis rather than pushing the walk
+ * arrows off the row. `components/detail-page.tsx` kept a copy of its own,
+ * which is a deprecated name for this one now.
  */
 export function BackLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (

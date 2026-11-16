@@ -7,7 +7,8 @@ page about one thing opens on (D1).
 `IdentityHeader`, `IdentityVerbs`, `platformName` (`components/identity-header.tsx`).
 **Deprecated, kept until WP-39 bans them:** `HostIdentity` (an alias of `IdentityHeader`),
 `HostFact` (use `Fact` with `product`), `FactDot` (see [`values-facts.md`](values-facts.md)),
-`PageContext`'s and `PageState`'s `eyebrow` (use `back`).
+`PageContext`'s and `PageState`'s `eyebrow` (use `back`), and the `BackLink` export of
+`components/detail-page.tsx` (import it from `components/page.tsx`).
 
 ## Anatomy
 
@@ -47,7 +48,9 @@ page passes move the pages that do otherwise.
 
 `IdentityVerbs({ verbs, name })` turns a thing's `Verb[]` into that `command` and `menu`: the first
 inline verb is the command, everything else goes in a menu named "More actions for `<name>`".
-Spread it in:
+The command says the verb's `short` word where it has one ("Logs" for "Open logs") and keeps `label`
+as its accessible name. On a phone the command is its icon alone, and the tip on hover or focus
+says that name, the words a screen reader hears, never the shorter ones. Spread it in:
 
 ```tsx
 <IdentityHeader
@@ -83,7 +86,10 @@ into `back`.
 
 `PageContext({ title, back?, actions?, className? })`: `back` is `{ href, label }`.
 
-`BackLink({ href, children })`: the 12px `ArrowLeft` link, for a way back outside `PageContext`.
+`BackLink({ href, children })`: the 12px `ArrowLeft` link, for a way back outside `PageContext`; a
+long list name ends in an ellipsis. It is the one way back: `PageContext`, `PageState`, `FlowHeader`
+and `DetailPage` all draw it. `components/detail-page.tsx` drew a copy of its own (WP-07); its
+`BackLink` export is now a deprecated name for this one, so import it from `components/page.tsx`.
 
 `PageState({ title, back?, error?, onRetry?, skeleton? })`: a page that has not got its data, or
 cannot get it. Give it `skeleton` in the page's final shape. A page that opens on an identity line

@@ -102,4 +102,15 @@ describe("IdentityVerbs", () => {
     expect(command).toBeTruthy()
     expect(menu).toBeFalsy()
   })
+
+  test("the command says the verb's short word and keeps its label as its name", () => {
+    const logs = { key: "logs", label: "Open logs", short: "Logs", icon: Glyph, run: noop }
+    const html = renderToStaticMarkup(IdentityVerbs({ verbs: [logs], name: "api" }).command)
+    expect(html).toContain('aria-label="Open logs"')
+    expect(html).toMatch(/>Logs<\/button>/)
+    // Without a short word the label is the words and the name both.
+    const plain = renderToStaticMarkup(IdentityVerbs({ verbs, name: "api" }).command)
+    expect(plain).not.toContain("aria-label")
+    expect(plain).toMatch(/>Edit<\/button>/)
+  })
 })

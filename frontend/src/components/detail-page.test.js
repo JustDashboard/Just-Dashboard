@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { siblingSteps, stepCommands } from "./detail-page"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { BackLink, siblingSteps, stepCommands } from "./detail-page"
+import { BackLink as PageBackLink } from "./page"
 
 // The keys a detail page walks its rail with. The Workspace runs the command
 // whose chord matches the press (`workspace/workspace.tsx`), spelled the way
@@ -25,10 +28,16 @@ describe("the sibling steps", () => {
 
   test("the ends of the list are disabled, and pressing them opens nothing", () => {
     const opened = []
-    const first = stepCommands("thing", siblingSteps(["a", "b"], "a", (key) => opened.push(key)))
+    const first = stepCommands(
+      "thing",
+      siblingSteps(["a", "b"], "a", (key) => opened.push(key)),
+    )
     expect(first[0].disabled).toBe(true)
     press(first, "ArrowUp")
-    const last = stepCommands("thing", siblingSteps(["a", "b"], "b", (key) => opened.push(key)))
+    const last = stepCommands(
+      "thing",
+      siblingSteps(["a", "b"], "b", (key) => opened.push(key)),
+    )
     expect(last[1].disabled).toBe(true)
     press(last, "ArrowDown")
     expect(opened).toEqual([])
@@ -41,5 +50,18 @@ describe("the sibling steps", () => {
     steps.previous.run()
     expect(opened).toEqual(["a", "c"])
     expect(siblingSteps([], null, () => {}).next.disabled).toBe(true)
+  })
+})
+
+describe("the way back", () => {
+  test("is the page frame's one BackLink, whichever file it is imported from", () => {
+    expect(BackLink).toBe(PageBackLink)
+    const html = renderToStaticMarkup(
+      createElement(BackLink, { href: "/docker/containers" }, "Containers"),
+    )
+    expect(html).toContain('href="/docker/containers"')
+    // The arrow is not read out, and a long list name ends in an ellipsis.
+    expect(html).toContain('aria-hidden="true"')
+    expect(html).toMatch(/<span class="truncate">Containers<\/span>/)
   })
 })

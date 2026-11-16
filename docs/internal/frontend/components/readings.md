@@ -5,7 +5,7 @@ A reading in words, a figure that moves, a band, a rank, a share and a chart (D4
 **Members:** `ReadingLine`, `ReadingLines`, `ReadingMark`, `NoReading` (`reading-line.tsx`);
 `StatTile`, `StatGrid`, `StatButton`, `TileBand` (`stat-tile.tsx`); `Meter`, `utilisationTone`
 (`meter.tsx`); `BarReading` (`bar-reading.tsx`, its arithmetic in `bar-reading-model.ts`);
-`RankList`, `RankSkeleton`, `SplitBar`, `percent` (`rank-list.tsx`); `Sparkline`, `TileTrend`
+`RankList`, `RankSkeleton`, `SplitBar` (`rank-list.tsx`); `Sparkline`, `TileTrend`
 (`sparkline.tsx`); `LiveFigure`, `LiveBytes`, `LandedFigures`, `HUE`, `CoreBars`, `SeriesKey`,
 `StreamState` (`live-figure.tsx`); `ChartPanel` (`chart-panel.tsx`) and `components/metrics/`.
 
@@ -149,7 +149,7 @@ against the busiest; the page passes move them here (WP-20, WP-23, WP-28).
     mark: <KindMark type={share.type} className="size-3" />,
     label: kindLabel(share.type),
     figure: share.figure,
-    note: percent(share.weight / whole),
+    note: sharePercent(share.weight / whole),
   }))}
 />
 ```
@@ -163,7 +163,11 @@ read `[data-slot=split-bar]`.
 line up and end on the block head's right edge, every row 32px. **Not** `BarList`: bars of
 different lengths are white slabs with figures floating beside them (the `bar-list` lint rule).
 A proportion that wants a picture is a `SplitBar` over the list, a row's `swatch` its legend.
-`RankSkeleton` waits at the list's own height.
+`RankSkeleton` waits at the list's own height. A row's `share` (0 to 1) is printed by
+`sharePercent` from `lib/format.ts` ("<1%", "42%", ">99%"), the one way the product says a share;
+the `percent` this file used to export is a deprecated name for it.
+
+**Enforced by** `rank-list.test.js` (the share column) and `format.test.js` (`sharePercent`).
 
 ## BarReading
 
