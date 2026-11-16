@@ -239,7 +239,7 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
             <li
               aria-hidden
               className={cn(
-                "sticky top-0 z-10 grid gap-x-4 bg-card px-3 py-1.5 text-hint font-medium text-muted-foreground @max-2xl:hidden",
+                "sticky top-0 z-raised grid gap-x-4 bg-card px-3 py-1.5 text-hint font-medium text-muted-foreground @max-2xl:hidden",
                 GRID,
               )}
             >
@@ -290,7 +290,7 @@ function FieldRow({
         </span>
         {field.indexed && (
           <span
-            className="flex shrink-0 items-center text-(--tag-cyan)"
+            className="flex shrink-0 items-center text-tag-cyan"
             title={`In ${field.indexes.length === 1 ? "the index" : "the indexes"} ${field.indexes.join(", ")}`}
           >
             <Key aria-hidden className="size-3" />

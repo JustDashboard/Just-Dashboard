@@ -337,7 +337,6 @@ export function RowInspector({
               type="button"
               size="xs"
               variant="ghost"
-              className="max-sm:h-8"
               onClick={() =>
                 void copyText(JSON.stringify(rowRecord(row), null, 2), "Row copied as JSON")
               }
@@ -350,7 +349,6 @@ export function RowInspector({
                 type="button"
                 size="xs"
                 variant="ghost"
-                className="max-sm:h-8"
                 onClick={() => {
                   const values = Object.fromEntries(
                     row.cells.map((cell) => [cell.column.key, cell.value]),
@@ -367,7 +365,6 @@ export function RowInspector({
                 type="button"
                 size="xs"
                 variant="ghost"
-                className="max-sm:h-8"
                 onClick={() => changeSet.revertRow(row.id)}
               >
                 <RotateCounterClockwise />
@@ -379,7 +376,6 @@ export function RowInspector({
                 type="button"
                 size="xs"
                 variant="ghost"
-                className="max-sm:h-8"
                 onClick={() => changeSet.revertRow(row.id)}
               >
                 <Trash />
@@ -394,7 +390,7 @@ export function RowInspector({
                   type="button"
                   size="xs"
                   variant="ghost"
-                  className="text-destructive max-sm:h-8"
+                  className="text-destructive"
                   onClick={() => changeSet.deleteRows([{ rowId: row.id, origin: row.origin }])}
                 >
                   <Trash />

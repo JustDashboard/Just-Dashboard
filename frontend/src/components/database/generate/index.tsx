@@ -7,7 +7,6 @@ import { ChevronDown, CloudDownload, Code, Sparkles, Table, Warning } from "@/co
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard } from "@/components/choice-card"
 import { Segments } from "@/components/segments"
@@ -58,6 +57,7 @@ import {
 import { SeedPanel } from "@/components/database/generate/seed"
 import { TablePicker } from "@/components/database/generate/table-picker"
 import { downloadArchive } from "@/components/database/generate/zip"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Schema = { name: string; system?: boolean; tables: number }
 type Head = { defaultSchema: string; schemas: Schema[] }
@@ -138,7 +138,7 @@ export function Generate() {
   const seeding = storedTarget === SEED && engine.can("seed")
 
   // Beside the files where there is room for both; folded to the chosen one where there is not.
-  const beside = useMediaQuery("(min-width: 1280px)")
+  const beside = useBreakpoint("xl")
   const [browsing, setBrowsing] = useState(false)
 
   /* ---------------------------------------------------------------- scope */

@@ -683,7 +683,7 @@ function Documents({
             data-slot="mongo-unsent"
             className="ml-auto flex min-h-9 min-w-0 flex-wrap items-center gap-x-1.5"
           >
-            <p className="text-hint text-(--git-modified)">
+            <p className="text-hint text-git-modified">
               Unsent edits on{" "}
               {stagedIds.length === 1 ? "one document" : `${stagedIds.length} documents`}
               {elsewhere.length > 0 &&
@@ -735,7 +735,7 @@ function Documents({
         {poll.loading && result && (
           <div
             aria-hidden
-            className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden bg-meter-track"
+            className="absolute inset-x-0 top-0 z-raised h-0.5 overflow-hidden bg-meter-track"
           >
             <div className="h-full w-1/3 animate-sweep bg-brand" />
           </div>

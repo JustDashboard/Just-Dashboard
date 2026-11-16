@@ -248,11 +248,11 @@ function Node({
               ) : (
                 <span className="min-w-0 truncate">{name}</span>
               )}
-              <span className="shrink-0 text-muted-foreground/50">:</span>
+              <span className="shrink-0 text-faint">:</span>
             </span>
           ))}
         {container ? (
-          <span className="shrink-0 whitespace-nowrap text-muted-foreground/70">
+          <span className="shrink-0 whitespace-nowrap text-faint">
             {node.kind === "array" ? "[ ]" : "{ }"} {nodeSize(node)}
           </span>
         ) : editing ? (

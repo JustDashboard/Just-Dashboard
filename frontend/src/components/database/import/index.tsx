@@ -356,7 +356,7 @@ export function OnlineImport() {
       : "Where is the database coming from?"
 
   return (
-    <Page register="flow" className="animate-rise">
+    <Page rise register="flow">
       <ImportTitle />
       {/* One centred column for the question, the steps and what they ask, so the
           spine is exactly as wide as the panel under it. */}

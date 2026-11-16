@@ -341,7 +341,7 @@ function InlineEditor({
           aria-invalid={error ? true : undefined}
           aria-describedby={hintId}
           className={cn(
-            "absolute inset-0 z-10 w-full min-w-0 bg-popover px-2 font-mono text-xs text-foreground focus-ring-inset placeholder:text-muted-foreground/60 max-sm:text-base",
+            "absolute inset-0 z-raised w-full min-w-0 bg-popover px-2 font-mono text-xs text-foreground focus-ring-inset placeholder:text-faint max-sm:text-base",
             column.kind === "number" && "text-right",
           )}
           onChange={(event) => setText(event.target.value)}

@@ -182,7 +182,7 @@ function RowCard({
         <span
           className={cn(
             "flex min-w-0 items-center gap-1.5",
-            row.state === "deleted" && "line-through decoration-(--git-deleted)",
+            row.state === "deleted" && "line-through decoration-git-deleted",
           )}
         >
           {title.map((cell, index) => (
@@ -232,16 +232,14 @@ function RowCard({
 function CardValue({ cell, className }: { cell: InspectedCell; className?: string }) {
   const value: EditValue | undefined = cell.value
   if (value === undefined || isDefault(value)) {
-    return (
-      <span className={cn("font-mono text-muted-foreground/60 italic", className)}>default</span>
-    )
+    return <span className={cn("font-mono text-faint italic", className)}>default</span>
   }
   return (
     <ValueText
       value={value}
       type={cell.column.typeName}
       clamp={48}
-      className={cn(cell.edited && "text-(--git-modified)", className)}
+      className={cn(cell.edited && "text-git-modified", className)}
     />
   )
 }

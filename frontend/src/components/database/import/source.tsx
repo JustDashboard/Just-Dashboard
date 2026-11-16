@@ -198,7 +198,7 @@ export function SourceStep({
         )}
       </FlowPanelBody>
       <FlowActions note="The password is sealed on the server, kept only while a replication needs it, and never sent back to a browser.">
-        <Button className="h-11 sm:h-9" disabled={!dsn} pending={checking} onClick={onCheck}>
+        <Button disabled={!dsn} pending={checking} onClick={onCheck}>
           <Router />
           Check the source
         </Button>

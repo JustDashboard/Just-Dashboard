@@ -206,7 +206,7 @@ function Entries({
           {(row.fields ?? []).map(([field, value], index) => (
             <span key={index} className="flex min-w-0 shrink-0 items-center">
               <span className="text-muted-foreground">{bytesLabel(field)}</span>
-              <span className="text-muted-foreground/50">=</span>
+              <span className="text-faint">=</span>
               <span className="max-w-64 truncate">{bytesLabel(value)}</span>
             </span>
           ))}

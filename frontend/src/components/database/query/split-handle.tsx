@@ -93,7 +93,7 @@ export function SplitHandle({
         className,
       )}
     >
-      {dragging && <span className="fixed inset-0 z-50 cursor-row-resize" aria-hidden />}
+      {dragging && <span className="fixed inset-0 z-overlay cursor-row-resize" aria-hidden />}
     </div>
   )
 }

@@ -129,7 +129,7 @@ export function RowField({
       data-edited={cell.edited || undefined}
       className={cn(
         "min-w-0 space-y-1 border-l-2 py-2 pr-3 pl-2.5",
-        cell.edited ? "border-l-(--git-modified)" : "border-l-transparent",
+        cell.edited ? "border-l-git-modified" : "border-l-transparent",
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
@@ -257,7 +257,7 @@ function Reading({
   const shown = formatCell(value, column)
   if (shown.tone !== "value") {
     return (
-      <p id={id} className="font-mono text-xs text-muted-foreground/70 italic">
+      <p id={id} className="font-mono text-xs text-faint italic">
         {shown.text}
       </p>
     )
@@ -450,7 +450,7 @@ function BooleanControl({ column, value, onStage }: Omit<ControlProps, "id">) {
         onChange={(next) => onStage(next === "true")}
       />
       {current === "" && (
-        <span className="font-mono text-xs text-muted-foreground/70 italic">{vacancy(value)}</span>
+        <span className="font-mono text-xs text-faint italic">{vacancy(value)}</span>
       )}
     </div>
   )
@@ -473,7 +473,7 @@ function EnumControl({ id, column, value, onStage }: ControlProps) {
       >
         <SelectValue
           placeholder={
-            <span className="text-muted-foreground/70 italic">
+            <span className="text-faint italic">
               {vacancy(value) || (typeof value === "string" ? value : "")}
             </span>
           }

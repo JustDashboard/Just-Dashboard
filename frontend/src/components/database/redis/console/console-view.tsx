@@ -349,7 +349,7 @@ export function ConsoleView({
             id={listId}
             role="listbox"
             aria-label="Commands"
-            className="absolute bottom-full left-2 z-20 mb-1 max-h-64 w-[min(34rem,calc(100%-1rem))] overflow-auto rounded-md border bg-popover p-1 shadow-md"
+            className="absolute bottom-full left-2 z-sticky mb-1 max-h-64 w-[min(34rem,calc(100%-1rem))] overflow-auto rounded-md border bg-popover p-1 shadow-md"
           >
             {options.map((option, at) => (
               <li
@@ -433,7 +433,7 @@ export function ConsoleView({
             }}
             onKeyDown={onKeyDown}
             onBlur={() => setTyping(false)}
-            className="h-7 min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/60 max-sm:text-base"
+            className="h-7 min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-faint max-sm:text-base"
           />
           <Button size="xs" pending={busy} disabled={!line.trim()} onClick={() => void run()}>
             <CornerDownLeft />

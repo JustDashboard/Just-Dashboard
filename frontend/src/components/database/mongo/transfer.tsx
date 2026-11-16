@@ -557,9 +557,9 @@ function ImportPreview({ report }: { report: MongoImportReport }) {
               {row.map((cell, at) => (
                 <td key={at} className="max-w-64 truncate px-2 py-1 whitespace-nowrap">
                   {cell === null ? (
-                    <span className="text-muted-foreground/60">not set</span>
+                    <span className="text-faint">not set</span>
                   ) : cell === "" ? (
-                    <span className="text-muted-foreground/60 italic">&quot;&quot;</span>
+                    <span className="text-faint italic">&quot;&quot;</span>
                   ) : (
                     cell
                   )}

@@ -671,7 +671,7 @@ function PreviewGrid({
         aria-label={`The first rows of ${table.name}`}
         containerClassName="max-h-[calc(100svh-26rem)] min-h-40"
       >
-        <TableHeader className="sticky top-0 z-10 bg-card [&_tr]:border-b">
+        <TableHeader className="sticky top-0 z-raised bg-card [&_tr]:border-b">
           <TableRow className="hover:bg-transparent">
             {table.columns.map((column) => (
               <TableHead key={column.name} className="h-auto px-3 pt-2 pb-1 align-top">

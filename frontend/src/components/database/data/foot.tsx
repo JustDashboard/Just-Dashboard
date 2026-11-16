@@ -267,14 +267,7 @@ export function ChangeBar({
           {changeSummary(counts)}
         </span>
       )}
-      <Button
-        type="button"
-        size="xs"
-        variant="outline"
-        className="max-sm:h-8"
-        disabled={applying}
-        onClick={onDiscard}
-      >
+      <Button type="button" size="xs" variant="outline" disabled={applying} onClick={onDiscard}>
         Discard
       </Button>
       {/* Busy, not disabled, while the statements are fetched: a button that
@@ -284,7 +277,6 @@ export function ChangeBar({
         type="button"
         size="xs"
         variant="outline"
-        className="max-sm:h-8"
         disabled={blocked || applying}
         aria-busy={reviewing || undefined}
         onClick={onReview}
@@ -295,7 +287,6 @@ export function ChangeBar({
       <Button
         type="button"
         size="xs"
-        className="max-sm:h-8"
         disabled={blocked}
         aria-busy={applying || reviewing || undefined}
         onClick={onApply}

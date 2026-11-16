@@ -44,7 +44,7 @@ function IndexKeys({ index }: { index: MongoIndex }) {
       {index.keys.map((key) => (
         <span key={`${key.field}:${key.type}`} className="font-mono text-hint whitespace-nowrap">
           <span className="text-muted-foreground">{key.field}</span>{" "}
-          <span className="text-(--tag-cyan)">{KEY_MARK[key.type] ?? key.type}</span>
+          <span className="text-tag-cyan">{KEY_MARK[key.type] ?? key.type}</span>
         </span>
       ))}
     </span>
@@ -70,7 +70,7 @@ function IndexProperties({ index, quiet }: { index: MongoIndex; quiet?: boolean 
       {index.hidden && <Status tone="warning" label="Hidden from the planner" />}
       {index.building && <Status tone="notice" label="Building" />}
       {tags.length === 0 && !index.hidden && !index.building && !quiet && (
-        <span className="text-muted-foreground/60">—</span>
+        <span className="text-faint">—</span>
       )}
     </span>
   )

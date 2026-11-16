@@ -58,7 +58,7 @@ const CELL_CLASS = Array.from({ length: 64 }, (_, bits) =>
   cn(
     "relative flex h-full min-w-0 items-center border-r border-b border-hairline px-2 font-mono text-xs focus-ring-inset data-[active]:outline-border-strong group-focus-within/grid:data-[active]:outline-ring",
     bits & PINNED
-      ? "sticky z-10 bg-(--jd-grid-ground) [background-image:linear-gradient(var(--wash),var(--wash))]"
+      ? "sticky z-raised bg-(--jd-grid-ground) [background-image:linear-gradient(var(--wash),var(--wash))]"
       : "bg-(--wash)",
     bits & RIGHT && "justify-end",
     bits & PIN_EDGE && "border-r-border",
@@ -67,8 +67,8 @@ const CELL_CLASS = Array.from({ length: 64 }, (_, bits) =>
       : bits & CHANGED && "[--wash:color-mix(in_oklab,var(--git-modified)_16%,transparent)]",
     // The corner mark says "changed" without the hue, and survives a selection.
     bits & CHANGED &&
-      "before:absolute before:top-0 before:left-0 before:border-4 before:border-transparent before:border-t-(--git-modified) before:border-l-(--git-modified)",
-    bits & STRUCK && "text-muted-foreground line-through decoration-(--git-deleted)",
+      "before:absolute before:top-0 before:left-0 before:border-4 before:border-transparent before:border-t-git-modified before:border-l-git-modified",
+    bits & STRUCK && "text-muted-foreground line-through decoration-git-deleted",
   ),
 )
 
@@ -260,7 +260,7 @@ const ROW_CLASS: Record<"plain" | "selected" | "inserted" | "deleted", string> =
 }
 
 const GUTTER =
-  "sticky left-0 z-10 flex h-full min-w-0 cursor-default items-center gap-1.5 border-r border-b border-hairline bg-(--jd-grid-ground) [background-image:linear-gradient(var(--wash),var(--wash))] px-2 select-none"
+  "sticky left-0 z-raised flex h-full min-w-0 cursor-default items-center gap-1.5 border-r border-b border-hairline bg-(--jd-grid-ground) [background-image:linear-gradient(var(--wash),var(--wash))] px-2 select-none"
 
 export interface GridRowProps {
   id: string

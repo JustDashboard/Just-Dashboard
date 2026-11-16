@@ -738,7 +738,7 @@ export function ImportDialog({
                                           placeholder="Left out"
                                           spellCheck={false}
                                           autoComplete="off"
-                                          className="h-8 w-44 font-mono placeholder:italic sm:h-7 sm:text-xs"
+                                          className="h-7 w-44 font-mono placeholder:italic sm:text-xs"
                                           onChange={(event) =>
                                             pick(column.source, event.target.value)
                                           }
@@ -759,7 +759,7 @@ export function ImportDialog({
                                           disabled={goes === ""}
                                           spellCheck={false}
                                           autoComplete="off"
-                                          className="h-8 w-36 font-mono sm:h-7 sm:text-xs"
+                                          className="h-7 w-36 font-mono sm:text-xs"
                                           onChange={(event) =>
                                             override(column.source, { type: event.target.value })
                                           }
@@ -811,13 +811,9 @@ export function ImportDialog({
                                         className="max-w-64 truncate py-1.5 font-mono"
                                       >
                                         {value === null ? (
-                                          <span className="text-muted-foreground/70 italic">
-                                            NULL
-                                          </span>
+                                          <span className="text-faint italic">NULL</span>
                                         ) : value === "" ? (
-                                          <span className="text-muted-foreground/70 italic">
-                                            &quot;&quot;
-                                          </span>
+                                          <span className="text-faint italic">&quot;&quot;</span>
                                         ) : (
                                           value
                                         )}
