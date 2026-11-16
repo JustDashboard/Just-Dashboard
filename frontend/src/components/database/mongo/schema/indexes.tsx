@@ -11,7 +11,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Meter } from "@/components/meter"
 import { DialogSubject, Modal } from "@/components/modal"
 import { EmptyNote, EmptyState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -33,6 +32,7 @@ import { dropIndex, hideIndex, mongoIndexes, setIndexExpiry } from "@/components
 import { CreateIndexDialog } from "@/components/database/mongo/schema/index-dialog"
 import type { MongoIndex } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
+import { ShareCell } from "@/components/database/ops/performance-words"
 import { ReadError } from "@/components/database/redis/read-error"
 
 const KEY_MARK: Record<string, string> = { asc: "↑", desc: "↓" }
@@ -134,7 +134,8 @@ export function IndexesView({
   const indexes = poll.data?.indexes
   const total = indexes?.reduce((sum, index) => sum + Math.max(index.size, 0), 0) ?? 0
   // The most any index here has been used: what each one's bar is drawn against.
-  const busiest = Math.max(...(indexes ?? []).map((index) => index.usage?.ops ?? 0), 1)
+  // Every use of this collection's indexes: each index's share of them is its column.
+  const uses = (indexes ?? []).reduce((sum, index) => sum + (index.usage?.ops ?? 0), 0)
 
   // After a drop the row has gone, and its control with it: the list takes the
   // keyboard. It is handed over when the confirmation ends, and again once the
@@ -301,6 +302,7 @@ export function IndexesView({
                     <TableHead>Type</TableHead>
                     <TableHead className="text-right">Size</TableHead>
                     <TableHead>Used</TableHead>
+                    <TableHead className="w-14 px-2 text-right">Share</TableHead>
                     <TableHead>Properties</TableHead>
                     <TableHead className="w-0">
                       <span className="sr-only">Actions</span>
@@ -330,24 +332,19 @@ export function IndexesView({
                         </TableCell>
                         <TableCell className="whitespace-nowrap">
                           {usage ? (
-                            <div className="w-36 space-y-1">
-                              <p className="flex items-baseline gap-1.5">
-                                <span className="numeric">{usage.figure}</span>
-                                <span className="truncate text-hint text-muted-foreground">
-                                  {usage.since}
-                                </span>
-                              </p>
-                              {/* Against the busiest index here: which ones carry the reads is seen at a glance. */}
-                              <Meter
-                                size="thin"
-                                value={((index.usage?.ops ?? 0) / busiest) * 100}
-                                label={`How much ${index.name} is used beside the busiest index`}
-                              />
-                            </div>
+                            <p className="flex w-44 items-baseline gap-1.5">
+                              <span className="numeric">{usage.figure}</span>
+                              <span className="truncate text-hint text-muted-foreground">
+                                {usage.since}
+                              </span>
+                            </p>
                           ) : (
-                            <span className="text-muted-foreground/60">—</span>
+                            <span className="text-faint">—</span>
                           )}
                         </TableCell>
+                        {/* What the bar under the figure said by its length: this index's
+                            part of the collection's reads through an index. */}
+                        <ShareCell part={index.usage ? index.usage.ops : -1} whole={uses} />
                         <TableCell>
                           <IndexProperties index={index} />
                         </TableCell>

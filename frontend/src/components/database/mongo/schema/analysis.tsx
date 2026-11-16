@@ -7,7 +7,6 @@ import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { Segments } from "@/components/segments"
-import { Meter } from "@/components/meter"
 import { SearchInput } from "@/components/search-input"
 import { EmptyState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -331,13 +330,6 @@ function FieldRow({
       </div>
 
       <div className="min-w-0 space-y-1 self-start">
-        <div className="flex h-2 items-center">
-          <Meter
-            size="thin"
-            value={field.presence * 100}
-            label={`${field.path} is in ${shareWords(field.presence)} of the sampled documents`}
-          />
-        </div>
         <p className="numeric flex flex-wrap items-center gap-x-1.5 text-hint text-muted-foreground">
           {shareWords(field.presence)}
           {missing > 0 && !element && (
