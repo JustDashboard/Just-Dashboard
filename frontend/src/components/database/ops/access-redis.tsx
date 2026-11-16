@@ -27,7 +27,7 @@ import type { RedisACL, RedisACLChange } from "@/components/database/ops/access-
 import { accountHref } from "@/components/database/ops/account-address"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
@@ -63,7 +63,7 @@ export function RedisAccess() {
   const { id, engine, readOnly, status, param, select } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const [creating, setCreating] = useState(false)
   const [frame, width] = useColumnWidth<HTMLDivElement>()

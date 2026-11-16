@@ -36,7 +36,7 @@ import { readableDuration } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { qualified } from "@/components/database/schema/changes"
-import { useFocusReturn } from "@/components/database/schema/focus"
+import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
 import {
   maintenanceKey,
   startMaintenance,
@@ -488,7 +488,7 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
   const { id, engine } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn((dialog.props as { request: unknown }).request !== null)
+  useSurfaceFocusReturn((dialog.props as { request: unknown }).request !== null)
   const list = usePoll(
     (signal) =>
       get<{ actions?: DbMaintenanceAction[] }>(`/databases/${id}/maintenance`, undefined, signal),

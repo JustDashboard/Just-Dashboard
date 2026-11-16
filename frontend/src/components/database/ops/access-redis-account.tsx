@@ -47,7 +47,7 @@ import {
   type AccountView,
 } from "@/components/database/ops/account-frame"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 const SHOW_WORDS: Record<AclShow, string> = {
@@ -83,7 +83,7 @@ export function RedisAccount({ name }: { name: string }) {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const filter = useAccessFilter(id)
   const show = filter.show as AclShow
