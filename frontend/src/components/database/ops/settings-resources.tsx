@@ -11,7 +11,7 @@ import { LimitField, useContainerPeaks } from "@/components/deploy/settings/limi
 import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { FieldRow, FormFact, FormNote } from "@/components/form"
 import { Detail, DetailList } from "@/components/detail-list"
-import { CouldNotRead, FactsSkeleton } from "@/components/database/home/blocks"
+import { FactsSkeleton } from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
 import { EngineMark } from "@/components/database/kit"
 import {
@@ -28,6 +28,7 @@ import {
   type LimitsDraft,
 } from "@/components/database/kit/limits"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
 
 /**
  * What the server's container may use of this machine: a memory limit and a
@@ -61,11 +62,7 @@ export function ResourcesSection({ confirm }: { confirm: (request: ConfirmReques
     return (
       <SettingSection id="resources" title="Resources">
         {resources.error ? (
-          <CouldNotRead
-            what="what it may use"
-            error={resources.error}
-            onRetry={resources.refresh}
-          />
+          <ErrorState what="what it may use" error={resources.error} onRetry={resources.refresh} />
         ) : (
           <div role="status" aria-label="Reading what it may use">
             <FactsSkeleton rows={3} />

@@ -3,20 +3,16 @@
 import { useCallback, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, Users } from "@/components/icons"
+import { Users } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { IconAction } from "@/components/icon-action"
+import { plural } from "@/lib/format"
+import { DetailPage, siblingSteps } from "@/components/detail-page"
 import { FormFact, FormFacts } from "@/components/form"
 import { Modal } from "@/components/modal"
-import { Page, PageContext } from "@/components/page"
 import { EmptyState } from "@/components/state"
-import { StatusDot } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useLinkGuard, useUnloadGuard } from "@/components/database/data/guard"
 import {
   accessHref,
@@ -46,6 +42,9 @@ export type AccountList = {
   label: string
   accounts: Omit<RailAccount, "href">[]
   loading: boolean
+  /** The list could not be read: the rail says so in place of its rows. */
+  error?: Error
+  onRetry?: () => void
   search?: { value: string; onChange: (value: string) => void; placeholder: string }
   caption: string
   filtered: boolean
@@ -124,124 +123,63 @@ export function AccountFrame({
 
   const hrefOf = (account: { name: string; host?: string }) => accountHref(id, account, tab)
   const accounts = list.accounts.map((account) => ({ ...account, href: hrefOf(account) }))
-  const at = accounts.findIndex((account) => account.key === current)
-  const step = (direction: number) => {
-    const next = at >= 0 ? accounts[at + direction] : accounts[direction > 0 ? 0 : -1]
-    if (next && !ask(next.href)) router.push(next.href, { scroll: false })
-  }
-  const previous = { disabled: at <= 0, run: () => step(-1) }
-  const next = {
-    disabled: accounts.length === 0 || at >= accounts.length - 1,
-    run: () => step(1),
-  }
+  // An account the list does not hold steps into it from its ends, as every
+  // detail page's arrows do.
+  const held = accounts.some((account) => account.key === current) ? current : null
+  const { previous, next } = siblingSteps(
+    accounts.map((account) => account.key),
+    held,
+    (key) => {
+      const to = accounts.find((account) => account.key === key)
+      if (to && !ask(to.href)) router.push(to.href, { scroll: false })
+    },
+  )
   const label = host ? `${name}@${host}` : name
   const page = engine.section("access")?.title ?? "Access"
   const one = list.label === "Users" ? "user" : "account"
 
   return (
-    <Workspace
-      name={one === "user" ? "User" : "Account"}
-      stateKey={`databases.${id}.account`}
-      commands={[
-        {
-          id: "previous",
-          label: `Previous ${one}`,
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: `Next ${one}`,
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
-    >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
+    <>
+      <DetailPage
+        name={one === "user" ? "User" : "Account"}
+        what={one}
+        stateKey={`databases.${id}.account`}
+        steps={{ previous, next }}
+        rail={
           <AccountRail
-            className="hidden w-72 shrink-0 xl:flex"
             label={list.label}
             accounts={accounts}
             current={current}
             pinned={{ key: current, name, host, line: "", href: hrefOf({ name, host }) }}
             loading={list.loading}
+            error={list.error}
+            onRetry={list.onRetry}
             search={list.search}
             caption={list.caption}
             filtered={list.filtered}
             onClearFilters={list.onClearFilters}
             onLeave={ask}
           />
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-            <div className="flex min-w-0 shrink-0 flex-col gap-5">
-              <PageContext
-                eyebrow={
-                  <Link
-                    href={accessHref(id, list.show)}
-                    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-                  >
-                    <ArrowLeft className="size-3" /> {page}
-                  </Link>
-                }
-                title={`${conn.name} · ${page} · ${label}`}
-                actions={
-                  <span className="flex items-center">
-                    <IconAction
-                      label={`Previous ${one}`}
-                      disabled={previous.disabled}
-                      onClick={previous.run}
-                    >
-                      <ChevronUp />
-                    </IconAction>
-                    <IconAction label={`Next ${one}`} disabled={next.disabled} onClick={next.run}>
-                      <ChevronDown />
-                    </IconAction>
-                    <span className="max-sm:hidden">
-                      <WorkspaceHelp compact />
-                    </span>
-                  </span>
-                }
-              />
-              {identity}
-            </div>
-            <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-              {views.length > 1 && (
-                <TabsPrimitive.List
-                  aria-label={`Views of ${label}`}
-                  className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-                >
-                  {views.map((view) => (
-                    <TabsPrimitive.Trigger
-                      key={view.key}
-                      value={view.key}
-                      className={tabClasses(tab === view.key, "h-10")}
-                    >
-                      {view.label}
-                      {view.count !== undefined && view.count > 0 && (
-                        <ChipCount>{view.count}</ChipCount>
-                      )}
-                      {view.unsaved && (
-                        <>
-                          <StatusDot tone="warning" />
-                          <span className="sr-only">unsaved changes</span>
-                        </>
-                      )}
-                    </TabsPrimitive.Trigger>
-                  ))}
-                </TabsPrimitive.List>
-              )}
-              {children(tab)}
-            </Tabs>
-          </div>
-        </div>
-      </Page>
+        }
+        back={{ href: accessHref(id, list.show), label: page }}
+        title={`${conn.name} · ${page} · ${label}`}
+        identity={identity}
+      >
+        <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
+          <ViewTabList
+            label={`Views of ${label}`}
+            value={tab}
+            hideWhenSingle
+            views={views.map((view) => ({
+              key: view.key,
+              label: view.label,
+              count: view.count,
+              dot: view.unsaved ? { tone: "warning", label: "unsaved changes" } : undefined,
+            }))}
+          />
+          {children(tab)}
+        </Tabs>
+      </DetailPage>
       <Modal
         open={leaving !== undefined}
         onOpenChange={(open) => !open && setLeaving(undefined)}
@@ -274,9 +212,7 @@ export function AccountFrame({
                 <AccountName name={name} host={host} className="text-body font-medium" />
               </p>
               <FormFacts>
-                <FormFact label="Not saved">
-                  {unsaved === 1 ? "1 change" : `${unsaved} changes`}
-                </FormFact>
+                <FormFact label="Not saved">{plural(unsaved, "change")}</FormFact>
               </FormFacts>
             </div>
           </div>
@@ -285,7 +221,7 @@ export function AccountFrame({
           </p>
         </div>
       </Modal>
-    </Workspace>
+    </>
   )
 }
 

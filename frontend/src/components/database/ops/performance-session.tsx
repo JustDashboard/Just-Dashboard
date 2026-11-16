@@ -5,14 +5,14 @@ import Link from "next/link"
 import { useParams } from "next/navigation"
 import { CodeBracket, Copy, Cross, StopCircle } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { duration, timestamp } from "@/lib/format"
+import { duration, plural, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { EmptyNote, EmptyState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -21,7 +21,6 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { DbClientMark } from "@/components/database/client-mark"
 import type { KnownClient } from "@/components/database/clients"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { EngineMark } from "@/components/database/kit"
 import { useKnownClients } from "@/components/database/use-known-clients"
 import {
@@ -40,7 +39,6 @@ import { readActivity } from "@/components/database/ops/performance-api"
 import {
   DetailFrame,
   DetailGate,
-  DetailHead,
   DetailRail,
   DetailTabs,
   stepOf,
@@ -154,7 +152,7 @@ function Session({ pid }: { pid: string | null }) {
     ? activity.error
       ? "The sessions could not be read"
       : "Reading the sessions…"
-    : `${rows.length} of ${total} ${total === 1 ? "session" : "sessions"}${
+    : `${rows.length} of ${plural(total, "session")}${
         state
           ? ` · ${SESSION_STATES.find((entry) => entry.id === state)?.label.toLowerCase()}`
           : idleOpen
@@ -163,14 +161,12 @@ function Session({ pid }: { pid: string | null }) {
       }`
 
   const back = { href: href("performance", { view: "sessions", state }), label: "Sessions" }
-  const head = (
-    <DetailHead
-      title={`${conn.name} · Session ${pid ?? ""}`}
-      back={back}
-      noun="session"
-      step={stepOf(rows, pid)}
-    />
-  )
+  const head = {
+    title: `${conn.name} · Session ${pid ?? ""}`,
+    back,
+    noun: "session",
+    step: stepOf(rows, pid),
+  }
   const rail = (
     <DetailRail
       label="Sessions"
@@ -182,6 +178,8 @@ function Session({ pid }: { pid: string | null }) {
       current={pid}
       pinned={pinned}
       loading={!activity.data && !activity.error}
+      error={activity.data ? undefined : activity.error}
+      onRetry={activity.refresh}
       empty={
         activity.error && !activity.data
           ? ""
@@ -194,24 +192,33 @@ function Session({ pid }: { pid: string | null }) {
 
   if (!shown) {
     return (
-      <DetailFrame rail={rail}>
-        {head}
-        {pid !== null && !activity.data && !activity.error ? (
-          <>
+      <DetailFrame
+        rail={rail}
+        head={head}
+        identity={
+          pid !== null && !activity.data && !activity.error ? (
+            // The loaded line's form, with a place for its verbs (empty
+            // until they are known), so nothing under it moves when it is read.
             <HostIdentity
+              loading
               className="border-b-0 pb-0"
               logo={<DbClientMark size="md" />}
               title={<SessionTitle pid={pid} />}
               state={<TextShimmer className="text-xs">Reading the sessions…</TextShimmer>}
-              facts={<span>&nbsp;</span>}
+              menu={false}
             />
+          ) : undefined
+        }
+      >
+        {pid !== null && !activity.data && !activity.error ? (
+          <>
             {/* The page's own shape while it is read: the strip is where it will be. */}
             <DetailTabs label={`Views of session ${pid}`} views={views} tab={tab} onTab={setTab}>
               <LoadingRows />
             </DetailTabs>
           </>
         ) : activity.error && !activity.data ? (
-          <CouldNotRead what="the sessions" error={activity.error} onRetry={activity.refresh} />
+          <ErrorState what="the sessions" error={activity.error} onRetry={activity.refresh} />
         ) : activity.data && !activity.data.supported ? (
           <EmptyState
             mark={<EngineMark engine={engine} size="md" />}
@@ -284,10 +291,10 @@ function Session({ pid }: { pid: string | null }) {
   ]
 
   return (
-    <DetailFrame rail={rail}>
-      {stopping.dialog}
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        {head}
+    <DetailFrame
+      rail={rail}
+      head={head}
+      identity={
         <HostIdentity
           label={`About session ${session.pid}`}
           className="animate-rise border-b-0 pb-0"
@@ -359,7 +366,9 @@ function Session({ pid }: { pid: string | null }) {
           }
           menu={menu.length > 0 && <VerbMenu verbs={menu} label={`More for session ${pid}`} />}
         />
-      </div>
+      }
+    >
+      {stopping.dialog}
 
       <DetailTabs label={`Views of session ${session.pid}`} views={views} tab={tab} onTab={setTab}>
         {tab === "activity" ? (
@@ -382,7 +391,7 @@ function Session({ pid }: { pid: string | null }) {
 function SessionTitle({ pid }: { pid: string }) {
   return (
     <span className="inline-flex min-w-0 items-baseline gap-1.5">
-      Session <span className="truncate font-mono text-[0.9375em]">{pid}</span>
+      Session <span className="truncate code-inline">{pid}</span>
     </span>
   )
 }

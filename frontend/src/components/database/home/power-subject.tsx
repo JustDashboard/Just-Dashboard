@@ -5,6 +5,7 @@ import type { Engine } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
 import { POWER } from "@/components/database/home/power"
 import type { DbConnectionSummary } from "@/components/database/shell/types"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * What a stop or a restart is confirmed with: the server drawn as itself —
@@ -58,7 +59,7 @@ export function powerConfirmation(
         {summary.consumers > 0 && (
           <p>
             {plural(summary.consumers, "deployment environment")}{" "}
-            {summary.consumers === 1 ? "is" : "are"} bound to this database and will lose it
+            {agree(summary.consumers, "is", "are")} bound to this database and will lose it
             {action === "stop" ? "." : " for as long as that takes."}
           </p>
         )}

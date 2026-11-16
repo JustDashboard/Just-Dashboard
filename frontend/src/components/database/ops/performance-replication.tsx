@@ -17,20 +17,15 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { readReplication } from "@/components/database/ops/performance-api"
-import {
-  Named,
-  NoFigure,
-  NotAvailable,
-  Notes,
-  Stale,
-  ViewRead,
-} from "@/components/database/ops/performance-parts"
+import { FIT_COLUMN, Named, NoFigure, NotAvailable, Notes } from "@/components/database/ops/performance-parts"
 import type {
   DbReplicaSource,
   DbReplicationSlot,
 } from "@/components/database/ops/performance-types"
 import { ReplicationPicture } from "@/components/database/ops/replication-picture"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
+import { cn } from "@/lib/utils"
 
 /** How far behind something is. `-1` is the server's "unknown", which is not zero. */
 function Lag({ seconds, size }: { seconds?: number; size?: number }) {
@@ -65,7 +60,8 @@ export function ReplicationView() {
   return (
     <Panel plain aria-label="Replication">
       <PanelHeader title="Replication" actions={<Stale poll={replication} />} />
-      <ViewRead
+      <Read
+        patience
         poll={replication}
         what="the replication state"
         locking={engine.can("locks")}
@@ -109,7 +105,7 @@ export function ReplicationView() {
                         <TableHead className="px-2">State</TableHead>
                         <TableHead className="px-2">Behind</TableHead>
                         <TableHead className="px-2 @max-[46rem]:hidden">Replayed to</TableHead>
-                        <TableHead className="@max-[38rem]:hidden">Connected</TableHead>
+                        <TableHead className="@max-stack:hidden">Connected</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -141,7 +137,7 @@ export function ReplicationView() {
                             {replica.replayLsn || <NoFigure />}
                           </TableCell>
                           <TableCell
-                            className="py-2 text-muted-foreground @max-[38rem]:hidden"
+                            className="py-2 text-muted-foreground @max-stack:hidden"
                             title={timestamp(replica.since)}
                           >
                             {replica.since ? relativeTime(replica.since) : <NoFigure />}
@@ -163,7 +159,7 @@ export function ReplicationView() {
                         <TableHead>Publication</TableHead>
                         <TableHead className="px-2">Tables</TableHead>
                         <TableHead className="px-2">Publishes</TableHead>
-                        <TableHead className="@max-[38rem]:hidden">Owner</TableHead>
+                        <TableHead className="@max-stack:hidden">Owner</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -184,7 +180,7 @@ export function ReplicationView() {
                                 ))}
                             </span>
                           </TableCell>
-                          <TableCell className="py-2 @max-[38rem]:hidden">
+                          <TableCell className="py-2 @max-stack:hidden">
                             {publication.owner ? <Named name={publication.owner} /> : <NoFigure />}
                           </TableCell>
                         </TableRow>
@@ -202,7 +198,7 @@ export function ReplicationView() {
                         <TableHead>Subscription</TableHead>
                         <TableHead className="px-2">State</TableHead>
                         <TableHead className="px-2">To</TableHead>
-                        <TableHead className="@max-[38rem]:hidden">Last message</TableHead>
+                        <TableHead className="@max-stack:hidden">Last message</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -231,7 +227,7 @@ export function ReplicationView() {
                             {subscription.publications.join(", ")}
                           </TableCell>
                           <TableCell
-                            className="py-2 text-muted-foreground @max-[38rem]:hidden"
+                            className="py-2 text-muted-foreground @max-stack:hidden"
                             title={timestamp(subscription.lastMessage)}
                           >
                             {subscription.lastMessage ? (
@@ -266,7 +262,7 @@ export function ReplicationView() {
             </PanelBody>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }
@@ -278,7 +274,7 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
       <p className="eyebrow">{title}</p>
       {/* A container: the tables inside give up a column by this block's
           width, not the window's. */}
-      <div className="@container -mx-4">{children}</div>
+      <div className={cn("@container", FIT_COLUMN)}>{children}</div>
     </section>
   )
 }
@@ -292,7 +288,7 @@ function Slots({ slots }: { slots: DbReplicationSlot[] }) {
             <TableHead>Slot</TableHead>
             <TableHead className="px-2">Read by</TableHead>
             <TableHead className="px-2 text-right">Log held back</TableHead>
-            <TableHead className="@max-[38rem]:hidden">Kind</TableHead>
+            <TableHead className="@max-stack:hidden">Kind</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -310,7 +306,7 @@ function Slots({ slots }: { slots: DbReplicationSlot[] }) {
               <TableCell className="numeric px-2 py-2 text-right">
                 {slot.retainedBytes < 0 ? <NoFigure /> : bytes(slot.retainedBytes)}
               </TableCell>
-              <TableCell className="py-2 @max-[38rem]:hidden">
+              <TableCell className="py-2 @max-stack:hidden">
                 <span className="flex flex-wrap items-center gap-x-2.5">
                   {slot.type && <Tag>{slot.type}</Tag>}
                   {slot.plugin && <Tag mono>{slot.plugin}</Tag>}

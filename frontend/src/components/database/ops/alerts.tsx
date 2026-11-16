@@ -209,16 +209,8 @@ export function Alerts() {
 
       <Panel plain aria-label="Alert rules">
         <PanelHeader
-          title={
-            <span className="flex items-baseline gap-2">
-              Alerts
-              {data && (
-                <span className="numeric text-hint font-normal text-muted-foreground">
-                  {rules.length}
-                </span>
-              )}
-            </span>
-          }
+          title="Alerts"
+          count={data ? rules.length : undefined}
           actions={
             <>
               {firing > 0 && (

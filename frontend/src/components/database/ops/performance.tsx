@@ -1,6 +1,5 @@
 "use client"
 
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { compact } from "@/components/database/home/readings"
 import { gauge, sqlSample } from "@/components/database/home/samples"
 import { useSamples } from "@/components/database/home/use-samples"
@@ -23,13 +22,14 @@ import { StatementsSetupHost } from "@/components/database/ops/statements-setup"
 import { TablesView } from "@/components/database/ops/performance-tables"
 import type { DbServerStats } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { tabClasses } from "@/components/tabs"
 import { ChipCount } from "@/components/chips"
 import { usePoll } from "@/hooks/use-poll"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { capitalize } from "@/components/database/kit/figures"
 
 type View =
   | "overview"
@@ -109,9 +109,7 @@ function Answering() {
       ...(engine.can("statementHistory")
         ? [{ id: "history" as const, label: "Statement history" }]
         : []),
-      ...(engine.can("tableStats")
-        ? [{ id: "tables" as const, label: objects[0].toUpperCase() + objects.slice(1) }]
-        : []),
+      ...(engine.can("tableStats") ? [{ id: "tables" as const, label: capitalize(objects) }] : []),
       ...(engine.can("indexStats") ? [{ id: "indexes" as const, label: "Indexes" }] : []),
       ...(engine.can("clickhouseViews")
         ? [
@@ -205,7 +203,7 @@ function Answering() {
         </Notice>
       )}
       {unread && (
-        <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
+        <ErrorState what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
 
       <div className="min-w-0 space-y-6">

@@ -1,12 +1,6 @@
 "use client"
 
 import { useConfirm } from "@/components/confirm-dialog"
-import {
-  CardsSkeleton,
-  CouldNotRead,
-  NotUpdating,
-  staleOf,
-} from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { dropAccountRequest } from "@/components/database/ops/access-drop"
@@ -37,12 +31,12 @@ import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { FormNote } from "@/components/form"
 import { Key, Trash, UserPlus } from "@/components/icons"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -51,6 +45,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { plural } from "@/lib/format"
 import { useMemo, useState } from "react"
+import { Stale } from "@/components/database/kit/read"
 
 /**
  * A SQL server's accounts: who can sign in, what each is, and what each was
@@ -202,7 +197,7 @@ export function SqlAccess() {
           title="Accounts"
           actions={
             <>
-              {staleOf(roles) && <NotUpdating error={staleOf(roles)!} />}
+              <Stale poll={roles} />
               {readOnly && <ProtectedTag />}
               <SearchInput
                 aria-label="Filter the accounts"
@@ -212,7 +207,7 @@ export function SqlAccess() {
                 containerClassName="w-40 sm:w-52"
               />
               {mayEdit && data?.supported && (
-                <Button size="sm" onClick={() => setCreating(true)}>
+                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
                   <UserPlus />
                   New account
                 </Button>
@@ -242,9 +237,9 @@ export function SqlAccess() {
         <PanelBody>
           {!data ? (
             roles.error ? (
-              <CouldNotRead what="the accounts" error={roles.error} onRetry={roles.refresh} />
+              <ErrorState what="the accounts" error={roles.error} onRetry={roles.refresh} />
             ) : (
-              <CardsSkeleton count={4} />
+              <ChoiceListSkeleton rows={4} lines={2} />
             )
           ) : !data.supported ? (
             <Notice title="The accounts cannot be listed">

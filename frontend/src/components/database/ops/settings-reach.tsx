@@ -26,14 +26,13 @@ import { Field, FormFact, FormNote, Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
 import { EngineGlyph, EngineMark } from "@/components/database/kit"
 import {
@@ -382,7 +381,6 @@ export function ReachabilitySection() {
         <>
           <Field label="Reachable from" info={what}>
             <Segments
-              fill
               label="Where it is reachable from"
               value={draft.choice}
               disabled={busy}
@@ -444,7 +442,7 @@ export function ReachabilitySection() {
       )}
 
       {admin && !data && access.error && (
-        <CouldNotRead
+        <ErrorState
           what="where it is reachable from"
           error={access.error}
           onRetry={access.refresh}
@@ -648,7 +646,6 @@ function AllowedAddresses({
             id="reach-allow-add"
             value={adding}
             placeholder="203.0.113.7 or 198.51.100.0/24"
-            aria-invalid={Boolean(problem) || undefined}
             onChange={(event) => setAdding(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter") return

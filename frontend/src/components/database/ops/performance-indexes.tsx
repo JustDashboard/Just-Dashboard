@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { bytes } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { RowLink } from "@/components/row-link"
@@ -31,14 +31,13 @@ import {
   useMaintenance,
 } from "@/components/database/ops/performance-maintenance"
 import {
+  FIT_COLUMN,
   NoFigure,
   NotAvailable,
   Notes,
   ObjectName,
-  ScopeChips,
-  Stale,
-  ViewRead,
   RETURNS_FOCUS,
+  ScopeChips,
 } from "@/components/database/ops/performance-parts"
 import {
   countFlags,
@@ -57,27 +56,29 @@ import {
 } from "@/components/database/ops/performance-words"
 import type { DbIndexStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
+import { agree } from "@/components/database/kit/figures"
 
 const FLAGS: { id: IndexFlag; chip: string; words: (count: number) => string }[] = [
   {
     id: "invalid",
     chip: "Invalid",
-    words: (n) => `${n === 1 ? "is" : "are"} invalid, and used by no query`,
+    words: (n) => `${agree(n, "is", "are")} invalid, and used by no query`,
   },
   {
     id: "duplicate",
     chip: "Duplicate",
-    words: (n) => `${n === 1 ? "repeats" : "repeat"} another index exactly`,
+    words: (n) => `${agree(n, "repeats", "repeat")} another index exactly`,
   },
   {
     id: "covered",
     chip: "Covered",
-    words: (n) => `${n === 1 ? "is" : "are"} the leading columns of a wider index`,
+    words: (n) => `${agree(n, "is", "are")} the leading columns of a wider index`,
   },
   {
     id: "unused",
     chip: "Unused",
-    words: (n) => `${n === 1 ? "has" : "have"} never been scanned`,
+    words: (n) => `${agree(n, "has", "have")} never been scanned`,
   },
 ]
 
@@ -204,7 +205,8 @@ export function IndexesView() {
           </TitleAside>
         )}
       </PanelHeader>
-      <ViewRead
+      <Read
+        patience
         poll={stats}
         what="the indexes"
         locking={engine.can("locks")}
@@ -249,7 +251,7 @@ export function IndexesView() {
               {flag && counts[flag] > 0 && (
                 <p className="text-body">
                   <span className="numeric font-medium">
-                    {counts[flag].toLocaleString()} {counts[flag] === 1 ? "index" : "indexes"}
+                    {plural(counts[flag], "index", "indexes")}
                   </span>{" "}
                   <span className="text-muted-foreground">
                     {FLAGS.find((entry) => entry.id === flag)?.words(counts[flag])}, holding{" "}
@@ -257,15 +259,15 @@ export function IndexesView() {
                   </span>
                 </p>
               )}
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {data.indexes.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     {data.notes?.length
                       ? "The engine lists no index here."
                       : `No ${engine.nouns.object} of this database has an index.`}
                   </EmptyNote>
                 ) : rows.length === 0 ? (
-                  <EmptyNote className="px-4">No index matches.</EmptyNote>
+                  <EmptyNote>No index matches.</EmptyNote>
                 ) : width < TABLE_FROM ? (
                   <ul className="divide-y divide-hairline border-y border-hairline">
                     {rows.map((index) => {
@@ -274,7 +276,7 @@ export function IndexesView() {
                         <li
                           key={`${index.schema}.${index.table}.${index.name}`}
                           data-list-row="index"
-                          className="space-y-1.5 px-4 py-2.5 text-xs"
+                          className="space-y-1.5 py-2.5 text-xs"
                         >
                           <div className="flex min-w-0 items-center gap-2">
                             <span className="min-w-0 flex-1 truncate font-mono" title={index.name}>
@@ -291,7 +293,7 @@ export function IndexesView() {
                           <span className="flex h-5 min-w-0 items-center gap-x-3 overflow-hidden whitespace-nowrap">
                             {counted && index.scans >= 0 && (
                               <span className="numeric text-hint text-muted-foreground">
-                                {compact(index.scans)} {index.scans === 1 ? "scan" : "scans"}
+                                {compact(index.scans)} {agree(index.scans, "scan", "scans")}
                               </span>
                             )}
                             <IndexTags index={index} />
@@ -387,7 +389,7 @@ export function IndexesView() {
             </div>
           )
         }
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

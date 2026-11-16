@@ -1,13 +1,9 @@
 "use client"
 
-import Link from "next/link"
-import { ArrowRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Stale } from "@/components/stale"
-import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { PollState } from "@/hooks/use-poll"
 
 /**
  * One block of a database's home: a title, a hairline, what was read.
@@ -21,14 +17,27 @@ import type { PollState } from "@/hooks/use-poll"
  */
 export function Block({
   title,
+  count,
+  link,
   actions,
+  aside,
   stale,
   className,
   bodyClassName,
   children,
 }: {
   title: string
+  /**
+   * The fact or count on the title's line: what the figures are of ("share
+   * of runtime since …"), how many there are. `PanelHeader`'s `count`, so it
+   * is drawn one way and stays at every width.
+   */
+  count?: React.ReactNode
+  /** The way on to the page that holds all of what the block shows the top of. */
+  link?: { href: string; label: string }
   actions?: React.ReactNode
+  /** Drawn on the head's line between the title and the actions (`PanelHeader`'s children). */
+  aside?: React.ReactNode
   /** The last poll failed over what is drawn: it is the reading before, not now. */
   stale?: Error
   className?: string
@@ -39,6 +48,8 @@ export function Block({
     <Panel plain aria-label={title} className={className}>
       <PanelHeader
         title={title}
+        count={count}
+        link={link}
         actions={
           (stale || actions) && (
             <>
@@ -47,118 +58,16 @@ export function Block({
             </>
           )
         }
-      />
+      >
+        {aside}
+      </PanelHeader>
       <PanelBody className={bodyClassName}>{children}</PanelBody>
     </Panel>
   )
 }
 
-/** The quiet way out of a block, to the page that holds all of what it shows the top of. */
-export function BlockLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-    >
-      {children} <ArrowRight className="size-3" />
-    </Link>
-  )
-}
-
-/**
- * A reading that is the one before: the poll after it failed.
- *
- * @deprecated use `Stale` from `@/components/stale` (its mark is this).
- */
-export function NotUpdating({ error }: { error: Error }) {
-  return <Stale error={error} />
-}
-
-/**
- * A read that failed with nothing to show in its place: "Could not read
- * <what>", the server's words, and always the retry.
- *
- * @deprecated use `ErrorState` with `what`, which this is. It was an amber
- * notice of its own, and dropped what `ErrorState` says for an item that is
- * gone, a server that asked for a pause and a module the host does not have.
- */
-export function CouldNotRead({
-  what,
-  error,
-  onRetry,
-  className,
-}: {
-  /** What the block would have shown: "the busiest statements". */
-  what: string
-  error: Error
-  onRetry: () => void
-  className?: string
-}) {
-  return <ErrorState what={what} error={error} onRetry={onRetry} className={className} />
-}
-
-/**
- * The three answers of one read, in one place: what it holds once it has
- * answered — and for as long as it has, whatever the polls after it do — the
- * failure when it never has, and the silhouette until either.
- */
-export function Read<T>({
-  poll,
-  what,
-  skeleton,
-  children,
-}: {
-  poll: PollState<T>
-  what: string
-  skeleton: React.ReactNode
-  children: (data: T) => React.ReactNode
-}) {
-  if (poll.data !== undefined) return <div className="animate-rise">{children(poll.data)}</div>
-  if (poll.error) return <ErrorState what={what} error={poll.error} onRetry={poll.refresh} />
-  return <>{skeleton}</>
-}
-
-/** The failure a block's header reports while its content stays: a poll that failed over data. */
-export function staleOf<T>(poll: PollState<T>): Error | undefined {
-  return poll.data !== undefined ? poll.error : undefined
-}
-
-/** A list of rows that has not arrived: a mark, two lines, a figure. */
-export function RowsSkeleton({ rows = 3, mark = true }: { rows?: number; mark?: boolean }) {
-  return (
-    <div className="divide-y divide-hairline" aria-hidden>
-      {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="flex items-center gap-3 py-3">
-          {mark && <Skeleton className="size-8 shrink-0 rounded-lg" />}
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <Skeleton className="h-3.5" style={{ width: `${44 - ((index * 11) % 20)}%` }} />
-            <Skeleton className="h-3" style={{ width: `${58 - ((index * 7) % 22)}%` }} />
-          </div>
-          <Skeleton className="h-3 w-14 shrink-0" />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * Cards that have not arrived: a mark and two lines in each. Stacked unless
- * the caller lays them out as the cards themselves will be.
- */
-export function CardsSkeleton({ count = 3, className }: { count?: number; className?: string }) {
-  return (
-    <div className={className ?? "space-y-2"} aria-hidden>
-      {Array.from({ length: count }).map((_, index) => (
-        <div key={index} className="flex min-h-14 items-center gap-3 rounded-xl border px-3 py-2.5">
-          <Skeleton className="size-8 shrink-0 rounded-lg" />
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <Skeleton className="h-3.5" style={{ width: `${52 - index * 9}%` }} />
-            <Skeleton className="h-3" style={{ width: `${70 - index * 12}%` }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  )
+function Bone({ width }: { width: string }) {
+  return <Skeleton className="inline-block h-[0.7em] max-w-full align-middle" style={{ width }} />
 }
 
 /** A list of facts that has not arrived: names down one side, values beside them, a rule under each. */
@@ -168,47 +77,18 @@ export function FactsSkeleton({ rows = 4, className }: { rows?: number; classNam
       {Array.from({ length: rows }).map((_, index) => (
         <div
           key={index}
-          className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-4 border-b border-hairline py-2.5"
+          className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-4 border-t border-hairline py-2 text-body first:border-t-0"
         >
-          <Skeleton className="h-3" style={{ width: `${70 - ((index * 13) % 30)}%` }} />
-          <Skeleton className="h-3" style={{ width: `${64 - ((index * 19) % 38)}%` }} />
+          {/* Bones inline in a line of the list's own size, so a row waits
+              at the height of the `Detail` that replaces it. */}
+          <span>
+            <Bone width={`${70 - ((index * 13) % 30)}%`} />
+          </span>
+          <span>
+            <Bone width={`${64 - ((index * 19) % 38)}%`} />
+          </span>
         </div>
       ))}
     </div>
-  )
-}
-
-/**
- * Facts as rows: the name on the left, its value beside it, a hairline under
- * each — the way a project's Runtime lists what a container may use. A
- * block's facts were a grid of 12px pairs with nothing between them, and in
- * a column a third of the page wide a value that wrapped ran into the next
- * one's name.
- */
-export function FactRows({ className, ...props }: React.ComponentProps<"dl">) {
-  return <dl className={cn("flex min-w-0 flex-col", className)} {...props} />
-}
-
-export function FactRow({
-  label,
-  children,
-  className,
-}: {
-  label: React.ReactNode
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <div className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)] items-baseline gap-x-4 border-b border-hairline py-2 text-body">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn("min-w-0", className)}>{children}</dd>
-    </div>
-  )
-}
-
-/** A sentence where a list would be: nothing to rank, and what would put something there. */
-export function Quiet({ className, ...props }: React.ComponentProps<"p">) {
-  return (
-    <p className={cn("text-body leading-relaxed text-muted-foreground", className)} {...props} />
   )
 }
