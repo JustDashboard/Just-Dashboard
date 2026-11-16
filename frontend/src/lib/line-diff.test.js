@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { diffCounts, lineDiff, unifiedBody } from "./diff"
+import { diffCounts, lineDiff, unifiedBody } from "./line-diff"
 
 describe("lineDiff", () => {
   test("marks what was removed and added, with no section unless asked for one", () => {
