@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   browserInlined,
   canGenerateSecret,
+  databaseLinkWrite,
   installsAssetsWithNode,
   needsStartCommand,
   candidateBlocker,
@@ -952,6 +953,21 @@ test("relinking keeps the connection shape the variable's reference asked for", 
   expect(withPreviousConnectionShape("postgres://db-7.jd.internal/app", "5.jdbc")).toBe(
     "postgres://db-7.jd.internal/app",
   )
+})
+
+test("a database link is written as the reference it is, an address as a value", () => {
+  // Sent as a value, the server stored the characters and the application got them.
+  expect(databaseLinkWrite("${{database.7}}")).toEqual({ reference: "${{database.7}}" })
+  expect(databaseLinkWrite("${{database.7.jdbc}}")).toEqual({ reference: "${{database.7.jdbc}}" })
+  expect(databaseLinkWrite("${{database.7.pooled}}")).toEqual({
+    reference: "${{database.7.pooled}}",
+  })
+  expect(databaseLinkWrite("postgres://db-7.jd.internal/app")).toEqual({
+    value: "postgres://db-7.jd.internal/app",
+  })
+  expect(databaseLinkWrite("${{database.7}}?sslmode=require")).toEqual({
+    value: "${{database.7}}?sslmode=require",
+  })
 })
 
 describe("repository container definitions", () => {
