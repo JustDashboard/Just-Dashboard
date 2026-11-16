@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Box, Clipboard, Layers, Sparkles } from "@/components/icons"
+import { Box, Clipboard, Layers, Rocket, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import type {
@@ -284,10 +284,14 @@ export default function DockerOverviewPage() {
               </>
             )
           }
+          // Its icon alone on a phone, as every identity line's command is.
           command={
             can("service.control") && (
               <Button size="sm" asChild>
-                <Link href="/deploy">Open Deployments</Link>
+                <Link href="/deploy">
+                  <Rocket className="size-3.5" />
+                  Open Deployments
+                </Link>
               </Button>
             )
           }
