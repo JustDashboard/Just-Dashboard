@@ -18,6 +18,7 @@ import { LoadingPanel } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
+  SortHead,
   Table,
   TableBody,
   TableCell,
@@ -43,7 +44,6 @@ import {
   ObjectName,
   RETURNS_FOCUS,
   ScopeChips,
-  SortHead,
 } from "@/components/database/ops/performance-parts"
 import {
   columnWidth,
@@ -345,9 +345,7 @@ export function TablesView() {
                         )}
                         {columns.has("vacuum") && <TableHead className="px-2">Vacuumed</TableHead>}
                         {columns.has("analyze") && <TableHead className="px-2">Analysed</TableHead>}
-                        <TableHead className="px-2">
-                          <span className="sr-only">Actions</span>
-                        </TableHead>
+                        <TableHead label="Actions" className="px-2" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>

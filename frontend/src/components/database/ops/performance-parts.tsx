@@ -2,7 +2,6 @@
 
 import { useCallback, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowDown, ArrowUp } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
 import { FormNote } from "@/components/form"
@@ -10,7 +9,6 @@ import { EmptyState } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
-import { TableHead } from "@/components/ui/table"
 import { nameHue, statementVerb } from "@/components/database/home/kinds"
 import { EngineMark } from "@/components/database/kit"
 import { oneLine } from "@/components/database/ops/queries"
@@ -151,50 +149,6 @@ export function SessionState({ status, late }: { status: DbSessionStatus; late?:
         ? "warning"
         : STATE_TONE[status]
   return <Status tone={tone} label={label} />
-}
-
-/**
- * A column's head that orders the rows under it. The head says which way the
- * column runs (`aria-sort`), and the arrow is drawn only on the one in use.
- */
-export function SortHead({
-  label,
-  active,
-  descending,
-  onSort,
-  align = "left",
-  className,
-  after,
-}: {
-  label: string
-  active: boolean
-  descending: boolean
-  onSort: () => void
-  align?: "left" | "right"
-  className?: string
-  /** Something beside the head's button that is not part of it: what the column means, as an `InfoTip`. */
-  after?: React.ReactNode
-}) {
-  const Arrow = descending ? ArrowDown : ArrowUp
-  return (
-    <TableHead
-      aria-sort={active ? (descending ? "descending" : "ascending") : "none"}
-      className={cn(align === "right" && "text-right", className)}
-    >
-      <button
-        type="button"
-        onClick={onSort}
-        className={cn(
-          "inline-flex items-center gap-1 rounded-sm focus-ring transition-colors hover:text-foreground",
-          active && "text-foreground",
-        )}
-      >
-        {label}
-        {active && <Arrow aria-hidden className="size-3" />}
-      </button>
-      {after && <span className="ml-1 inline-flex align-middle">{after}</span>}
-    </TableHead>
-  )
 }
 
 /** A dash where a row has no figure: the engine does not count it. */
