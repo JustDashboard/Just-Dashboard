@@ -268,7 +268,7 @@ test("read-only role sees the privacy boundary without requesting flow metadata"
   })
   await page.goto("/network/flows")
   await expect(
-    page.getByText("Socket history needs the admin capability", { exact: true }),
+    page.getByText("Socket history needs an administrator", { exact: true }),
   ).toBeVisible()
   await expect(
     page.getByText("Peer and descriptor-owner history can expose private workload connections."),
