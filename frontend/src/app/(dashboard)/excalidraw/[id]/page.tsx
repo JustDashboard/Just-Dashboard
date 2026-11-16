@@ -11,7 +11,7 @@ import { LoadingPanel } from "@/components/loading"
 const BoardWorkspace = dynamic(() => import("@/components/boards/board-workspace"), {
   ssr: false,
   loading: () => (
-    <Page fill className="max-w-none p-2 lg:p-3">
+    <Page fill="workspace">
       <LoadingPanel />
     </Page>
   ),

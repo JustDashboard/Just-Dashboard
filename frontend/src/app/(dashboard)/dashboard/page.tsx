@@ -97,7 +97,6 @@ export default function DashboardVersionPage() {
   if (!report) {
     return (
       <PageState
-        eyebrow="Settings"
         title="Version"
         error={error}
         skeleton={
@@ -122,9 +121,9 @@ export default function DashboardVersionPage() {
   const noted = report.releases.find((release) => release.breaking)?.version ?? target
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {dialog}
-      <PageContext eyebrow="Settings" title="Version" />
+      <PageContext title="Version" />
 
       <Identity
         report={report}
@@ -243,7 +242,7 @@ export default function DashboardVersionPage() {
             <SearchInput
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Find a change, a version or a fix"
+              placeholder="Find a change"
             />
           }
         />
@@ -294,11 +293,7 @@ function Identity({ report, command }: { report: SelfUpdateReport; command: Reac
         : { tone: "unknown" as const, label: "Version checks off" }
   const checked = report.check.checkedAt ? `checked ${relativeTime(report.check.checkedAt)}` : ""
   const hint = report.available
-    ? [
-        `${behind} ${behind === 1 ? "release" : "releases"} ahead of yours`,
-        offerTagNote(report),
-        pendingNote(report),
-      ]
+    ? [`${plural(behind, "release")} ahead of yours`, offerTagNote(report), pendingNote(report)]
         .filter(Boolean)
         .join(" · ")
     : report.check.enabled

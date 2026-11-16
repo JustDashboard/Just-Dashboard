@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { Check, ChevronDown, Cross, EyeOff } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { latency } from "@/lib/requests"
 import type { LogFacet, LogLine } from "@/lib/types"
 import type { LogFields, LogFilterState } from "@/components/logs/types"
@@ -263,7 +263,10 @@ export function LensBar({
 
   return (
     <div className="flex shrink-0 items-center gap-1 border-b border-hairline pr-2">
-      <ChipStrip className="scroll-affordance flex-1 px-2 py-1.5 max-sm:mx-0 max-sm:my-0 max-sm:px-2 max-sm:py-1.5 sm:flex-nowrap sm:overflow-x-auto">
+      <ChipStrip
+        bleed={false}
+        className="scroll-affordance flex-1 px-2 py-1.5 sm:flex-nowrap sm:overflow-x-auto"
+      >
         {onDefaults && (
           <FilterChip
             selected
@@ -355,7 +358,7 @@ export function LensBar({
               ) : (
                 !drawn &&
                 count !== undefined &&
-                count > 0 && <ChipCount>{count.toLocaleString()}</ChipCount>
+                count > 0 && <ChipCount>{grouped(count)}</ChipCount>
               )}
             </FilterChip>
           )
@@ -525,13 +528,13 @@ function FieldsPopover({
                           {share > 0 && (
                             <span
                               className="numeric shrink-0 text-hint text-destructive"
-                              title={`${entry.errors.toLocaleString()} of them errors`}
+                              title={`${grouped(entry.errors)} of them errors`}
                             >
                               {Math.round(share * 100)}%
                             </span>
                           )}
                           <span className="numeric shrink-0 text-hint text-muted-foreground">
-                            {entry.count.toLocaleString()}
+                            {grouped(entry.count)}
                           </span>
                           <IconAction
                             reveal

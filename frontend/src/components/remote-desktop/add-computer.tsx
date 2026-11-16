@@ -231,17 +231,12 @@ export function AddComputer({ peer: first }: { peer?: string }) {
           <FlowActions
             note="The password is sealed on this server and only ever sent to guacd."
             secondary={
-              <Button
-                variant="ghost"
-                className="h-11 text-muted-foreground sm:h-9"
-                onClick={() => setStep(1)}
-              >
+              <Button variant="ghost" className="text-muted-foreground" onClick={() => setStep(1)}>
                 Back
               </Button>
             }
           >
             <Button
-              className="h-11 sm:h-9"
               pending={saving}
               disabled={draft.name.trim() === "" || draft.host.trim() === ""}
               onClick={() => void save()}
@@ -312,7 +307,7 @@ function ChooseComputer({
           </FieldRow>
         </FlowPanelBody>
         <FlowActions>
-          <Button className="h-11 sm:h-9" disabled={draft.host.trim() === ""} onClick={onNext}>
+          <Button disabled={draft.host.trim() === ""} onClick={onNext}>
             <ArrowRight className="size-4" />
             Continue
           </Button>
@@ -396,7 +391,7 @@ function ChooseComputer({
           className="px-0"
           note="A computer this server reaches another way can be added by its address."
         >
-          <Button variant="outline" className="h-11 sm:h-9" onClick={onManual}>
+          <Button variant="outline" onClick={onManual}>
             <Globe className="size-4" />
             Somewhere else
           </Button>
@@ -506,13 +501,13 @@ function TurnItOn({
         </div>
         <FlowActions
           secondary={
-            <Button variant="ghost" className="h-11 text-muted-foreground sm:h-9" onClick={onBack}>
+            <Button variant="ghost" className="text-muted-foreground" onClick={onBack}>
               Back
             </Button>
           }
           note={open ? undefined : "You can continue now and connect once it answers."}
         >
-          <Button className="h-11 sm:h-9" onClick={onNext}>
+          <Button onClick={onNext}>
             <ArrowRight className="size-4" />
             Continue
           </Button>

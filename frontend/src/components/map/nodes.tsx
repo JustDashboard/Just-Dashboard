@@ -176,7 +176,7 @@ function SharedMark({ node }: { node: SystemNode }) {
   return (
     <span
       title={`Also drawn in ${node.shared.length === 1 ? "one other system" : `${node.shared.length} other systems`}`}
-      className="absolute -top-2.5 right-3 z-10 flex items-center gap-1 rounded-sm border border-hairline bg-card px-1.5 text-micro leading-4 text-muted-foreground"
+      className="absolute -top-2.5 right-3 z-raised flex items-center gap-1 rounded-sm border border-hairline bg-card px-1.5 text-micro leading-4 text-muted-foreground"
     >
       <Linked className="size-3" />
       also in {node.shared.length}

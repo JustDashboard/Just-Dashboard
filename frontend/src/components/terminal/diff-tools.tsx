@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useCallback, useMemo, useState } from "react"
 import { CheckCircle, ChevronDoubleDown, ChevronDoubleUp, ChevronDown } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -7,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { splitDiff, type FileDiff } from "@/lib/diff-files"
 import type { GitFileChange, GitStatus } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { DiffView } from "@/components/files/diff-view"
+import { DiffView } from "@/components/diff-view"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { IconAction } from "@/components/icon-action"
@@ -125,9 +126,7 @@ export function DiffTools({
       ) : (
         <>
           <div className="flex min-h-9 shrink-0 items-center gap-3 border-b border-hairline px-3">
-            <span className="numeric text-xs text-foreground">
-              {files.length} {files.length === 1 ? "file" : "files"}
-            </span>
+            <span className="numeric text-xs text-foreground">{plural(files.length, "file")}</span>
             <span className="numeric text-xs font-medium text-success">+{totals.additions}</span>
             <span className="numeric text-xs font-medium text-destructive">
               −{totals.deletions}
@@ -172,8 +171,8 @@ const LETTER: Record<string, string> = {
   A: "text-success",
   U: "text-success",
   D: "text-destructive",
-  R: "text-[var(--tag-cyan)]",
-  C: "text-[var(--tag-cyan)]",
+  R: "text-tag-cyan",
+  C: "text-tag-cyan",
 }
 
 function FileSection({
@@ -203,7 +202,7 @@ function FileSection({
         aria-expanded={open}
         onClick={onToggle}
         title={change.from ? `${change.from} → ${change.path}` : change.path}
-        className="sticky top-0 z-10 flex w-full min-w-0 items-center gap-2 bg-card px-3 py-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
+        className="sticky top-0 z-raised flex w-full min-w-0 items-center gap-2 bg-card px-3 py-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
       >
         <ChevronDown
           aria-hidden

@@ -22,15 +22,15 @@ import type { ChangeKind } from "@/lib/types"
  * dialog draw of everything an update brings.
  */
 export const KIND_STYLE: Record<ChangeKind, { label: string; className: string; bar: string }> = {
-  added: { label: "New", className: "text-[var(--tag-green)]", bar: "bg-[var(--tag-green)]" },
-  changed: { label: "Changed", className: "text-[var(--tag-blue)]", bar: "bg-[var(--tag-blue)]" },
-  fixed: { label: "Fixed", className: "text-[var(--tag-cyan)]", bar: "bg-[var(--tag-cyan)]" },
-  removed: { label: "Removed", className: "text-[var(--tag-slate)]", bar: "bg-[var(--tag-slate)]" },
-  security: { label: "Security", className: "text-[var(--tag-red)]", bar: "bg-[var(--tag-red)]" },
+  added: { label: "New", className: "text-tag-green", bar: "bg-tag-green" },
+  changed: { label: "Changed", className: "text-tag-blue", bar: "bg-tag-blue" },
+  fixed: { label: "Fixed", className: "text-tag-cyan", bar: "bg-tag-cyan" },
+  removed: { label: "Removed", className: "text-tag-slate", bar: "bg-tag-slate" },
+  security: { label: "Security", className: "text-tag-red", bar: "bg-tag-red" },
   deprecated: {
     label: "Ageing",
-    className: "text-[var(--tag-amber)]",
-    bar: "bg-[var(--tag-amber)]",
+    className: "text-tag-amber",
+    bar: "bg-tag-amber",
   },
 }
 

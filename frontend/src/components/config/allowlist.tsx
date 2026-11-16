@@ -117,7 +117,7 @@ export function CidrText({ cidr }: { cidr: string }) {
   return (
     <span className="numeric font-mono">
       {address}
-      {prefix !== undefined && <span className="text-[var(--tag-pink)]">/{prefix}</span>}
+      {prefix !== undefined && <span className="text-tag-pink">/{prefix}</span>}
     </span>
   )
 }

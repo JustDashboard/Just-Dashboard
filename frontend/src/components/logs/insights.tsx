@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { LineChart, MagnifyingGlassMinus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
-import { bytes, clock, plural, relativeTime, timestamp } from "@/lib/format"
+import { bytes, clock, grouped, plural, relativeTime, timestamp } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import { latency, type StatusClass } from "@/lib/requests"
 import type { LogBucket, LogFacet, LogFacetValue, LogSearchResult } from "@/lib/types"
@@ -28,7 +28,7 @@ import { LatencyReadings } from "@/components/deploy/latency-readings"
 import { FieldMark, FieldValue } from "@/components/logs/field-value"
 import { Histogram, SERIES_HUES } from "@/components/logs/histogram"
 import { TileTrend } from "@/components/sparkline"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { StatButton, StatGrid, StatTile, TileBand } from "@/components/stat-tile"
 import { NumberTicker } from "@/components/ui/number-ticker"
@@ -180,7 +180,7 @@ export function Insights(props: InsightsProps) {
           <EmptyState
             icon={MagnifyingGlassMinus}
             title="Nothing in this window"
-            description={`Scanned ${answer.overview.scanned.toLocaleString()} lines and none matched. Widen the window, or let a chip or a field go.`}
+            description={`Scanned ${grouped(answer.overview.scanned)} lines and none matched. Widen the window, or let a chip or a field go.`}
           />
         </div>
       ) : (
@@ -445,7 +445,7 @@ function Readings({
         hint={
           loading
             ? "Reading the window…"
-            : `of ${overview.scanned.toLocaleString()} read · ${overview.tookMillis}ms`
+            : `of ${grouped(overview.scanned)} read · ${overview.tookMillis}ms`
         }
       />
       <StatButton
@@ -745,7 +745,7 @@ function titleOf(key: string) {
  * top of a longer one — "top 8 of 312" — and a count past its budget says so.
  */
 function tallyOf(facet: LogFacet, shown = SHOWN) {
-  const distinct = `${facet.distinct.toLocaleString()}${facet.distinctCapped ? "+" : ""}`
+  const distinct = `${grouped(facet.distinct)}${facet.distinctCapped ? "+" : ""}`
   return facet.values.length > shown || facet.distinct > shown
     ? `top ${Math.min(shown, facet.values.length)} of ${distinct}`
     : plural(facet.distinct, "value")
@@ -812,7 +812,7 @@ function FacetList({
     swatch: swatches?.[v.value],
     mono: !(verdict || field.kind === "product" || field.kind === "lane"),
     label: <FieldValue name={name} value={v.value} lens={lensId} glyph={false} />,
-    value: v.count.toLocaleString(),
+    value: grouped(v.count),
     share: matched > 0 ? v.count / matched : undefined,
     // An event and a level are the verdict already, in their own colour; a
     // client or a path is where the share of errors is the news.
@@ -849,7 +849,7 @@ function FacetList({
 function measured(key: string | undefined) {
   const kind = key ? fieldOf(key).kind : undefined
   return (n: number) =>
-    kind === "duration" ? latency(n) : kind === "bytes" ? bytes(n) : n.toLocaleString()
+    kind === "duration" ? latency(n) : kind === "bytes" ? bytes(n) : grouped(n)
 }
 
 /**
@@ -892,13 +892,37 @@ function GroupTable({
   }
   const facet = result?.facets?.[group.by]
   if (!facet || facet.values.length === 0) {
-    return <p className="py-3 text-hint text-muted-foreground">None in this window.</p>
+    return <EmptyNote dense>None in this window.</EmptyNote>
   }
   const values = facet.values.slice(0, GROUP_ROWS)
   const errors = values.some((v) => v.errors > 0)
   const timed = Boolean(group.measure) && values.some((v) => v.sum !== undefined)
   const format = measured(group.measure)
   const byQuery = group.by === "fp" && values.some((v) => v.samples?.query)
+
+  // A table is for readings down its columns (D7): one or two values are a
+  // ranked line each, with what the columns said in words, not a framed head
+  // over a row.
+  if (values.length < FEW)
+    return (
+      <RankList
+        items={values.map((v) => ({
+          key: v.value,
+          label: <GroupValue value={v} by={group.by} byQuery={byQuery} lensId={lensId} />,
+          mono: false,
+          value: plural(v.count, "line"),
+          hint: [
+            v.errors > 0 && plural(v.errors, "error"),
+            timed && v.max !== undefined && `longest ${format(v.max)}`,
+            v.last && `seen ${relativeTime(v.last)}`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          title: `Only lines where ${fieldOf(group.by).label} is ${v.value}`,
+          onClick: () => onPick(v.value),
+        }))}
+      />
+    )
 
   return (
     <Table containerClassName="-mx-2 w-auto">
@@ -928,11 +952,11 @@ function GroupTable({
               <GroupValue value={v} by={group.by} byQuery={byQuery} lensId={lensId} />
             </TableCell>
             <TableCell className={cn(FIGURE, "font-medium text-foreground")}>
-              {v.count.toLocaleString()}
+              {grouped(v.count)}
             </TableCell>
             {errors && (
               <TableCell className={cn(FIGURE, v.errors > 0 && "text-destructive")}>
-                {v.errors > 0 ? v.errors.toLocaleString() : "—"}
+                {v.errors > 0 ? grouped(v.errors) : "—"}
               </TableCell>
             )}
             {timed && (
@@ -955,6 +979,23 @@ function GroupTable({
         ))}
       </TableBody>
     </Table>
+  )
+}
+
+/** Fewer values than this are ranked lines rather than a table (D7). */
+const FEW = 3
+
+/** A pattern with its holes marked, as the line it stands for with the varying parts left out. */
+function PatternText({ pattern }: { pattern: string }) {
+  return (
+    <span className="block truncate font-mono text-xs" title={pattern}>
+      {pattern.split("<*>").map((part, i) => (
+        <span key={i}>
+          {i > 0 && <span className="text-faint">&lt;*&gt;</span>}
+          {part}
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -1018,6 +1059,24 @@ function GroupValue({
 function PatternTable({ facet, onPick }: { facet: LogFacet; onPick: (pattern: string) => void }) {
   const values = facet.values.slice(0, GROUP_ROWS)
   const errors = values.some((v) => v.errors > 0)
+  if (values.length < FEW)
+    return (
+      <RankList
+        items={values.map((v) => ({
+          key: v.value,
+          label: <PatternText pattern={v.value} />,
+          value: plural(v.count, "line"),
+          hint: [
+            v.errors > 0 && plural(v.errors, "error"),
+            v.last && `seen ${relativeTime(v.last)}`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          title: "Show the lines of this pattern in History",
+          onClick: () => onPick(v.value),
+        }))}
+      />
+    )
   return (
     <Table containerClassName="-mx-2 w-auto">
       <TableHeader>
@@ -1036,21 +1095,14 @@ function PatternTable({ facet, onPick }: { facet: LogFacet; onPick: (pattern: st
             title="Show the lines of this pattern in History"
           >
             <TableCell className={cn(CELL, "w-full max-w-0")}>
-              <span className="block truncate font-mono text-xs" title={v.value}>
-                {v.value.split("<*>").map((part, i) => (
-                  <span key={i}>
-                    {i > 0 && <span className="text-muted-foreground/60">&lt;*&gt;</span>}
-                    {part}
-                  </span>
-                ))}
-              </span>
+              <PatternText pattern={v.value} />
             </TableCell>
             <TableCell className={cn(FIGURE, "font-medium text-foreground")}>
-              {v.count.toLocaleString()}
+              {grouped(v.count)}
             </TableCell>
             {errors && (
               <TableCell className={cn(FIGURE, v.errors > 0 && "text-destructive")}>
-                {v.errors > 0 ? v.errors.toLocaleString() : "—"}
+                {v.errors > 0 ? grouped(v.errors) : "—"}
               </TableCell>
             )}
             <TableCell className={cn(FIGURE, "max-sm:hidden")} title={seenTitle(v)}>

@@ -8,14 +8,14 @@ import type { GitResult } from "@/lib/types"
 import type { PreviewContext } from "@/components/git/preview-panel"
 import { PreviewHeader } from "@/components/git/preview-header"
 import { Field } from "@/components/form"
-import { ErrorState } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { FilterChip } from "@/components/chips"
-import { DiffView } from "@/components/files/diff-view"
+import { DiffView } from "@/components/diff-view"
 import {
   Select,
   SelectContent,
@@ -66,9 +66,7 @@ export function SubmodulePreview({ ctx, onClose }: { ctx: PreviewContext; onClos
       <div className="min-h-0 flex-1 overflow-auto">
         {rows.error && <ErrorState error={rows.error} className="m-3" />}
         {rows.loading && <LoadingRows className="p-3" rows={3} />}
-        {rows.data?.length === 0 && (
-          <p className="p-3 text-hint text-muted-foreground">No submodules.</p>
-        )}
+        {rows.data?.length === 0 && <EmptyNote dense>No submodules.</EmptyNote>}
         <ul className="divide-y divide-hairline">
           {rows.data?.map((r) => (
             <li key={r.path} className="space-y-2 p-3">

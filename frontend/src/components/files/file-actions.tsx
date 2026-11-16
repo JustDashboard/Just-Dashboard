@@ -42,7 +42,7 @@ import {
   FOLDER_COLOUR_NAMES,
   FolderSwatch,
   type FolderColour,
-} from "@/components/files/file-icon"
+} from "@/components/file-icon"
 
 export { isArchive, isImage } from "@/components/files/media"
 

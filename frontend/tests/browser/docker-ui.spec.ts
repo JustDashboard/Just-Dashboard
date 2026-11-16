@@ -1162,7 +1162,9 @@ test("a container's logs read as what its image writes", async ({ page }) => {
   expect(mocks.sockets.at(-1)?.get("source")).toBe(`docker:${DB}`)
   // Postgres's own questions, one press each, and its readings above the pane.
   await expect(page.getByRole("button", { name: /^Slow\b/ })).toBeVisible()
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(5)
+  // Said as reading lines, as Security says the same readings: no tile row (D4).
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=reading-line]")).toHaveCount(5)
   await expect(page.getByText("Deadlocks & lock waits")).toBeVisible()
   // A question a tile answers is counted once, by the tile over its hour:
   // its chip carries no second figure from the lines on screen. One no tile

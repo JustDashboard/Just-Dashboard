@@ -8,7 +8,6 @@ import { plural, relativeTime } from "@/lib/format"
 import type { DashboardUser, Role } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote } from "@/components/form"
@@ -30,7 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { ROLE_HUE, ROLE_MARK, ROLE_SUMMARY } from "@/components/account/capabilities"
+import { ROLE_SUMMARY } from "@/components/account/capabilities"
+import { ROLE_HUE, ROLE_MARK, ROLE_NAME } from "@/components/account/role"
 import {
   ROLES,
   inUserScope,
@@ -43,6 +43,7 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
 import { AvatarRun, UserAvatar, displayNameOf } from "@/components/user-avatar"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export function useDashboardUsers(enabled = true) {
   return usePoll(
@@ -71,14 +72,14 @@ function RolePicker({
   const Mark = ROLE_MARK[value]
   return (
     <Select value={value} onValueChange={(v) => onChange(v as Role)}>
-      <SelectTrigger size="sm" className="w-32 text-xs" aria-label={label}>
+      <SelectTrigger size="sm" className="w-36 text-xs" aria-label={label}>
         <Mark aria-hidden className="size-3.5" style={{ color: ROLE_HUE[value] }} />
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="w-72">
         {ROLES.map((r) => (
           <SelectItem key={r} value={r} hint={ROLE_SUMMARY[r]}>
-            {r}
+            {ROLE_NAME[r]}
           </SelectItem>
         ))}
       </SelectContent>
@@ -114,7 +115,7 @@ function UserCard({
   onUpdate: (body: Record<string, unknown>) => void
   verbs: Verb[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const name = displayNameOf(user)
   const readings = (
     <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
@@ -555,7 +556,7 @@ function EditUserDialog({
           <div className="min-w-0">
             <p className="truncate text-body font-medium">{displayNameOf(user)}</p>
             <p className="truncate text-hint text-muted-foreground">
-              @{user.username} · {user.role}
+              @{user.username} · {ROLE_NAME[user.role]}
             </p>
           </div>
         </div>

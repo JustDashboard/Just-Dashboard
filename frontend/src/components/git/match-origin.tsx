@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { grouped, plural } from "@/lib/format"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { GitMatchBranch, GitMatchPlan } from "@/lib/types"
 
@@ -13,10 +14,6 @@ export function matchPlanIsEmpty(plan: GitMatchPlan): boolean {
     plan.unique.length === 0 &&
     plan.staleRefs.length === 0
   )
-}
-
-function plural(n: number, noun: string): string {
-  return `${n.toLocaleString()} ${noun}${n === 1 ? "" : noun.endsWith("ch") ? "es" : "s"}`
 }
 
 /**
@@ -48,12 +45,12 @@ export function MatchOriginBody({
         </p>
       )}
       <MatchList
-        title={`Update ${plural(plan.update.length, "branch")} to match ${remote}`}
+        title={`Update ${plural(plan.update.length, "branch", "branches")} to match ${remote}`}
         rows={plan.update}
-        fact={(row) => (row.behind ? `${row.behind.toLocaleString()} behind` : "")}
+        fact={(row) => (row.behind ? `${grouped(row.behind)} behind` : "")}
       />
       <MatchList
-        title={`Delete ${plural(plan.delete.length, "branch")} ${remote} no longer has`}
+        title={`Delete ${plural(plan.delete.length, "branch", "branches")} ${remote} no longer has`}
         hint={`Nothing is lost: every commit is still on ${remote}.`}
         rows={plan.delete}
       />
@@ -76,8 +73,8 @@ export function MatchOriginBody({
               }}
             />
             <span>
-              Also discard {plural(plan.unique.length, "branch")} with commits {remote} does not
-              have. Those commits exist nowhere else. Left unticked, they stay as they are.
+              Also discard {plural(plan.unique.length, "branch", "branches")} with commits {remote}{" "}
+              does not have. Those commits exist nowhere else. Left unticked, they stay as they are.
             </span>
           </label>
           <MatchRows
@@ -87,7 +84,7 @@ export function MatchOriginBody({
         </div>
       )}
       <MatchList
-        title={`Leave ${plural(plan.inUse.length, "branch")} alone`}
+        title={`Leave ${plural(plan.inUse.length, "branch", "branches")} alone`}
         hint="Another checkout is using them."
         rows={plan.inUse}
       />

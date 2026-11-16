@@ -106,7 +106,7 @@ function Entry({
         <h3
           className={cn(
             "numeric text-2xl leading-tight font-semibold tracking-tight",
-            !installed && !newer && "text-foreground/80",
+            !installed && !newer && "text-muted-foreground",
           )}
         >
           {release.version}

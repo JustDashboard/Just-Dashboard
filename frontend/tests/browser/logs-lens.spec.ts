@@ -203,7 +203,13 @@ test("Insights ranks the window's values and a press narrows it in place", async
   await expect(page.getByRole("heading", { name: "Events", exact: true })).toBeVisible()
   // Each as figures and shares rather than a bar per row, as the request
   // record's lists are; the events and the levels each a whole, in one strip.
-  await expect(page.locator("[data-slot=rank-list]")).toHaveCount(7)
+  // A group of one or two values is ranked lines too, not a framed table over a row (D7):
+  // every table left holds three rows or more.
+  await expect(page.locator("[data-slot=rank-list]")).toHaveCount(11)
+  for (const rows of await page
+    .locator("table")
+    .evaluateAll((tables) => tables.map((table) => table.querySelectorAll("tbody tr").length)))
+    expect(rows).toBeGreaterThanOrEqual(3)
   await expect(page.locator("[data-slot=bar-list]")).toHaveCount(0)
   await expect(page.locator("[data-slot=split-bar]")).toHaveCount(3)
   await expect(page.getByRole("heading", { name: "Query shape" })).toHaveCount(0)

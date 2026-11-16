@@ -35,23 +35,7 @@ export function ComputerMark({
       <WireMark tone="logo" size={size}>
         <ProductGlyph id={osProduct(os)} />
       </WireMark>
-      {reach && (
-        <span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background">
-          <StatusDot tone={reachTone(reach)} live={reach.kind === "live"} className="size-2" />
-        </span>
-      )}
+      {reach && <StatusDot corner="lg" tone={reachTone(reach)} live={reach.kind === "live"} />}
     </span>
-  )
-}
-
-/** The key that finds a computer on a bar or a list, in the hue its card carries. */
-export function HueKey({ color }: { color: string }) {
-  return (
-    <span
-      aria-hidden
-      data-slot="hue-key"
-      className="h-2.5 w-0.75 shrink-0 rounded-full"
-      style={{ background: color }}
-    />
   )
 }

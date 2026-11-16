@@ -22,7 +22,7 @@ import { MissingLine } from "@/components/missing-thing"
 import { logKindMissing } from "@/components/missing-thing-model"
 import { SearchInput } from "@/components/search-input"
 import { Pane, PaneHeader } from "@/components/panel"
-import { ErrorState } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { StatusDot } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
@@ -330,9 +330,9 @@ export function SourceRail({
             )}
             {after.map(renderGroup)}
             {groups.length === 0 && shownRecords.length === 0 && (
-              <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-                Nothing matches that filter.
-              </p>
+              <EmptyNote dense action={{ label: "Clear the filter", onClick: () => setFilter("") }}>
+                Nothing matches “{filter}”.
+              </EmptyNote>
             )}
           </div>
         )}

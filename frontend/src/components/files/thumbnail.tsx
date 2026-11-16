@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Play } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
-import { FileIcon } from "@/components/files/file-icon"
+import { FileIcon } from "@/components/file-icon"
 import { rawUrl, thumbnailKind } from "@/components/files/media"
 
 /**

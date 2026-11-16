@@ -6,7 +6,7 @@ import { useFilterHistory } from "@/components/workspace/history"
 import { useHeldList } from "@/components/workspace/held-list"
 import { CrossCircle, Download, FileText, Notes, RefreshClockwise } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
-import { calendarDate, clock, plural, relativeTime, timestamp } from "@/lib/format"
+import { calendarDate, clock, grouped, plural, relativeTime, timestamp } from "@/lib/format"
 import type { MetricsState } from "@/lib/metrics/store"
 import { notify } from "@/lib/toast"
 import type { AuditEntry } from "@/lib/types"
@@ -231,7 +231,7 @@ export default function AuditPage() {
       notify.success(`Exported ${plural(rows.length, "entry", "entries")}`, {
         description:
           matching > rows.length
-            ? `The newest ${rows.length.toLocaleString()} of ${matching.toLocaleString()}. Narrow the trail to export the rest.`
+            ? `The newest ${grouped(rows.length)} of ${grouped(matching)}. Narrow the trail to export the rest.`
             : undefined,
       })
     } catch (err) {
@@ -258,8 +258,8 @@ export default function AuditPage() {
     failure instanceof ApiError && failure.status === 403
   if (!admin || refused(error) || refused(day.error)) {
     return (
-      <Page className="animate-rise">
-        <PageContext eyebrow="Advanced" title="Audit log" />
+      <Page rise>
+        <PageContext title="Audit log" />
         <EmptyState
           icon={Notes}
           title="The audit log is for administrators"
@@ -279,8 +279,8 @@ export default function AuditPage() {
         return true
       }}
     >
-      <Page className="animate-rise">
-        <PageContext eyebrow="Advanced" title="Audit log" />
+      <Page rise>
+        <PageContext title="Audit log" />
 
         {/* The line and the day under it are one block: what happened, then
             when. Both stand at their final height before the day is read. */}
@@ -306,12 +306,10 @@ export default function AuditPage() {
                   key={total}
                   className="numeric animate-rise text-hint text-muted-foreground"
                   aria-label={
-                    filtered
-                      ? `${total.toLocaleString()} matching`
-                      : `${total.toLocaleString()} recorded`
+                    filtered ? `${grouped(total)} matching` : `${grouped(total)} recorded`
                   }
                 >
-                  {total.toLocaleString()}
+                  {grouped(total)}
                   {filtered && " matching"}
                 </span>
               )}
@@ -551,7 +549,7 @@ export default function AuditPage() {
                   ? filtered
                     ? "No matching entries"
                     : "Nothing recorded yet"
-                  : `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${data.total.toLocaleString()}`}
+                  : `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${grouped(data.total)}`}
             </span>
             <div className="flex gap-2">
               <Button
@@ -644,7 +642,7 @@ function AuditIdentity({
               </>
             )}
             <span className="numeric">
-              <span className="text-foreground">{day.total.toLocaleString()}</span>{" "}
+              <span className="text-foreground">{grouped(day.total)}</span>{" "}
               {day.total === 1 ? "change" : "changes"} in the last day
             </span>
             {who && (
