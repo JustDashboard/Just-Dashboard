@@ -10,13 +10,12 @@ import {
   Field,
   FieldRow,
   FormFact,
-  FormFacts,
   OptionList,
   OptionRow,
   Statement,
 } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Modal } from "@/components/modal"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -249,17 +248,18 @@ export function CreateIndexDialog({
       }
     >
       <div className="space-y-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{collection}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={collection}
+          mono
+          facts={
+            <>
               <FormFact label="Database" mono>
                 {database}
               </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         <div role="group" aria-labelledby="mongo-index-keys" className="space-y-1.5">
           <p id="mongo-index-keys" className="text-body font-medium">

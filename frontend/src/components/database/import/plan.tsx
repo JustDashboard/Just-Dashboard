@@ -241,29 +241,18 @@ export function PlanStep({
         }
         secondary={
           <>
-            <Button
-              variant="ghost"
-              className="h-11 sm:h-9"
-              disabled={starting}
-              onClick={onChangeSource}
-            >
+            <Button variant="ghost" disabled={starting} onClick={onChangeSource}>
               Change source
             </Button>
             {blockers.length > 0 && (
-              <Button
-                variant="outline"
-                className="h-11 sm:h-9"
-                pending={checking}
-                disabled={starting}
-                onClick={onRecheck}
-              >
+              <Button variant="outline" pending={checking} disabled={starting} onClick={onRecheck}>
                 Check again
               </Button>
             )}
           </>
         }
       >
-        <Button className="h-11 sm:h-9" disabled={!ready} pending={starting} onClick={onStart}>
+        <Button disabled={!ready} pending={starting} onClick={onStart}>
           <CloudDownload />
           Start the import
         </Button>

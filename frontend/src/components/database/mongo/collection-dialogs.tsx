@@ -17,7 +17,7 @@ import {
   OptionList,
   OptionRow,
 } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -595,20 +595,26 @@ export function RenameCollectionDialog({
       }
     >
       <div className="space-y-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="flex min-w-0 items-center gap-1.5 font-mono text-body font-medium">
-              <CollectionMark kind={collectionKind(collection)} />
-              <span className="truncate">{collection.name}</span>
-            </p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={
+            <>
+              <CollectionMark
+                kind={collectionKind(collection)}
+                className="mr-1.5 inline-block align-[-2px]"
+              />
+              {collection.name}
+            </>
+          }
+          mono
+          facts={
+            <>
               <FormFact label="Database" mono>
                 {database}
               </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
         <Field
           label="New name"
           htmlFor="mongo-rename-to"
@@ -941,14 +947,17 @@ export function CollectionOptionsDialog({
       }
     >
       <div className="space-y-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="flex min-w-0 items-center gap-1.5 font-mono text-body font-medium">
-              <CollectionMark kind={kind} />
-              <span className="truncate">{collection.name}</span>
-            </p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={
+            <>
+              <CollectionMark kind={kind} className="mr-1.5 inline-block align-[-2px]" />
+              {collection.name}
+            </>
+          }
+          mono
+          facts={
+            <>
               <FormFact label="Database" mono>
                 {database}
               </FormFact>
@@ -963,9 +972,9 @@ export function CollectionOptionsDialog({
                   {collection.timeseries.timeField}
                 </FormFact>
               )}
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         {collection.capped && (
           <FieldRow>

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { ChipCount } from "@/components/chips"
 import { ChevronDown } from "@/components/icons"
 import { SearchInput } from "@/components/search-input"
 import { Button } from "@/components/ui/button"
@@ -53,15 +54,19 @@ export function TablePicker({
           className="h-7 shrink-0 gap-1.5 px-2.5 text-xs max-sm:h-10"
           disabled={Boolean(disabledWhy) || loading || names.length === 0}
         >
-          {disabledWhy
-            ? `Every ${engine.nouns.object}`
-            : loading
-              ? `Reading the ${engine.nouns.objects}…`
-              : names.length === 0
-                ? `No ${engine.nouns.objects}`
-                : every
-                  ? `Every ${engine.nouns.object} (${names.length})`
-                  : `${picked.length} of ${names.length} ${engine.nouns.objects}`}
+          {disabledWhy ? (
+            `Every ${engine.nouns.object}`
+          ) : loading ? (
+            `Reading the ${engine.nouns.objects}…`
+          ) : names.length === 0 ? (
+            `No ${engine.nouns.objects}`
+          ) : every ? (
+            <>
+              Every {engine.nouns.object} <ChipCount>{names.length}</ChipCount>
+            </>
+          ) : (
+            `${picked.length} of ${names.length} ${engine.nouns.objects}`
+          )}
           <ChevronDown className="size-3" />
         </Button>
       </PopoverTrigger>

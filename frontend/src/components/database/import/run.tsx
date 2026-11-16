@@ -169,12 +169,7 @@ export function RunStep({
 
         {running && (
           <FlowActions note="It carries on if you leave this page.">
-            <Button
-              variant="outline"
-              className="h-11 sm:h-9"
-              disabled={!mayStop || !imp.job}
-              onClick={onStopJob}
-            >
+            <Button variant="outline" disabled={!mayStop || !imp.job} onClick={onStopJob}>
               <Stop />
               Stop
             </Button>
@@ -193,12 +188,7 @@ export function RunStep({
             }
             secondary={
               mayAct && (
-                <Button
-                  variant="outline"
-                  className="h-11 sm:h-9"
-                  disabled={busy || cutting}
-                  onClick={onStopReplication}
-                >
+                <Button variant="outline" disabled={busy || cutting} onClick={onStopReplication}>
                   <Cross />
                   Stop replicating
                 </Button>
@@ -206,7 +196,6 @@ export function RunStep({
             }
           >
             <Button
-              className="h-11 sm:h-9"
               disabled={!mayAct || !canCutOver(live) || busy}
               pending={cutting}
               onClick={onCutover}
@@ -220,16 +209,11 @@ export function RunStep({
             secondary={
               mayAct && (
                 <>
-                  <Button
-                    variant="ghost"
-                    className="h-11 sm:h-9"
-                    disabled={busy}
-                    onClick={onForget}
-                  >
+                  <Button variant="ghost" disabled={busy} onClick={onForget}>
                     Forget this import
                   </Button>
                   {onOpen && (
-                    <Button variant="outline" className="h-11 sm:h-9" onClick={onNew}>
+                    <Button variant="outline" onClick={onNew}>
                       Another import
                     </Button>
                   )}
@@ -238,12 +222,12 @@ export function RunStep({
             }
           >
             {onOpen ? (
-              <Button className="h-11 sm:h-9" pending={busy} onClick={onOpen}>
+              <Button pending={busy} onClick={onOpen}>
                 <CloudDownload />
                 Open {imp.database}
               </Button>
             ) : (
-              <Button className="h-11 sm:h-9" disabled={!mayAct} onClick={onNew}>
+              <Button disabled={!mayAct} onClick={onNew}>
                 Another import
               </Button>
             )}
@@ -253,13 +237,13 @@ export function RunStep({
           <FlowActions
             secondary={
               mayAct && (
-                <Button variant="ghost" className="h-11 sm:h-9" disabled={busy} onClick={onForget}>
+                <Button variant="ghost" disabled={busy} onClick={onForget}>
                   Forget this import
                 </Button>
               )
             }
           >
-            <Button className="h-11 sm:h-9" disabled={!mayAct} onClick={onNew}>
+            <Button disabled={!mayAct} onClick={onNew}>
               Start another
             </Button>
           </FlowActions>

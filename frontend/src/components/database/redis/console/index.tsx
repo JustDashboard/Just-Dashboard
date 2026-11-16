@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { BookOpen, SidebarRightClose, SidebarRightOpen, Terminal, Trash } from "@/components/icons"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { usePanelSize } from "@/lib/panel-size"
 import { forgetMemoryState, useViewState } from "@/lib/view-state"
@@ -22,9 +21,10 @@ import { CommandHelper } from "@/components/database/redis/console/helper"
 import { MonitorView } from "@/components/database/redis/console/monitor"
 import { PubSubView } from "@/components/database/redis/console/pubsub"
 import { DbPicker } from "@/components/database/redis/db-picker"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const HELPER = { base: 320, min: 260, max: 520 }
 const NO_VERBS: Verb[] = []
@@ -47,7 +47,7 @@ export function RedisConsole() {
   const redis = useRedis()
   const { id, db, server, engine, param, select, canRun, admin } = redis
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const features = server.data?.features
 
   const views: { id: View; label: string }[] = [
@@ -63,7 +63,7 @@ export function RedisConsole() {
   const reference = usePoll((signal) => redisCommands(id, signal), 0, [id])
   const [line, setLine] = useState("")
 
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const [helperShown, setHelperShown] = useViewState(`databases.${id}.redis.helper`, true)
   const [helperOver, setHelperOver] = useState(false)
   const helperVisible = view === "console" && (wide ? helperShown : helperOver)
@@ -174,7 +174,7 @@ export function RedisConsole() {
           )}
         </div>
         {helperVisible && (
-          <div className="relative flex shrink-0 border-hairline max-lg:absolute max-lg:inset-0 max-lg:z-20 lg:w-(--jd-redis-helper) lg:border-l">
+          <div className="relative flex shrink-0 border-hairline max-lg:absolute max-lg:inset-0 max-lg:z-sticky lg:w-(--jd-redis-helper) lg:border-l">
             <ResizeHandle
               side="right"
               label="Commands panel width"
@@ -183,7 +183,7 @@ export function RedisConsole() {
               max={HELPER.max}
               onChange={(px, commit) => setHelperWidth(px, commit)}
               onReset={resetHelperWidth}
-              className="absolute inset-y-0 -left-1 z-20"
+              className="absolute inset-y-0 -left-1 z-sticky"
             />
             <CommandHelper
               reference={reference.data}

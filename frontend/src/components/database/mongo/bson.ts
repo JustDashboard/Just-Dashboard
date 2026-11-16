@@ -1,3 +1,5 @@
+import { plural } from "@/lib/format"
+
 /**
  * A document as MongoDB stores it, read from the canonical Extended JSON the
  * server sends and written back as the same.
@@ -515,12 +517,10 @@ export const TYPE_LABEL: Record<BsonType, string> = {
 /** "3 fields", "1 element": what a folded value holds. */
 export function sizeWord(node: BsonNode): string {
   if (node.type === "object") {
-    const n = node.fields.length
-    return `${n.toLocaleString("en-US")} ${n === 1 ? "field" : "fields"}`
+    return plural(node.fields.length, "field")
   }
   if (node.type === "array") {
-    const n = node.items.length
-    return `${n.toLocaleString("en-US")} ${n === 1 ? "element" : "elements"}`
+    return plural(node.items.length, "element")
   }
   return ""
 }
