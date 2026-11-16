@@ -1,12 +1,10 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
   Archive,
-  ArrowLeft,
   CloudDownload,
   Database,
   Download,
@@ -31,7 +29,8 @@ import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageContext } from "@/components/page"
+import { DetailPage, useSiblingSteps } from "@/components/detail-page"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Detail, DetailList } from "@/components/detail-list"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -41,12 +40,12 @@ import { TileTrend } from "@/components/sparkline"
 import { HUE } from "@/components/live-figure"
 import { ReadingLine } from "@/components/reading-line"
 import { WireMark } from "@/components/wire/wire"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader, IdentityVerbs } from "@/components/identity-header"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { Field, FormNote } from "@/components/form"
-import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
+import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -67,7 +66,7 @@ import { FileIcon } from "@/components/files/file-icon"
 import { useJobVerbs } from "@/components/backups/job-verbs"
 import { JobDialog } from "@/components/backups/job-form"
 import { useQuerySelection } from "@/hooks/use-query-selection"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { JobRail } from "@/components/backups/job-rail"
 import { rangeSelection } from "@/components/workspace/selection"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
@@ -141,6 +140,15 @@ export function JobPage() {
   const docker = usePoll(
     (signal) => get<Container[]>("/docker/containers/", undefined, signal),
     60000,
+  )
+  // The other jobs, for the rail beside this one.
+  const jobs = usePoll((signal) => get<BackupJob[]>("/backups/", undefined, signal), 15000)
+  const jobList = useMemo(() => jobs.data ?? [], [jobs.data])
+  const current = /^\d+$/.test(jobId) ? Number(jobId) : null
+  const steps = useSiblingSteps(
+    jobList.map((one) => one.id),
+    current,
+    (id) => router.push(`/backups/${id}`),
   )
   const containers = useMemo(() => docker.data ?? [], [docker.data])
   const resourceList = useMemo(() => resources.data?.resources ?? [], [resources.data])
@@ -247,224 +255,192 @@ export function JobPage() {
   const holding = job && holdingReading(job, sizes.at(-1))
   const pauses = job?.pauseContainers ?? []
 
+  // Escape lets go of the run picked, back to the newest, as it did when the
+  // page held its own workspace; a press another control took is left alone.
+  useEffect(() => {
+    if (selectedId === null) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      if (document.querySelector("[role=dialog], [role=menu]")) return
+      const target = event.target as HTMLElement | null
+      const typing =
+        target?.closest("textarea, select, [contenteditable='true']") ||
+        (target instanceof HTMLInputElement && target.type !== "checkbox")
+      if (typing) return
+      setSelectedId(null)
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  })
+
   return (
-    <Workspace
+    <DetailPage
       name="Backups"
+      what="backup job"
       stateKey={`backups.${jobId}`}
       refresh={() => {
         jobPoll.refresh()
         runs.refresh()
       }}
-      escape={() => {
-        if (selectedId === null) return false
-        setSelectedId(null)
-        return true
-      }}
-    >
-      <Page>
-        <PageContext
-          eyebrow={
-            <Link
-              href="/backups"
-              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-            >
-              <ArrowLeft className="size-3" /> Backups
-            </Link>
-          }
-          title={job?.name ?? "Backup"}
-          actions={
-            job && (
-              <>
-                <VerbBar verbs={verbs} menuLabel={`More actions for ${job.name}`} />
-                <WorkspaceHelp />
-              </>
-            )
-          }
+      steps={steps}
+      back={{ href: "/backups", label: "Backups" }}
+      title={job?.name ?? "Backup"}
+      rail={
+        <JobRail
+          jobs={jobList}
+          current={current}
+          resources={resourceList}
+          containers={containers}
+          loading={jobs.loading}
+          error={jobs.data ? undefined : jobs.error}
+          onRetry={jobs.refresh}
         />
-
-        {jobPoll.error && !job && <ErrorState error={jobPoll.error} />}
-        {jobPoll.loading && !job && <LoadingRows />}
-
-        {job && holding && (
-          <>
-            <HostIdentity
-              className="animate-rise"
-              logo={
-                <JobMark products={products} project={jobProject(job, resourceList)} size="lg" />
-              }
-              title={job.name}
-              facts={
-                <>
-                  {/* What it takes, without the count of containers it pauses:
-                      they are named after where it writes. */}
-                  <span>{contentsLabel({ ...job, pauseContainers: undefined })}</span>
-                  <FactDot />
-                  <HostFact product={destinationProduct(job)}>
-                    <span className={cn(job.targetKind === "local" && "font-mono")}>
-                      {targetLabel(job)}
-                    </span>
-                  </HostFact>
-                  {pauses.length > 0 && (
-                    <>
-                      <FactDot />
-                      <span>
-                        pauses <span className="mx-0.5 font-mono">{pauses.join(", ")}</span> while
-                        it archives
-                      </span>
-                    </>
-                  )}
-                  {job.encrypt && (
-                    <>
-                      <FactDot />
-                      <span>encrypted with this server&apos;s backup key</span>
-                    </>
-                  )}
-                  {job.imported && (
-                    <>
-                      <FactDot />
-                      <span>{importedFrom(job)}</span>
-                    </>
-                  )}
-                  {job.recovery && (
-                    <>
-                      <FactDot />
-                      <span>
-                        recovery check {job.recovery.automatic ? "after every run" : "on request"} ·
-                        schema {job.recovery.schemaVersion}
-                      </span>
-                    </>
-                  )}
-                </>
-              }
-              aside={<LastRun job={job} />}
-            />
-
-            {/* On the page's own ground with no frame and no dot grid, as the
-                list page's picture stands. */}
-            {(resources.data || resources.error) && (
-              <div className="relative animate-rise py-2 lg:py-4">
-                <JobMap job={job} resources={resourceList} containers={containers} />
-              </div>
-            )}
-
-            {/* Out by the line's own inset, as a run of them stands, so its
-                mark is on the page's edge. */}
-            <div className="-mx-2 animate-rise">
-              <ReadingLine
-                mark={
-                  <WireMark size="md" hue={HUE.disk}>
-                    <Archive aria-hidden />
-                  </WireMark>
-                }
-                name="Holding"
-                hint={holding.hint}
-                trend={
-                  <TileTrend
-                    values={sizes}
-                    label="Archive size, oldest run to newest"
-                    color={HUE.disk}
-                  />
-                }
-              >
-                {holding.words}
-              </ReadingLine>
-            </div>
-
-            {job.excludes.length > 0 && (
-              <DetailList className="text-body">
-                <Detail label="Excludes">
-                  <ul className="min-w-0 space-y-0.5 font-mono text-xs">
-                    {job.excludes.map((path) => (
-                      <li key={path} className="truncate">
-                        {path}
-                      </li>
-                    ))}
-                  </ul>
-                </Detail>
-              </DetailList>
-            )}
-
-            <Panel plain>
-              <PanelHeader
-                title="Runs"
-                actions={
-                  runs.data?.running ? (
-                    <Status state="running" label={<TextShimmer>running now</TextShimmer>} />
-                  ) : (
-                    runList.length > 0 && (
-                      <span className="numeric text-hint text-muted-foreground">
-                        {plural(runList.length, "run")}
-                        {failed > 0 && (
-                          <>
-                            {" · "}
-                            <span className="text-destructive">{failed} failed</span>
-                          </>
-                        )}
-                      </span>
-                    )
-                  )
-                }
-              />
-              <PanelBody flush className="pt-3">
-                {runs.error && runs.data && (
-                  <Notice title="Run history could not refresh" tone="warning" className="mb-3">
-                    <p>Showing the last successful reading. {runs.error.message}</p>
-                    <Button size="xs" variant="outline" onClick={runs.refresh} className="mt-2">
-                      Retry run history
-                    </Button>
-                  </Notice>
-                )}
-                {runs.error && !runs.data ? (
-                  <div className="space-y-2">
-                    <ErrorState error={runs.error} />
-                    <Button size="xs" variant="outline" onClick={runs.refresh}>
-                      Retry run history
-                    </Button>
-                  </div>
-                ) : runs.loading && !runs.data ? (
-                  <LoadingRows rows={3} />
-                ) : runList.length === 0 ? (
-                  <EmptyNote>No runs yet. Run now takes the first one.</EmptyNote>
-                ) : (
-                  // One frame round the rail and the run it shows, the run
-                  // page's Details: the rail decides what the inspector holds.
-                  <div className="grid min-w-0 overflow-hidden rounded-xl border bg-card lg:h-[min(80svh,48rem)] lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-                    <div className="min-h-0 overflow-y-auto p-2 max-lg:max-h-80 max-lg:border-b lg:border-r">
-                      <RunRail
-                        runs={runList}
-                        selectedId={shown?.id}
-                        onSelect={(run) => setSelectedId(run.id)}
-                      />
-                    </div>
-                    <div className="min-h-0 min-w-0 overflow-y-auto">
-                      {shown && (
-                        <RunInspector
-                          key={shown.id}
-                          run={shown}
-                          verbs={runVerbs(shown)}
-                          browsing={browsing}
-                          onBrowse={() => browse(shown)}
-                          onRestorePaths={(paths) => setRestore({ run: shown, paths })}
-                          canRestore={can("destructive") && shown.status === "success"}
-                        />
-                      )}
-                    </div>
-                  </div>
-                )}
-              </PanelBody>
-            </Panel>
-          </>
-        )}
-        {editing && (
-          <JobDialog
-            job={editing}
-            resources={resourceList}
-            onOpenChange={(open: boolean) => !open && setEditing(null)}
-            onDone={jobPoll.refresh}
+      }
+      identity={
+        job && holding ? (
+          <JobIdentity
+            job={job}
+            products={products}
+            project={jobProject(job, resourceList)}
+            pauses={pauses}
+            verbs={verbs}
           />
-        )}
-        {dialog}
-      </Page>
+        ) : jobPoll.loading && !job ? (
+          <IdentityHeader loading state command menu={false} />
+        ) : undefined
+      }
+    >
+      {jobPoll.error && !job && <ErrorState error={jobPoll.error} />}
+      {jobPoll.loading && !job && <LoadingRows />}
+
+      {job && holding && (
+        <>
+          {/* On the page's own ground with no frame and no dot grid, as the
+                list page's picture stands. */}
+          {(resources.data || resources.error) && (
+            <div className="relative animate-rise py-2 lg:py-4">
+              <JobMap job={job} resources={resourceList} containers={containers} />
+            </div>
+          )}
+
+          {/* Out by the line's own inset, as a run of them stands, so its
+                mark is on the page's edge. */}
+          <div className="-mx-2 animate-rise">
+            <ReadingLine
+              mark={
+                <WireMark size="md" hue={HUE.disk}>
+                  <Archive aria-hidden />
+                </WireMark>
+              }
+              name="Holding"
+              hint={holding.hint}
+              trend={
+                <TileTrend
+                  values={sizes}
+                  label="Archive size, oldest run to newest"
+                  color={HUE.disk}
+                />
+              }
+            >
+              {holding.words}
+            </ReadingLine>
+          </div>
+
+          {job.excludes.length > 0 && (
+            <DetailList className="text-body">
+              <Detail label="Excludes">
+                <ul className="min-w-0 space-y-0.5 font-mono text-xs">
+                  {job.excludes.map((path) => (
+                    <li key={path} className="truncate">
+                      {path}
+                    </li>
+                  ))}
+                </ul>
+              </Detail>
+            </DetailList>
+          )}
+
+          <Panel plain>
+            <PanelHeader
+              title="Runs"
+              actions={
+                runs.data?.running ? (
+                  <Status state="running" label={<TextShimmer>running now</TextShimmer>} />
+                ) : (
+                  runList.length > 0 && (
+                    <span className="numeric text-hint text-muted-foreground">
+                      {plural(runList.length, "run")}
+                      {failed > 0 && (
+                        <>
+                          {" · "}
+                          <span className="text-destructive">{failed} failed</span>
+                        </>
+                      )}
+                    </span>
+                  )
+                )
+              }
+            />
+            <PanelBody flush className="pt-3">
+              {runs.error && runs.data && (
+                <Notice title="Run history could not refresh" tone="warning" className="mb-3">
+                  <p>Showing the last successful reading. {runs.error.message}</p>
+                  <Button size="xs" variant="outline" onClick={runs.refresh} className="mt-2">
+                    Retry run history
+                  </Button>
+                </Notice>
+              )}
+              {runs.error && !runs.data ? (
+                <div className="space-y-2">
+                  <ErrorState error={runs.error} />
+                  <Button size="xs" variant="outline" onClick={runs.refresh}>
+                    Retry run history
+                  </Button>
+                </div>
+              ) : runs.loading && !runs.data ? (
+                <LoadingRows rows={3} />
+              ) : runList.length === 0 ? (
+                <EmptyNote>No runs yet. Run now takes the first one.</EmptyNote>
+              ) : (
+                // One frame round the rail and the run it shows, the run
+                // page's Details: the rail decides what the inspector holds.
+                <div className="grid min-w-0 overflow-hidden rounded-xl border bg-card lg:h-[min(80svh,48rem)] lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+                  <div className="min-h-0 overflow-y-auto p-2 max-lg:max-h-80 max-lg:border-b lg:border-r">
+                    <RunRail
+                      runs={runList}
+                      selectedId={shown?.id}
+                      onSelect={(run) => setSelectedId(run.id)}
+                    />
+                  </div>
+                  <div className="min-h-0 min-w-0 overflow-y-auto">
+                    {shown && (
+                      <RunInspector
+                        key={shown.id}
+                        run={shown}
+                        verbs={runVerbs(shown)}
+                        browsing={browsing}
+                        onBrowse={() => browse(shown)}
+                        onRestorePaths={(paths) => setRestore({ run: shown, paths })}
+                        canRestore={can("destructive") && shown.status === "success"}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            </PanelBody>
+          </Panel>
+        </>
+      )}
+      {editing && (
+        <JobDialog
+          job={editing}
+          resources={resourceList}
+          onOpenChange={(open: boolean) => !open && setEditing(null)}
+          onDone={jobPoll.refresh}
+        />
+      )}
+      {dialog}
 
       {restore && (
         <RestoreFilesDialog
@@ -484,7 +460,61 @@ export function JobPage() {
           onDone={runs.refresh}
         />
       )}
-    </Workspace>
+    </DetailPage>
+  )
+}
+
+/**
+ * The line a job's page opens on: what it takes as the things themselves,
+ * its name, how its last run went as its state, and the facts it is opened
+ * to check — what it takes, where it writes, what it pauses, whether it is
+ * encrypted, and its recovery check. Its verbs are the line's own: Run now
+ * as the command and the rest behind `⋯`.
+ */
+function JobIdentity({
+  job,
+  products,
+  project,
+  pauses,
+  verbs,
+}: {
+  job: BackupJob
+  products: string[]
+  project?: number
+  pauses: string[]
+  verbs: Verb[]
+}) {
+  return (
+    <IdentityHeader
+      className="animate-rise"
+      logo={<JobMark products={products} project={project} size="lg" />}
+      title={job.name}
+      state={<LastRun job={job} />}
+      facts={
+        <>
+          {/* What it takes, without the count of containers it pauses:
+              they are named after where it writes. */}
+          <Fact>{contentsLabel({ ...job, pauseContainers: undefined })}</Fact>
+          <Fact product={destinationProduct(job)} mono={job.targetKind === "local"}>
+            {targetLabel(job)}
+          </Fact>
+          {pauses.length > 0 && (
+            <Fact>
+              pauses <span className="mx-0.5 font-mono">{pauses.join(", ")}</span> while it archives
+            </Fact>
+          )}
+          {job.encrypt && <Fact>encrypted with this server&apos;s backup key</Fact>}
+          {job.imported && <Fact>{importedFrom(job)}</Fact>}
+          {job.recovery && (
+            <Fact>
+              recovery check {job.recovery.automatic ? "after every run" : "on request"} · schema{" "}
+              {job.recovery.schemaVersion}
+            </Fact>
+          )}
+        </>
+      }
+      {...IdentityVerbs({ verbs, name: job.name })}
+    />
   )
 }
 
@@ -520,34 +550,26 @@ function RunInspector({
             Run {run.id}
             <Status state={run.status} tone={run.status === "failed" ? "danger" : undefined} />
           </h3>
-          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <span className="numeric">{timestamp(run.startedAt)}</span>
-            <FactDot />
-            <span>{run.trigger.replaceAll("_", " ")}</span>
+          <FactLine className="text-xs text-muted-foreground">
+            <Fact className="numeric">{timestamp(run.startedAt)}</Fact>
+            <Fact>{run.trigger.replaceAll("_", " ")}</Fact>
             {!run.imported && (
-              <>
-                <FactDot />
-                <span>
-                  took <span className="numeric text-foreground">{run.duration ?? "—"}</span>
-                </span>
-              </>
+              <Fact>
+                took <span className="numeric text-foreground">{run.duration ?? "—"}</span>
+              </Fact>
             )}
             {run.sizeBytes > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric text-foreground">{bytes(run.sizeBytes)}</span>
-              </>
+              <Fact className="numeric text-foreground">{bytes(run.sizeBytes)}</Fact>
             )}
             {run.manifest?.encryption && (
-              <>
-                <FactDot />
+              <Fact>
                 <span className="inline-flex items-center gap-1">
                   <LockClosed aria-hidden className="size-3" />
                   encrypted
                 </span>
-              </>
+              </Fact>
             )}
-          </p>
+          </FactLine>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {run.status === "success" && (

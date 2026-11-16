@@ -341,12 +341,21 @@ test("closing the detail edit discards its draft and reopening uses the saved de
   page,
 }) => {
   await page.goto("/backups/1")
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  // Edit is behind the identity line's menu; Run now is its command.
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Discard this edit")
   await page.keyboard.press("Escape")
   await expect(dialog).toHaveCount(0)
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(jobs[0].name)
 })
 

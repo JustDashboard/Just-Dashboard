@@ -1,12 +1,13 @@
 "use client"
 
 import Link from "next/link"
-import { ChartActivity, Terminal } from "@/components/icons"
+import { ChartActivity, Copy, Terminal } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { asSentence } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
-import { ProductLogos, hasProductLogo } from "@/components/product-logo"
-import { EmptyState, ErrorState } from "@/components/state"
+import { copyText } from "@/lib/clipboard"
+import { MissingThing } from "@/components/missing-thing"
+import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 
 /** The terminal the one command is typed in, for an account that has one. */
@@ -14,7 +15,7 @@ function OpenTerminal() {
   const { can } = useAuth()
   if (!can("terminal")) return null
   return (
-    <Button size="sm" variant="outline" asChild>
+    <Button variant="outline" asChild>
       <Link href="/terminal">
         <Terminal className="size-4" />
         Open a terminal
@@ -38,28 +39,41 @@ export function PM2FactsLine({ children }: { children?: React.ReactNode }) {
   )
 }
 
-const mark = () => (hasProductLogo("pm2") ? <ProductLogos ids={["pm2"]} /> : undefined)
+/**
+ * A line to type, as a step: the button copies it, and the line stands beside
+ * it, because the reader should see what they are about to paste.
+ */
+function CopyStep({ label, text }: { label: string; text: string }) {
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+      <Button size="lg" onClick={() => void copyText(text, "Copied")}>
+        <Copy />
+        {label}
+      </Button>
+      <code className="min-w-0 font-mono text-hint break-all text-muted-foreground">{text}</code>
+    </span>
+  )
+}
 
 /**
  * Where no account on this server has PM2. It is an npm package, installed
  * for the account whose applications it will run, so it is not something the
- * server's package manager can put in as it does git or WireGuard: the block
- * names the one command and opens the terminal it is typed in.
+ * server's package manager can put in as it does git or WireGuard: the screen
+ * is PM2 drawn as itself, the one line to copy and the terminal it is typed
+ * in, the way a server without Docker or systemd is told (`MissingThing`).
  */
 export function PM2Missing() {
   return (
-    <EmptyState
+    <MissingThing
+      thing="pm2"
       icon={ChartActivity}
-      mark={mark()}
       title="PM2 is not installed"
-      description={
-        <>
-          It comes from npm, for the account whose applications it runs:{" "}
-          <span className="font-mono text-foreground">npm install -g pm2</span>.
-        </>
-      }
-      action={<OpenTerminal />}
-    />
+      reason="not-installed"
+      step={<CopyStep label="Copy the install line" text="npm install -g pm2" />}
+      more={<OpenTerminal />}
+    >
+      It comes from npm, for the account whose applications it runs.
+    </MissingThing>
   )
 }
 
@@ -67,23 +81,20 @@ export function PM2Missing() {
  * Where PM2 is installed and no account's daemon is running. PM2 starts its
  * daemon with the first application, as the account that starts it, so there
  * is no daemon to start from here and nothing to list: the page drew an empty
- * band over an empty table that said PM2 "is running". The block says what is
- * true and names the command that changes it.
+ * band over an empty table that said PM2 "is running". The screen says what
+ * is true and names the line that changes it.
  */
 export function PM2Idle() {
   return (
-    <EmptyState
+    <MissingThing
+      thing="pm2"
       icon={ChartActivity}
-      mark={mark()}
       title="No PM2 daemon is running"
-      description={
-        <>
-          PM2 starts its daemon with the first application, as the account that runs it:{" "}
-          <span className="font-mono text-foreground">pm2 start app.js</span>.
-        </>
-      }
-      action={<OpenTerminal />}
-    />
+      step={<CopyStep label="Copy the start line" text="pm2 start app.js" />}
+      more={<OpenTerminal />}
+    >
+      PM2 starts its daemon with the first application, as the account that runs it.
+    </MissingThing>
   )
 }
 
@@ -91,9 +102,10 @@ export function PM2Idle() {
  * Where PM2 is installed and its list could not be read: `pm2 jlist` exited
  * with an error, or timed out behind a daemon that is wedged. The page's
  * headline was whatever the command printed ("pm2 jlist: exit status 1"); it
- * says what happened in the product's words, keeps PM2's own under it, and
- * offers the read again. An answer that is not PM2's — a refusal, a pause the
- * server asked for — keeps the product's own block for it.
+ * says what happened in the product's words, keeps PM2's own folded behind
+ * "What the server said", and offers the read again. An answer that is not
+ * PM2's — a refusal, a pause the server asked for — keeps the product's own
+ * block for it.
  */
 export function PM2Unanswered({ error, onRetry }: { error: Error; onRetry: () => void }) {
   if (error instanceof ApiError && error.status < 500) {
@@ -101,24 +113,19 @@ export function PM2Unanswered({ error, onRetry }: { error: Error; onRetry: () =>
   }
   return (
     <div role="alert">
-      <EmptyState
+      <MissingThing
+        thing="pm2"
         icon={ChartActivity}
-        mark={mark()}
         title="PM2 did not answer"
-        description={
-          <>
-            The dashboard asked for its list and got this back:{" "}
-            <span className="font-mono break-words text-foreground">
-              {asSentence(error.message)}
-            </span>
-          </>
-        }
-        action={
-          <Button size="sm" variant="outline" onClick={onRetry}>
+        raw={asSentence(error.message)}
+        step={
+          <Button size="lg" onClick={onRetry}>
             Try again
           </Button>
         }
-      />
+      >
+        The dashboard asked for its list of applications and got no list back.
+      </MissingThing>
     </div>
   )
 }

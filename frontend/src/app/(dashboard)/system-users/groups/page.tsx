@@ -1,9 +1,8 @@
 "use client"
 
-import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Plus, Trash, Users } from "@/components/icons"
+import { Plus, Trash, Users } from "@/components/icons"
 import { InitialsMark } from "@/components/user-avatar"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
@@ -42,14 +41,7 @@ import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useBreakpoint } from "@/lib/breakpoints"
 
-const BACK = (
-  <Link
-    href="/system-users"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> System users
-  </Link>
-)
+const BACK = { href: "/system-users", label: "System users" }
 
 /**
  * Who is in what, and what being in it hands over. A group's power is the
@@ -123,7 +115,7 @@ function SystemGroups() {
 
   return (
     <Page rise>
-      <PageContext eyebrow={BACK} title="Groups" />
+      <PageContext back={BACK} title="Groups" />
 
       <HostIdentity
         fallback={Users}
