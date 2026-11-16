@@ -37,7 +37,9 @@ export function logsPageHref(sourceId: string, ask?: LogAsk): string {
  * big and how fresh it is where the server measured it, or where it lives.
  */
 export function sourceSummary(source: Omit<ServiceLogSource, "id">): string {
-  const parts: string[] = [KIND_TAG[source.kind] ?? source.kind]
+  const parts: string[] = []
+  const kind = KIND_TAG[source.kind] ?? source.kind
+  if (kind) parts.push(kind)
   if (source.size !== undefined && source.size > 0) {
     parts.push(bytes(source.size))
     if (source.modified) parts.push(`written ${relativeTime(source.modified)}`)
@@ -104,7 +106,7 @@ export function EmbeddedLog({
       ) : !sources ? null : phone ? (
         <ChoiceList aria-label={title}>
           {sources.map((source) => (
-            <SourceCard key={source.id} source={source} ask={logs.ask} />
+            <SourceCard key={source.id} source={source} ask={logs.ask} fallback={title} />
           ))}
         </ChoiceList>
       ) : (
@@ -119,7 +121,16 @@ export function EmbeddedLog({
  * described is asked about once, for its size and its last write; a server
  * that does not answer leaves the card with what the page knew.
  */
-function SourceCard({ source, ask }: { source: ServiceLogSource; ask?: LogAsk }) {
+function SourceCard({
+  source,
+  ask,
+  fallback,
+}: {
+  source: ServiceLogSource
+  ask?: LogAsk
+  /** The section's title, for a source the server described without a name. */
+  fallback: string
+}) {
   const described = usePoll(
     (signal) => get<Partial<ServiceLogSource>>("/logs/source", { source: source.id }, signal),
     0,
@@ -128,13 +139,16 @@ function SourceCard({ source, ask }: { source: ServiceLogSource; ask?: LogAsk })
   )
   const facts = { ...described.data, ...stripUndefined(source) } as ServiceLogSource
   const product = source.product ?? lensFor(source.lens)?.product
+  const name = source.label || source.path?.slice(source.path.lastIndexOf("/") + 1) || fallback
   return (
     <ChoiceRow
       leading={<ProductLogo id={product} size="sm" fallback={kindIcon(source.kind) ?? Logs} />}
-      title={source.label}
-      verb={`Open ${source.label} in Logs`}
-      description={sourceSummary(facts)}
-      href={logsPageHref(source.id, ask)}
+      title={name}
+      verb={`Open ${name} in Logs`}
+      description={sourceSummary(facts) || undefined}
+      // A source with no id cannot be named in the address; the Logs page
+      // still opens, on the source it would have opened anyway.
+      href={source.id ? logsPageHref(source.id, ask) : "/logs"}
     />
   )
 }
