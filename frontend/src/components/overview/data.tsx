@@ -11,7 +11,7 @@ import { LastRun, nextLabel } from "@/components/backups/job-card"
 import { runJobNow } from "@/components/backups/job-verbs"
 import { destinationProduct } from "@/components/backups/marks"
 import { engineFor, sectionHref } from "@/components/database/engine"
-import { sortFleet } from "@/components/database/fleet/fleet"
+import { objectNouns, sortFleet } from "@/components/database/fleet/fleet"
 import { EngineMark, EnvironmentTag } from "@/components/database/kit"
 import { DatabaseStatusMark, fleetStatus } from "@/components/database/shell/status"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
@@ -53,7 +53,7 @@ export function DatabasesPanel({ read }: { read: PollState<DbFleet> }) {
                 {down > 0 && <span className="text-destructive"> · {down} not answering</span>}
               </span>
             )}
-            <SectionLink href="/databases">Control center</SectionLink>
+            <SectionLink href="/databases">Databases</SectionLink>
           </div>
         }
       />
@@ -83,6 +83,7 @@ export function DatabasesPanel({ read }: { read: PollState<DbFleet> }) {
             {entries.slice(0, SHOWN).map((entry) => {
               const engine = engineFor(entry)
               const version = entry.versionNumber ? ` ${entry.versionNumber}` : ""
+              const nouns = objectNouns(entry.objectWord)
               return (
                 <ChoiceRow
                   key={entry.id}
@@ -96,7 +97,7 @@ export function DatabasesPanel({ read }: { read: PollState<DbFleet> }) {
                         {engine.label}
                         {version}
                         {entry.sizesKnown && ` · ${bytes(entry.bytes)}`}
-                        {` · ${plural(entry.objects, entry.objectWord.replace(/s$/, ""), entry.objectWord)}`}
+                        {` · ${plural(entry.objects, nouns.one, nouns.many)}`}
                       </>
                     ) : (
                       <span title={entry.error}>
