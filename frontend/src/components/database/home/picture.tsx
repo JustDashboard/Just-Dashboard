@@ -6,6 +6,7 @@ import { Archive, Plus, type Icon } from "@/components/icons"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { DbTopoEdge, DbTopoNode, DbTopology } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useBreakpoint } from "@/lib/breakpoints"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useNow } from "@/hooks/use-now"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
@@ -102,6 +103,9 @@ export function HomePicture({
   const running = status.state === "running"
 
   const container = useRef<HTMLDivElement>(null)
+  // Stacked on a phone the database is one more row of its lanes, at their
+  // size, so its words start where theirs do rather than 12px further in.
+  const hubSize = useBreakpoint("lg") ? "lg" : "md"
   const [focus, setFocus] = useState<string | null>(null)
   const shownReaders = readers.slice(0, SHOWN)
   const shownHoldings = (holdings ?? []).slice(0, SHOWN)
@@ -305,11 +309,11 @@ export function HomePicture({
                   align="center"
                   mark={
                     <span ref={refFor("db")} className="relative flex">
-                      <WireMark tone="logo" size="lg">
+                      <WireMark tone="logo" size={hubSize}>
                         <EngineGlyph engine={engine} />
                       </WireMark>
                       <StatusDot
-                        corner="lg"
+                        corner={hubSize}
                         state={
                           running ? "running" : status.state === "broken" ? "failed" : "stopped"
                         }

@@ -464,6 +464,9 @@ export function HostAlertsPage() {
               }
               waiting={waiting}
               onAdd={(kind) => edit({ kind })}
+              // Five of its eight sources are named nowhere else on the page
+              // until a rule watches them, so a phone keeps their words.
+              phone="stack"
             />
           </div>
 

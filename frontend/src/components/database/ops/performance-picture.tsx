@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Clock, LockClosed, Pause, Play, type Icon } from "@/components/icons"
 import { duration, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { useBreakpoint } from "@/lib/breakpoints"
 import type { PollState } from "@/hooks/use-poll"
 import { WireMark, WireNode } from "@/components/wire/wire"
 import { StatusDot } from "@/components/status-dot"
@@ -86,6 +87,9 @@ export function NowPicture({
   const groups = useMemo(() => clientGroups(sessions ?? []), [sessions])
   const doing = useMemo(() => doingOf(sessions ?? []), [sessions])
   const running = status.state === "running"
+  // Stacked on a phone the database is one more row of its lanes, at their
+  // size, so its words start where theirs do rather than 12px further in.
+  const hubSize = useBreakpoint("lg") ? "lg" : "md"
   const open = sessions?.length ?? 0
 
   const container = useRef<HTMLDivElement>(null)
@@ -286,11 +290,11 @@ export function NowPicture({
                   align="center"
                   mark={
                     <span ref={refFor("db")} className="relative flex">
-                      <WireMark tone="logo" size="lg">
+                      <WireMark tone="logo" size={hubSize}>
                         <EngineGlyph engine={engine} />
                       </WireMark>
                       <StatusDot
-                        corner="lg"
+                        corner={hubSize}
                         state={
                           running ? "running" : status.state === "broken" ? "failed" : "stopped"
                         }
