@@ -16,7 +16,7 @@ import { Field, FormFact, FormFacts, FormNote, InfoTip } from "@/components/form
 import { Modal } from "@/components/modal"
 import { OutcomeStrip, type Outcome } from "@/components/outcome-strip"
 import { ProductGlyph } from "@/components/product-logo"
-import { ChoiceRow } from "@/components/choice-row"
+import { ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -25,15 +25,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { sectionHref } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
-import {
-  Block,
-  BlockLink,
-  CardsSkeleton,
-  NotUpdating,
-  Quiet,
-  Read,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { Block } from "@/components/database/home/blocks"
+import { EmptyNote } from "@/components/state"
 import { nameHue } from "@/components/database/home/kinds"
 import { read, record } from "@/components/database/home/read"
 import { compact } from "@/components/database/home/readings"
@@ -46,6 +39,9 @@ import type {
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { settingsPageHref } from "@/components/database/shell/settings-pages"
+import { Stale } from "@/components/stale"
+import { Read, staleOf } from "@/components/database/kit/read"
+import { SectionLink } from "@/components/section-link"
 
 /**
  * What a database runs as, where it is reachable from and what is kept of it:
@@ -274,19 +270,21 @@ export function RunsAs({ uptimeSeconds }: { uptimeSeconds?: number }) {
       actions={
         <>
           {container && (
-            <BlockLink href={`/docker/containers/${encodeURIComponent(container.name)}`}>
+            <SectionLink href={`/docker/containers/${encodeURIComponent(container.name)}`}>
               Open container
-            </BlockLink>
+            </SectionLink>
           )}
           {!container && unit && (
-            <BlockLink href={`/processes/services/${encodeURIComponent(unit.name)}`}>
+            <SectionLink href={`/processes/services/${encodeURIComponent(unit.name)}`}>
               Open unit
-            </BlockLink>
+            </SectionLink>
           )}
           {file && (
-            <BlockLink href={`/files?path=${encodeURIComponent(directory)}`}>Open folder</BlockLink>
+            <SectionLink href={`/files?path=${encodeURIComponent(directory)}`}>
+              Open folder
+            </SectionLink>
           )}
-          {logs && <BlockLink href={href("logs")}>Logs</BlockLink>}
+          {logs && <SectionLink href={href("logs")}>Logs</SectionLink>}
         </>
       }
     />
@@ -396,7 +394,7 @@ export function ReachableFrom() {
             <span className="min-w-0 truncate">{exposure.word}</span>
           )}
           <InfoTip label={`What “${exposure.word}” means`}>{exposure.sentence}</InfoTip>
-          {stale && <NotUpdating error={stale} />}
+          {stale && <Stale error={stale} />}
         </>
       }
       facts={
@@ -447,7 +445,7 @@ export function ReachableFrom() {
           </span>
         </span>
       }
-      actions={<BlockLink href={href("settings")}>{admin ? "Change" : "Settings"}</BlockLink>}
+      actions={<SectionLink href={href("settings")}>{admin ? "Change" : "Settings"}</SectionLink>}
     />
   )
 }
@@ -586,7 +584,7 @@ export function BackupsLine({
                 {plural(data.files.length, "dump")} · {bytes(kept)}
               </span>
             )}
-            {stale && <NotUpdating error={stale} />}
+            {stale && <Stale error={stale} />}
           </span>
         ) : backups.error ? (
           <span className="font-normal text-muted-foreground">The dumps could not be read</span>
@@ -629,12 +627,12 @@ export function BackupsLine({
       actions={
         <>
           {data && !job && answering && can("service.control") && (
-            <Button size="xs" variant="outline" pending={starting} onClick={start}>
+            <Button size="sm" variant="outline" pending={starting} onClick={start}>
               <Archive />
               Back up now
             </Button>
           )}
-          <BlockLink href={href("backups")}>All backups</BlockLink>
+          <SectionLink href={href("backups")}>All backups</SectionLink>
         </>
       }
     />
@@ -749,7 +747,7 @@ export function ServerDatabases() {
       stale={staleOf(list)}
       actions={
         adds && (
-          <Button ref={create} size="xs" variant="ghost" onClick={() => setCreating(true)}>
+          <Button ref={create} size="sm" variant="outline" onClick={() => setCreating(true)}>
             <Plus />
             New database
           </Button>
@@ -757,13 +755,20 @@ export function ServerDatabases() {
       }
     >
       <Read
+        rise
         poll={list}
         what="the server's databases"
-        skeleton={<CardsSkeleton className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" />}
+        skeleton={
+          <ChoiceListSkeleton
+            rows={3}
+            lines={2}
+            className="grid gap-2 space-y-0 sm:grid-cols-2 xl:grid-cols-3"
+          />
+        }
       >
         {() =>
           rows.length === 0 ? (
-            <Quiet>The server lists no database to this account.</Quiet>
+            <EmptyNote>The server lists no database to this account.</EmptyNote>
           ) : (
             <>
               <CardGrid>
@@ -994,13 +999,20 @@ export function Keyspaces({ server }: { server: PollState<RedisServer> }) {
       }
     >
       <Read
+        rise
         poll={server}
         what="the keyspace"
-        skeleton={<CardsSkeleton className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" />}
+        skeleton={
+          <ChoiceListSkeleton
+            rows={3}
+            lines={2}
+            className="grid gap-2 space-y-0 sm:grid-cols-2 xl:grid-cols-3"
+          />
+        }
       >
         {(data) =>
           data.keyspace.length === 0 ? (
-            <Quiet>None of its {data.databases} numbered databases holds a key yet.</Quiet>
+            <EmptyNote>None of its {data.databases} numbered databases holds a key yet.</EmptyNote>
           ) : (
             <>
               <CardGrid>

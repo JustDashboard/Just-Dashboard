@@ -12,7 +12,6 @@ import {
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DbAlertKind, NotificationChannel } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
 import { ChoiceRow } from "@/components/choice-row"
 import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
@@ -38,6 +37,7 @@ import type {
   DbAlertRule,
   DbAlertSubject,
 } from "@/components/database/ops/alerts-types"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** Each kind's glyph, on its card, its tile and its rows. */
 export const KIND_GLYPH: Record<DbAlertKind, Icon> = {
@@ -150,7 +150,7 @@ export function AlertRow({
   // The status and its mark stand beside the name only where the page is wide
   // enough to keep the name whole; under that they are the card's second line,
   // on every card, so the cards stay one height there too.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const words = ALERT_KINDS[rule.kind]
   const focus = focusOf(subjects)
   const stand = standing(rule, subjects, Boolean(away))
@@ -189,7 +189,7 @@ export function AlertRow({
         aria-label={`What ${words.label} read`}
         className="w-80 space-y-2 p-3 text-hint text-muted-foreground"
       >
-        {said && <p className="text-pretty text-foreground/90">{said}</p>}
+        {said && <p className="text-pretty text-foreground">{said}</p>}
         {follows && (
           <p className="min-w-0 break-words">follows {subjects.map((s) => s.label).join(", ")}</p>
         )}
@@ -265,7 +265,7 @@ export function GoesTo({
       {channels.map((channel) => (
         <span key={channel.id} className="inline-flex min-w-0 items-center gap-1">
           <ChannelGlyph channel={channel} />
-          <span className="truncate text-foreground/85">{channel.name}</span>
+          <span className="truncate text-foreground">{channel.name}</span>
         </span>
       ))}
     </span>

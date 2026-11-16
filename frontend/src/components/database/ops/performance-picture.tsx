@@ -11,8 +11,9 @@ import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { LegendLine } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
-import { Block, CardsSkeleton, staleOf } from "@/components/database/home/blocks"
-import { Lane, pulseFor } from "@/components/database/home/picture"
+import { Block } from "@/components/database/home/blocks"
+import { Lane, WaitingLine, WaitingNodes, pulseFor } from "@/components/database/home/picture"
+import { ErrorState } from "@/components/state"
 import { DbClientMark } from "@/components/database/client-mark"
 import { clientOf, type KnownClient } from "@/components/database/clients"
 import { useKnownClients } from "@/components/database/use-known-clients"
@@ -29,6 +30,7 @@ import type {
   DbSessionStatus,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { staleOf } from "@/components/database/kit/read"
 
 /** How many clients the left lane draws before the rest are counted. */
 const SHOWN = 6
@@ -126,17 +128,21 @@ export function NowPicture({
     onBlur: () => setFocus((held) => (held === key ? null : held)),
   })
 
-  if (activity.error && !activity.data) return null
+  const waiting = !activity.data
   return (
     <Block
       title="Right now"
       stale={staleOf(activity)}
       actions={<NowLegend className="max-xl:hidden" />}
     >
-      {!activity.data ? (
-        <CardsSkeleton count={2} />
+      {activity.error && !activity.data ? (
+        // A first read that failed keeps the block and says so, as the
+        // Home's picture does: the section used to vanish.
+        <ErrorState what="the sessions" error={activity.error} onRetry={activity.refresh} />
       ) : (
-        <div className="relative animate-rise py-4">
+        // Waiting, the picture is its own shape: the server, the four states
+        // and grey clients, so nothing moves when the read lands.
+        <div className="relative py-4" aria-busy={waiting || undefined}>
           <div
             aria-hidden
             className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0"
@@ -206,7 +212,9 @@ export function NowPicture({
 
             <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(3rem,7vw,7rem)_minmax(0,11rem)_clamp(3rem,7vw,7rem)_minmax(0,1fr)] lg:items-center">
               <Lane title="Connected" count={groups.length} className="lg:text-right">
-                {groups.length === 0 ? (
+                {waiting ? (
+                  <WaitingNodes align="end" />
+                ) : groups.length === 0 ? (
                   <li className="text-hint text-muted-foreground lg:text-right">
                     No session but the server&apos;s own is open.
                   </li>
@@ -281,23 +289,26 @@ export function NowPicture({
                       <WireMark tone="logo" size="lg">
                         <EngineGlyph engine={engine} />
                       </WireMark>
-                      <span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background">
-                        <StatusDot
-                          state={
-                            running ? "running" : status.state === "broken" ? "failed" : "stopped"
-                          }
-                        />
-                      </span>
+                      <StatusDot
+                        corner="lg"
+                        state={
+                          running ? "running" : status.state === "broken" ? "failed" : "stopped"
+                        }
+                      />
                     </span>
                   }
                   eyebrow={summary?.version ?? engine.label}
                   title={<span className="block truncate">{conn.name}</span>}
                   hint={
-                    <span className="numeric">
-                      {ceiling
-                        ? `${open.toLocaleString()} of ${ceiling.toLocaleString()} sessions`
-                        : plural(open, "session")}
-                    </span>
+                    waiting ? (
+                      <WaitingLine className="w-20" />
+                    ) : (
+                      <span className="numeric">
+                        {ceiling
+                          ? `${open.toLocaleString()} of ${ceiling.toLocaleString()} sessions`
+                          : plural(open, "session")}
+                      </span>
+                    )
                   }
                 />
               </div>
@@ -343,7 +354,9 @@ export function NowPicture({
                             aria-label={`${plural(count, "session")} ${state.label.toLowerCase()}: open them`}
                             className="flex min-w-0 items-baseline gap-2 rounded-sm focus-ring hover:underline"
                           >
-                            <span className="numeric font-semibold">{count.toLocaleString()}</span>
+                            <span className="numeric font-semibold">
+                              {waiting ? <WaitingLine className="w-3" /> : count.toLocaleString()}
+                            </span>
                             <span className="truncate font-normal text-muted-foreground">
                               {state.label}
                             </span>

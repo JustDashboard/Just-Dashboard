@@ -14,6 +14,7 @@ import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_HREF } from "@/components/database/shell/routes"
+import { agree } from "@/components/database/kit/figures"
 
 /** A deployment that holds the connection through a managed database network. */
 export type LinkedDeployment = { name: string; href: string }
@@ -185,8 +186,8 @@ export function useForgetConnection(confirm: (request: ConfirmRequest) => void) 
           </p>
           {consumers > 0 && (
             <p>
-              {plural(consumers, "deployment environment")} {consumers === 1 ? "is" : "are"} bound
-              to it.
+              {plural(consumers, "deployment environment")} {agree(consumers, "is", "are")} bound to
+              it.
             </p>
           )}
         </>

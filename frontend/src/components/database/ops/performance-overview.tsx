@@ -1,21 +1,20 @@
 "use client"
 
-import { ViewChart, HistoryRange } from "@/components/database/home/activity"
-import { Block, NotUpdating } from "@/components/database/home/blocks"
+import { HistoryFact, HistoryRange, ViewChart } from "@/components/database/home/activity"
+import { Block } from "@/components/database/home/blocks"
 import { offeredViews } from "@/components/database/home/charts"
 import { chartEvents } from "@/components/database/home/events"
-import { gauge, heldSeconds, type Sample } from "@/components/database/home/samples"
-import { SAMPLE_EVERY_MS, keptFor } from "@/components/database/home/use-samples"
+import { gauge, type Sample } from "@/components/database/home/samples"
 import { overviewCharts, quietChart } from "@/components/database/ops/performance-figures"
 import { Notes } from "@/components/database/ops/performance-parts"
-import { Fig, TitleFact } from "@/components/database/ops/performance-words"
 import { NowPicture } from "@/components/database/ops/performance-picture"
 import type { DbActivityResponse, DbServerStats } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import type { PollState } from "@/hooks/use-poll"
-import { duration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
+import { Stale } from "@/components/stale"
+import { capitalize } from "@/components/database/kit/figures"
 
 /**
  * The Overview: who is on the server right now, then what it has done over
@@ -68,8 +67,6 @@ export function OverviewView({
       quiet: all.filter((chart) => !ids.has(chart.id)),
     }
   }, [charts, drawnKey, offeredKey])
-  const held = heldSeconds(samples)
-  const every = SAMPLE_EVERY_MS / 1000
   const note = loading
     ? "Reading the server…"
     : error && samples.length === 0
@@ -89,22 +86,12 @@ export function OverviewView({
       <Block
         title="Activity"
         bodyClassName="space-y-4"
+        // What was two sentences under the charts: how much is recorded and
+        // how long it is kept, on the line that picks the window.
+        aside={<HistoryFact samples={samples} retentionHours={retentionHours} />}
         actions={
           <>
-            {/* What was two sentences under the charts: how much is recorded
-                and how long it is kept, on the line that picks the window. */}
-            <TitleFact
-              title={`Collected every ${every} seconds, including while this page is closed.`}
-            >
-              {held > 0 ? (
-                <>
-                  <Fig>{duration(held)}</Fig> recorded, kept for {keptFor(retentionHours)}
-                </>
-              ) : (
-                <>kept for {keptFor(retentionHours)}</>
-              )}
-            </TitleFact>
-            {error && samples.length > 0 && <NotUpdating error={error} />}
+            {error && samples.length > 0 && <Stale error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }
@@ -142,7 +129,7 @@ function sentence(words: string[]): string {
     words.length <= 1
       ? (words[0] ?? "")
       : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`
-  return text.charAt(0).toUpperCase() + text.slice(1)
+  return capitalize(text)
 }
 
 /**

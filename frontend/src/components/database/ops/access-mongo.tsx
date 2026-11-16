@@ -1,13 +1,7 @@
 "use client"
 
 import { useConfirm } from "@/components/confirm-dialog"
-import { generatePassword } from "@/components/database/connect/rules"
-import {
-  CardsSkeleton,
-  CouldNotRead,
-  NotUpdating,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { generatePassword } from "@/lib/password"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import {
@@ -39,11 +33,11 @@ import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Disclosure, Field, FieldRow, FormFact, FormNote } from "@/components/form"
 import { Cross, Key, Trash, UserPlus } from "@/components/icons"
 import { Panel, PanelBody } from "@/components/panel"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { tabClasses } from "@/components/tabs"
 import { ChipStrip, FilterChip } from "@/components/chips"
@@ -65,6 +59,7 @@ import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { useId, useMemo, useState } from "react"
+import { Stale } from "@/components/database/kit/read"
 
 /**
  * A document database's accounts: the users, each living in a database and
@@ -148,10 +143,10 @@ export function MongoAccess() {
             ))}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 pb-2">
-            {staleOf(users) && <NotUpdating error={staleOf(users)!} />}
+            <Stale poll={users} />
             {readOnly && <ProtectedTag />}
             {mayEdit && view === "users" && (
-              <Button size="sm" onClick={() => setCreating(true)}>
+              <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
                 <UserPlus />
                 New user
               </Button>
@@ -163,9 +158,9 @@ export function MongoAccess() {
             <RolesView />
           ) : !data ? (
             users.error ? (
-              <CouldNotRead what="the users" error={users.error} onRetry={users.refresh} />
+              <ErrorState what="the users" error={users.error} onRetry={users.refresh} />
             ) : (
-              <CardsSkeleton count={3} />
+              <ChoiceListSkeleton rows={3} lines={2} />
             )
           ) : list.length === 0 ? (
             <Notice tone="warning" title="No user exists on this server">
@@ -464,7 +459,7 @@ function RolesView() {
       </ChipStrip>
       {!data ? (
         roles.error ? (
-          <CouldNotRead what="the roles" error={roles.error} onRetry={roles.refresh} />
+          <ErrorState what="the roles" error={roles.error} onRetry={roles.refresh} />
         ) : (
           <LoadingRows rows={5} />
         )

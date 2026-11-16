@@ -1,4 +1,6 @@
 import type { DbTLS } from "@/lib/types"
+import { plural } from "@/lib/format"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * What the TLS section says and asks, worked out from what the server reported.
@@ -51,7 +53,7 @@ export function certificateLife(
   if (left < 0) return "Expired"
   if (left === 0) return "Ends today"
   const renewIn = daysUntil(tls.renewAt, now)
-  const base = `${left} ${left === 1 ? "day" : "days"} left`
+  const base = `${plural(left, "day")} left`
   return renewIn !== undefined && renewIn > 0 ? base : `${base}, renews on its own`
 }
 
@@ -70,7 +72,7 @@ export function changeEffects(
   const linked =
     tls.linked > 0
       ? [
-          `${tls.linked} deployment ${tls.linked === 1 ? "environment reaches" : "environments reach"} this database by its internal name. Once TLS is required, each has to connect with TLS.`,
+          `${plural(tls.linked, "deployment environment")} ${agree(tls.linked, "reaches", "reach")} this database by its internal name. Once TLS is required, each has to connect with TLS.`,
         ]
       : []
   switch (change) {

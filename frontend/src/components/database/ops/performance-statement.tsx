@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
-import { percent, relativeTime } from "@/lib/format"
+import { percent, plural, relativeTime } from "@/lib/format"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -22,13 +22,12 @@ import { WireMark } from "@/components/wire/wire"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { TileTrend } from "@/components/sparkline"
 import { ReadingLine } from "@/components/reading-line"
-import { EmptyState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
 import { CodeView, EngineMark } from "@/components/database/kit"
@@ -38,7 +37,6 @@ import { readStatementHistoryOf, readStatements } from "@/components/database/op
 import {
   DetailFrame,
   DetailGate,
-  DetailHead,
   DetailRail,
   DetailTabs,
   stepOf,
@@ -71,6 +69,7 @@ import type {
   DbStatements,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { counted, agree } from "@/components/database/kit/figures"
 
 /** How many statements the page reads to find its own among, and lists beside it. The server's cap. */
 const LISTED = 200
@@ -172,20 +171,18 @@ function Statement({ address }: { address: string | null }) {
       : "Reading the statements…"
     : !data.supported
       ? "This server is not counting its statements"
-      : `${rows.length === keyed.length ? keyed.length : `${rows.length} of ${keyed.length}`} ${keyed.length === 1 ? "statement" : "statements"} · by ${(order ?? "total time").toLowerCase()}`
+      : `${rows.length === keyed.length ? keyed.length : `${rows.length} of ${keyed.length}`} ${agree(keyed.length, "statement", "statements")} · by ${(order ?? "total time").toLowerCase()}`
 
   const fromHistory = tab === "history"
   const back = fromHistory
     ? { href: href("performance", { view: "history" }), label: "Statement history" }
     : { href: href("performance", { view: "statements", sort: carried.sort }), label: "Statements" }
-  const head = (
-    <DetailHead
-      title={`${conn.name} · Statement`}
-      back={back}
-      noun="statement"
-      step={stepOf(rows, address)}
-    />
-  )
+  const head = {
+    title: `${conn.name} · Statement`,
+    back,
+    noun: "statement",
+    step: stepOf(rows, address),
+  }
   const rail = (
     <DetailRail
       label="Statements"
@@ -197,6 +194,8 @@ function Statement({ address }: { address: string | null }) {
       current={address}
       pinned={pinned}
       loading={!data && !statements.error}
+      error={statements.data ? undefined : statements.error}
+      onRetry={statements.refresh}
       empty={
         // The caption has already said why there is nothing under it.
         (statements.error && !data) || (data && !data.supported)
@@ -213,10 +212,11 @@ function Statement({ address }: { address: string | null }) {
     (!recorder || engineId === "" || detail.data !== undefined || detail.error !== undefined)
   if (text === undefined) {
     return (
-      <DetailFrame rail={rail}>
-        {head}
-        {address !== null && !settled ? (
-          <>
+      <DetailFrame
+        rail={rail}
+        head={head}
+        identity={
+          address !== null && !settled ? (
             <HostIdentity
               className="border-b-0 pb-0"
               logo={<StatementTile />}
@@ -224,17 +224,18 @@ function Statement({ address }: { address: string | null }) {
               menu={<span className="size-8" />}
               facts={<span>&nbsp;</span>}
             />
+          ) : undefined
+        }
+      >
+        {address !== null && !settled ? (
+          <>
             {/* The page's own shape while it is read: the strip is where it will be. */}
             <DetailTabs label="Views of this statement" views={views} tab={tab} onTab={setTab}>
               <LoadingRows />
             </DetailTabs>
           </>
         ) : statements.error && !data ? (
-          <CouldNotRead
-            what="the statements"
-            error={statements.error}
-            onRetry={statements.refresh}
-          />
+          <ErrorState what="the statements" error={statements.error} onRetry={statements.refresh} />
         ) : (
           <NotListed data={data} back={back} />
         )}
@@ -256,9 +257,10 @@ function Statement({ address }: { address: string | null }) {
   const missing = listed && listed.hitRatio >= 0 && listed.hitRatio < 0.9 ? listed : undefined
 
   return (
-    <DetailFrame rail={rail}>
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        {head}
+    <DetailFrame
+      rail={rail}
+      head={head}
+      identity={
         <HostIdentity
           label="About this statement"
           className="animate-rise border-b-0 pb-0"
@@ -277,9 +279,7 @@ function Statement({ address }: { address: string | null }) {
                   <Fig>{shareWords(listed.share)}</Fig> of runtime
                 </span>
                 <FactDot />
-                <span className="numeric">
-                  {listed.calls.toLocaleString()} {listed.calls === 1 ? "call" : "calls"}
-                </span>
+                <span className="numeric">{plural(listed.calls, "call")}</span>
                 <FactDot />
                 <span className="numeric">{millis(listed.meanMs)} a call</span>
                 {missing && (
@@ -298,9 +298,7 @@ function Statement({ address }: { address: string | null }) {
                   time
                 </span>
                 <FactDot />
-                <span className="numeric">
-                  {recorded.calls.toLocaleString()} {recorded.calls === 1 ? "call" : "calls"}
-                </span>
+                <span className="numeric">{plural(recorded.calls, "call")}</span>
               </>
             ) : (
               <span>&nbsp;</span>
@@ -311,7 +309,7 @@ function Statement({ address }: { address: string | null }) {
               <Button size="sm" onClick={() => toQuery(text)}>
                 <CodeBracket />
                 {/* On a phone the command shares the title's row: the word
-                    that says where is enough, and the statement keeps the room. */}
+                  that says where is enough, and the statement keeps the room. */}
                 <span>
                   <span className="max-sm:sr-only">Open in </span>Query
                 </span>
@@ -320,8 +318,8 @@ function Statement({ address }: { address: string | null }) {
           }
           menu={<VerbMenu verbs={verbs} label="More for this statement" />}
         />
-      </div>
-
+      }
+    >
       <DetailTabs label="Views of this statement" views={views} tab={tab} onTab={setTab}>
         {tab === "figures" ? (
           listed ? (
@@ -392,7 +390,7 @@ function railRow(
     sub:
       statement.calls === undefined || statement.meanMs === undefined
         ? "not among the top statements"
-        : `${compact(statement.calls)} ${statement.calls === 1 ? "call" : "calls"} · ${millis(statement.meanMs)} each`,
+        : `${counted(statement.calls, "call")} · ${millis(statement.meanMs)} each`,
     figure: statement.share === undefined ? undefined : shareWords(statement.share),
   }
 }
@@ -519,8 +517,7 @@ function Figures({
             />
           }
         >
-          {statement.calls.toLocaleString()} {statement.calls === 1 ? "call" : "calls"},{" "}
-          {statement.rows.toLocaleString()} {statement.rows === 1 ? "row" : "rows"}
+          {plural(statement.calls, "call")}, {plural(statement.rows, "row")}
         </ReadingLine>
         <ReadingLine
           mark={

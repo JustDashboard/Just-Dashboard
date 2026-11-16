@@ -5,6 +5,7 @@ import type {
   DbAlertState,
   DbAlertSubject,
 } from "@/components/database/ops/alerts-types"
+import { plural } from "@/lib/format"
 
 /**
  * A database alert in words. A rule is read as a sentence — "Disk filling
@@ -267,7 +268,7 @@ export function eventOutcome(event: Pick<DbAlertEvent, "delivered" | "failed" | 
   }
   if (event.kept === "recovery") return "not told: the rule tells only when it fires"
   if (event.delivered === 0 && event.failed === 0) return "no channel to tell"
-  const told = `told ${event.delivered} ${event.delivered === 1 ? "channel" : "channels"}`
+  const told = `told ${plural(event.delivered, "channel")}`
   return event.failed > 0 ? `${told}, ${event.failed} failed` : told
 }
 

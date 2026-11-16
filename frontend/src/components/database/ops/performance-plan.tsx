@@ -122,10 +122,8 @@ export function StatementPlan({
                     className="max-w-40 truncate font-mono"
                     title={`${field.before} ${field.token}`}
                   >
-                    {field.before && (
-                      <span className="text-muted-foreground/70">{field.before} </span>
-                    )}
-                    <span className="text-foreground/80">{field.token}</span>
+                    {field.before && <span className="text-faint">{field.before} </span>}
+                    <span className="text-muted-foreground">{field.token}</span>
                   </InputGroupText>
                 </InputGroupAddon>
                 <InputGroupInput
@@ -208,7 +206,7 @@ function Plan({ answer }: { answer: DbExplainResponse }) {
             <TableRow key={index}>
               {row.map((cell, at) => (
                 <TableCell key={at} className="px-2.5 py-1.5 font-mono whitespace-pre">
-                  {cell === null ? <span className="text-muted-foreground/60">NULL</span> : cell}
+                  {cell === null ? <span className="text-faint">NULL</span> : cell}
                 </TableCell>
               ))}
             </TableRow>
