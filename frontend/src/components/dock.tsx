@@ -28,7 +28,11 @@ export type StackLayer = "bar" | "dock"
 
 export type StackOccupant = {
   layer: StackLayer
-  /** A dock's place from the bottom: lower first. Bars ignore it. */
+  /**
+   * Its place from the bottom among its layer: lower first. A bar of a
+   * higher order floats over the ones under it (the save bar over a pane
+   * page's bottom bar), and a dock over the docks under it.
+   */
   order: number
   /** A bar: how far up from the window's bottom edge it reaches. A dock: its height. */
   extent: number
@@ -40,14 +44,31 @@ export const STACK_GAP = 12
 
 /**
  * Where everything in the stack sits: how much of the foot the bars occupy,
- * and each dock's distance from the window's bottom edge.
+ * how far each bar is lifted over the bars of a lower order, and each dock's
+ * distance from the window's bottom edge.
+ *
+ * Bars share the foot, so two at once took the taller and the second was
+ * drawn over the first: a save bar on a phone page with a bottom bar would
+ * have covered its stops. A bar of a higher order is lifted by how far the
+ * ones under it reach, so they stand one above the other; a bar's extent is
+ * measured with its lift in it, so the stack's top is the upper one's.
  */
 export function stackOffsets(occupants: ReadonlyMap<string, StackOccupant>) {
   let occupied = 0
   const docks: [string, StackOccupant][] = []
+  const bars: [string, StackOccupant][] = []
   for (const [id, occupant] of occupants) {
-    if (occupant.layer === "bar") occupied = Math.max(occupied, occupant.extent)
-    else docks.push([id, occupant])
+    if (occupant.layer === "bar") {
+      occupied = Math.max(occupied, occupant.extent)
+      bars.push([id, occupant])
+    } else docks.push([id, occupant])
+  }
+  const lifts: Record<string, number> = {}
+  for (const [id, bar] of bars) {
+    lifts[id] = bars.reduce(
+      (under, [, other]) => (other.order < bar.order ? Math.max(under, other.extent) : under),
+      0,
+    )
   }
   // Docks in their order; two of one order keep the order they arrived in.
   docks.sort((a, b) => a[1].order - b[1].order)
@@ -57,7 +78,12 @@ export function stackOffsets(occupants: ReadonlyMap<string, StackOccupant>) {
     bottoms[id] = next
     next += dock.extent + STACK_GAP
   }
-  return { occupied, top: docks.length > 0 ? next - STACK_GAP : occupied, docks: bottoms }
+  return {
+    occupied,
+    top: docks.length > 0 ? next - STACK_GAP : occupied,
+    docks: bottoms,
+    bars: lifts,
+  }
 }
 
 const occupants = new Map<string, StackOccupant>()
@@ -123,7 +149,7 @@ function extentOf(element: HTMLElement, layer: StackLayer) {
  * Puts an element in the stack while `active`: measured as it changes size,
  * and taken out when it goes. A bar passes the element that is positioned at
  * the foot (the one with `bottom`); a dock passes itself. Returns the stack's
- * id for it, which a dock reads its place under.
+ * id for it, which a dock reads its place under and a bar its lift.
  */
 export function useStackOccupant(
   element: HTMLElement | null,

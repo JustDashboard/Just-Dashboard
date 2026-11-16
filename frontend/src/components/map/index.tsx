@@ -80,8 +80,10 @@ export { useFullscreen }
  *
  * A reading page held to the window as a workbench (design system §16), one
  * frame around the rail of systems, a canvas and its inspector, the way a
- * database's Diagram is. Below the width those fit, the canvas alone, edge to
- * edge.
+ * database's Diagram is. Below the width those fit, one of the three at a
+ * time, edge to edge, with a bar at the foot to pick which: the canvas alone
+ * left a phone no list of systems, no inspector and no way to the command
+ * the desk's inspector has, where the databases map had all three.
  */
 export function ServerMapPage() {
   const asked = useSearchParams().get("system") ?? undefined
@@ -123,6 +125,7 @@ export function ServerMapPage() {
                 full={screen.full}
                 onFullscreen={screen.toggle}
                 initialSystem={asked}
+                panes
               />
             </ReactFlowProvider>
           ) : read.error && !map ? (

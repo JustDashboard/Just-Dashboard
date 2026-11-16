@@ -7,8 +7,8 @@ between them, the page's keys and place, the terminal, the editor and the canvas
 (`phone-panes.tsx`); `ResizeHandle` (`resize-handle.tsx`); `Workspace`, `WorkspaceHelp`,
 `useWorkspaceFocus` (`components/workspace/`); `XtermPane` (`xterm-pane.tsx`); `CodeEditor`
 (`code-editor.tsx`); `CANVAS_MOVE`, `zoomKey`, `zoomAbout`, `useCanvasPinch` (`canvas-move.ts`);
-`useIsPhone`, `useMediaQuery` (`hooks/use-mobile.ts`). Coming in 0.9.0: `WorkbenchHeader` (WP-33),
-`CanvasZoom` and `useFullscreen` (WP-15), `Page fill="workspace"` (WP-09).
+`useIsPhone`, `useMediaQuery` (`hooks/use-mobile.ts`); `WorkbenchHeader` (`workbench-header.tsx`).
+Coming in 0.9.0: `CanvasZoom` and `useFullscreen` (WP-15), `Page fill="workspace"` (WP-09).
 
 **Register.** A workbench is a page the reader works in for minutes (the terminal, Files, Git, a
 database's Data and Query, the boards, the map), not one they read. Its recipe is
@@ -20,6 +20,7 @@ is the viewport.
 | You need | Use | Not |
 | --- | --- | --- |
 | A working region of the page: a rail, a tree, a console | `Pane` | a `Panel` (that is a block of content) |
+| The strip a workbench opens on: back, what is open, its verbs | `WorkbenchHeader` | a `PaneHeader` of your own, a text "← Files", a visible `h1` |
 | Several panes on a phone | `paneShown` on each, `PaneBar` at the foot, `PaneBack` in an opened page | stacked short boxes inside a scrolling page |
 | A side column the reader can widen | `ResizeHandle` beside it | a fixed width |
 | A list page's keys (rows, search, refresh, help) and the place it returns to | `Workspace` | key handlers on `window` |
@@ -31,6 +32,31 @@ is the viewport.
 
 **Purpose.** The same frame as a `Panel` for a working region rather than a block of content; its
 header and footer strips keep a faint tint, and it does not lift. **Not** a block on a reading page.
+
+## WorkbenchHeader
+
+**Purpose.** The strip a workbench that opens one thing starts on: the board, Git's repository and
+the editor. Back, what is open, how it is, and what can be done to it, read left to right. They
+drew this three ways (an icon back, the words "← Files", a name as a field, two lines or a visible
+heading on a second row), so moving between workbenches read as moving between products. A remote
+screen's session bar and the terminal's window strip are other controls and keep their own; Files,
+the terminal and the map keep their toolbars and carry their mark in them (the terminal's rail head,
+the map's rail).
+
+**Props.** `back: { label, hint?, onClick | href }`, always an arrow (`PaneBack`'s look, at every
+width), named by `label` ("Back to repositories", "Back to Excalidraw", "Back to Files") with
+`hint` as its tooltip. `heading` is the page's `h1`, said and not drawn, and the tab's name: it is
+drawn beside the strip, so a phone that hides the strip while a pane is read keeps the page's
+name. `mark` (the product or the thing as itself), `name` (words, or the field that renames it),
+`state` (beside the name where the strip has room, under it where it does not), `subline` (the
+remote, the folder), `tools` (the workbench's own controls; a row of their own when narrow),
+`command` and `menu` (the one command and the `⋯`, at the end). The strip measures itself, not the
+window: narrower than one row it folds on purpose, the back, the name and the verbs over the tools.
+
+**Accessibility.** One `h1` per page, here; the back is a named button with a tooltip.
+
+**Example.** `components/git/repo-workspace.tsx`: the repository, its remote as the subline, HEAD
+and the sync verbs as tools, the `⋯` and the GitHub account as the menu.
 
 ## One pane on a phone: PaneBar, PaneBack, paneShown
 
@@ -45,7 +71,8 @@ one 56px stop per pane, the glyph over its word, a `count` on the glyph's should
 home indicator, not drawn from the break up. It is a bar in the bottom stack
 ([`overlays-confirm.md`](overlays-confirm.md)), so a dock opened over the page (held remote
 sessions, the assistant's conversations) rises above its stops instead of covering them; from the
-break up it measures nothing. `PaneBack` in the head of an opened page. The page
+break up it measures nothing. A settings save bar on the same page stands above it, not on it: a bar
+of a higher order (`useStackOccupant(el, "bar", { order: 1 })`) is lifted by the bars under it. `PaneBack` in the head of an opened page. The page
 keeps its own state for which pane is shown, and holds its frame to the window below the break
 (`Page fill`) so the pane has a height to be the whole of.
 
@@ -53,10 +80,13 @@ keeps its own state for which pane is shown, and holds its frame to the window b
 one `aria-current="page"` and its count as a description; `PaneBack` is named "Back to the list"
 unless told otherwise.
 
-**Example.** The ten pages on it are listed in
+**Example.** The pages on it are listed in
 [`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md): the Git workspace, the
 assistant, Logs, the network tools, Files, the editor, a project's logs, the terminal, a Remote
-Desktop session and the databases map.
+Desktop session and the databases map; since 0.9.0 also the server map (Systems, Map, Inspector),
+a deployment run (Logs, Steps, Step) and a database's Logs (its readings). A backup job shows its
+runs as rows, and a run picked in their place with `PaneBack`. The assistant's page puts Settings
+on its bar, so one strip picks what is shown.
 
 **Enforced by** `phone-panes.test.js` and the specs of those pages at 390.
 

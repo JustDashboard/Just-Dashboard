@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
-  ArrowLeft,
   FolderOpen,
   MagnifyingGlass,
   Pencil,
@@ -11,7 +10,9 @@ import {
   SidebarLeftOpen,
 } from "@/components/icons"
 import { Page } from "@/components/page"
-import { PaneHeader } from "@/components/panel"
+import { Tag } from "@/components/tag"
+import { WorkbenchHeader } from "@/components/workbench-header"
+import { FileIcon } from "@/components/file-icon"
 import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
@@ -47,6 +48,7 @@ export default function FileEditorPage() {
       ? parentOf(path)
       : requestedRoot
   const line = Number(params.get("line")) || undefined
+  const name = path?.split("/").pop() || "File"
   const [sidebar, setSidebar] = useViewState("files.fullEditor.sidebar", true)
   // Which pane a phone shows. Both stay mounted while the other is looked
   // at: the editor that is out of sight still holds its unsaved draft.
@@ -55,14 +57,19 @@ export default function FileEditorPage() {
   const [searchMode, setSearchMode] = useState<FileSearchMode>("names")
   const [refresh, setRefresh] = useState(0)
   const dirty = useRef(false)
+  // The same, drawn: the strip says a file is unsaved, which the guards
+  // read from the ref without waiting for a render.
+  const [unsaved, setUnsaved] = useState(false)
   const setDirty = useCallback((value: boolean) => {
     dirty.current = value
+    setUnsaved(value)
   }, [])
   const requestNavigate = useCallback(
     (href: string) => {
       if (new URL(href, window.location.href).href === window.location.href) return
       const navigate = () => {
         dirty.current = false
+        setUnsaved(false)
         router.push(href)
       }
       if (!dirty.current) return navigate()
@@ -168,42 +175,52 @@ export default function FileEditorPage() {
           picked on the bar at its foot: beside each other on a phone the tree
           was a drawer over the code, opened from a glyph in the strip. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border">
-        <PaneHeader className="gap-2 px-2 py-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => requestNavigate("/files?path=" + encodeURIComponent(parentOf(path)))}
-          >
-            <ArrowLeft className="size-4" />
-            Files
-          </Button>
-          <IconAction
-            label={sidebar ? "Hide file tree" : "Show file tree"}
-            className="hidden size-8 lg:inline-flex"
-            aria-pressed={sidebar}
-            onClick={() => setSidebar(!sidebar)}
-          >
-            {sidebar ? <SidebarLeftClose /> : <SidebarLeftOpen />}
-          </IconAction>
-          <span
-            className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground"
-            title={root}
-          >
-            {root}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={() => {
-              setSearchMode("names")
-              setFind(true)
-            }}
-          >
-            <MagnifyingGlass className="size-4" />
-            Find file
-          </Button>
-        </PaneHeader>
+        <WorkbenchHeader
+          back={{
+            label: "Back to Files",
+            hint: "Back to the folder",
+            onClick: () => requestNavigate("/files?path=" + encodeURIComponent(parentOf(path))),
+          }}
+          heading={name}
+          mark={
+            <FileIcon
+              entry={{ name, path, isDir: false, isSymlink: false }}
+              className="size-5 shrink-0"
+            />
+          }
+          name={<span className="truncate">{name}</span>}
+          state={unsaved && <Tag tone="warning">unsaved</Tag>}
+          subline={
+            <span className="truncate font-mono" title={root}>
+              {root}
+            </span>
+          }
+          command={
+            <>
+              <IconAction
+                label={sidebar ? "Hide file tree" : "Show file tree"}
+                className="hidden size-8 lg:inline-flex"
+                aria-pressed={sidebar}
+                onClick={() => setSidebar(!sidebar)}
+              >
+                {sidebar ? <SidebarLeftClose /> : <SidebarLeftOpen />}
+              </IconAction>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                aria-label="Find file"
+                onClick={() => {
+                  setSearchMode("names")
+                  setFind(true)
+                }}
+              >
+                <MagnifyingGlass className="size-4" />
+                <span className="max-sm:hidden">Find file</span>
+              </Button>
+            </>
+          }
+        />
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Hidden at a desk is a desk's choice: the bar reaches the tree
               whether or not the column was put away. */}
@@ -244,7 +261,16 @@ export default function FileEditorPage() {
               />
             </aside>
           )}
-          <div className={cn("flex min-h-0 min-w-0 flex-1", paneShown(pane === "editor"))}>
+          {/* The strip names the file, so the editors' own headings, made for
+              the sheet they also open in, are not drawn here: the text
+              editor's title row goes, and the image editor keeps its row of
+              size and state without the name. */}
+          <div
+            className={cn(
+              "flex min-h-0 min-w-0 flex-1 [&_h1]:hidden [&_section[aria-label='File_editor']>[data-slot=pane-header]:first-child]:hidden",
+              paneShown(pane === "editor"),
+            )}
+          >
             {isImage(path) && can("file.write") ? (
               <ImageEditor
                 key={params.toString()}
