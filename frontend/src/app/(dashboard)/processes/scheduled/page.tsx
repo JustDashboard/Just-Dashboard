@@ -9,14 +9,12 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { useAuth } from "@/hooks/use-auth"
 import { useSessionState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ServiceLogs } from "@/components/logs/service-logs"
+import { EmbeddedLog } from "@/components/logs/embedded-log"
 import { Fact } from "@/components/fact-line"
 import { HostIdentity, platformName } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { platformProduct } from "@/components/product-logo"
-import { EmptyNote, ErrorState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
+import { EmptyNote } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { CronJobsPanel } from "@/components/procs/cron-jobs"
 import { NextUp, ScheduleBand } from "@/components/procs/schedule-band"
@@ -182,21 +180,16 @@ function Scheduled() {
         onOpen={openKey}
       />
 
-      <Panel plain>
-        <PanelHeader title="Cron log" />
-        <PanelBody flush className="pt-3">
-          {logs.error && !logs.data ? (
-            <ErrorState error={logs.error} />
-          ) : !logs.data ? (
-            <LoadingRows rows={4} />
-          ) : cron ? (
-            <ServiceLogs
-              sources={cronSources}
-              storageKey="processes.cron.log"
-              readings="chips"
-              paneClassName="h-[min(70svh,36rem)] min-h-80"
-            />
-          ) : (
+      <EmbeddedLog
+        title="Cron log"
+        sources={logs.data ? cronSources : undefined}
+        error={logs.error && !logs.data ? logs.error : undefined}
+        onRetry={logs.refresh}
+        storageKey="processes.cron.log"
+        readings="chips"
+        instead={
+          logs.data &&
+          !cron && (
             // Only a host without the journal gets here: on one with it,
             // cron's lines are read out of it by program even with no unit.
             <EmptyNote className="px-0 text-left">
@@ -204,9 +197,9 @@ function Scheduled() {
               log under {(logs.data.roots ?? []).join(", ") || "the log roots"} — so what cron ran
               is not recorded anywhere this page can read.
             </EmptyNote>
-          )}
-        </PanelBody>
-      </Panel>
+          )
+        }
+      />
 
       {dialog}
     </Page>

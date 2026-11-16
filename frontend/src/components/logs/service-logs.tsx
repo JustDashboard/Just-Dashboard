@@ -157,8 +157,33 @@ export type ServiceLogsProps = {
   flush?: boolean
   /** The column the readings and the pane stand in. */
   className?: string
-  /** The pane's own size — its height, or the floor it fills the column from. */
+  /**
+   * The pane's height, by where it stands (`LOG_PANE_SIZE`): `section` at a
+   * page's foot, `sheet` among other blocks or in a sheet, `fill` the page's
+   * own column. Absent, the pane is as tall as the column makes it.
+   */
+  size?: LogPaneSize
+  /** @deprecated use `size`: the fifteen hand-typed heights this took are three now. */
   paneClassName?: string
+}
+
+/** Where a service's log stands, which is what decides its height. */
+export type LogPaneSize = "section" | "sheet" | "fill"
+
+/**
+ * The three heights a service's log takes, named once. They were fifteen
+ * `paneClassName` strings — 75vh, 70vh, 60vh, 30rem, 26rem — each a guess at
+ * the same question, and the vh ones moved with a phone's browser chrome.
+ */
+export const LOG_PANE_SIZE: Record<LogPaneSize, string> = {
+  // The workbench well (`--height-workbench`): tall enough to work in, never
+  // taller than the screen, in svh so a phone's toolbars do not resize it.
+  section: "h-workbench min-h-80",
+  // Shorter, so what stands under it on a detail page or in a sheet is
+  // still in reach.
+  sheet: "h-[min(70svh,36rem)] min-h-80",
+  // The column's own height, from a floor a log is still readable at.
+  fill: "min-h-80",
 }
 
 const DEFAULT_RANGE: LogTimeRange = "24h"
@@ -533,12 +558,22 @@ export function ServiceLogs(props: ServiceLogsProps) {
 
   // The pane's own height, where the page gives one, is its height: a flex
   // basis of zero made it whatever the column was, or the whole log tall.
-  const paneClass = cn("min-h-0 flex-auto", props.paneClassName)
+  const paneClass = cn(
+    "min-h-0 flex-auto",
+    props.size && LOG_PANE_SIZE[props.size],
+    props.paneClassName,
+  )
+  // A pane that fills takes the column's height, so its own column must too.
+  const column = cn(
+    "flex min-h-0 min-w-0 flex-col",
+    props.size === "fill" && "flex-1",
+    props.className,
+  )
 
   if (!source) {
     if (!missing) return null
     return (
-      <div className={cn("flex min-h-0 min-w-0 flex-col", props.className)}>
+      <div className={column}>
         <Pane flush={props.flush} className={paneClass}>
           <div className="flex min-h-10 shrink-0 items-center border-b border-hairline px-2">
             {picker}
@@ -560,7 +595,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
 
   if (refused) {
     return (
-      <div className={cn("flex min-h-0 min-w-0 flex-col", props.className)}>
+      <div className={column}>
         <Pane flush={props.flush} className={paneClass}>
           <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-hairline px-2">
             {!picker && product && <ProductGlyph id={product} />}
@@ -613,7 +648,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
   const exportable = !sheet && (!view || view.filtered)
 
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-col gap-4", props.className)}>
+    <div className={cn(column, "gap-4")}>
       {asTiles && readings.tiles.length > 0 && (
         <LensReadings readings={readings} filter={shown} onFilterChange={setFilter} />
       )}
