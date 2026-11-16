@@ -1,12 +1,11 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { ArrowLeft, ChevronDown, ChevronUp } from "@/components/icons"
+import { ChevronDown, ChevronUp } from "@/components/icons"
 import { useViewState } from "@/lib/view-state"
 import { IconAction } from "@/components/icon-action"
-import { Page, PageContext } from "@/components/page"
+import { BackLink as PageBackLink, Page, PageContext } from "@/components/page"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import type { WorkspaceCommand } from "@/components/workspace/commands"
 
@@ -124,17 +123,13 @@ export function useDetailTab<T extends string>(
   return [tab, setTab, visited]
 }
 
-/** The way back to the list, as the page's eyebrow. */
-export function BackLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-    >
-      <ArrowLeft className="size-3" /> {children}
-    </Link>
-  )
-}
+/**
+ * The way back to the list, which this file drew a second time beside the
+ * page frame's own. There is one now, in `components/page.tsx`.
+ *
+ * @deprecated import `BackLink` from `@/components/page`
+ */
+export const BackLink = PageBackLink
 
 /** The two arrows a phone walks the list with, and the shortcuts' help. */
 export function StepArrows({
@@ -227,7 +222,7 @@ export function DetailPage({
             <div className="flex min-w-0 shrink-0 flex-col gap-5">
               {head ?? (
                 <PageContext
-                  eyebrow={back && <BackLink href={back.href}>{back.label}</BackLink>}
+                  eyebrow={back && <PageBackLink href={back.href}>{back.label}</PageBackLink>}
                   title={title ?? name}
                   actions={
                     <>
