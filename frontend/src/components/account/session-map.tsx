@@ -2,7 +2,7 @@
 
 import { useRef, type RefObject } from "react"
 import { describeClient, networkOf, type NetworkKind } from "@/lib/clients"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import type { SessionInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -142,7 +142,7 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
             mark={mark}
             eyebrow={NETWORK_EYEBROW[network.kind]}
             title={<span className="inline-block first-letter:uppercase">{network.label}</span>}
-            hint={`${network.sessions.length} ${network.sessions.length === 1 ? "session" : "sessions"}`}
+            hint={plural(network.sessions.length, "session")}
           />
         ) : (
           <div ref={networkRef[network.kind]} className="relative z-raised flex">
@@ -177,7 +177,7 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
             nodeRef={server}
             mark={<WireHost />}
             eyebrow="This server"
-            title={`${ordered.length} ${ordered.length === 1 ? "session" : "sessions"} signed in`}
+            title={`${plural(ordered.length, "session")} signed in`}
             hint={<span className={open > 0 ? "text-success" : undefined}>{hint}</span>}
           />
         </div>

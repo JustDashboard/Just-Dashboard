@@ -1,5 +1,6 @@
 "use client"
 
+import { grouped, plural } from "@/lib/format"
 import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import type { LogLine } from "@/lib/types"
@@ -36,12 +37,12 @@ export function LivePulse({ lines, paused }: { lines: readonly LogLine[]; paused
   if (!slots) return null
   const total = slots.reduce((n, s) => n + s.total, 0)
   const peak = Math.max(1, ...slots.map((s) => s.total))
-  const pace = total === 0 ? "quiet" : `${total.toLocaleString()} a minute`
+  const pace = total === 0 ? "quiet" : `${grouped(total)} a minute`
 
   return (
     <span
       className="flex shrink-0 items-center gap-2"
-      title={`${total.toLocaleString()} ${total === 1 ? "line" : "lines"} written in the last minute`}
+      title={`${plural(total, "line")} written in the last minute`}
     >
       <span aria-hidden className="flex h-4 w-[90px] items-end gap-px">
         {slots.map((slot, i) => (

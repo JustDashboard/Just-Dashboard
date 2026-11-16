@@ -27,7 +27,7 @@ import {
 import { logPlaceIdentities } from "@/components/logs/log-place"
 import { useMemoryState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
-import { plural, timestamp } from "@/lib/format"
+import { grouped, plural, timestamp } from "@/lib/format"
 import type { LogLine } from "@/lib/types"
 import {
   LEVEL_EDGE,
@@ -449,9 +449,7 @@ export function LogConsole({
             // The held count stays beside the glyph at every width: it is the
             // one thing a paused pane has to say.
             extra={
-              paused && held > 0 ? (
-                <span className="numeric">{held.toLocaleString()} held</span>
-              ) : undefined
+              paused && held > 0 ? <span className="numeric">{grouped(held)} held</span> : undefined
             }
           />
         )}
@@ -547,8 +545,8 @@ export function LogConsole({
                     />
                     <span className="numeric">
                       {row.expanded
-                        ? `Fold the last ${row.hidden.toLocaleString()}`
-                        : `${row.hidden.toLocaleString()} more ${row.hidden === 1 ? "line" : "lines"}`}
+                        ? `Fold the last ${grouped(row.hidden)}`
+                        : `${grouped(row.hidden)} more ${row.hidden === 1 ? "line" : "lines"}`}
                     </span>
                   </button>
                 )
@@ -590,7 +588,7 @@ export function LogConsole({
         >
           <ChevronDoubleDown className="size-3" />
           Jump to the end
-          {held > 0 && <span className="numeric">· {held.toLocaleString()} held</span>}
+          {held > 0 && <span className="numeric">· {grouped(held)} held</span>}
         </button>
       )}
 
@@ -869,9 +867,9 @@ export const LogRow = memo(function LogRow({
       {repeat && repeat > 1 && (
         <span
           className="numeric shrink-0 font-medium text-muted-foreground select-none"
-          title={`${repeat.toLocaleString()} identical lines${since ? ` since ${timestamp(since)}` : ""}`}
+          title={`${grouped(repeat)} identical lines${since ? ` since ${timestamp(since)}` : ""}`}
         >
-          ×{repeat.toLocaleString()}
+          ×{grouped(repeat)}
         </span>
       )}
       {highlight ? (

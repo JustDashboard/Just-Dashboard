@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { CheckCircle, ChevronRight, Clock, CrossCircle, External, Slash } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
-import { plural, relativeTime } from "@/lib/format"
+import { grouped, plural, relativeTime } from "@/lib/format"
 import type { GitHubCheckRun, GitPullRequest, GitResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
@@ -22,7 +22,7 @@ import {
   pullStateOf,
 } from "@/components/git/pull-state"
 import { IconAction } from "@/components/icon-action"
-import { ErrorState } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -257,8 +257,8 @@ function DiffStat({
     <span className="numeric inline-flex items-center gap-1.5 text-hint text-muted-foreground">
       {plural(files ?? 0, "file")}
       <span className="font-mono">
-        <span className="text-git-added">+{additions.toLocaleString()}</span>{" "}
-        <span className="text-git-deleted">−{deletions.toLocaleString()}</span>
+        <span className="text-git-added">+{grouped(additions)}</span>{" "}
+        <span className="text-git-deleted">−{grouped(deletions)}</span>
       </span>
       <span aria-hidden className="inline-flex gap-px">
         {Array.from({ length: 5 }, (_, i) => (
@@ -363,9 +363,7 @@ function ChecksSection({
         </p>
       )}
       {checks.loading && !checks.data && <LoadingRows className="px-3 pb-2" rows={2} />}
-      {checks.data && rows.length === 0 && (
-        <p className="px-3 pb-3 text-hint text-muted-foreground">No checks on this commit.</p>
-      )}
+      {checks.data && rows.length === 0 && <EmptyNote dense>No checks on this commit.</EmptyNote>}
       {open && rows.length > 0 && (
         <ul className="divide-y divide-hairline border-t border-hairline">
           {rows.map((check, i) => {

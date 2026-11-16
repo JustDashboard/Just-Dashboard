@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
-import { clock, plural, timestamp } from "@/lib/format"
+import { clock, grouped, plural, timestamp } from "@/lib/format"
 import type { LogBucket } from "@/lib/types"
 import { LEVEL_DOT, LEVEL_LABEL, LOG_LEVELS, type LogLevel } from "@/lib/log/filter"
 import { eventLabel, eventMeta } from "@/lib/log/lenses"
@@ -226,7 +226,7 @@ export function Histogram({
                       className={cn("size-1.5 rounded-full", s.className)}
                       style={{ backgroundColor: s.color }}
                     />
-                    {countIn(active, s.key).toLocaleString()} {s.label}
+                    {grouped(countIn(active, s.key))} {s.label}
                   </span>
                 ))}
             </>

@@ -733,7 +733,7 @@ function Configuration() {
             status={pending(["allowedCidrs", "require2fa"])}
             state={
               <>
-                {cidrs.length} {cidrs.length === 1 ? "network" : "networks"} allowed · two-factor{" "}
+                {plural(cidrs.length, "network")} allowed · two-factor{" "}
                 {draft.require2fa ? "required" : "optional"}
               </>
             }

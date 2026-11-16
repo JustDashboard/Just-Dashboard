@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, ChevronDown, Cross, MagnifyingGlass, SettingsSliders } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import type { LogJournalUnit, LogSource } from "@/lib/types"
 import {
   LEVEL_DOT,
@@ -444,7 +444,7 @@ export function LevelChips({
                 {LEVEL_LABEL[level]}
                 {counts[level] > 0 && (
                   <ChipCount className={cn(COUNT_TONE[level], COUNT_TONE[level] && "opacity-100")}>
-                    {counts[level].toLocaleString()}
+                    {grouped(counts[level])}
                   </ChipCount>
                 )}
               </FilterChip>

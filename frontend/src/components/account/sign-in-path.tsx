@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useRef } from "react"
 import { Fingerprint, LockClosed, ShieldCheck } from "@/components/icons"
 import { parseAgent } from "@/lib/clients"
@@ -151,11 +152,7 @@ export function SignInPath({
               align="center"
               mark={<WireHost />}
               eyebrow="This server"
-              title={
-                count === undefined
-                  ? "Signed in"
-                  : `${count} ${count === 1 ? "session" : "sessions"}`
-              }
+              title={count === undefined ? "Signed in" : plural(count, "session")}
               hint={
                 clients.length > 0 ? (
                   <span className="inline-flex items-center gap-1.5">

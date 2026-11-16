@@ -22,7 +22,7 @@ import { AheadBehind } from "@/components/git/ahead-behind"
 import { SourcePull } from "@/components/git/glyphs"
 import { SearchInput } from "@/components/search-input"
 import { ProductGlyph } from "@/components/product-logo"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -301,15 +301,14 @@ function BranchList({
           </>
         )}
         {shownLocal.length + shownRemote.length === 0 && (
-          <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-            {needle ? (
-              <>
-                No branch matches <span className="font-medium text-foreground">{filter}</span>.
-              </>
-            ) : (
-              "No branches yet."
-            )}
-          </p>
+          <EmptyNote
+            dense
+            action={
+              needle ? { label: "Clear the filter", onClick: () => setFilter("") } : undefined
+            }
+          >
+            {needle ? <>Nothing matches “{filter}”.</> : "No branches yet."}
+          </EmptyNote>
         )}
       </div>
     </div>

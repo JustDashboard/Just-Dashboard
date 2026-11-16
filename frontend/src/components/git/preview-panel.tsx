@@ -45,7 +45,7 @@ import { NameDialog } from "@/components/git/name-dialog"
 import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
 import { AuthorMark } from "@/components/git/marks"
 import { RefTags } from "@/components/git/ref-tags"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { VerbBar, type Verb } from "@/components/verbs"
@@ -631,9 +631,9 @@ function CommitPreview({
                 />
               ))}
               {c.changes.length === 0 && (
-                <li className="px-3 py-4 text-center text-hint text-muted-foreground">
+                <EmptyNote as="li" dense>
                   This commit changed no files.
-                </li>
+                </EmptyNote>
               )}
             </ul>
 

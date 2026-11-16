@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useCallback, useMemo, useState } from "react"
 import { CheckCircle, ChevronDoubleDown, ChevronDoubleUp, ChevronDown } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -125,9 +126,7 @@ export function DiffTools({
       ) : (
         <>
           <div className="flex min-h-9 shrink-0 items-center gap-3 border-b border-hairline px-3">
-            <span className="numeric text-xs text-foreground">
-              {files.length} {files.length === 1 ? "file" : "files"}
-            </span>
+            <span className="numeric text-xs text-foreground">{plural(files.length, "file")}</span>
             <span className="numeric text-xs font-medium text-success">+{totals.additions}</span>
             <span className="numeric text-xs font-medium text-destructive">
               −{totals.deletions}

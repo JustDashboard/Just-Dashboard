@@ -25,6 +25,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
+import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { useBelow } from "@/lib/breakpoints"
 import { isArranged, type MapDocument, type Point } from "@/lib/server-map"
@@ -932,16 +933,17 @@ export function MapCanvas({
 function EmptyMap() {
   return (
     <div className="flex h-full items-center justify-center p-8">
-      <div className="max-w-sm text-center">
-        <p className="text-title font-semibold">Nothing to draw yet</p>
-        <p className="mt-1.5 text-body text-muted-foreground">
-          A deployment, a Compose stack or a container shows up here as its own diagram, wired to
-          its domains, databases, volumes and backups.
-        </p>
-        <Button size="sm" asChild className="mt-4">
-          <Link href="/deploy/new">Deploy a project</Link>
-        </Button>
-      </div>
+      <EmptyState
+        icon={ServerMap}
+        title="Nothing to draw yet"
+        description="A deployment, a Compose stack or a container shows up here as its own diagram, wired to its domains, databases, volumes and backups."
+        action={
+          <Button size="sm" asChild>
+            <Link href="/deploy/new">Deploy a project</Link>
+          </Button>
+        }
+        className="max-w-md"
+      />
     </div>
   )
 }

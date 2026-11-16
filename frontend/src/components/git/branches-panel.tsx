@@ -25,7 +25,7 @@ import { MatchOriginBody, matchPlanIsEmpty } from "@/components/git/match-origin
 import { NameDialog } from "@/components/git/name-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
 import type { GitRun } from "@/components/git/run"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -486,12 +486,7 @@ export function BranchesPanel({
               )}
               <div className="min-w-0 flex-1">
                 <p className="flex min-w-0 items-center gap-1.5">
-                  <span
-                    className={cn(
-                      "truncate font-mono text-xs",
-                      b.current && "font-semibold",
-                    )}
-                  >
+                  <span className={cn("truncate font-mono text-xs", b.current && "font-semibold")}>
                     {b.name}
                   </span>
                   {b.current && <Tag tone="success">current</Tag>}
@@ -553,7 +548,9 @@ export function BranchesPanel({
             </li>
           ))}
           {local.length === 0 && (
-            <li className="px-3 py-3 text-hint text-muted-foreground">No local branches yet.</li>
+            <EmptyNote as="li" dense>
+              No local branches yet.
+            </EmptyNote>
           )}
         </ul>
 

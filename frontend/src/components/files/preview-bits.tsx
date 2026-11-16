@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import type { FilePreview } from "@/lib/types"
 import { LoadingRows } from "@/components/loading"
 import { Well } from "@/components/panel"
+import { Notice } from "@/components/state"
 import { fetchResponse } from "@/lib/api"
 
 /**
@@ -73,9 +74,9 @@ export function PdfPreview({
 
   if (failed) {
     return (
-      <p className="rounded-lg border border-dashed border-hairline p-4 text-center text-xs text-muted-foreground">
-        This PDF could not be loaded for preview. Download it to read it.
-      </p>
+      <Notice tone="warning" title="This PDF could not be previewed">
+        Download it to read it.
+      </Notice>
     )
   }
   if (!url) return <LoadingRows rows={2} />

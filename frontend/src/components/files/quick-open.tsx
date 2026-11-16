@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useId, useRef, useState } from "react"
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react"
 import { CornerDownLeft, Cross, FolderOpen, MagnifyingGlass } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
+import { bytes, grouped, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry, FileFindResult, FilePlaces } from "@/lib/types"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -452,7 +452,7 @@ function SearchBody({
                 : busy
                   ? "Searching…"
                   : current?.total && current.total > hits.length
-                    ? `Best ${hits.length} of ${current.total.toLocaleString()}`
+                    ? `Best ${hits.length} of ${grouped(current.total)}`
                     : trimmed
                       ? plural(
                           hits.length,

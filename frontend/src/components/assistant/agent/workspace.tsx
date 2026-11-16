@@ -20,6 +20,7 @@ import {
   type AgentStep,
 } from "@/components/assistant/agent/model"
 import { agentWorking, type AgentSession } from "@/components/assistant/agent/sessions"
+import { EmptyNote } from "@/components/state"
 
 export type AgentPane = "chat" | "chats" | "activity"
 
@@ -152,7 +153,9 @@ function Activity({ session, className }: { session: AgentSession; className?: s
       <section className="space-y-2">
         <h2 className="eyebrow">Changes</h2>
         {changes.length === 0 ? (
-          <p className="text-hint text-muted-foreground">Nothing yet.</p>
+          <EmptyNote dense className="text-left">
+            Nothing yet.
+          </EmptyNote>
         ) : (
           <ul className="space-y-2">
             <AnimatePresence initial={false}>

@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useRef } from "react"
 import { DesktopDevice, Globe, Terminal, type Icon } from "@/components/icons"
 import { describeClient, parseAgent } from "@/lib/clients"
@@ -104,9 +105,7 @@ export function RequestPath({
                       {network.hint}
                     </span>
                   )}
-                  <span className="block">
-                    {allowed} {allowed === 1 ? "network" : "networks"} allowed
-                  </span>
+                  <span className="block">{plural(allowed, "network")} allowed</span>
                 </>
               }
             />

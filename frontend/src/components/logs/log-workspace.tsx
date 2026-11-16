@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
-import { localInputValue, plural } from "@/lib/format"
+import { grouped, localInputValue, plural } from "@/lib/format"
 import type {
   LogLine,
   LogRetention,
@@ -559,7 +559,7 @@ export function LogWorkspace(props: WorkspaceProps) {
                     v.countTone === "warning" && "text-warning opacity-100",
                   )}
                 >
-                  {v.count.toLocaleString()}
+                  {grouped(v.count)}
                 </ChipCount>
               )}
             </button>
@@ -1068,8 +1068,8 @@ function SearchSummary({ result, loading }: { result: LogSearchResult | null; lo
   if (!result) return <span className="shrink-0 pl-1 text-hint text-muted-foreground">History</span>
   return (
     <span className="numeric shrink-0 pl-1 text-hint whitespace-nowrap text-muted-foreground">
-      <span className="font-medium text-foreground">{result.matched.toLocaleString()}</span>{" "}
-      {result.matched === 1 ? "match" : "matches"} in {result.scanned.toLocaleString()} lines ·{" "}
+      <span className="font-medium text-foreground">{grouped(result.matched)}</span>{" "}
+      {result.matched === 1 ? "match" : "matches"} in {grouped(result.scanned)} lines ·{" "}
       {result.tookMillis}ms
     </span>
   )
@@ -1104,7 +1104,7 @@ function SearchNotes({ result }: { result: LogSearchResult }) {
   const notes: string[] = []
   if (result.truncated) {
     notes.push(
-      `Showing the most recent ${result.lines.length.toLocaleString()} of ${result.matched.toLocaleString()} matches — narrow the window to see the rest.`,
+      `Showing the most recent ${grouped(result.lines.length)} of ${grouped(result.matched)} matches — narrow the window to see the rest.`,
     )
   }
   if (!result.complete) {
@@ -1122,8 +1122,7 @@ function SearchNotes({ result }: { result: LogSearchResult }) {
         files.map((file) => (
           <span key={file.path} className="numeric" title={file.path}>
             {file.name}
-            {file.archive && " (archive)"}:{" "}
-            {file.error ?? `${file.matched.toLocaleString()} matched`}
+            {file.archive && " (archive)"}: {file.error ?? `${grouped(file.matched)} matched`}
           </span>
         ))}
     </>
@@ -1294,8 +1293,8 @@ function SearchEmpty({
       title="No matches in that window"
       description={
         requirement
-          ? `Scanned ${result.scanned.toLocaleString()} lines. These lines are written only when ${requirement} is set on the server.`
-          : `Scanned ${result.scanned.toLocaleString()} lines in ${result.tookMillis}ms. Widen the window, relax the level filter, or look further back.`
+          ? `Scanned ${grouped(result.scanned)} lines. These lines are written only when ${requirement} is set on the server.`
+          : `Scanned ${grouped(result.scanned)} lines in ${result.tookMillis}ms. Widen the window, relax the level filter, or look further back.`
       }
       action={
         hasArchives && !archives ? (

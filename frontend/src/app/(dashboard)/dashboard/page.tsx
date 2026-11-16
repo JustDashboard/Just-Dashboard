@@ -294,11 +294,7 @@ function Identity({ report, command }: { report: SelfUpdateReport; command: Reac
         : { tone: "unknown" as const, label: "Version checks off" }
   const checked = report.check.checkedAt ? `checked ${relativeTime(report.check.checkedAt)}` : ""
   const hint = report.available
-    ? [
-        `${behind} ${behind === 1 ? "release" : "releases"} ahead of yours`,
-        offerTagNote(report),
-        pendingNote(report),
-      ]
+    ? [`${plural(behind, "release")} ahead of yours`, offerTagNote(report), pendingNote(report)]
         .filter(Boolean)
         .join(" · ")
     : report.check.enabled

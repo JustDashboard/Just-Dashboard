@@ -45,7 +45,7 @@ import { IconAction } from "@/components/icon-action"
 import { Page } from "@/components/page"
 import { PaneHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -806,9 +806,7 @@ function LoadedBoard({ board }: { board: Board }) {
                 </section>
                 <section>
                   <h3 className="eyebrow px-2 pt-1 pb-1.5">Deployments</h3>
-                  {projects.length === 0 && (
-                    <p className="px-2 text-hint text-muted-foreground">No projects yet</p>
-                  )}
+                  {projects.length === 0 && <EmptyNote dense>No projects yet.</EmptyNote>}
                   {projects.map((project) => (
                     <ResourceButton
                       key={project.id}

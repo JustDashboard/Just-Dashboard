@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "
 import { motion, useReducedMotion } from "motion/react"
 import { Cross } from "@/components/icons"
 import { get } from "@/lib/api"
-import { plural, relativeTime, timestamp } from "@/lib/format"
+import { grouped, plural, relativeTime, timestamp } from "@/lib/format"
 import {
   GRAPH_PAD,
   GRAPH_ROW,
@@ -216,7 +216,7 @@ export function GraphPanel({
   const height = rows.length * GRAPH_ROW
   const edges = useMemo(() => graphEdges(rows, height), [rows, height])
   const total = view.total ?? rows.length
-  const count = (n: number) => n.toLocaleString()
+  const count = (n: number) => grouped(n)
   const noun = (n: number) => (searching ? plural(n, "match", "matches") : plural(n, "commit"))
   const status = view.hasMore
     ? page.loading

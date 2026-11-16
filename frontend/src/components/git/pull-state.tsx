@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { ChatBubble, CheckCircle, Clock, CrossCircle } from "@/components/icons"
 import type { GitPullRequest } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -150,7 +151,7 @@ export function CommentCount({ count }: { count: number }) {
   return (
     <span
       className="numeric inline-flex shrink-0 items-center gap-0.5 text-hint text-muted-foreground"
-      aria-label={`${count} comment${count === 1 ? "" : "s"}`}
+      aria-label={plural(count, "comment")}
     >
       <ChatBubble aria-hidden className="size-3.5" />
       {count}

@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useRef, type RefObject } from "react"
 import type { ApiToken, Role } from "@/lib/types"
 import { LineChart, Rocket, Sparkles } from "@/components/icons"
@@ -159,9 +160,7 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
             }
             eyebrow="Role"
             title={name}
-            hint={
-              held.length === 0 ? "no key" : `${held.length} ${held.length === 1 ? "key" : "keys"}`
-            }
+            hint={held.length === 0 ? "no key" : plural(held.length, "key")}
           />
         ) : (
           <div ref={roleRef[role]} className="relative z-raised flex">

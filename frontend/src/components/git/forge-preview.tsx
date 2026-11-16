@@ -7,7 +7,7 @@ import type { PreviewContext } from "@/components/git/preview-panel"
 import { PreviewHeader } from "@/components/git/preview-header"
 import { HistoryPaging } from "@/components/git/inspect-panels"
 import { Field } from "@/components/form"
-import { ErrorState } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -178,7 +178,7 @@ export function ForgePreview({ ctx, onClose }: { ctx: PreviewContext; onClose: (
                     onNext={() => setPage(page + 1)}
                   />
                   {list.data.requests.length === 0 && (
-                    <p className="p-3 text-hint text-muted-foreground">No requests in this view.</p>
+                    <EmptyNote dense>No requests in this view.</EmptyNote>
                   )}
                 </>
               )}

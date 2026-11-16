@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { minuteAt } from "@/lib/format"
+import { grouped, minuteAt } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { DAY_HOURS, hourTone, hourWords, type DayReading } from "@/components/audit/day"
 
@@ -117,7 +117,7 @@ export function DayStrip({
             {day.sections.slice(0, 5).map((section) => (
               <div key={section.label} className="flex shrink-0 gap-1.5">
                 <dt>{section.label}</dt>
-                <dd className="font-medium text-foreground">{section.changes.toLocaleString()}</dd>
+                <dd className="font-medium text-foreground">{grouped(section.changes)}</dd>
               </div>
             ))}
           </dl>

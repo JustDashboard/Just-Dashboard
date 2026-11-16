@@ -1,3 +1,4 @@
+import { grouped } from "@/lib/format"
 import type { LogLine, LogSource } from "@/lib/types"
 import { fieldsEqual, fieldsOf, highlightRanges, lineValue, type LogLevel } from "@/lib/log/filter"
 import { logLineKey } from "@/lib/log/line-key"
@@ -115,7 +116,7 @@ export function readingShown(
   }
   return {
     value: figure.value,
-    text: `${figure.value.toLocaleString()}${figure.capped ? "+" : ""}`,
+    text: `${grouped(figure.value)}${figure.capped ? "+" : ""}`,
     decimals: 0,
   }
 }

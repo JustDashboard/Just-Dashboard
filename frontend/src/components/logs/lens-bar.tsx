@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { Check, ChevronDown, Cross, EyeOff } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { latency } from "@/lib/requests"
 import type { LogFacet, LogLine } from "@/lib/types"
 import type { LogFields, LogFilterState } from "@/components/logs/types"
@@ -355,7 +355,7 @@ export function LensBar({
               ) : (
                 !drawn &&
                 count !== undefined &&
-                count > 0 && <ChipCount>{count.toLocaleString()}</ChipCount>
+                count > 0 && <ChipCount>{grouped(count)}</ChipCount>
               )}
             </FilterChip>
           )
@@ -525,13 +525,13 @@ function FieldsPopover({
                           {share > 0 && (
                             <span
                               className="numeric shrink-0 text-hint text-destructive"
-                              title={`${entry.errors.toLocaleString()} of them errors`}
+                              title={`${grouped(entry.errors)} of them errors`}
                             >
                               {Math.round(share * 100)}%
                             </span>
                           )}
                           <span className="numeric shrink-0 text-hint text-muted-foreground">
-                            {entry.count.toLocaleString()}
+                            {grouped(entry.count)}
                           </span>
                           <IconAction
                             reveal
