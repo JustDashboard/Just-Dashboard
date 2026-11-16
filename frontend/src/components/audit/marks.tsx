@@ -29,10 +29,17 @@ import {
   type Icon,
 } from "@/components/icons"
 import { InitialsMark, UserAvatar } from "@/components/user-avatar"
-import { DashboardMark } from "@/components/backups/marks"
+import { DashboardMark } from "@/components/logo"
 import { ProductLogo } from "@/components/product-logo"
 import { useAuth } from "@/hooks/use-auth"
 import { LANES, hueFor } from "@/lib/hue"
+
+/**
+ * The namespace hues: `LANES` without its green, which beside a result column
+ * whose green dot means 200 made a refused `database.row.delete` read as one
+ * that went through.
+ */
+const NAMESPACE_HUES = LANES.filter((hue) => hue !== "var(--tag-green)")
 import type { AuditEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -231,7 +238,7 @@ export function ActionMark({ action, className }: { action: string; className?: 
 
 /**
  * The action as the log console draws a program: the part of the product in
- * the hue its name takes (`LANES`, which has no red or amber to be mistaken
+ * the hue its name takes (`LANES` less its green, with no red or amber to be mistaken
  * for a failure), what was done to it in ink, and a route's method stepped
  * back in front of both.
  */
@@ -244,7 +251,7 @@ export function ActionName({ action, className }: { action: string; className?: 
   return (
     <span className={cn("min-w-0 truncate font-mono", className)} title={action}>
       {method && <span className="text-faint">{method}</span>}
-      <span style={{ color: hueFor(head, LANES) }}>{head}</span>
+      <span style={{ color: hueFor(head, NAMESPACE_HUES) }}>{head}</span>
       <span className="text-foreground">{tail}</span>
     </span>
   )

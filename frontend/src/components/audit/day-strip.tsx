@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { minuteAt } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { DAY_HOURS, hourTone, hourWords, type DayReading } from "@/components/audit/day"
 
@@ -12,12 +13,14 @@ const HOUR_FILL = {
   failed: "bg-destructive",
 } as const
 
-const hourName = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" })
-
-/** "14:00 to 15:00", and "since 14:00" for the hour that is still running. */
+/**
+ * "14:00 to 15:00", and "since 14:00" for the hour that is still running: the
+ * 24-hour clock every other time in the product reads in (`minuteAt`), not the
+ * browser's, which gave "02:00 PM to 03:00 PM" in an en-US one.
+ */
 function hourSpan(from: number, running: boolean) {
-  const start = hourName.format(new Date(from))
-  return running ? `since ${start}` : `${start} to ${hourName.format(new Date(from + 3_600_000))}`
+  const start = minuteAt(new Date(from))
+  return running ? `since ${start}` : `${start} to ${minuteAt(new Date(from + 3_600_000))}`
 }
 
 /**
