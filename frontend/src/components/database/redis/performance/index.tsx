@@ -15,7 +15,7 @@ import {
 } from "@/components/database/redis/performance/samples"
 import { SlowlogView } from "@/components/database/redis/performance/slowlog"
 import { worthRetrying } from "@/components/database/redis/read-error"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 import { Notice } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
@@ -46,7 +46,7 @@ type View = "overview" | "memory" | "slowlog" | "clients" | "commands" | "persis
 export function RedisPerformance() {
   const redis = useRedis()
   const { id, server, engine, param, select } = redis
-  useFocusReturn()
+  useFocusTrail()
   const stats = usePoll((signal) => redisStats(id, signal), EVERY_MS, [id])
   const [samples, setSamples] = useState<StatSample[]>([])
   const newest = samples[samples.length - 1]

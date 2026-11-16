@@ -16,7 +16,7 @@ import {
 import type { MongoServer } from "@/components/database/mongo/types"
 import { useMongo } from "@/components/database/mongo/use-mongo"
 import { worthRetrying } from "@/components/database/redis/read-error"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { tabClasses } from "@/components/tabs"
 import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
@@ -52,7 +52,7 @@ export function MongoPerformance() {
   const mongo = useMongo()
   const { id, engine, param, select } = mongo
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const stats = usePoll((signal) => mongoServer(id, signal), EVERY_MS, [id])
   const databases = usePoll((signal) => mongoDatabases(id, signal), 120_000, [id])
   const [samples, setSamples] = useState<MongoServer[]>([])

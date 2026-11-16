@@ -22,7 +22,7 @@ import { CommandHelper } from "@/components/database/redis/console/helper"
 import { MonitorView } from "@/components/database/redis/console/monitor"
 import { PubSubView } from "@/components/database/redis/console/pubsub"
 import { DbPicker } from "@/components/database/redis/db-picker"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
 
@@ -47,7 +47,7 @@ export function RedisConsole() {
   const redis = useRedis()
   const { id, db, server, engine, param, select, canRun, admin } = redis
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const features = server.data?.features
 
   const views: { id: View; label: string }[] = [
