@@ -103,7 +103,9 @@ for (const width of [1280, 390]) {
       })
     }
     expect([...titles]).toHaveLength(1)
-    expect([...tiles]).toEqual([40])
+    // One tile size on every page: a step smaller on a phone, where the header
+    // is one compact row.
+    expect([...tiles]).toEqual([width < 640 ? 32 : 40])
   })
 }
 

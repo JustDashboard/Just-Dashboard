@@ -19,6 +19,20 @@ async function top(page: Page, selector: string) {
   return Math.round(box!.y)
 }
 
+/**
+ * What the bars at the window's foot take of it, as the bottom stack
+ * (`components/dock.tsx`) publishes it: a dock rises above this.
+ */
+async function occupied(page: Page) {
+  return page.evaluate(() =>
+    Math.round(
+      Number.parseFloat(
+        document.documentElement.style.getPropertyValue("--bottom-occupied") || "0",
+      ),
+    ),
+  )
+}
+
 /** Holds the request record and the rules until released, so the page is seen waiting. */
 async function held(page: Page) {
   let release = () => {}
@@ -55,8 +69,10 @@ test("no tile opens the page, and the pane is in one place waiting and read", as
     pane: await top(page, '[data-slot="pane"]'),
   }).toEqual(waiting)
   await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
-  // A desk has no bar: the views are the strip at the pane's head.
+  // A desk has no bar: the views are the strip at the pane's head, and the
+  // foot is free for a dock.
   await expect(page.locator('[data-slot="pane-bar"]')).toBeHidden()
+  expect(await occupied(page)).toBe(0)
   await expect(page.locator('[data-slot="hour-line"]')).toHaveCount(0)
 })
 
@@ -123,6 +139,9 @@ test.describe("on a phone", () => {
     expect(Math.round(pane.y + pane.height)).toBe(PHONE.height)
     const barBox = (await bar.boundingBox())!
     expect(Math.round(barBox.y + barBox.height)).toBe(PHONE.height)
+    // The bar is in the bottom stack, so a dock opened over the page sits
+    // above its stops rather than on them.
+    await expect.poll(() => occupied(page)).toBe(Math.round(barBox.height))
     expect(pane.height).toBeGreaterThan(420)
     expect(
       await page.evaluate(() => {
@@ -178,8 +197,9 @@ test.describe("on a phone", () => {
       "href",
       "/deploy/7/settings/automation#alerts",
     )
-    // A page a row opened has the bar out of its way.
+    // A page a row opened has the bar out of its way, and out of the stack.
     await expect(page.locator('[data-slot="pane-bar"]')).toHaveCount(0)
+    await expect.poll(() => occupied(page)).toBe(0)
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)

@@ -919,11 +919,13 @@ test.describe("Databases & backups", () => {
     expect(variablePuts[0].url).toContain("/variables/DATABASE_URL")
     // A new variable reaches the build too, the way a database linked while
     // creating the project does: a static env import or Prisma's config reads it there.
+    // The link goes as a reference: sent as a value, the server kept the characters.
     expect(variablePuts[0].body).toMatchObject({
-      value: "${{database.9}}",
+      reference: "${{database.9}}",
       sensitivity: "secret",
       scopes: ["runtime", "build"],
     })
+    expect(variablePuts[0].body).not.toHaveProperty("value")
 
     const orders = page.getByRole("link", { name: "orders-db", exact: true })
     await expect(orders).toHaveAttribute("href", "/databases/9")
@@ -944,13 +946,21 @@ test.describe("Databases & backups", () => {
       page.getByRole("list", { name: "How the application reaches its databases" }),
     ).toBeVisible()
 
+    const variableDeletes: string[] = []
+    await page.route("**/api/v1/deploy/7/environments/12/variables/**", async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback()
+      variableDeletes.push(route.request().url())
+      await json(route, { desiredRevision: 4 })
+    })
     await page.getByRole("button", { name: "Actions for orders-db" }).click()
     await page.getByRole("menuitem", { name: "Remove database" }).click()
-    // The fixture's configuration echoes no `reference` for the variable that
-    // was just written, so the page sees a bound database it cannot name a
-    // carrier for and asks before removing the link alone.
-    await expect(page.getByText("This page finds no variable referencing orders-db")).toBeVisible()
-    await page.getByRole("button", { name: "Remove the link", exact: true }).click()
+    // The link was written as the reference it is, so the page names the
+    // variable that carries it, which goes with the link. Written as text it
+    // had no carrier and stayed behind.
+    await expect(page.getByText("DATABASE_URL carries this database")).toBeVisible()
+    await page.getByRole("button", { name: "Remove the link and its variables" }).click()
+    await expect.poll(() => variableDeletes.length).toBe(1)
+    expect(variableDeletes[0]).toContain("/variables/DATABASE_URL")
     await expect.poll(() => configPuts.length).toBe(2)
     expect(configPuts[1].dependencies).toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: "backup" })]),

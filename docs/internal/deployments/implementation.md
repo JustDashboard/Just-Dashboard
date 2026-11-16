@@ -997,7 +997,10 @@ only renderer/executor/validation authority for their feature.
   printed by a framework's own startup line, then any program's generic "`X_Y` is not set / must be
   set / is required" (read this late, and never from a line that calls itself a warning, because
   programs print it as a warning and carry on: `SENTRY_DSN is not set` beside the port the server
-  really took must name the port), and a single container that stopped with exit code 0 instead of
+  really took must name the port), a single container that died with a failing exit code while its
+  start command's migration tool was the last thing it printed (`runtime_migration_silent`: drizzle-kit
+  migrate's spinner, with the database's error kept to itself — the usual cause a database it cannot
+  reach or that refuses it, so the fix points at the linked database), and a single container that stopped with exit code 0 instead of
   serving (`runtime_start_exited`; several containers are a Compose stack, where a one-off service
   exits 0 by design), and a Django candidate whose check was answered with a 5xx while the output
   holds no error at all (`runtime_errors_hidden`, a 400 read as `runtime_host_disallowed`, a 401, 403 or
@@ -1037,6 +1040,17 @@ only renderer/executor/validation authority for their feature.
   and full URLs retain their configured targets. Quick deploy leaves the check port unset to follow
   allocation. Failed gates log the check name, safe address, attempt count and specific status/reason;
   saved older failures derive the same explanation from retained check evidence when read.
+- A gate stops asking a candidate that is gone (`CheckRunner.candidateGone`, `checks.go`). After each
+  failed attempt it inspects the target's container (`dockerx.ContainerLiveness`: state, exit code,
+  restart count, no log). An `exited` or `dead` container, which nothing will start again (Docker marks
+  one its policy restarts as `restarting` the moment it exits), ends the check at once. One that is
+  `restarting` ends it after five restarts and thirty seconds from the check's start, so an application
+  that exits while the database it waits for comes up is not given up on. The last attempt's code is
+  `application_exited`, with the container's state, exit code and `restarts`, and the message says the
+  application kept exiting (code N, restarted M times) instead of "could not connect" after every
+  attempt ran out: a start command that failed before the server listened used to wait out forty
+  attempts. A running container, a target without one and a backend that cannot read it keep the
+  attempts as configured.
 - HTTP, TCP, Docker-health, command and public-route checks have closed configuration, per-attempt
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime

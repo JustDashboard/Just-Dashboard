@@ -122,6 +122,7 @@ export const CAUSE_TITLES: Record<string, string> = {
   runtime_loopback_bind: "Application listens on localhost only",
   runtime_port_mismatch: "Application listens on another port",
   runtime_start_exited: "Start command exited",
+  runtime_migration_silent: "Migration failed without an error",
   runtime_errors_hidden: "Application errors are not logged",
   runtime_rootfs_read_only: "Application writes to the read-only root",
   runtime_sqlite_not_writable: "SQLite database not writable",

@@ -621,7 +621,9 @@ function AutoDeployFact({
   return (
     <Link
       href={href}
-      className="flex rounded-sm focus-ring"
+      // Auto-deploy on is the answer a project is expected to give: a phone's
+      // one line of facts leaves it out and keeps the ones that differ.
+      className={cn("flex rounded-sm focus-ring", reading.tone === "running" && "max-sm:hidden")}
       aria-label={`${reading.label} · automatic deployment settings`}
     >
       <Status tone={reading.tone} label={reading.label} />
