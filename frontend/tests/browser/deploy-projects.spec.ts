@@ -642,8 +642,8 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
 
   await row.getByRole("button", { name: "Actions for Ops room" }).click()
   await page.getByRole("menuitem", { name: "Delivery history" }).click()
-  await expect(page.getByRole("heading", { name: "Deliveries · Ops room" })).toBeVisible()
-  const sheet = page.getByRole("dialog", { name: "Deliveries · Ops room" })
+  await expect(page.getByRole("heading", { name: "Ops room · history" })).toBeVisible()
+  const sheet = page.getByRole("dialog", { name: "Ops room · history" })
   await expect(sheet.getByText(/run\.failed/)).toBeVisible()
   await expect(sheet.getByText("Delivered", { exact: true })).toBeVisible()
   await page.keyboard.press("Escape")

@@ -331,7 +331,7 @@ export function ReleaseTasks({
         onOpenChange={(next) => !next && setOpen(undefined)}
         title={editing ? editing.name.trim() || `Release task ${(open ?? 0) + 1}` : "Release task"}
         description="What this task runs, where, and how long it may take."
-        width="sm"
+        size="sm"
         // A named task's name is not what the reader came to change, and
         // landing in it would select it.
         initialFocus={editing?.name.trim() ? "body" : "first"}

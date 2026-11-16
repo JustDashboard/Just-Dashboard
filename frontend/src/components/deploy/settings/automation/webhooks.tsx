@@ -38,7 +38,7 @@ import type {
   DeploymentTriggerOutcome,
 } from "@/lib/types"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Disclosure,
   Field,
@@ -53,10 +53,9 @@ import { Modal } from "@/components/modal"
 import { OutcomeStrip } from "@/components/outcome-strip"
 import { Panel, Well } from "@/components/panel"
 import { ProductGlyph, ProductGlyphs, ProductLogo, hostProduct } from "@/components/product-logo"
-import { Row, RowList } from "@/components/row-list"
+import { Row, RowList, RowsSkeleton } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
@@ -377,7 +376,7 @@ export function Webhooks({
     >
       <div ref={column} className="min-w-0">
         {triggers.loading && !triggers.data ? (
-          <LoadingRows rows={2} />
+          <ChoiceListSkeleton rows={2} />
         ) : triggers.error && !triggers.data ? (
           <ErrorState error={triggers.error} onRetry={triggers.refresh} />
         ) : list.length === 0 ? (
@@ -570,7 +569,7 @@ function WebhookCard({
           )}
           {trigger.config.ref && (
             <>
-              <SourceBranch aria-hidden className="mx-1 inline size-3 align-[-2px]" />
+              <SourceBranch aria-hidden className="mx-1 glyph-inline size-3" />
               <span className="font-mono">{trigger.config.ref}</span>
             </>
           )}
@@ -763,9 +762,9 @@ function DeliveriesSheet({
     <SidePanel
       open={Boolean(trigger)}
       onOpenChange={(open) => !open && onClose()}
-      title={trigger ? `Deliveries · ${trigger.name}` : "Deliveries"}
+      title={trigger ? `${trigger.name} · history` : "History"}
       description="Recent events this webhook received and what happened to each."
-      width="md"
+      size="md"
       actions={
         trigger && <VerbBar verbs={verbs} menuLabel={`Actions for ${trigger.name} in its sheet`} />
       }
@@ -792,7 +791,7 @@ function DeliveriesSheet({
           {deliveries.error && !deliveries.data ? (
             <ErrorState error={deliveries.error} onRetry={deliveries.refresh} />
           ) : deliveries.loading && !deliveries.data ? (
-            <LoadingRows rows={4} />
+            <RowsSkeleton rows={4} />
           ) : log.length === 0 ? (
             <EmptyState
               icon={Inbox}
@@ -1112,7 +1111,7 @@ export function WebhookSheet({
           ? "Change what this webhook deploys and when."
           : "Add a sender that can start a deployment, or turn on pull request previews."
       }
-      width="md"
+      size="md"
       footer={
         created ? (
           <Button onClick={close}>Done</Button>
@@ -1432,7 +1431,7 @@ function TryAChange({
             >
               {current.matched ? (
                 <>
-                  <Check aria-hidden className="mr-1 inline size-3 align-[-1px]" />
+                  <Check aria-hidden className="mr-1 glyph-inline size-3" />
                   Would deploy
                 </>
               ) : (

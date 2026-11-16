@@ -21,12 +21,8 @@ import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { MOUNT_STATUS, MountMark } from "@/components/deploy/vocabulary"
 import { volumeProduct } from "@/components/deploy/service-product"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { emptyMount, MountRows, type MountValue } from "@/components/deploy/settings/mounts"
 import { useColumnWidth } from "@/hooks/use-column-width"

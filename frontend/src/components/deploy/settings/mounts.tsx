@@ -3,7 +3,7 @@
 import { useId } from "react"
 import { ArrowRight, LockClosed, Servers, Trash } from "@/components/icons"
 import { ownershipTip } from "@/components/deploy/settings/domain-rows"
-import { HoverTip } from "@/components/deploy/settings/hover-tip"
+import { Explain } from "@/components/explain"
 import { cn } from "@/lib/utils"
 import type { DeploymentConfiguration } from "@/lib/types"
 import { Field } from "@/components/form"
@@ -86,7 +86,7 @@ export function OwnershipSelect<T extends Ownership>({
       aria-label={label}
       aria-describedby={descriptionId}
       // Wide enough for the longest word, so the rows' selects line up.
-      className={cn("max-sm:text-body", quiet && "w-28")}
+      className={cn(quiet && "w-28")}
     >
       <SelectValue />
     </SelectTrigger>
@@ -97,9 +97,9 @@ export function OwnershipSelect<T extends Ownership>({
         {quiet ? (
           // A wrapper rather than the trigger itself, whose open state its
           // `data-state` has to keep for the chevron and the list.
-          <HoverTip tip={ownershipTip(options.map((option) => OWNERSHIP[option]))}>
+          <Explain face="wrap" tip={ownershipTip(options.map((option) => OWNERSHIP[option]))}>
             <span className="inline-flex">{trigger}</span>
-          </HoverTip>
+          </Explain>
         ) : (
           trigger
         )}
@@ -152,7 +152,7 @@ export function MountRows({
 }) {
   // A later row's label is still the field's name for a screen reader.
   const head = (label: string, index: number) =>
-    headOnce && index > 0 ? <span className="@min-[36rem]:sr-only">{label}</span> : label
+    headOnce && index > 0 ? <span className="@xl:sr-only">{label}</span> : label
   if (mounts.length === 0)
     return <EmptyState icon={Servers} title="No persistent mounts" description={emptyLabel} />
   const change = (index: number, next: Partial<MountValue>) =>
@@ -167,7 +167,7 @@ export function MountRows({
           // in under the button that added it.
           <li
             key={index}
-            className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0 @min-[36rem]:grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_auto]"
+            className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0 @xl:grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_auto]"
           >
             <span key={kind ?? "none"} className="row-start-1 mb-0.5 flex animate-rise">
               <MountMark source={source} product={source ? product : undefined} />
@@ -199,12 +199,12 @@ export function MountRows({
             </Field>
             <ArrowRight
               aria-hidden
-              className="row-start-1 mb-3 hidden size-3.5 text-muted-foreground @min-[36rem]:block"
+              className="row-start-1 mb-3 hidden size-3.5 text-muted-foreground @xl:block"
             />
             <Field
               label={head("Container path", index)}
               htmlFor={`${idPrefix}-target-${index}`}
-              className="col-[2/span_2] row-start-2 @min-[36rem]:col-[4] @min-[36rem]:row-start-1"
+              className="col-[2/span_2] row-start-2 @xl:col-[4] @xl:row-start-1"
             >
               <InputGroup>
                 <InputGroupInput
@@ -227,7 +227,7 @@ export function MountRows({
                 </InputGroupAddon>
               </InputGroup>
             </Field>
-            <span className="col-start-3 row-start-1 flex @min-[36rem]:col-start-5">
+            <span className="col-start-3 row-start-1 flex @xl:col-start-5">
               {!readOnly && (
                 <IconAction
                   label={`Remove mount ${mount.target || index + 1}`}
@@ -246,7 +246,7 @@ export function MountRows({
               onChange={(ownership) => change(index, { ownership })}
               label={`Ownership of ${mount.target || `mount ${index + 1}`}`}
               disabled={readOnly}
-              className="col-[2/span_2] row-start-3 @min-[36rem]:col-[2/span_4] @min-[36rem]:row-start-2"
+              className="col-[2/span_2] row-start-3 @xl:col-[2/span_4] @xl:row-start-2"
             />
             {rowError?.(index) && (
               <p
