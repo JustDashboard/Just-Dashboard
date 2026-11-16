@@ -6,7 +6,7 @@ import { get } from "@/lib/api"
 import type { HostInfo } from "@/lib/types"
 import { PURPOSES, type PurposeKey } from "@/lib/sidebar-sections"
 import { cn } from "@/lib/utils"
-import { useIsMobile } from "@/hooks/use-mobile"
+import { useIsPhone } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { ProductGlyph, ProductLogo, platformProduct } from "@/components/product-logo"
@@ -35,7 +35,7 @@ export function ServerPicture({
   const host = usePoll((signal) => get<HostInfo>("/system/host", undefined, signal), 0, [], {
     key: "/system/host",
   })
-  const narrow = useIsMobile()
+  const narrow = useIsPhone()
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const nodes = useRef<Partial<Record<PurposeKey, RefObject<HTMLDivElement | null>>>>({})
