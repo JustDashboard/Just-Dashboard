@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from "react"
 import Link from "next/link"
 import { Clock, Eye, EyeOff, Plus, RefreshClockwise, Trash } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
-import { bytes, duration, relativeTime } from "@/lib/format"
+import { bytes, duration, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
@@ -12,7 +12,7 @@ import { useColumnWidth } from "@/hooks/use-column-width"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Meter } from "@/components/meter"
-import { Modal } from "@/components/modal"
+import { DialogSubject, Modal } from "@/components/modal"
 import { EmptyNote, EmptyState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
@@ -84,7 +84,7 @@ function usageWords(index: MongoIndex): { figure: string; since: string } | null
   if (!index.usage) return null
   const ago = relativeTime(index.usage.since)
   return {
-    figure: `${index.usage.ops.toLocaleString("en-US")} ${index.usage.ops === 1 ? "use" : "uses"}`,
+    figure: plural(index.usage.ops, "use"),
     since: ago === "just now" ? "in the last moments" : `in the last ${ago.replace(/ ago$/, "")}`,
   }
 }
@@ -255,9 +255,7 @@ export function IndexesView({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-3 py-1">
         <p className="numeric min-w-0 flex-1 text-hint text-muted-foreground">
-          {indexes
-            ? `${indexes.length.toLocaleString("en-US")} ${indexes.length === 1 ? "index" : "indexes"} · ${bytes(total)} on disk`
-            : ""}
+          {indexes ? `${plural(indexes.length, "index", "indexes")} · ${bytes(total)} on disk` : ""}
         </p>
         <IconAction label="Read the indexes again" className="size-7" onClick={poll.refresh}>
           <RefreshClockwise />
@@ -525,20 +523,21 @@ function ExpiryDialog({
       }
     >
       <div className="space-y-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{index.name}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={index.name}
+          mono
+          facts={
+            <>
               <FormFact label="Collection" mono>
                 {database}.{collection}
               </FormFact>
               <FormFact label="On" mono>
                 {field}
               </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
         <Field
           label="Delete a document after"
           htmlFor="mongo-index-expiry"

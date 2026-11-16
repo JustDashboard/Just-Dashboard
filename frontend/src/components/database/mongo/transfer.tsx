@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react"
 import { ApiError, fetchResponse, errorMessage } from "@/lib/api"
-import { bytes, grouped } from "@/lib/format"
+import { bytes, grouped, plural } from "@/lib/format"
 import { exportBlob, exportProgress, saveExport, streamExport } from "@/lib/stream-export"
 import { notify } from "@/lib/toast"
 import { Segments } from "@/components/segments"
-import { Field, FormFact, FormFacts, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { Field, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -182,17 +182,18 @@ export function ExportDialog({
       }
     >
       <div className="space-y-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{request.target.collection}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={request.target.collection}
+          mono
+          facts={
+            <>
               <FormFact label="Database" mono>
                 {request.target.database}
               </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         {queried && (
           <Field label="Which documents">
@@ -428,17 +429,18 @@ export function ImportDialog({
       }
     >
       <div className="space-y-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{target.collection}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={target.collection}
+          mono
+          facts={
+            <>
               <FormFact label="Database" mono>
                 {target.database}
               </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         {report ? (
           <ImportOutcome report={report} />
@@ -591,7 +593,7 @@ function ImportOutcome({ report }: { report: MongoImportReport }) {
         title={
           report.mode === "replace"
             ? `The collection now holds the file's ${grouped(report.inserted)} documents`
-            : `${grouped(report.inserted)} ${report.inserted === 1 ? "document" : "documents"} imported`
+            : `${plural(report.inserted, "document")} imported`
         }
       >
         {report.skipped > 0
