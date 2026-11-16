@@ -1225,12 +1225,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           serve and on TLS and the hour's requests, and at its far end the
           command that adds a site with the rest behind the menu. Four tiles
           stood here, each one count with no site named in it; site-band.tsx
-          says where each went. */}
+          says where each went. The marks stand in the line's own 40px tile,
+          so on a phone its row is as tall as the loading line's. */}
       <IdentityHeader
         className="animate-rise"
         logo={
           tiles.length > 0 ? (
-            <span className="flex h-12 shrink-0 items-center">
+            <span className="flex h-10 shrink-0 items-center">
               <ProductLogos ids={tiles} size="md" />
             </span>
           ) : undefined

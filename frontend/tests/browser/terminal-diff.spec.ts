@@ -166,9 +166,8 @@ test("an open pull request is checked out from the Git tab to try it", async ({ 
   await expect(current).toContainText("checked out")
   await expect(current.getByRole("button", { name: "Check out" })).toHaveCount(0)
   await expect(list.locator('[data-pull="141"]')).toContainText("draft")
-  await expect(
-    list.locator('[data-pull="141"]').getByRole("img", { name: "Checks failed" }),
-  ).toBeVisible()
+  // Git's own checks mark: the cross, with its word said to a screen reader.
+  await expect(list.locator('[data-pull="141"]')).toContainText("checks failed")
   await toolsEvidence(page, "terminal-git-pull-requests.png")
 
   await list.locator('[data-pull="144"]').getByRole("button", { name: "Check out" }).click()

@@ -444,7 +444,7 @@ export default function ProxyOverviewPage() {
         inventory={
           <>
             {/* What is firing is the most urgent fact the line has. */}
-            <Firing alerts={admin && !alerts.error ? alerts.data : undefined} />
+            {firingFact(admin && !alerts.error ? alerts.data : undefined)}
             {inventory.map((fact) =>
               fact.error ? (
                 <Fact
@@ -470,7 +470,15 @@ export default function ProxyOverviewPage() {
                 </Fact>
               ),
             )}
-            <Freshness at={updatedAt} refreshing={refreshing} late={late} />
+            {/* "Updated just now" would spend the line's width on the one
+                reading that is nearly always fine; the menu says it beside
+                Refresh. Hidden as a whole fact, so it takes its dot with it. */}
+            <Fact
+              className={late.length > 0 ? "font-medium text-warning" : "sr-only"}
+              title={late.length > 0 ? late.join(", ") : undefined}
+            >
+              <Freshness at={updatedAt} refreshing={refreshing} late={late} />
+            </Fact>
           </>
         }
         modules={status.nginx && <ModulesFact admin={admin} installer={installer} />}
@@ -766,20 +774,8 @@ function Freshness({
   late: string[]
 }) {
   const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
-  if (late.length > 0)
-    return (
-      <Fact className="font-medium text-warning" title={late.join(", ")}>
-        {noAnswerLabel(late)}
-      </Fact>
-    )
-  // "Updated just now" would spend the line's width on the one reading that
-  // is nearly always fine; the menu says it beside Refresh. Hidden as a whole
-  // fact, so it takes its dot with it.
-  return (
-    <Fact className="sr-only">
-      {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
-    </Fact>
-  )
+  if (late.length > 0) return noAnswerLabel(late)
+  return refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)
 }
 
 /**
@@ -787,7 +783,7 @@ function Freshness({
  * way to that page with nothing beside it said nothing about whether anybody
  * was being told something right now. Nothing firing is nothing to say.
  */
-function Firing({ alerts }: { alerts?: ProxyAlerts }) {
+function firingFact(alerts?: ProxyAlerts) {
   const subjects = alerts?.subjects ?? []
   const firing = subjects.filter((s) => s.state === "firing").length
   const holding = subjects.filter((s) => s.state === "pending").length
