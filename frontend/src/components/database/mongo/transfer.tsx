@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ApiError, fetchResponse, errorMessage } from "@/lib/api"
 import { bytes, grouped } from "@/lib/format"
+import { exportBlob, exportProgress, saveExport, streamExport } from "@/lib/stream-export"
 import { notify } from "@/lib/toast"
 import { Segments } from "@/components/segments"
 import { Field, FormFact, FormFacts, FormNote, OptionList, OptionRow } from "@/components/form"
@@ -76,37 +77,15 @@ export function useMongoExport() {
           relaxed: request.relaxed && format !== "csv" ? 1 : undefined,
         },
       )
-      if (!response.body) throw new Error("The export response has no body")
-
-      const parts: BlobPart[] = []
-      const reader = response.body.getReader()
-      let received = 0
-      let said = 0
-      for (;;) {
-        // The server ends a failed export by breaking the connection: the
-        // read throws, and nothing is saved.
-        const { done, value } = await reader.read()
-        if (done) break
-        parts.push(value)
-        received += value.byteLength
-        if (received - said >= 1 << 20) {
-          said = received
-          notify.raw.loading(`Exporting ${name}… ${bytes(received)}`, { id: toast })
-        }
-      }
-
-      const disposition = response.headers.get("Content-Disposition") ?? ""
-      const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `${name}.${format}`
-      const url = URL.createObjectURL(
-        new Blob(parts, {
-          type: response.headers.get("Content-Type") ?? "application/octet-stream",
-        }),
-      )
-      const link = document.createElement("a")
-      link.href = url
-      link.download = filename
-      link.click()
-      URL.revokeObjectURL(url)
+      const read = await streamExport(response, {
+        signal: controller.signal,
+        progress: exportProgress(name, toast),
+      })
+      // The server ends a failed export by breaking the connection, and
+      // nothing is saved.
+      if (read.cut) throw new Error("The export broke off")
+      const { received } = read
+      saveExport(exportBlob(read.parts, response), response, `${name}.${format}`)
 
       notify.dismiss(toast)
       const truncated = response.headers.get("X-Export-Truncated")
