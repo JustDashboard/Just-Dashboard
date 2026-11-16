@@ -1,5 +1,6 @@
 "use client"
 
+import { EmptyNote } from "@/components/state"
 import { cn } from "@/lib/utils"
 import { egressEventReading, type EgressEvent, type EgressGroup } from "@/lib/network/egress"
 import { Disclosure } from "@/components/form"
@@ -12,8 +13,7 @@ import { TONE_TEXT } from "@/components/network/egress/marks"
  * connections moved, pinned and flushed, and the journal entry.
  */
 export function EgressDecisions({ group }: { group: EgressGroup }) {
-  if (group.events.length === 0)
-    return <p className="text-hint text-muted-foreground">Nothing has been decided yet.</p>
+  if (group.events.length === 0) return <EmptyNote>Nothing has been decided yet.</EmptyNote>
   return (
     <ol
       className="flex flex-col divide-y divide-hairline"

@@ -3,7 +3,7 @@
 import { Globe, Location, Plus, Servers } from "@/components/icons"
 import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { ExternalCheck, ExternalVantage } from "@/lib/network/external"
 import {
@@ -135,9 +135,7 @@ export function ExternalPicture({
         className: HUB_ROOM,
         eyebrow: "Across",
         title: HUB_NAME,
-        hint: kept
-          ? `${kept} measurement${kept === 1 ? "" : "s"} kept · 7 days`
-          : "nothing measured yet",
+        hint: kept ? `${plural(kept, "measurement")} kept · 7 days` : "nothing measured yet",
       }}
     />
   )

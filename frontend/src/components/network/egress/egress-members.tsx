@@ -48,44 +48,44 @@ export function EgressMembers({ group }: { group: EgressGroup }) {
           {advice}
         </Notice>
       )}
-      <Panel>
-        <PanelHeader
-          title="Members"
-          actions={
-            <span className="numeric text-hint text-muted-foreground">
-              every {egressDuration(group.thresholds.intervalSeconds)} · group table {group.table}
-            </span>
-          }
-        />
-        <PanelBody flush>
-          <div className="max-md:hidden">
-            <Table aria-label={`Members of ${group.name}`}>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Member</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead className="text-right">Round trip</TableHead>
-                  <TableHead className="text-right">Loss</TableHead>
-                  <TableHead>Last {samples} samples</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {group.members.map((m) => (
-                  <MemberRow key={m.id} group={group} member={m} samples={samples} />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <ul
-            aria-label={`Members of ${group.name}`}
-            className="divide-y divide-hairline md:hidden"
-          >
-            {group.members.map((m) => (
-              <MemberItem key={m.id} group={group} member={m} samples={samples} />
-            ))}
-          </ul>
-        </PanelBody>
-      </Panel>
+      {/* The tab is already called Members: its first line says how they
+          are measured, and the table follows with no second title over it. */}
+      <div className="flex min-w-0 flex-col gap-2">
+        <p className="numeric text-hint text-muted-foreground">
+          Measured every {egressDuration(group.thresholds.intervalSeconds)} · group table{" "}
+          {group.table}
+        </p>
+        <Panel>
+          <PanelBody flush>
+            <div className="max-md:hidden">
+              <Table aria-label={`Members of ${group.name}`}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Member</TableHead>
+                    <TableHead>State</TableHead>
+                    <TableHead className="text-right">Round trip</TableHead>
+                    <TableHead className="text-right">Loss</TableHead>
+                    <TableHead>Last {samples} samples</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {group.members.map((m) => (
+                    <MemberRow key={m.id} group={group} member={m} samples={samples} />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <ul
+              aria-label={`Members of ${group.name}`}
+              className="divide-y divide-hairline md:hidden"
+            >
+              {group.members.map((m) => (
+                <MemberItem key={m.id} group={group} member={m} samples={samples} />
+              ))}
+            </ul>
+          </PanelBody>
+        </Panel>
+      </div>
       <Readiness group={group} />
       <Bindings group={group} />
       <HowItDecides group={group} />

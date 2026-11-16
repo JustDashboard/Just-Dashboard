@@ -799,7 +799,7 @@ test("connections offers a block only for an address that is not private", async
   await page.goto("/network/connections")
   await loaded(page)
 
-  await expect(page.getByRole("radio", { name: "From the internet 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^From the internet\s*1$/ })).toBeVisible()
   const internet = page.locator("[data-slot=choice-row]").filter({ hasText: "203.0.113.50" })
   await internet.getByRole("button", { name: "Actions for 203.0.113.50" }).click()
   await expect(page.getByRole("menuitem", { name: "Block at the firewall" })).toBeVisible()

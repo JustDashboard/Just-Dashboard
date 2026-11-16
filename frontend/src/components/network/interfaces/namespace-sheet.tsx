@@ -7,7 +7,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { SidePanel } from "@/components/side-panel"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Detail, DetailList } from "@/components/detail-list"
-import { Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Field, FieldRow } from "@/components/form"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { ReadingWords } from "./device-detail"
 
@@ -160,9 +160,7 @@ export function NamespaceSheet({
                   </p>
                 )}
                 {d.routes.length === 0 ? (
-                  d.routesRead.state === "ok" && (
-                    <p className="text-body text-muted-foreground">No route of its own.</p>
-                  )
+                  d.routesRead.state === "ok" && <EmptyNote>No route of its own.</EmptyNote>
                 ) : (
                   <Table aria-label="Namespace routes">
                     <TableHeader>

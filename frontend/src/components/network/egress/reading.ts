@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import type { Tone } from "@/components/tone"
 import type { WireLine } from "@/components/wire/wire-flow-model"
 import {
@@ -220,8 +221,4 @@ export function egressSibling<T extends Pick<EgressGroup, "name">>(
   const at = groups.findIndex((g) => g.name.toLowerCase() === name.toLowerCase())
   if (at < 0) return direction > 0 ? groups[0] : groups[groups.length - 1]
   return groups[at + direction]
-}
-
-function plural(n: number, word: string) {
-  return `${n} ${n === 1 ? word : `${word}s`}`
 }

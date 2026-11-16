@@ -1,8 +1,9 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import { useCallback, useState } from "react"
 import { del, get, post } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
+import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { NetworkOverview, WGInterface, WGPeer, WGPeerCreated } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -384,9 +385,7 @@ export function PeerSheet({
               </Detail>
             )}
             <Detail label="Moved">
-              <span className="numeric">
-                ↓ {bytes(peer.rxBytes)} · ↑ {bytes(peer.txBytes)}
-              </span>
+              <InOut rx={peer.rxBytes} tx={peer.txBytes} unit="bytes" />
             </Detail>
             <Detail label="Public key">
               <span className="font-mono break-all">{peer.publicKey}</span>

@@ -16,7 +16,7 @@ import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs } from "@/components/ui/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -271,8 +271,22 @@ export function SocketHistoryPage() {
       : []),
   ]
 
+  // The picture of what is sampled and kept opens every view, under the
+  // strip: its nodes are the way between the views, so it is the same in
+  // each, and the strip stands directly under the line.
+  const picture = (
+    <FlowsPicture
+      data={data}
+      day={filters.day}
+      loading={loading}
+      stale={Boolean(read.error)}
+      words={untouched}
+      onJump={jump}
+    />
+  )
+
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="Socket history" />
       <HostIdentity
         fallback={ClockRewind}
@@ -348,34 +362,18 @@ export function SocketHistoryPage() {
               <p>{data.error}</p>
             </Notice>
           )}
-          <FlowsPicture
-            data={data}
-            day={filters.day}
-            loading={loading}
-            stale={Boolean(read.error)}
-            words={untouched}
-            onJump={jump}
-          />
           <Tabs
             value={view}
             onValueChange={(next) => show(next as FlowViewKey)}
             className="min-w-0 gap-0"
           >
-            <TabsPrimitive.List
-              aria-label="Views of socket history"
-              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-            >
-              {FLOW_VIEWS.map((key) => (
-                <TabsPrimitive.Trigger
-                  key={key}
-                  value={key}
-                  className={tabClasses(view === key, "h-10")}
-                >
-                  {FLOW_VIEW_NAME[key]}
-                </TabsPrimitive.Trigger>
-              ))}
-            </TabsPrimitive.List>
+            <ViewTabList
+              label="Views of socket history"
+              views={FLOW_VIEWS.map((key) => ({ key, label: FLOW_VIEW_NAME[key] }))}
+              value={view}
+            />
             <TabsPrimitive.Content value="hours" className={VIEW}>
+              {picture}
               {untouched ? (
                 <div
                   data-slot="flow-off"
@@ -418,6 +416,7 @@ export function SocketHistoryPage() {
               )}
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="observer" className={VIEW}>
+              {picture}
               {data ? (
                 <KernelObserverPanel
                   observer={data.kernelObserver}
@@ -433,6 +432,7 @@ export function SocketHistoryPage() {
               )}
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="sample" className={VIEW}>
+              {picture}
               {data ? (
                 <>
                   <FlowsSample cycle={data.lastCycle} />
