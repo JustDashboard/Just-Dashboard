@@ -8,7 +8,8 @@ Empty, absent, failed, stale, notice and loading: each one designed, and each at
 `MissingScreen`, `MissingOrError`, `MissingLine` (`components/missing-thing.tsx`, words in
 `missing-thing-model.ts`); `InstallHandoff` (`components/install-handoff.tsx`); `Spinner`,
 `LoadingRows`, `LoadingPanel`, `Hold`, `Sweep` (`components/loading.tsx`); `Bone`;
-`MissingPage` and `StandaloneState` for a whole route.
+`MissingPage` and `StandaloneState` for a whole route, and `DatabaseMissingPage`
+(`database/shell/missing-page.tsx`) under a database, whose rail is the nearest pages.
 
 **Deprecated, kept while they have callers:** `ReadFailed` (`database/fleet/read-failed.tsx`,
 called only from `database/schema/` and `database/diagram/` now), `ReadError`

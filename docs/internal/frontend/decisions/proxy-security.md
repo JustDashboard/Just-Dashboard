@@ -409,7 +409,8 @@ said.
 
 The overview took a second pass on 2026-10-23, at the operator's request, for its quiet
 states. A host with no reverse proxy opens, under the identity line, on `EngineSetup`
-(`components/proxy/engine-setup.tsx`): the question at the 24px rung ("Put nginx in front of
+(`components/proxy/engine-setup.tsx`; since 0.9.0 it is `MissingThing size="page"` with the
+install as its step, the certbot option and the job console): the question at the 24px rung ("Put nginx in front of
 this server"), the brand command at `size="lg"` with the exact package-manager line beside it,
 certbot riding along on an `OptionRow` that is on by default, the job streaming under it, and
 a rail of what the page draws once nginx runs. It was two `xs` outline buttons over an empty

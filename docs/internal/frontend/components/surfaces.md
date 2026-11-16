@@ -90,9 +90,9 @@ tighter than `PanelHeader` on purpose, and in a split view the strips are what l
 ### PaneSection
 
 A titled group inside a pane beside the work: the files inspector's Details and Contents, the map
-inspector's Ports, a remote session's Clipboard. Four inspector columns used to draw this four
-ways: two eyebrow heads, a semibold h2 and an unruled eyebrow, with the rule above in one column and
-below in the others (WSP-08).
+inspector's Ports, a remote session's Clipboard, the assistant's activity. Four inspector columns
+used to draw this four ways: two eyebrow heads, a semibold h2 and an unruled eyebrow, with the rule
+above in one column and below in the others.
 
 ```
 PORTS  3                      [Copy]

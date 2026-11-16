@@ -206,7 +206,7 @@ rather than `grouped`.
   short and long forms and the last day).
 - Browser specs that assert the words: `proxy-certificates`, `proxy-certificate-page`, `proxy-tls`,
   `proxy-config`, `proxy-ports-history`, `deploy-project`, `network-traffic-page`, `database-home`.
-- WP-40 adds lint for `decodeURIComponent` outside `lib/route-params`, and for `navigator.clipboard`
+- Planned (WP-39): lint for `decodeURIComponent` outside `lib/route-params`, and for `navigator.clipboard`
   and hand copy buttons outside `copy.tsx` and `lib/clipboard`.
 
 ## Still to move

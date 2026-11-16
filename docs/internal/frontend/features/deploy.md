@@ -153,6 +153,8 @@ and the exact masked text that was sent — is kept with the run, and an adminis
 up from there (`deploy-run-diagnosis.spec.ts`). `/deploy/notifications`
 (`components/deploy/notifications-page.tsx`) manages Discord, Slack, Microsoft Teams, Mattermost,
 Telegram, ntfy, Gotify, Pushover, e-mail and signed webhook channels with event selection, pause/resume, test delivery and delivery history.
+Its picture is a `WireFlow` (`marks` on a phone): projects, this server, and a node per channel with
+dashed rings for kinds not yet added; a channel's history sheet is titled `{name} · history`.
 `/deploy/variables` (`components/deploy/shared-variables-page.tsx` over the list in
 `shared-variables.tsx`, Deployments → Shared variables) lists the
 server's shared variables and Settings → Variables a project's own under *Project variables*, the same
