@@ -80,12 +80,7 @@ export function SystemRail({
                     >
                       <SystemMark system={s} />
                       <span className="min-w-0 flex-1">
-                        <span
-                          className={cn(
-                            "block truncate text-body font-medium",
-                            focus === s.id ? "text-foreground" : "text-foreground/90",
-                          )}
-                        >
+                        <span className="block truncate text-body font-medium text-foreground">
                           {systemTitle(s)}
                         </span>
                         <span className="block truncate text-hint text-muted-foreground">

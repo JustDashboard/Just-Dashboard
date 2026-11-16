@@ -5,7 +5,6 @@ import { describeClient, networkOf, type NetworkKind } from "@/lib/clients"
 import { relativeTime } from "@/lib/format"
 import type { SessionInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireHost, WireMark, WireNode } from "@/components/wire/wire"
 import { useNow } from "@/hooks/use-now"
@@ -20,6 +19,7 @@ import {
   type Line,
 } from "@/components/account/access"
 import { SessionState, SessionWireMark } from "@/components/account/marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** How many sessions the picture draws before it counts the rest. */
 const SHOWN = 6
@@ -70,7 +70,7 @@ export const GUARD_WORDS: Record<Guard, string> = {
  * busy as the busiest session on it.
  */
 export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const now = useNow(15_000)
   const container = useRef<HTMLDivElement>(null)
   const server = useRef<HTMLDivElement>(null)
@@ -145,7 +145,7 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
             hint={`${network.sessions.length} ${network.sessions.length === 1 ? "session" : "sessions"}`}
           />
         ) : (
-          <div ref={networkRef[network.kind]} className="relative z-10 flex">
+          <div ref={networkRef[network.kind]} className="relative z-raised flex">
             {mark}
             <span className="sr-only">{`${network.label}: ${network.sessions.length} sessions`}</span>
           </div>
@@ -189,7 +189,7 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
           <div role="group" aria-label="Networks" className="mt-10 flex justify-center gap-8">
             {middle}
           </div>
-          <div ref={server} className="relative z-10 mt-10 flex">
+          <div ref={server} className="relative z-raised mt-10 flex">
             <WireHost />
           </div>
           <p className="mt-2 text-hint text-muted-foreground">
@@ -239,7 +239,7 @@ function SessionNode({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={node} className="relative z-10 flex">
+        <div ref={node} className="relative z-raised flex">
           <SessionWireMark userAgent={session.userAgent} />
         </div>
         <span className="sr-only">{`${describeClient(session.userAgent)}: ${state}`}</span>

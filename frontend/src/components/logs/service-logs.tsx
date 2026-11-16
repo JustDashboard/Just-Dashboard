@@ -13,7 +13,6 @@ import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/ty
 import type { Tone } from "@/components/tone"
 import type { Verb } from "@/components/verbs"
 import { usePoll } from "@/hooks/use-poll"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ExportDialog } from "@/components/logs/export-dialog"
 import {
   LensReadings,
@@ -34,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export type { LogAsk }
 
@@ -236,7 +236,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
   const sheet = props.layout === "sheet"
   const modes = props.modes ?? ALL_MODES
   const opening = props.initialRange ?? DEFAULT_RANGE
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   const [storedPicked, setPicked] = useKept(storageKey, "source", "")
   const [storedMode, setMode] = useKept<LogMode>(storageKey, "mode", modes[0])

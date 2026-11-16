@@ -397,7 +397,7 @@ function SearchBody({
       {/* One line on a wide screen, two on a phone, and the same lines in
           every state: what changes as results arrive is text inside a cell,
           never a row appearing under the others. */}
-      <PaneFooter className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 px-3 py-2 text-hint text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+      <PaneFooter className="grid grid-cols-main-end gap-x-4 gap-y-1.5 px-3 py-2 text-hint text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_auto]">
         <div className="col-span-full flex min-w-0 items-center gap-2 sm:col-span-1">
           {scopes.length > 1 && (
             <ToggleGroup

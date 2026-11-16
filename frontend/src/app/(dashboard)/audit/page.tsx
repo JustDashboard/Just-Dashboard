@@ -258,7 +258,7 @@ export default function AuditPage() {
     failure instanceof ApiError && failure.status === 403
   if (!admin || refused(error) || refused(day.error)) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Advanced" title="Audit log" />
         <EmptyState
           icon={Notes}
@@ -279,7 +279,7 @@ export default function AuditPage() {
         return true
       }}
     >
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Advanced" title="Audit log" />
 
         {/* The line and the day under it are one block: what happened, then

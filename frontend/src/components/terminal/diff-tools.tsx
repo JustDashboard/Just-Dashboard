@@ -172,8 +172,8 @@ const LETTER: Record<string, string> = {
   A: "text-success",
   U: "text-success",
   D: "text-destructive",
-  R: "text-[var(--tag-cyan)]",
-  C: "text-[var(--tag-cyan)]",
+  R: "text-tag-cyan",
+  C: "text-tag-cyan",
 }
 
 function FileSection({
@@ -203,7 +203,7 @@ function FileSection({
         aria-expanded={open}
         onClick={onToggle}
         title={change.from ? `${change.from} → ${change.path}` : change.path}
-        className="sticky top-0 z-10 flex w-full min-w-0 items-center gap-2 bg-card px-3 py-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
+        className="sticky top-0 z-raised flex w-full min-w-0 items-center gap-2 bg-card px-3 py-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
       >
         <ChevronDown
           aria-hidden

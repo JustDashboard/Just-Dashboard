@@ -366,8 +366,8 @@ export function PullReview({
                           {f.filename}
                         </span>
                         <span className="numeric shrink-0 font-mono text-hint">
-                          <span className="text-(--git-added)">+{f.additions}</span>{" "}
-                          <span className="text-(--git-deleted)">−{f.deletions}</span>
+                          <span className="text-git-added">+{f.additions}</span>{" "}
+                          <span className="text-git-deleted">−{f.deletions}</span>
                         </span>
                       </button>
                     </li>

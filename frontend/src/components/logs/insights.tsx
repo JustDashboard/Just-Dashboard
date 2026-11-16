@@ -1039,7 +1039,7 @@ function PatternTable({ facet, onPick }: { facet: LogFacet; onPick: (pattern: st
               <span className="block truncate font-mono text-xs" title={v.value}>
                 {v.value.split("<*>").map((part, i) => (
                   <span key={i}>
-                    {i > 0 && <span className="text-muted-foreground/60">&lt;*&gt;</span>}
+                    {i > 0 && <span className="text-faint">&lt;*&gt;</span>}
                     {part}
                   </span>
                 ))}

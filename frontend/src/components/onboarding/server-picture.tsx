@@ -47,7 +47,7 @@ export function ServerPicture({
   const rx = chosen.length <= 2 ? 28 : 36
 
   const server = (
-    <div ref={hub} className="relative z-10 flex flex-col items-center">
+    <div ref={hub} className="relative z-raised flex flex-col items-center">
       <span className="flex rounded-[1.375rem] border border-rule-brand bg-background p-1">
         <span className="flex size-20 items-center justify-center rounded-[1.125rem] bg-wash-brand text-brand">
           <Servers aria-hidden className="size-9" />
@@ -107,7 +107,7 @@ export function ServerPicture({
       {narrow ? (
         server
       ) : (
-        <div className="absolute top-1/2 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute top-1/2 left-1/2 z-raised -translate-x-1/2 -translate-y-1/2">
           {server}
         </div>
       )}
@@ -120,7 +120,7 @@ export function ServerPicture({
             key={purpose.key}
             // Positioned either way, so a card paints over the line that ends at it.
             className={cn(
-              "relative z-10 animate-rise",
+              "relative z-raised animate-rise",
               !narrow && "absolute -translate-x-1/2 -translate-y-1/2",
             )}
             style={

@@ -285,7 +285,7 @@ export function Histogram({
                 <span
                   key={s.key}
                   className={cn(
-                    "w-full transition-[height] duration-300 ease-out first:rounded-t-[2px]",
+                    "w-full transition-[height] duration-300 ease-out first:rounded-t-xs",
                     s.className,
                   )}
                   style={{
@@ -304,7 +304,7 @@ export function Histogram({
           {legend.map((s) => (
             <span key={s.key} className="flex items-center gap-1.5">
               <span
-                className={cn("size-2 rounded-[2px]", s.className)}
+                className={cn("size-2 rounded-xs", s.className)}
                 style={{ backgroundColor: s.color }}
               />
               {s.label}

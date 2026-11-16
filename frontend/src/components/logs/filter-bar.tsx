@@ -283,7 +283,7 @@ export function FilterBar({
           <Button
             size="sm"
             variant="outline"
-            className="h-8 shrink-0 gap-1.5 px-2.5 font-normal max-sm:h-10"
+            className="shrink-0 gap-1.5 px-2.5 font-normal"
             aria-label="Options"
           >
             <SettingsSliders className="size-3.5 text-muted-foreground" />
@@ -568,7 +568,7 @@ function UnitPicker({
         <Button
           variant="outline"
           size="sm"
-          className="h-8 w-48 justify-between font-normal max-sm:h-10"
+          className="w-48 justify-between font-normal"
           aria-label="Unit"
         >
           <span className="truncate text-body">{value || "Every unit"}</span>

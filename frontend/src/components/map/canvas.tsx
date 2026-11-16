@@ -26,7 +26,7 @@ import {
 } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
-import { useMediaQuery } from "@/hooks/use-mobile"
+import { useBelow } from "@/lib/breakpoints"
 import { isArranged, type MapDocument, type Point } from "@/lib/server-map"
 import {
   FRAME,
@@ -75,13 +75,6 @@ const UNREAD_ROOM = 96
 const FIT_PADDING = 0.06
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
 const FLY = { padding: 0.04, maxZoom: 1 }
-
-/**
- * Where the map is nothing but the map: below the width the rail and the
- * inspector fit beside a canvas, there is no chrome at all. A tap on a box or
- * a system's head offers one way on, to its page.
- */
-const BARE = "(max-width: 1023px)"
 
 const clampZoom = (z: number) => Math.min(ZOOM.max, Math.max(ZOOM.min, z))
 
@@ -171,7 +164,10 @@ export function MapCanvas({
   const router = useRouter()
   const canvasRef = useRef<HTMLDivElement>(null)
   const store = useStoreApi()
-  const bare = useMediaQuery(BARE)
+  // Where the map is nothing but the map: below the width the rail and the
+  // inspector fit beside a canvas, there is no chrome at all. A tap on a box or
+  // a system's head offers one way on, to its page.
+  const bare = useBelow("lg")
 
   const placed = useMemo(() => layoutAtlas(systems), [systems])
 
@@ -878,7 +874,7 @@ export function MapCanvas({
           <div
             data-slot="map-pane"
             data-pane="systems"
-            className="absolute inset-0 z-10 flex flex-col bg-background [&>nav]:flex-1 [&>nav]:border-r-0"
+            className="absolute inset-0 z-raised flex flex-col bg-background [&>nav]:flex-1 [&>nav]:border-r-0"
           >
             <SystemRail board={board} systems={systems} focus={focus} onFocus={look} />
           </div>
@@ -887,7 +883,7 @@ export function MapCanvas({
           <div
             data-slot="map-pane"
             data-pane="about"
-            className="absolute inset-0 z-10 flex flex-col bg-background [&>aside]:flex-1 [&>aside]:border-l-0"
+            className="absolute inset-0 z-raised flex flex-col bg-background [&>aside]:flex-1 [&>aside]:border-l-0"
           >
             <MapInspector
               board={board}

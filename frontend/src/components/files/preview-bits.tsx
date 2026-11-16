@@ -19,7 +19,7 @@ export function TextHead({ text, className }: { text: string; className?: string
   const lines = useMemo(() => text.replace(/\n$/, "").split("\n"), [text])
   return (
     <div className={cn("grid grid-cols-[auto_1fr] gap-x-3 p-2", className)}>
-      <div className="numeric shrink-0 text-right text-muted-foreground/60 select-none">
+      <div className="numeric shrink-0 text-right text-faint select-none">
         {lines.map((_, i) => (
           <div key={i}>{i + 1}</div>
         ))}

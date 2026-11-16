@@ -82,7 +82,7 @@ function Workspace() {
   )
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Account" title="Workspace" />
       <HostIdentity
         fallback={GridSquare}

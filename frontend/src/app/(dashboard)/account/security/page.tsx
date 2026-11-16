@@ -34,7 +34,7 @@ export default function AccountSecurityPage() {
   const user = status?.user
   return (
     <SaveBarProvider>
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Account" title="Security" />
         {user && (
           <SignInPath

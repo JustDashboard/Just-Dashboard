@@ -579,7 +579,7 @@ function LogsScreen() {
                 max={RAIL.max}
                 onChange={(px, commit) => setRailWidth(px, commit)}
                 onReset={resetRailWidth}
-                className="absolute inset-y-0 -right-1 z-20"
+                className="absolute inset-y-0 -right-1 z-sticky"
               />
             </div>
           )}

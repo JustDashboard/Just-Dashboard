@@ -119,7 +119,7 @@ export function RequestPath({
               eyebrow="Proxy"
               title={
                 <>
-                  Caddy <span className="numeric font-mono text-[var(--tag-pink)]">:{s.port}</span>
+                  Caddy <span className="numeric font-mono text-tag-pink">:{s.port}</span>
                 </>
               }
               hint={
@@ -190,7 +190,7 @@ function Loopback({ port }: { port: number }) {
       {/* Two to a row on a phone leaves no room for the address every
           service shares; the port is the part that differs. */}
       <span className="text-muted-foreground max-sm:hidden">127.0.0.1</span>
-      <span className="text-[var(--tag-pink)]">:{port}</span>
+      <span className="text-tag-pink">:{port}</span>
     </span>
   )
 }
@@ -255,7 +255,7 @@ export function EndpointText({ url, className }: { url: string; className?: stri
     <span className={cn("min-w-0 truncate font-mono", className)}>
       <span className="text-muted-foreground">{scheme}</span>
       <span className="text-foreground">{host}</span>
-      {port && <span className="numeric text-[var(--tag-pink)]">{port}</span>}
+      {port && <span className="numeric text-tag-pink">{port}</span>}
       {rest && <span className="text-muted-foreground">{rest}</span>}
     </span>
   )

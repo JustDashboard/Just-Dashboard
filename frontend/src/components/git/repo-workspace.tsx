@@ -25,6 +25,7 @@ import {
   UserSettings,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
+import { breakpointQuery } from "@/lib/breakpoints"
 import { forgeRepository } from "@/lib/git-repos"
 import { cn } from "@/lib/utils"
 import type {
@@ -84,7 +85,7 @@ import { VerbMenu, type Verb } from "@/components/verbs"
 type Tab = "changes" | "history" | "branches" | "github"
 
 // Where the three columns stop fitting: `lg`, the breakpoint their widths use.
-const onePane = () => window.matchMedia("(max-width: 1023.98px)").matches
+const onePane = () => window.matchMedia(breakpointQuery("lg", "below")).matches
 
 // The preview is the column that needs the room — a diff is wider than a
 // file name or a commit subject — so the other two start narrow and can be
@@ -631,7 +632,7 @@ export function RepoWorkspace({
             <PaneHeader
               className={cn("@container h-auto min-h-12 px-2 py-1.5", reading && "max-lg:hidden")}
             >
-              <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 @4xl:flex">
+              <div className="grid w-full min-w-0 grid-cols-main-end items-center gap-x-2 gap-y-1.5 @4xl:flex">
                 <div className="flex min-w-0 items-center gap-2 @4xl:flex-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -676,7 +677,7 @@ export function RepoWorkspace({
                               href={forge.url}
                               target="_blank"
                               rel="noreferrer"
-                              className="max-w-[14rem] truncate text-foreground/75 hover:text-foreground hover:underline"
+                              className="max-w-[14rem] truncate text-muted-foreground hover:text-foreground hover:underline"
                             >
                               {forge.slug}
                             </a>
@@ -894,7 +895,7 @@ export function RepoWorkspace({
                   max={TREE.max}
                   onChange={(px, commit) => setTreeWidth(clamp(px, TREE.min, TREE.max), commit)}
                   onReset={resetTreeWidth}
-                  className="absolute inset-y-0 -right-1 z-20"
+                  className="absolute inset-y-0 -right-1 z-sticky"
                 />
               </div>
 
@@ -912,9 +913,7 @@ export function RepoWorkspace({
                   >
                     Changes
                     {changeCount > 0 && (
-                      <ChipCount className="text-(--git-modified) opacity-100">
-                        {changeCount}
-                      </ChipCount>
+                      <ChipCount className="text-git-modified opacity-100">{changeCount}</ChipCount>
                     )}
                   </TabButton>
                   <TabButton
@@ -938,7 +937,7 @@ export function RepoWorkspace({
                   >
                     GitHub
                     {openPulls > 0 && (
-                      <ChipCount className="inline-flex items-center gap-0.5 text-(--pull-open) opacity-100">
+                      <ChipCount className="inline-flex items-center gap-0.5 text-pull-open opacity-100">
                         <SourcePull aria-hidden className="size-3" />
                         {openPulls}
                       </ChipCount>
@@ -1052,7 +1051,7 @@ export function RepoWorkspace({
                   max={WORK.max}
                   onChange={(px, commit) => setWorkWidth(clamp(px, WORK.min, WORK.max), commit)}
                   onReset={resetWorkWidth}
-                  className="absolute inset-y-0 -right-1 z-20"
+                  className="absolute inset-y-0 -right-1 z-sticky"
                 />
               </div>
 
@@ -1083,7 +1082,7 @@ export function RepoWorkspace({
                     label: "Changes",
                     icon: <Pencil />,
                     count: changeCount,
-                    countClassName: "bg-(--git-modified)",
+                    countClassName: "bg-git-modified",
                   },
                   { key: "history", label: "History", icon: <SourceCommit /> },
                   { key: "branches", label: "Branches", icon: <SourceBranch /> },
@@ -1092,7 +1091,7 @@ export function RepoWorkspace({
                     label: "GitHub",
                     icon: <GitHubMark />,
                     count: openPulls,
-                    countClassName: "bg-(--pull-open)",
+                    countClassName: "bg-pull-open",
                   },
                   { key: "files", label: "Files", icon: <FolderOpen /> },
                 ]}

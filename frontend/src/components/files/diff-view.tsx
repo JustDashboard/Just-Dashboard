@@ -117,7 +117,7 @@ export function DiffView({
             style={{ background: ROW_TINT[row.kind] }}
           >
             {selection && (
-              <span className="sticky left-0 z-10 flex items-center justify-center bg-card">
+              <span className="sticky left-0 z-raised flex items-center justify-center bg-card">
                 {row.kind === "hunk" && hunkLines(i).length > 0 ? (
                   <Checkbox
                     aria-label={`Select chunk at ${row.text}`}
@@ -161,9 +161,9 @@ export function DiffView({
 const TEXT: Record<DiffRow["kind"], string | undefined> = {
   heading: "font-medium text-foreground",
   hunk: "text-primary",
-  rename: "text-(--git-renamed)",
-  add: "text-(--git-added)",
-  del: "text-(--git-deleted)",
+  rename: "text-git-renamed",
+  add: "text-git-added",
+  del: "text-git-deleted",
   context: undefined,
   meta: "text-muted-foreground",
 }
@@ -223,7 +223,7 @@ function Gutter({
             : 0,
       }}
       className={cn(
-        "sticky z-10 px-1.5 py-px text-right text-muted-foreground/60 tabular-nums select-none",
+        "sticky z-raised px-1.5 py-px text-right text-faint tabular-nums select-none",
         second && "border-r border-hairline",
       )}
     >

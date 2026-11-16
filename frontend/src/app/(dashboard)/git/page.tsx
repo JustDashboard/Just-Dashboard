@@ -251,7 +251,7 @@ export default function GitPage() {
         return true
       }}
     >
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Workspace" title="Git" actions={<WorkspaceHelp />} />
 
         {selected && repos.data && !active && (

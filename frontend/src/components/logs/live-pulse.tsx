@@ -48,7 +48,7 @@ export function LivePulse({ lines, paused }: { lines: readonly LogLine[]; paused
           <span
             key={i}
             className={cn(
-              "flex min-w-0 flex-1 flex-col justify-end overflow-hidden rounded-[1px]",
+              "flex min-w-0 flex-1 flex-col justify-end overflow-hidden rounded-xs",
               slot.total === 0 && "bg-meter-track/60",
             )}
             style={{ height: slot.total ? `${Math.max(18, (slot.total / peak) * 100)}%` : "2px" }}

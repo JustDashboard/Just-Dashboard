@@ -195,7 +195,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     (error instanceof ApiError && (error.code === "board_not_found" || error.status === 404))
   if (absent)
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <h1 className="sr-only">Drawing</h1>
         <EmptyState
           mark={<ProductLogo id="excalidraw" size="lg" />}
@@ -214,7 +214,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     )
   if (error)
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <h1 className="sr-only">Drawing</h1>
         {/* Reading a drawing changes nothing, so it is always worth asking again. */}
         <ErrorState
@@ -651,7 +651,7 @@ function LoadedBoard({ board }: { board: Board }) {
         {/* Two rows on a phone, on purpose: back, the name and the verbs, then
             the save state under the name. Wrapped wherever the next control
             ran out of room, the status landed between the buttons. */}
-        <PaneHeader className="grid min-h-12 grid-cols-[auto_minmax(0,1fr)_auto] gap-x-1.5 gap-y-0 px-2 py-1.5 sm:flex">
+        <PaneHeader className="grid min-h-12 grid-cols-start-main-end gap-x-1.5 gap-y-0 px-2 py-1.5 sm:flex">
           <IconAction label="Back to Excalidraw" onClick={() => void go("/excalidraw")}>
             <ArrowLeft />
           </IconAction>
@@ -775,7 +775,7 @@ function LoadedBoard({ board }: { board: Board }) {
             // canvas's place, since a 320px panel left a strip of canvas no
             // finger could draw on.
             <aside
-              className="absolute inset-0 z-10 flex min-h-0 flex-col border-hairline bg-card sm:relative sm:inset-auto sm:w-80 sm:shrink-0 sm:border-l"
+              className="absolute inset-0 z-raised flex min-h-0 flex-col border-hairline bg-card sm:relative sm:inset-auto sm:w-80 sm:shrink-0 sm:border-l"
               aria-label="Server items"
             >
               <PaneHeader className="h-10 py-0 pl-3">

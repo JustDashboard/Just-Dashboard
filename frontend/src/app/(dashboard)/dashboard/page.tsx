@@ -122,7 +122,7 @@ export default function DashboardVersionPage() {
   const noted = report.releases.find((release) => release.breaking)?.version ?? target
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {dialog}
       <PageContext eyebrow="Settings" title="Version" />
 

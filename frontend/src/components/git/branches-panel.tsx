@@ -468,7 +468,7 @@ export function BranchesPanel({
                   merged as the merge in the merged hue, one whose upstream is
                   gone in red. */}
               {!b.current && b.merged && !b.gone ? (
-                <SourceMerge aria-hidden className="size-4 shrink-0 text-(--pull-merged)" />
+                <SourceMerge aria-hidden className="size-4 shrink-0 text-pull-merged" />
               ) : (
                 <SourceBranch
                   aria-hidden
@@ -489,7 +489,7 @@ export function BranchesPanel({
                   <span
                     className={cn(
                       "truncate font-mono text-xs",
-                      b.current ? "font-semibold" : "text-foreground/90",
+                      b.current && "font-semibold",
                     )}
                   >
                     {b.name}
@@ -511,7 +511,7 @@ export function BranchesPanel({
                           and says nothing; an upstream under another name is
                           worth the room. */}
                       {b.upstream && b.upstream !== `origin/${b.name}` && (
-                        <span className="max-w-[50%] min-w-0 truncate font-mono text-foreground/60">
+                        <span className="max-w-[50%] min-w-0 truncate font-mono text-muted-foreground">
                           {b.upstream}
                         </span>
                       )}
@@ -699,7 +699,7 @@ function updates(b: GitBranch): boolean {
 
 function GroupLabel({ label, explain, count }: { label: string; explain: string; count: number }) {
   return (
-    <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-b border-hairline bg-card px-3">
+    <div className="sticky top-0 z-raised flex h-8 items-center gap-1.5 border-b border-hairline bg-card px-3">
       <span className="eyebrow">{label}</span>
       <span className="numeric text-hint text-muted-foreground">{count}</span>
       <GitExplain name={explain} />

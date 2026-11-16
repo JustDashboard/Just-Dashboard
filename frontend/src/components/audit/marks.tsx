@@ -243,7 +243,7 @@ export function ActionName({ action, className }: { action: string; className?: 
   const tail = dot < 0 ? "" : bare.slice(dot)
   return (
     <span className={cn("min-w-0 truncate font-mono", className)} title={action}>
-      {method && <span className="text-muted-foreground/60">{method}</span>}
+      {method && <span className="text-faint">{method}</span>}
       <span style={{ color: hueFor(head, LANES) }}>{head}</span>
       <span className="text-foreground">{tail}</span>
     </span>

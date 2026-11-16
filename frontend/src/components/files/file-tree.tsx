@@ -550,7 +550,7 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
           ) : dirHasChanges ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="ml-auto size-1.5 shrink-0 rounded-full bg-(--git-modified)" />
+                <span className="ml-auto size-1.5 shrink-0 rounded-full bg-git-modified" />
               </TooltipTrigger>
               <TooltipContent>Contains changes</TooltipContent>
             </Tooltip>

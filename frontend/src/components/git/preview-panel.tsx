@@ -579,8 +579,8 @@ function CommitPreview({
                   {c.changes.length} file{c.changes.length === 1 ? "" : "s"}
                 </span>
                 <span className="numeric font-mono">
-                  <span className="text-(--git-added)">+{c.insertions}</span>{" "}
-                  <span className="text-(--git-deleted)">−{c.deletions}</span>
+                  <span className="text-git-added">+{c.insertions}</span>{" "}
+                  <span className="text-git-deleted">−{c.deletions}</span>
                 </span>
                 {c.parents && c.parents.length > 0 && (
                   <span className="numeric font-mono">
@@ -603,7 +603,7 @@ function CommitPreview({
               <VerbBar verbs={verbs} />
             </div>
 
-            <div className="sticky top-0 z-10 flex h-8 items-center gap-2 border-b border-hairline bg-card px-3">
+            <div className="sticky top-0 z-raised flex h-8 items-center gap-2 border-b border-hairline bg-card px-3">
               <span className="eyebrow">Files</span>
               <span className="flex-1" />
               <button
@@ -740,8 +740,8 @@ function ChangedFileRow({
         <Tag>binary</Tag>
       ) : (
         <span className="numeric shrink-0 font-mono text-micro">
-          <span className="text-(--git-added)">+{file.insertions}</span>{" "}
-          <span className="text-(--git-deleted)">−{file.deletions}</span>
+          <span className="text-git-added">+{file.insertions}</span>{" "}
+          <span className="text-git-deleted">−{file.deletions}</span>
         </span>
       )}
       <Tooltip>
@@ -913,8 +913,8 @@ function ComparePreview({
               in{d.behind > 0 ? ` · ${base} is ${d.behind} ahead of ${head}` : ""} ·{" "}
               <span className="numeric">{d.files}</span> file{d.files === 1 ? "" : "s"} ·{" "}
               <span className="numeric font-mono">
-                <span className="text-(--git-added)">+{d.insertions}</span>{" "}
-                <span className="text-(--git-deleted)">−{d.deletions}</span>
+                <span className="text-git-added">+{d.insertions}</span>{" "}
+                <span className="text-git-deleted">−{d.deletions}</span>
               </span>
             </>
           ) : (
@@ -999,8 +999,8 @@ export function CommitRow({ commit: c, onClick }: { commit: GitCommit; onClick: 
         </span>
         {(c.insertions > 0 || c.deletions > 0) && (
           <span className="numeric mt-px shrink-0 font-mono text-micro">
-            <span className="text-(--git-added)">+{c.insertions}</span>{" "}
-            <span className="text-(--git-deleted)">−{c.deletions}</span>
+            <span className="text-git-added">+{c.insertions}</span>{" "}
+            <span className="text-git-deleted">−{c.deletions}</span>
           </span>
         )}
       </button>

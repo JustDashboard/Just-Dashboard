@@ -782,18 +782,14 @@ export const LogRow = memo(function LogRow({
         )}
       />
       {showLineNumbers && (
-        <span className="numeric w-12 shrink-0 text-right text-muted-foreground/40 select-none @max-lg:hidden">
+        <span className="numeric w-12 shrink-0 text-right text-faint select-none @max-lg:hidden">
           {line.no ?? ""}
         </span>
       )}
       {showTime && (
         <span
           title={line.timestamp ? timestamp(line.timestamp) : undefined}
-          className={cn(
-            "numeric shrink-0 text-muted-foreground/70 select-none",
-            TIME_WIDTH[time],
-            beside,
-          )}
+          className={cn("numeric shrink-0 text-faint select-none", TIME_WIDTH[time], beside)}
         >
           {/* A record's lines share its head's moment; the time down each of
               them made a Postgres error with its DETAIL read as three. */}
@@ -849,10 +845,7 @@ export const LogRow = memo(function LogRow({
           )
         })}
       {showFile && line.file && (
-        <span
-          className="w-28 shrink-0 truncate text-muted-foreground/70 @max-xl:hidden"
-          title={line.file}
-        >
+        <span className="w-28 shrink-0 truncate text-faint @max-xl:hidden" title={line.file}>
           {line.file}
         </span>
       )}
@@ -871,7 +864,7 @@ export const LogRow = memo(function LogRow({
         // failure that was not there. A line the lens read has its own
         // severity, and a record's later lines its head's, so the stream
         // says nothing about either.
-        <span className="shrink-0 text-muted-foreground/70 select-none">stderr</span>
+        <span className="shrink-0 text-faint select-none">stderr</span>
       )}
       {repeat && repeat > 1 && (
         <span

@@ -181,7 +181,7 @@ function Records({ records }: { records: SharedRecord[] }) {
   const shown = all ? records : records.slice(0, LISTED)
   return (
     <div className="pt-1.5 pb-0.5">
-      <ul className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+      <ul className="grid grid-cols-start-main gap-x-3 gap-y-1">
         {shown.map((record, n) => (
           <li
             key={n}

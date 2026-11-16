@@ -257,14 +257,14 @@ function DiffStat({
     <span className="numeric inline-flex items-center gap-1.5 text-hint text-muted-foreground">
       {plural(files ?? 0, "file")}
       <span className="font-mono">
-        <span className="text-(--git-added)">+{additions.toLocaleString()}</span>{" "}
-        <span className="text-(--git-deleted)">−{deletions.toLocaleString()}</span>
+        <span className="text-git-added">+{additions.toLocaleString()}</span>{" "}
+        <span className="text-git-deleted">−{deletions.toLocaleString()}</span>
       </span>
       <span aria-hidden className="inline-flex gap-px">
         {Array.from({ length: 5 }, (_, i) => (
           <span
             key={i}
-            className="size-2 rounded-[2px]"
+            className="size-2 rounded-xs"
             style={{
               background:
                 i < added

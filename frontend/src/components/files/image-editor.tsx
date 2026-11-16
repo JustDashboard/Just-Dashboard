@@ -690,7 +690,7 @@ export function ImageEditor({
               aria-label="Image editing canvas"
               className={cn(
                 "object-contain",
-                zoom === "fit" ? "max-h-[45vh] max-w-full" : "max-w-none",
+                zoom === "fit" ? "max-h-[45svh] max-w-full" : "max-w-none",
               )}
               style={zoom === "fit" ? undefined : { width: (current.width * Number(zoom)) / 100 }}
             />

@@ -19,7 +19,7 @@ import { SessionsView, useSessions } from "@/components/account/sessions"
 export default function AccountSessionsPage() {
   const sessions = useSessions()
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Account" title="Sessions" />
       <SessionsView sessions={sessions} />
     </Page>

@@ -148,7 +148,7 @@ export function ComputerPicture({
           <section aria-label="Computers" className="min-w-0">
             <p className="eyebrow mb-3 flex items-center gap-1.5">
               Computers
-              <span className="numeric text-muted-foreground/70">{overview.computers.length}</span>
+              <span className="numeric text-faint">{overview.computers.length}</span>
             </p>
             <ul className="flex min-w-0 flex-col gap-4">
               {overview.computers.map((computer) => (

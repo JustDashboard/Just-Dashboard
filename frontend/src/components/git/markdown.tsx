@@ -90,7 +90,7 @@ function BlockView({ block, ...links }: { block: Block } & Links) {
         )
       }
       return (
-        <p className="text-foreground/90">
+        <p className="text-foreground">
           <Runs runs={block.c} {...links} />
         </p>
       )
@@ -149,7 +149,7 @@ function BlockView({ block, ...links }: { block: Block } & Links) {
                   className={cn(
                     "mt-[3px] flex size-3.5 shrink-0 items-center justify-center rounded-sm border",
                     item.done
-                      ? "border-(--pull-merged) bg-(--pull-merged) text-background"
+                      ? "border-pull-merged bg-pull-merged text-background"
                       : "border-border",
                   )}
                 >
@@ -223,7 +223,7 @@ function Runs({ runs, repoUrl, forge }: { runs: Inline[] } & Links) {
         return (
           <code
             key={index}
-            className="rounded-sm border border-hairline bg-surface-sunken px-1 font-mono text-[0.9em] text-foreground"
+            className="rounded-sm border border-hairline bg-surface-sunken px-1 code-inline text-foreground"
           >
             {run.v}
           </code>

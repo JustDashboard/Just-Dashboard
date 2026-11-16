@@ -395,7 +395,7 @@ export function RepoCard({
           <p
             className={cn(
               "mt-2 h-5 truncate text-body leading-5",
-              repo.subject && !repo.empty ? "text-foreground/90" : "text-muted-foreground italic",
+              repo.subject && !repo.empty ? "text-foreground" : "text-muted-foreground italic",
             )}
             title={repo.subject}
           >

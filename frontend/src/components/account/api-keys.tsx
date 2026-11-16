@@ -21,7 +21,6 @@ import type { ApiToken, DashboardUser, DbConnection, Role } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormNote, InfoTip } from "@/components/form"
@@ -90,6 +89,7 @@ import {
   deployReach,
   jdLogin,
 } from "@/components/account/deploy-keys"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export function useApiKeys() {
   return usePoll((signal) => get<ApiToken[]>("/tokens/", undefined, signal), 30000)
@@ -193,7 +193,7 @@ function KeyRow({
   owner?: DashboardUser
   verbs: Verb[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const usage = token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used"
   // A key narrowed to one job says the job, where the role beneath it would
   // read as the key being able to do everything that role can.

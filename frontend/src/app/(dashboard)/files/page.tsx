@@ -1802,7 +1802,7 @@ export default function FilesPage() {
                   max={RAIL.max}
                   onChange={(px, commit) => setRailWidth(clamp(px, RAIL.min, RAIL.max), commit)}
                   onReset={resetRailWidth}
-                  className="absolute inset-y-0 -right-1 z-20 max-lg:hidden"
+                  className="absolute inset-y-0 -right-1 z-sticky max-lg:hidden"
                 />
               </div>
             )}
@@ -1815,7 +1815,7 @@ export default function FilesPage() {
             >
               <div
                 data-file-actions
-                className="pointer-events-none absolute inset-x-2 bottom-12 z-20 flex justify-center"
+                className="pointer-events-none absolute inset-x-2 bottom-12 z-sticky flex justify-center"
               >
                 <AnimatePresence initial={false} mode="wait">
                   {selected.size > 0 ? (
@@ -1905,7 +1905,7 @@ export default function FilesPage() {
                   {...dropZone.handlers}
                 >
                   {dropZone.over && (
-                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-wash-brand">
+                    <div className="pointer-events-none absolute inset-0 z-raised flex items-center justify-center bg-wash-brand">
                       <span className="rounded-lg border border-dashed border-rule-brand bg-card px-4 py-2 text-body font-medium">
                         Drop to upload to {truncateMiddle(path ?? "/", 40)}
                       </span>
@@ -2039,7 +2039,7 @@ export default function FilesPage() {
                     <div
                       data-file-marquee
                       aria-hidden
-                      className="pointer-events-none absolute z-10 rounded-sm border border-rule-brand bg-wash-brand"
+                      className="pointer-events-none absolute z-raised rounded-sm border border-rule-brand bg-wash-brand"
                       style={{
                         left: marquee.box.left,
                         top: marquee.box.top,
@@ -2101,7 +2101,7 @@ export default function FilesPage() {
                     setInspectorWidth(clamp(px, INSPECTOR.min, INSPECTOR.max), commit)
                   }
                   onReset={resetInspectorWidth}
-                  className="absolute inset-y-0 -left-1 z-20 max-lg:hidden"
+                  className="absolute inset-y-0 -left-1 z-sticky max-lg:hidden"
                 />
                 <PreviewPanel
                   entry={activeEntry}

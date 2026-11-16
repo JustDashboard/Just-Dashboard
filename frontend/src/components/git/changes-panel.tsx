@@ -472,7 +472,7 @@ function Group({
 }) {
   return (
     <div>
-      <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-b border-hairline bg-card px-3">
+      <div className="sticky top-0 z-raised flex h-8 items-center gap-1.5 border-b border-hairline bg-card px-3">
         <span className="eyebrow">{label}</span>
         <span className="numeric text-hint text-muted-foreground">{count}</span>
         <GitExplain name={explain} />

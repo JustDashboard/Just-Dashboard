@@ -352,7 +352,7 @@ function Configuration() {
   const drift = report.drift ?? []
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {dialog}
       <PageContext eyebrow="Settings" title="Configuration" />
 

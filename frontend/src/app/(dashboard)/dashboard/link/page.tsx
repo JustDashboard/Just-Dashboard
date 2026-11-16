@@ -72,7 +72,7 @@ export default function AccountLinkPage() {
   const scope = link?.scope ?? status.request?.scope ?? choice
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Settings" title="Connect" />
 
       <HostIdentity

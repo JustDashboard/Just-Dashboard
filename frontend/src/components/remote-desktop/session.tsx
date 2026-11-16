@@ -23,7 +23,6 @@ import { ProductGlyph, ProductLogos } from "@/components/product-logo"
 import { PaneHeader } from "@/components/panel"
 import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { SidePanel } from "@/components/side-panel"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
@@ -69,6 +68,7 @@ import {
   type Transfer,
 } from "@/components/remote-desktop/session-panel"
 import type { HeldState } from "@/components/remote-desktop/held-sessions"
+import { useBelow } from "@/lib/breakpoints"
 
 type Phase =
   | { kind: "connecting" }
@@ -160,8 +160,8 @@ export function RemoteSession({
   // Three widths: a phone shows one pane and a bar; up to `xl` the computers
   // are a rail and the tools a sheet, since both beside the screen would
   // leave it a strip; from `xl` all three stand side by side.
-  const phone = useMediaQuery("(max-width: 1023px)")
-  const narrow = useMediaQuery("(max-width: 1279px)")
+  const phone = useBelow("lg")
+  const narrow = useBelow("xl")
   const [pane, setPane] = useState<SessionPane>("screen")
   const [mobileTools, setMobileTools] = useState(false)
   const toolsTrigger = useRef<HTMLButtonElement>(null)
@@ -533,7 +533,7 @@ export function RemoteSession({
 
   if (data && !computer) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <EmptyState
           mark={<ProductLogos ids={["windows", "apple", "linux"]} size="md" />}
           title="This computer is not in Remote Desktop"
@@ -612,7 +612,7 @@ export function RemoteSession({
         data-slot="remote-workspace"
         className={cn(
           "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card",
-          immersive && "fixed inset-0 z-50 bg-background",
+          immersive && "fixed inset-0 z-immersive bg-background",
         )}
       >
         <div className="flex min-h-0 min-w-0 flex-1">

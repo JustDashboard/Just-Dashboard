@@ -8,7 +8,6 @@ import { plural, relativeTime } from "@/lib/format"
 import type { DashboardUser, Role } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote } from "@/components/form"
@@ -43,6 +42,7 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
 import { AvatarRun, UserAvatar, displayNameOf } from "@/components/user-avatar"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export function useDashboardUsers(enabled = true) {
   return usePoll(
@@ -114,7 +114,7 @@ function UserCard({
   onUpdate: (body: Record<string, unknown>) => void
   verbs: Verb[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const name = displayNameOf(user)
   const readings = (
     <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
