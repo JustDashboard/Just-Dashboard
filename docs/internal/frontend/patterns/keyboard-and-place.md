@@ -90,12 +90,12 @@ stacking them: `paneShown(shown, until)` on each pane (hidden below the break wh
 picked, untouched from the break up), `PaneBar` at the foot of the frame (one 56px stop for each pane, a
 count on a glyph's shoulder, clear of the home indicator, not drawn from the break up) and `PaneBack` in the
 head of a page a row opened. The page keeps its own state for which pane is shown, and the frame is held
-to the window below the break so the pane has a height to be the whole of. Ten pages are on it:
+to the window below the break so the pane has a height to be the whole of. These pages are on it:
 
 | Page | Break | Stops | Opens on |
 | --- | --- | --- | --- |
 | Git workspace | `lg` | Changes, History, Branches, GitHub, Files | Changes |
-| Assistant chat | `lg` | Chat, Chats, What it did | Chat |
+| Assistant chat | `lg` | Chat, Chats, What it did (and Settings on the assistant's own page) | Chat |
 | `/logs` | `md` | Log, Sources | the log |
 | `/network/tools` | `md` | Tool, Every tool | the tool, the one a link asked for |
 | `/files` | `lg` | Places, Folder, Details | the folder |
@@ -104,6 +104,9 @@ to the window below the break so the pane has a height to be the whole of. Ten p
 | `/terminal` | `lg` | Sessions, Terminal, Files, Git | the emulator |
 | A Remote Desktop session | `lg` | Screen, Tools, Computers | the screen |
 | The databases map | `lg` | Databases, Map, Inspector | the canvas |
+| The server map | `lg` | Systems, Map, Inspector | the canvas |
+| A deployment run | `lg` | Logs, Steps, Step | Logs while it runs, else Steps (how it ended over its steps) |
+| A database's Logs | `lg` | Live, History, Insights, its queries and the source's own views | the view the address or the tab last read |
 
 Logs and the tools run to the screen's edges below `md` and open on the thing the page is for; picking a
 source or a tool returns to it. Logs keeps its tablet layout from `md` to `lg` (the rail stacked over the
