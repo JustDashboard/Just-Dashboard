@@ -871,7 +871,14 @@ test("an empty drawing offers what to draw, the menu stays on this server, and a
   await expect(page.getByRole("complementary", { name: "Server items" })).toBeVisible()
   await page.getByRole("button", { name: "Close" }).click()
 
-  await page.locator(".main-menu-trigger").click()
+  // Excalidraw draws these three with no name, a second page footer and a
+  // label that is not the words on the button; the page names them (A11Y-22).
+  await expect(page.locator(".excalidraw footer")).toHaveAttribute("role", "presentation")
+  await expect(page.getByRole("button", { name: "100%", exact: true })).toHaveAttribute(
+    "title",
+    "Reset zoom",
+  )
+  await page.getByRole("button", { name: "Canvas menu", exact: true }).click()
   const menu = page.locator(".dropdown-menu")
   await expect(menu).toContainText("Save to this server")
   await expect(menu).not.toContainText(/GitHub|Discord|Follow us/)

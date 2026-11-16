@@ -72,11 +72,12 @@ test("every system is its own diagram, listed in the rail by what anchors it", a
     ["On their own", ["metabase", "uptime-kuma", "vaultwarden", "legacy"]],
     ["Not wired", ["Everything else"]],
   ] as const) {
-    const section = rail(page).locator("section", {
-      has: page.getByRole("heading", { name: group }),
-    })
-    for (const name of names) await expect(section.getByRole("button", { name })).toBeVisible()
+    // A group's name labels its list. It is not a heading: the rail stands
+    // before the page's own, and an h3 there broke the outline's order.
+    const list = rail(page).getByRole("list", { name: group, exact: true })
+    for (const name of names) await expect(list.getByRole("button", { name })).toBeVisible()
   }
+  await expect(rail(page).getByRole("heading")).toHaveCount(0)
   for (const system of [
     "system:dashboard:self",
     "system:project:1",
