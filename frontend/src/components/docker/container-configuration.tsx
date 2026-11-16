@@ -143,7 +143,10 @@ function StandaloneConfiguration({
             <BorderBeam size={120} duration={4} />
           </span>
         )}
-        <Panel>
+        <Panel
+          // Framed: the replacement's border beam runs along its edge.
+          framed
+        >
           <PanelHeader
             title={<label htmlFor="remedy-spec">Replacement specification</label>}
             actions={
@@ -153,7 +156,7 @@ function StandaloneConfiguration({
                 <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
                   <span className="text-hint text-muted-foreground">Edited</span>
                   {changed.map((field) => (
-                    <Tag key={field} mono style={{ color: "var(--git-modified)" }}>
+                    <Tag key={field} mono hue="var(--git-modified)">
                       {field}
                     </Tag>
                   ))}

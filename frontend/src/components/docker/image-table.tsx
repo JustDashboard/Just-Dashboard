@@ -128,7 +128,7 @@ export function ImageTable({
                       )}
                       {state !== "unused" && state !== "untagged" && (
                         <>
-                          <span className="text-muted-foreground/40">·</span>
+                          <span className="text-faint">·</span>
                           <span className="min-w-0 truncate">
                             <FreshnessWord state={state} pulling={pulling === tag} />
                           </span>
@@ -231,7 +231,7 @@ function ImageFacts({ image }: { image: DockerImage }) {
       <span className="shrink-0 font-mono">{shortId(image.id)}</span>
       {tag && (
         <>
-          <span className="text-muted-foreground/40">·</span>
+          <span className="text-faint">·</span>
           <span className="truncate">
             {image.repoDigests.length > 0 ? registryName(tag) : "built here"}
           </span>
@@ -239,13 +239,13 @@ function ImageFacts({ image }: { image: DockerImage }) {
       )}
       {version && !tag?.endsWith(`:${version}`) && (
         <>
-          <span className="text-muted-foreground/40">·</span>
+          <span className="text-faint">·</span>
           <span className="shrink-0 font-mono">v{version.replace(/^v/, "")}</span>
         </>
       )}
       {others > 0 && (
         <>
-          <span className="text-muted-foreground/40">·</span>
+          <span className="text-faint">·</span>
           <span className="shrink-0">+{plural(others, "tag")}</span>
         </>
       )}

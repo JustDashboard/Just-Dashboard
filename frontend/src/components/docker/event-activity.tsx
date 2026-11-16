@@ -16,7 +16,6 @@ import {
 import { hueFor, LANES } from "@/lib/hue"
 import type { Container, DockerEvent } from "@/lib/types"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { rowReveal } from "@/components/icon-action"
 import { ROW_BLEED } from "@/components/row-list"
 import { Status } from "@/components/status-dot"
@@ -34,6 +33,7 @@ import {
 import { EventMark } from "@/components/docker/event-marks"
 import { EventSource } from "@/components/docker/event-feed"
 import { stateWord } from "@/components/docker/container-cells"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Each outcome in the hue that reads it: a failure red, a restart or a check
@@ -314,12 +314,12 @@ export function ActivityTable({
   onSelect: (key: string) => void
 }) {
   const arrived = useArrivals(rows.map((row) => row.key))
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   const live = (row: ContainerActivity) => listed(row, containers)
 
   if (wide) {
     return (
-      <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+      <Table className="table-fixed" containerClassName="max-h-rail">
         <TableHeader className={stickyTableHeader}>
           <TableRow>
             <TableHead className="w-56">Container</TableHead>
@@ -554,7 +554,7 @@ function StateNow({
     status = <Status tone="stopped" label="Removed" />
     detail = relativeTime(row.last.time)
   } else if (!loaded) {
-    status = <span className="text-muted-foreground/60">—</span>
+    status = <span className="text-faint">—</span>
   } else {
     status = <Status tone="unknown" label="Not listed" />
   }
@@ -576,7 +576,7 @@ function StateNow({
 }
 
 function Failures({ row }: { row: ContainerActivity }) {
-  if (row.failures === 0) return <span className="font-mono text-muted-foreground/50">0</span>
+  if (row.failures === 0) return <span className="font-mono text-faint">0</span>
   return (
     <div className="flex flex-col items-end">
       <span className="numeric font-mono font-medium text-destructive">{row.failures}</span>
@@ -591,7 +591,7 @@ function Restarts({ row }: { row: ContainerActivity }) {
       className={cn(
         "numeric font-mono",
         row.restarts === 0
-          ? "text-muted-foreground/50"
+          ? "text-faint"
           : row.looping || row.restarts >= 3
             ? "font-medium text-warning"
             : "text-foreground",

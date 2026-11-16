@@ -1,10 +1,13 @@
 "use client"
 
-import { Box } from "@/components/icons"
+import { Box, type Icon } from "@/components/icons"
 import type { HostInfo } from "@/lib/types"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
 import { platformProduct } from "@/components/product-logo"
 import { WorkspaceHelp } from "@/components/workspace/workspace"
+import { useMetricsValue } from "@/hooks/use-metrics"
+import type { MetricsState } from "@/lib/metrics/store"
 
 /**
  * The engine's name, as every Docker page says it: "Docker" and its version
@@ -26,19 +29,26 @@ export function DockerTitle({ version }: { version?: string }) {
 
 /**
  * The line every Docker section page opens on, laid out as a project's header
- * (`HostIdentity` with `state`): Docker as the mark, its name and version, the
- * page's verdict beside the name, the server it runs on as the first fact and
- * the page's own facts after it, and at the far end the page's one command
- * with the shortcuts before it.
+ * (`IdentityHeader` with `state`): Docker as the mark, the page's name, its
+ * verdict beside the name, Docker and its version as the first fact, the
+ * server it runs on after it and the page's own facts after that, and at the
+ * far end the page's one command with the shortcuts before it.
  *
- * It is one component so the rule is written once. The overview, Containers,
- * Events and Stacks draw it; Images, Volumes and Networks open the same way
- * and can take it as they are.
+ * The page's name is the title (PGH-16). The list pages opened on "Docker
+ * 29.2.0" one after another, the h1 was for screen readers only, and with the
+ * phone's sidebar closed nothing above the fold said which page this was. The
+ * Overview, which is Docker itself, passes no `page` and keeps Docker as its
+ * name.
+ *
+ * It is one component so the rule is written once: the Overview, Containers,
+ * Stacks, Images, Volumes, Networks and Events all open on it.
  */
 export function DockerIdentity({
+  page,
   version,
   host,
   hostDetail,
+  fallback = Box,
   state,
   facts,
   controls,
@@ -46,12 +56,16 @@ export function DockerIdentity({
   menu,
   className,
 }: {
+  /** The page's name ("Containers"), as the title; Docker becomes the first fact. */
+  page?: string
   version?: string
-  /** The server, drawn as the first fact from `sm`; a phone keeps the line to the page's own. */
+  /** The server, drawn as a fact from `sm`; a phone keeps the line to the page's own. */
   host?: Pick<HostInfo, "hostname" | "platform"> | { hostname?: string; platform?: string }
   /** What the server is, after its name: its distribution, on the page that says it. */
   hostDetail?: string
-  /** The page's verdict, a `Status` or a button holding one. */
+  /** The glyph on the tile when Docker's own logo cannot be drawn. */
+  fallback?: Icon
+  /** The page's verdict, a `Status` or a `VerdictButton` holding one. */
   state?: React.ReactNode
   facts: React.ReactNode
   /** What changes the page's reading — a window — before the command. */
@@ -62,11 +76,11 @@ export function DockerIdentity({
   className?: string
 }) {
   return (
-    <HostIdentity
+    <IdentityHeader
       className={className}
       mark="docker"
-      fallback={Box}
-      title={<DockerTitle version={version} />}
+      fallback={fallback}
+      title={page ?? <DockerTitle version={version} />}
       state={
         state ?? (
           // The verdict's line, held open: on a phone it is a row of its own,
@@ -78,14 +92,12 @@ export function DockerIdentity({
       }
       facts={
         <>
+          {page && <Fact>{version ? `Docker ${version}` : "Docker"}</Fact>}
           {host?.hostname && (
-            <span className="contents max-sm:hidden">
-              <HostFact product={platformProduct(host.platform)}>
-                {host.hostname}
-                {hostDetail && ` · ${hostDetail}`}
-              </HostFact>
-              <FactDot />
-            </span>
+            <Fact product={platformProduct(host.platform)} className="max-sm:hidden">
+              {host.hostname}
+              {hostDetail && ` · ${hostDetail}`}
+            </Fact>
           )}
           {facts}
         </>
@@ -102,6 +114,16 @@ export function DockerIdentity({
       menu={menu}
     />
   )
+}
+
+const selectHost = (state: MetricsState) => state.host
+
+/**
+ * The server, for a Docker page that reads nothing else from the metrics
+ * stream: it re-renders when the host changes, not on every frame.
+ */
+export function useDockerHost() {
+  return useMetricsValue(selectHost) ?? undefined
 }
 
 /**

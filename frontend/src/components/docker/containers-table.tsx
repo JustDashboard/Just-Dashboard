@@ -2,7 +2,6 @@
 
 import { Box, ChevronDown, ChevronUp } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useNow } from "@/hooks/use-now"
 import { HUE } from "@/components/live-figure"
 import { RowLink } from "@/components/row-link"
@@ -40,11 +39,12 @@ import {
   containerWord,
   exitCodeOf,
   exitedWhen,
-  exitWords,
   type ContainerSort,
   type NetRate,
   type SortKey,
 } from "@/components/docker/containers"
+import { exitWords } from "@/components/docker/words"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export type RowsProps = {
   stats: Record<string, ContainerStats>
@@ -98,11 +98,11 @@ export function ContainerRows({
   const heaviest = rows.reduce((top, c) => Math.max(top, rest.stats[c.id]?.memUsage ?? 0), 0)
   // One shape, chosen here, rather than a hidden twin of the other: a
   // reading that exists in a hidden copy is two answers to every query (§12).
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   if (wide) {
     return (
       <div className="min-w-0">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <SortHead label="Container" column="name" sort={sort} onSort={onSort} />
@@ -492,7 +492,7 @@ function CpuCell({
   if (!stat || stat.cpuReady === false) {
     return (
       <p
-        className="text-right font-mono text-muted-foreground/60"
+        className="text-right font-mono text-faint"
         title={container.state === "running" ? "Waiting for a second reading" : undefined}
       >
         —
@@ -557,7 +557,7 @@ function MemoryCell({
   stat?: ContainerStats
   heaviest: number
 }) {
-  if (!stat) return <p className="text-right font-mono text-muted-foreground/60">—</p>
+  if (!stat) return <p className="text-right font-mono text-faint">—</p>
   const limited = stat.memLimited || (container.memoryLimit ?? 0) > 0
   const limit = container.memoryLimit || stat.memLimit
   const near = limited && stat.memPercent >= 85
@@ -597,13 +597,13 @@ function NetworkCell({
   rate?: NetRate
 }) {
   if (!stat || container.state !== "running") {
-    return <p className="text-right font-mono text-muted-foreground/60">—</p>
+    return <p className="text-right font-mono text-faint">—</p>
   }
   if (stat.networkAvailable === false) {
     return <p className="text-right text-hint text-muted-foreground">host network</p>
   }
   if (!net) {
-    return <p className="text-right font-mono text-muted-foreground/60">—</p>
+    return <p className="text-right font-mono text-faint">—</p>
   }
   return <RatePair rx={net.rx} tx={net.tx} className="justify-end" />
 }

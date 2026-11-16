@@ -87,7 +87,7 @@ export function EventMark({
       : undefined
   const Glyph = badge?.[0]
   return (
-    <span className="relative z-10 flex shrink-0">
+    <span className="relative z-raised flex shrink-0">
       <ProductLogo id={id} size="sm" fallback={event.type === "network" ? NetworkDevice : Box} />
       {Glyph && (
         <span

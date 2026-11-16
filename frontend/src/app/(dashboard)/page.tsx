@@ -23,7 +23,6 @@ import type {
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import type { SectionKey } from "@/lib/sidebar-sections"
 import { type PollState, usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -72,6 +71,7 @@ import { Bone } from "@/components/bone"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 // A fixed hour, not the metrics page's draggable window: the landing page is a
 // glance, and there is exactly one range control in the product — on /metrics.
@@ -133,7 +133,7 @@ export default function OverviewPage() {
   const cores = ready ? ready.snapshot.cpu.cores || 1 : 0
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title={host?.hostname ?? "Overview"} />
 
       <DashboardHealthNotice />
@@ -534,7 +534,7 @@ function DeploymentsSection({
   const { can } = useAuth()
   const admin = can("system.admin")
   const deployments = useMemo(() => sortFleet(fleet.data?.deployments ?? []), [fleet.data])
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const shown = deployments.slice(0, wide ? SHOWN_PROJECTS : SHOWN_PROJECTS_NARROW)
 
   return (

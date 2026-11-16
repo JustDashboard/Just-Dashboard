@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
+import { cores } from "@/components/procs/shared"
 import { Pencil } from "@/components/icons"
 import { get, patch, ApiError } from "@/lib/api"
 import { bytes, percent } from "@/lib/format"
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useContainerFrame } from "@/hooks/use-container-live"
-import { Field } from "@/components/form"
+import { Field, FormNote } from "@/components/form"
 import { Meter, utilisationTone } from "@/components/meter"
 import { Section } from "@/components/section"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -32,7 +33,7 @@ import {
 import { TrafficBar } from "@/components/metrics/hardware-panels"
 import { HUE, SeriesKey } from "@/components/live-figure"
 import { RuntimeUsage } from "@/components/deploy/runtime-usage"
-import { Hint, Term } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import { usageMarkers } from "@/components/docker/usage-markers"
 
 /** The charts' own hues (`deploy/runtime-usage.tsx`), so a breakdown reads as its chart. */
@@ -229,10 +230,10 @@ function MemoryAllocation({ stats, running }: { stats?: ContainerStats; running:
             {stats.memSwap == null ? "not reported" : bytes(stats.memSwap)}
           </span>
         </div>
-        <Hint>
+        <FormNote>
           The working set — programs and active files — excludes the inactive file cache, matching
           Docker stats. The kernel reclaims that cache under pressure before anything is killed.
-        </Hint>
+        </FormNote>
       </PanelBody>
     </Panel>
   )
@@ -275,9 +276,9 @@ function Processor({
         actions={
           <span className="numeric text-hint text-muted-foreground">
             <span className="font-medium text-foreground">
-              {cpu === undefined ? "—" : `${(cpu / 100).toFixed(2)}`}
+              {cpu === undefined ? "—" : cores(cpu)}
             </span>{" "}
-            cores in use · 100% is one core
+            in use · 100% is one core
           </span>
         }
       />
@@ -329,10 +330,10 @@ function Processor({
           }
         />
       </StatGrid>
-      <Hint className="pt-3">
+      <FormNote className="pt-3">
         Throttled periods are the share of CPU scheduling periods that hit the quota, not a share of
         CPU time.
-      </Hint>
+      </FormNote>
     </Panel>
   )
 }
@@ -394,7 +395,7 @@ function Limits({
   return (
     <Panel plain className="animate-rise">
       <PanelHeader
-        title={<Term name="memoryLimit">Limits</Term>}
+        title={<Definition name="memoryLimit">Limits</Definition>}
         actions={
           control &&
           !open && (
@@ -457,9 +458,7 @@ function Limits({
               />
             )}
             <p className="text-hint text-muted-foreground">
-              {cpu !== undefined
-                ? `${(cpu / 100).toFixed(2)} cores in use now`
-                : "Read while it runs"}
+              {cpu !== undefined ? `${cores(cpu)} in use now` : "Read while it runs"}
             </p>
             {open && (
               <Field label="New quota in cores" htmlFor="limit-cpus" className="pt-2">
@@ -498,12 +497,12 @@ function Limits({
                 too, so the limit survives deployment.
               </p>
             )}
-            <Hint>
+            <FormNote>
               Leaving a field empty means no change. Docker applies a new limit to the running
               container; nothing is replaced. A memory limit is what makes the kernel kill this
               container rather than choosing a victim across the whole server; the trade is that it
               will be killed when it exceeds it.
-            </Hint>
+            </FormNote>
           </div>
         )}
       </PanelBody>
@@ -535,7 +534,11 @@ function Interfaces({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <Panel className="animate-rise">
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+        className="animate-rise"
+      >
         <PanelHeader
           title="Interfaces"
           actions={
@@ -631,17 +634,17 @@ function Interfaces({
         )}
       </Panel>
       {mode.startsWith("container:") && (
-        <Hint>
+        <FormNote>
           This container shares another container&rsquo;s network namespace. These counters cover
           that shared namespace, not this process alone.
-        </Hint>
+        </FormNote>
       )}
       {rows.length > 0 && (
-        <Hint>
+        <FormNote>
           Traffic includes local container and LAN traffic as well as internet traffic. Rates are
           measured between Docker&rsquo;s own timestamps; errors and drops are cumulative interface
           counters.
-        </Hint>
+        </FormNote>
       )}
     </div>
   )

@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, Database } from "@/components/icons"
+import { ChevronDown, ChevronUp, Database } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import type {
@@ -61,23 +60,13 @@ import { Page, PageContext } from "@/components/page"
 import { containerProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { decodeSegment } from "@/lib/route-params"
-
-const BACK = (
-  <Link
-    href="/docker/volumes"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Volumes
-  </Link>
-)
 
 const TAB_LABEL: Record<VolumeTab, string> = {
   files: "Files",
@@ -395,7 +384,11 @@ function VolumeMain({
   if (!volume && error) {
     return (
       <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title="Volume" actions={walk} />
+        <PageContext
+          back={{ href: "/docker/volumes", label: "Volumes" }}
+          title="Volume"
+          actions={walk}
+        />
         {gone ? (
           <EmptyState
             icon={Database}
@@ -432,7 +425,11 @@ function VolumeMain({
     // From `xl` this column scrolls and the rail beside it does not. A step of
     // padding keeps a focus ring at its edge from being clipped by the scroll.
     <div className="flex min-w-0 flex-1 flex-col gap-5 xl:-mr-2 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
-      <PageContext eyebrow={BACK} title={name} actions={walk} />
+      <PageContext
+        back={{ href: "/docker/volumes", label: "Volumes" }}
+        title={name}
+        actions={walk}
+      />
       <VolumeIdentity
         name={name}
         volume={volume}
@@ -451,40 +448,34 @@ function VolumeMain({
         menu={menu.length > 0 && <VerbMenu verbs={menu} label={`More actions for ${name}`} />}
       />
 
-      <VolumePicture
-        volume={volume}
-        productOf={productOf}
-        coverage={coverage}
-        backup={backup}
-        jobs={jobs.data}
-        stacks={known}
-        onTab={setTab}
-        onBackUp={backUp}
-      />
-
       <Tabs value={tab} onValueChange={setTab} className="gap-0">
-        <TabsPrimitive.List
-          aria-label={`Views of ${name}`}
-          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-        >
-          {VOLUME_TABS.map((key) => (
-            <TabsPrimitive.Trigger
-              key={key}
-              value={key}
-              className={tabClasses(tab === key, "h-10")}
-            >
-              {TAB_LABEL[key]}
-              {(counts[key] ?? 0) > 0 && <ChipCount>{counts[key]}</ChipCount>}
-            </TabsPrimitive.Trigger>
-          ))}
-        </TabsPrimitive.List>
+        <ViewTabList
+          label={`Views of ${name}`}
+          views={VOLUME_TABS.map((key) => ({ key, label: TAB_LABEL[key], count: counts[key] }))}
+          value={tab}
+        />
 
         {VOLUME_TABS.map((key) => (
           <TabsContent key={key} value={key} className="pt-5 pb-2">
-            {tab !== key ? null : !volume ? (
+            {tab !== key ? null : key === "files" ? (
+              // The picture opens the volume's first view, as a detail page's
+              // Overview holds its picture; the strip stands straight under
+              // the line on every view (PGH-17).
+              <div className="flex min-w-0 flex-col gap-6">
+                <VolumePicture
+                  volume={volume}
+                  productOf={productOf}
+                  coverage={coverage}
+                  backup={backup}
+                  jobs={jobs.data}
+                  stacks={known}
+                  onTab={setTab}
+                  onBackUp={backUp}
+                />
+                {volume ? <VolumeFiles volume={volume} /> : <LoadingRows rows={6} />}
+              </div>
+            ) : !volume ? (
               <LoadingRows rows={6} />
-            ) : key === "files" ? (
-              <VolumeFiles volume={volume} />
             ) : key === "mounts" ? (
               <VolumeMounts volume={volume} productOf={productOf} stacks={known} />
             ) : key === "backups" ? (

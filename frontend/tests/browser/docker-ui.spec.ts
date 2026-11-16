@@ -836,8 +836,11 @@ test("the container page can act on the container it is describing", async ({ pa
   await page.getByRole("button", { name: "web", exact: true }).first().click()
 
   await expect(page).toHaveURL(/\/docker\/containers\/1111111111111111$/)
-  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible()
+  // Restart is the line's command, and Stop is behind its ⋯ (PGH-02).
   await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "More actions for web" }).click()
+  await expect(page.getByRole("menuitem", { name: "Stop" })).toBeVisible()
+  await page.keyboard.press("Escape")
   // And the identity is a fact under the title rather than a tag in it.
   await expect(page.getByText("nginx:alpine").first()).toBeVisible()
   // The way back is the eyebrow, where a page's own breadcrumb goes.

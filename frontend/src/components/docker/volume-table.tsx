@@ -145,7 +145,7 @@ export function VolumeTable({
                     {wide ? (
                       facts.map((fact, i) => (
                         <span key={i} className="inline-flex min-w-0 items-center gap-1.5">
-                          {i > 0 && <span className="text-muted-foreground/40">·</span>}
+                          {i > 0 && <span className="text-faint">·</span>}
                           {fact}
                         </span>
                       ))
@@ -157,7 +157,7 @@ export function VolumeTable({
                         <StandingWord volume={volume} />
                         {backup && (
                           <>
-                            <span className="text-muted-foreground/40">·</span>
+                            <span className="text-faint">·</span>
                             <BackupWord backup={backup} short />
                           </>
                         )}
@@ -278,7 +278,7 @@ function VolumeName({ volume, product }: { volume: VolumeDetail; product?: strin
         {anonymous ? (
           <>
             {volume.name.slice(0, 12)}
-            <span className="text-muted-foreground/60">…</span>
+            <span className="text-faint">…</span>
           </>
         ) : (
           <>
