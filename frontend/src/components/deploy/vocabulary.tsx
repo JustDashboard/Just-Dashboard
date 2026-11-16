@@ -18,7 +18,7 @@ import { duration, shortDigest } from "@/lib/format"
 import type { GitTone } from "@/lib/git-status"
 import { Status, StatusDot, type DotTone, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { FolderIcon } from "@/components/files/file-icon"
+import { FolderIcon } from "@/components/file-icon"
 import {
   ProductGlyph,
   ProductLogo,

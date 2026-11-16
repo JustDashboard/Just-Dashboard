@@ -26,7 +26,7 @@ import { EngineHead, EngineWaiting } from "@/components/security/engine-head"
 import { FAIL2BAN_LOG } from "@/components/security/host-logs"
 import { fail2banFault, type Fail2banStatus } from "@/components/security/intrusion-model"
 import { JailsPanel } from "@/components/security/jail-panel"
-import { LensReadingLine, type ReadingLook } from "@/components/security/lens-reading-line"
+import { LensReadingLine, type ReadingLook } from "@/components/logs/lens-reading-line"
 import {
   HostLogSection,
   useAddressLineVerbs,
