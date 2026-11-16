@@ -81,7 +81,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 export default function HubLinkPage() {
   const hub = useHubLink()
   const { status } = hub
-  const { refresh: refreshAuth } = useAuth()
+  const { status: auth, refresh: refreshAuth, can } = useAuth()
   const shell = useShellHub()
   const params = useSearchParams()
   // Null follows the link the person arrived by; typing takes over from it.
@@ -109,11 +109,17 @@ export default function HubLinkPage() {
   }, [state, name, refreshAuth, shell])
 
   if (!status) {
+    // A linked server's line ends in its verbs for an administrator, and the session already says
+    // whether it is linked, so the loading line keeps their row on a phone and the page does not
+    // move when the status lands (D11).
+    const verbs = can("system.admin") && Boolean(auth?.hub?.linked)
     return (
       <PageState
         title="Hub"
         error={hub.error}
-        skeleton={<IdentityHeader loading logo={<HubTile />} state />}
+        skeleton={
+          <IdentityHeader loading logo={<HubTile />} state menu={verbs ? false : undefined} />
+        }
       />
     )
   }
