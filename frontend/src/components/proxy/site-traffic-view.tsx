@@ -221,14 +221,12 @@ function TrafficPage() {
         mark={engineProduct(status)}
         fallback={ChartActivity}
         title="Traffic"
-        facts={
-          <IdentityFacts
-            sites={sites}
-            hour={hour}
-            error={summary.error}
-            observedAt={summary.data?.observedAt}
-          />
-        }
+        facts={identityFacts({
+          sites,
+          hour,
+          error: summary.error,
+          observedAt: summary.data?.observedAt,
+        })}
         // Laid out as a project's header: how the hour is answering beside
         // the name, the page's verbs behind `⋯`. Always a state, so the line
         // is one height on a phone before the hour is read and after.
@@ -320,8 +318,13 @@ function TrafficPage() {
   )
 }
 
-/** What the page covers, on the identity line: the hour, the sites, and how old the read is. */
-function IdentityFacts({
+/**
+ * What the page covers, on the identity line: the hour, the sites, and how old
+ * the read is. Called as a function, not drawn as a component, so the line
+ * receives the `Fact`s themselves: it reads only a `Fact` element as a fact,
+ * and a component's facts drew a dot before the first of them.
+ */
+function identityFacts({
   sites,
   hour,
   error,
