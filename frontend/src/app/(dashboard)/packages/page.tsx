@@ -45,6 +45,7 @@ import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -673,7 +674,7 @@ function PackagesPage({ asked }: { asked: string | null }) {
                           <TableHead className="w-[20%]">Installed</TableHead>
                           <TableHead className="w-[20%]">Available</TableHead>
                           <TableHead className="w-[28%]">Origin</TableHead>
-                          <TableHead className="w-24" />
+                          <TableHead label="Security" className="w-24" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -773,6 +774,7 @@ function PackageName({
       <PackageMark name={name} section={section} />
       <Link
         href={packageHref(name)}
+        {...ROW_NAME}
         className="max-w-full min-w-0 truncate rounded-sm font-mono text-body font-medium focus-ring hover:underline"
       >
         {name}
@@ -803,7 +805,7 @@ function PackageTable({
           <TableHead className="w-[22%]">Version</TableHead>
           <TableHead className="w-[22%]">Available</TableHead>
           <TableHead className="w-24 text-right">Size</TableHead>
-          <TableHead className="hidden w-40 xl:table-cell" />
+          <TableHead label="Marks" className="hidden w-40 xl:table-cell" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -868,14 +870,7 @@ function PackageCards({ packages }: { packages: InstalledPackage[] }) {
           leading={
             <span className="relative flex">
               <PackageMark name={p.name} section={p.section} />
-              {p.upgradable && (
-                <span
-                  aria-hidden
-                  className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-                >
-                  <StatusDot tone={p.security ? "warning" : "notice"} className="size-1.5" />
-                </span>
-              )}
+              {p.upgradable && <StatusDot tone={p.security ? "warning" : "notice"} corner />}
             </span>
           }
           title={

@@ -34,14 +34,13 @@ import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductGlyph, platformProduct } from "@/components/product-logo"
-import { ROW_BLEED } from "@/components/row-list"
+import { ROW_BLEED, TABLE_BLEED } from "@/components/row-list"
 import { Address } from "@/components/security/marks"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { FaceRun } from "@/components/system-users/marks"
 import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -55,6 +54,7 @@ import {
 } from "@/components/ui/table"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { saveText } from "@/lib/download"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const PAGE_SIZE = 100
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -178,6 +178,9 @@ export default function AuditPage() {
   if (data && data.total !== total) setTotal(data.total)
 
   const filtered = username !== "" || action !== "" || onlyFailed
+  // Below `sm` the trail is rows, not a table, so it is a section rather than
+  // a frame: the frame's own padding cut the rows and the chip strip short.
+  const phone = !useBreakpoint("sm")
   const held = useHeldList(data?.entries, (entry) => String(entry.id), JSON.stringify(filters))
   const entries = held.rows
   const arrived = useArrivals(entries.map((entry) => String(entry.id)))
@@ -295,10 +298,11 @@ export default function AuditPage() {
         </div>
 
         {/* The table is the whole of the trail, and it is framed: a grid that
-          owns its own scrolling takes an edge (§2). The filters stay mounted
+          owns its own scrolling takes an edge (§2). On a phone the trail is a
+          list of rows and the section has no frame. The filters stay mounted
           across a filter change so the box being typed into never loses its
           caret to a skeleton. */}
-        <Panel>
+        <Panel framed={!phone}>
           <PanelHeader title="Recorded requests" className="gap-x-3">
             <span className="mr-auto flex min-w-0 items-center gap-3">
               {total !== undefined && (
@@ -334,13 +338,13 @@ export default function AuditPage() {
                 placeholder="User"
                 aria-label="User"
               />
-              <Input
+              <SearchInput
+                containerClassName="max-sm:basis-0 max-sm:flex-[1.4] sm:w-60"
                 value={action}
                 onChange={(e) => narrow(() => setAction(e.target.value))}
                 data-workspace-search
                 placeholder="Action, e.g. docker.container"
                 aria-label="Action"
-                className="h-10 min-w-0 flex-[1.4] text-body sm:h-8 sm:w-60 sm:flex-none"
               />
             </div>
           </PanelHeader>
@@ -388,7 +392,7 @@ export default function AuditPage() {
                 {/* The outer columns take the gutter from their own cell padding,
                   so the first column starts in the title's column; the `-mx`
                   bleed that does the same on a plain panel is gated to it (§2). */}
-                <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
+                <div className={cn("hidden min-w-0 lg:block", TABLE_BLEED)}>
                   <Table containerClassName="max-h-[calc(100svh-21rem)]">
                     <TableHeader className={stickyTableHeader}>
                       <TableRow>

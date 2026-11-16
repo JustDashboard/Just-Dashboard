@@ -19,6 +19,7 @@ import { cronLineName, cronProgram, longClock } from "@/lib/schedule"
 import { notify } from "@/lib/toast"
 import type { CronJob, Crontab } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { TABLE_BLEED } from "@/components/row-list"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
@@ -43,6 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -234,14 +236,14 @@ export function CronJobsPanel({
               ) : (
                 <Table
                   className="table-fixed"
-                  containerClassName="group-data-[plain]/panel:-mx-4 max-h-[calc(100svh-22rem)] w-auto"
+                  containerClassName={cn("max-h-[calc(100svh-22rem)] w-auto", TABLE_BLEED)}
                 >
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>
                       <TableHead>Job</TableHead>
                       <TableHead className="hidden w-[30%] lg:table-cell">Schedule</TableHead>
                       <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
-                      <TableHead className="w-28 md:w-32" />
+                      <TableHead label="Actions" className="w-28 md:w-32" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -560,9 +562,10 @@ export function JobCell({
         {onOpen ? (
           <button
             type="button"
+            {...ROW_NAME}
             onClick={onOpen}
             aria-label={`${name}: ${job.command}`}
-            className="block max-w-full truncate text-left text-body font-medium hover:underline"
+            className="block max-w-full truncate rounded-sm text-left text-body font-medium focus-ring hover:underline"
           >
             {name}
           </button>

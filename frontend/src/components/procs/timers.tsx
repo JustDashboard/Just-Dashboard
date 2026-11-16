@@ -8,6 +8,7 @@ import { clockLabel, describeTimer, longClock } from "@/lib/schedule"
 import { notify } from "@/lib/toast"
 import type { SystemdTimer, SystemdUnit } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { TABLE_BLEED } from "@/components/row-list"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
@@ -22,6 +23,7 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -151,7 +153,7 @@ export function TimersPanel({
         {shown.length > 0 && (
           <Table
             className="table-fixed"
-            containerClassName="w-auto max-h-[calc(100svh-22rem)] group-data-[plain]/panel:-mx-4"
+            containerClassName={cn("max-h-[calc(100svh-22rem)] w-auto", TABLE_BLEED)}
           >
             <TableHeader className={stickyTableHeader}>
               <TableRow>
@@ -160,7 +162,7 @@ export function TimersPanel({
                 <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
                 <TableHead className="hidden w-28 xl:table-cell">Last run</TableHead>
                 <TableHead className="w-24 md:w-32">State</TableHead>
-                <TableHead className="w-20 md:w-24" />
+                <TableHead label="Actions" className="w-20 md:w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -359,10 +361,11 @@ function TimerRow({
           <div className="min-w-0">
             <button
               type="button"
+              {...ROW_NAME}
               onClick={onOpen}
               aria-label={timer.unit}
               title={timer.unit}
-              className="block max-w-full truncate text-left text-body font-medium hover:underline"
+              className="block max-w-full truncate rounded-sm text-left text-body font-medium focus-ring hover:underline"
             >
               {timer.unit.replace(/\.timer$/, "")}
             </button>
