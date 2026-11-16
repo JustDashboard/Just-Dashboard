@@ -348,7 +348,10 @@ function Fleet() {
                   <SearchInput
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search deployments"
+                    // On a phone the field shares its line with the layout,
+                    // the verb and the menu, and the full placeholder was cut
+                    // mid-word; its name still says what it searches.
+                    placeholder={roomy ? "Search deployments" : "Search"}
                     aria-label="Search deployments"
                     containerClassName="max-sm:flex-1"
                     className={cn(query && "pr-8")}

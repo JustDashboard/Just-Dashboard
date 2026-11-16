@@ -61,6 +61,7 @@ import { holdingReading } from "@/components/backups/readings"
 import { LastRun, importedFrom } from "@/components/backups/job-card"
 import { RunContents, RunEncryption, RunLog, RunRail } from "@/components/backups/job-runs"
 import { JobMark, destinationProduct, jobProducts, jobProject } from "@/components/backups/marks"
+import { ProductLogo } from "@/components/product-logo"
 import { JobMap } from "@/components/backups/protection-map"
 import { FileIcon } from "@/components/file-icon"
 import { useJobVerbs } from "@/components/backups/job-verbs"
@@ -484,6 +485,19 @@ export function JobPage() {
 }
 
 /**
+ * The job's mark on its identity line, at the line's own 40px tile. A job that
+ * writes one product's data (or none it can name) is that logo on the tile;
+ * one led by a project or holding several is the `JobMark` stack. `JobMark`'s
+ * own `lg` tile is 48px, which on a phone stood the line's one row 6px taller
+ * than the loading line's, so the page moved when the job landed.
+ */
+function JobTile({ products, project }: { products: string[]; project?: number }) {
+  if (project === undefined && products.length <= 1)
+    return <ProductLogo id={products[0]} fallback={Archive} />
+  return <JobMark products={products} project={project} size="lg" />
+}
+
+/**
  * The line a job's page opens on: what it takes as the things themselves,
  * its name, how its last run went as its state, and the facts it is opened
  * to check — what it takes, where it writes, what it pauses, whether it is
@@ -506,7 +520,7 @@ function JobIdentity({
   return (
     <IdentityHeader
       className="animate-rise"
-      logo={<JobMark products={products} project={project} size="lg" />}
+      logo={<JobTile products={products} project={project} />}
       title={job.name}
       state={<LastRun job={job} />}
       facts={

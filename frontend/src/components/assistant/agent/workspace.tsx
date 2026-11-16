@@ -170,7 +170,9 @@ function Activity({ session, className }: { session: AgentSession; className?: s
           column, so its groups are spaced rather than ruled. */}
       <PaneSection title="Changes" level={2} className={ACTIVITY_GROUP}>
         {changes.length === 0 ? (
-          <EmptyNote dense className="text-left">
+          // On the heading's edge, as the Chats group's empty line beside
+          // it is: the note's own padding set it in and down from it.
+          <EmptyNote dense className="p-0 text-left">
             Nothing yet.
           </EmptyNote>
         ) : (
