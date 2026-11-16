@@ -902,10 +902,17 @@ function SettingRow({
   )
 }
 
-/** A section's count at its title line's far end, as `PanelHeader count` draws one. */
+/**
+ * A section's count at its title line's far end, as `PanelHeader count` draws
+ * one. It stands at a chip's height, so the Edited filter and the section's
+ * state landing beside it move neither the head nor the rows under it.
+ */
 function SectionCount({ children }: { children: React.ReactNode }) {
   return (
-    <span data-slot="panel-count" className="numeric mr-1 text-hint text-muted-foreground">
+    <span
+      data-slot="panel-count"
+      className="numeric mr-1 inline-flex min-h-7 items-center text-hint text-muted-foreground"
+    >
       {children}
     </span>
   )
