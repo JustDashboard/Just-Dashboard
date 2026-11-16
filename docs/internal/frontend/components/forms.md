@@ -215,10 +215,11 @@ line).
 **Spacing does what the rail was for, and type keeps the ranks apart.** The space is asymmetric on
 purpose: 32px above and below every section, so 64px and a hairline between one section and the
 next, against 16px from a head to its own fields, which stand 20px apart — a head is always nearer
-its own fields than the ones above it. The title is `text-base` semibold, a `Section`'s 16 and a
-rung above a dialog section's 15, because it names a part of the page (§8). The state under it is
-`text-xs` muted, 12, between the title and the 11px hints in the fields, because it is data rather
-than a caption (§5). `actions` sit at the far end of the head's row, and so does a settings
+its own fields than the ones above it. The title is the section head, `PanelHeader` plain at
+15/600, an h2 where a dialog's is an h3, because it names a part of the page (§8); it draws no rule
+of its own, because `FormSections` draws the one between sections. The state under it (the
+deprecated `hint`) is `text-xs` muted, 12, between the title and the 11px hints in the fields,
+because it is data rather than a caption (§5). `actions` sit at the far end of the head's row, and so does a settings
 section's `settingStatus`, so "Unsaved changes", arriving with the first keystroke, takes no line of
 its own and pushes no field down.
 

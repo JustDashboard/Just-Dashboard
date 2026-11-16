@@ -686,7 +686,7 @@ test("the pages held to the window under the header end at its foot", async ({ p
   }
 })
 
-test("on a narrow line the commands stand under the facts, and a long name is read whole", async ({
+test("on a narrow line the commands stand under the facts, on a phone beside the name, and a long name is read whole", async ({
   page,
 }) => {
   await mockDatabases(page, {
@@ -705,9 +705,27 @@ test("on a narrow line the commands stand under the facts, and a long name is re
     ).toBe(true)
     const open = (await line(page).getByRole("link", { name: "Open data" }).boundingBox())!
     const facts = (await line(page).getByText("PostgreSQL 16.4").boundingBox())!
-    expect(open.y, `the command is under the facts at ${width}`).toBeGreaterThan(
-      facts.y + facts.height - 1,
-    )
+    if (width === 390) {
+      // A phone's line is one row over one line of facts: the command is on
+      // the name's row, level with it and at its right, above the facts.
+      const named = (await name.boundingBox())!
+      const middle = (box: { y: number; height: number }) => box.y + box.height / 2
+      expect(
+        Math.abs(middle(open) - middle(named)),
+        `the command is level with the name at ${width}`,
+      ).toBeLessThanOrEqual(2)
+      expect(open.x, `the command is right of the name at ${width}`).toBeGreaterThanOrEqual(
+        named.x + named.width - 1,
+      )
+      expect(
+        open.y + open.height,
+        `the command is above the facts at ${width}`,
+      ).toBeLessThanOrEqual(facts.y + 1)
+    } else {
+      expect(open.y, `the command is under the facts at ${width}`).toBeGreaterThan(
+        facts.y + facts.height - 1,
+      )
+    }
     expect(await stripOverlaps(page)).toEqual([])
   }
   // With the room, the commands stand at the line's end, level with the name.

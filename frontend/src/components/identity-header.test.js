@@ -38,19 +38,38 @@ describe("IdentityHeader", () => {
     expect(html).not.toContain("text-title")
   })
 
-  test("on a phone the command takes a row of its own by default, so the title keeps the row", () => {
+  test("on a phone the line is one row: the tile, the name and the verbs, then one line of facts", () => {
     const html = draw({ title: "api.example.test", facts: "x", command: h("button", null, "View") })
-    // Title row, state row, command row, then the facts, whose wrapping never moves the command.
-    expect(html).toContain("max-sm:order-3 max-sm:col-span-3")
-    expect(html).toContain("max-sm:order-4")
-    expect(html).not.toContain("max-sm:order-1")
+    // No row of its own for the verbs, at any width below the foot's.
+    expect(html).not.toContain("max-sm:order-3")
+    expect(html).not.toContain("max-sm:col-span-3")
+    expect(html).not.toContain("max-sm:flex-wrap")
+    // The tile a step smaller, the verbs 32px squares with a 44px press box.
+    expect(html).toContain("max-sm:[zoom:0.8]")
+    expect(html).toContain("max-sm:[&amp;_[data-size]]:hit-area")
+    expect(html).toContain("max-sm:[&amp;_[data-size]]:[--control-h:2rem]")
+    // A command with an icon is drawn as the icon alone; its words stay its name.
+    expect(html).toContain("max-sm:[&amp;_[data-size]:has(svg)]:[font-size:0]")
+    // One line of facts that never wraps to a second.
+    expect(html).toContain("max-sm:h-4 max-sm:overflow-clip")
+    // The command's tooltip box is no box from `sm`, so the wide line is laid out as before.
+    expect(html).toContain("sm:contents")
   })
 
-  test("a line with a place for verbs keeps a control's height for them, filled or not", () => {
+  test("a place for verbs no longer adds a row: menu={false}, a loading command and foot", () => {
     const empty = draw({ title: "api", facts: "x", state: "ok", menu: false })
-    expect(empty).toContain("max-sm:min-h-(--control-compact)")
     const none = draw({ title: "api", facts: "x", state: "ok" })
-    expect(none).not.toContain("max-sm:order-3 max-sm:col-span-3")
+    expect(empty).not.toContain("max-sm:min-h-(--control-compact)")
+    expect(empty).not.toContain("max-sm:mt-1")
+    // The row is a control's height on a phone with no verb in it yet, whatever the tile.
+    expect(empty).toContain("max-sm:min-h-8")
+    expect(none).not.toContain("max-sm:mt-1")
+    const footed = draw({ title: "api", facts: "x", state: "ok", menu: false, foot: true })
+    // The foot's own row is a wide screen's beside a rail, never a phone's.
+    expect(footed).toContain("sm:@max-2xl:order-last!")
+    expect(footed).not.toMatch(/(^|[\s"])@max-2xl:order-last!/)
+    const loading = draw({ loading: true, state: true, command: true })
+    expect(loading).toContain("h-(--control-compact) w-28 rounded-md max-sm:size-8")
   })
 
   test("facts written as facts are drawn as a FactLine", () => {
@@ -82,5 +101,16 @@ describe("IdentityVerbs", () => {
     const { command, menu } = IdentityVerbs({ verbs: verbs.slice(0, 1), name: "api" })
     expect(command).toBeTruthy()
     expect(menu).toBeFalsy()
+  })
+
+  test("the command says the verb's short word and keeps its label as its name", () => {
+    const logs = { key: "logs", label: "Open logs", short: "Logs", icon: Glyph, run: noop }
+    const html = renderToStaticMarkup(IdentityVerbs({ verbs: [logs], name: "api" }).command)
+    expect(html).toContain('aria-label="Open logs"')
+    expect(html).toMatch(/>Logs<\/button>/)
+    // Without a short word the label is the words and the name both.
+    const plain = renderToStaticMarkup(IdentityVerbs({ verbs, name: "api" }).command)
+    expect(plain).not.toContain("aria-label")
+    expect(plain).toMatch(/>Edit<\/button>/)
   })
 })

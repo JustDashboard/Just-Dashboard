@@ -173,9 +173,11 @@ describing its mark; pinned by a press or a tap it is a small `dialog` named by 
 What floats at the foot of the window is one stack, in the float layer (`z-float`), and nothing in
 it covers anything else.
 
-- **Bars** span the foot: `FloatingBar` (the settings save bar, a proxy site's two-save bar) and,
-  later, a pane page's bottom bar. A bar reports how far up from the window's edge it reaches
-  (`useStackOccupant(element, "bar")`).
+- **Bars** span the foot: `FloatingBar` (the settings save bar, a proxy site's two-save bar) and a
+  pane page's bottom bar on a phone (`PaneBar`, 56px and the home indicator). A bar reports how far
+  up from the window's edge it reaches (`useStackOccupant(element, "bar")`); the bars share the
+  foot, so the stack takes the tallest of them, not their sum. No page shows a save bar over a
+  `PaneBar`.
 - **Docks** sit in the bottom-right corner above every bar, and on each other in `order`, each
   lifted by the measured height of the ones below: Remote Desktop's held sessions (`order` 0, the
   corner first), then the assistant's conversations (`order` 1). `Dock` is the frame: a popover's

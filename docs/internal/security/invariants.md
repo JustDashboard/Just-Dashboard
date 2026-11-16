@@ -186,7 +186,11 @@ A change that weakens any of these has to say so explicitly.
    changed (configuration and source) by a person only, though the key may still deploy it and set its
    variables; no saved credential chosen, or a Git credential sent to a different repository; no
    variable pointed at a saved credential, a database or a secret store — checked on a draft at commit, where its
-   variables reach the form they are stored in — nor, for a narrowed key, at a server shared variable.
+   variables reach the form they are stored in (a supplied `${{database.N}}` for a database the plan links
+   is stored as the reference, so the check reads it as one) — nor, for a narrowed key, at a server shared variable.
+   The startup repair of database links stored as text (`repairLinkedDatabaseVariables`) promotes only
+   what a person provably wrote — a session's committed draft, or a session's audited write — so a key
+   cannot plant the text and a dependency for a restart to turn into a reference.
    A key that can change a deployment's source and deploy it can still run code that reads that
    deployment's own variables at run time, a database reference a person gave it included:
    write-only is a property of the API, not a sandbox. The walk `TestADeployKeyGetsTheDecidedAnswerOnEveryRoute` holds the table on every
