@@ -13,6 +13,8 @@ import {
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { KEYCAP } from "@/components/command-search/keycaps"
 import { Status } from "@/components/status-dot"
+import { PaneSection } from "@/components/panel"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { copyText } from "@/lib/clipboard"
@@ -143,7 +145,7 @@ function Identity({
   actions?: React.ReactNode
 }) {
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-4 border-b border-hairline p-4 last:border-b-0">
       <div className="flex min-w-0 items-start gap-3">
         {mark}
         <div className="min-w-0 flex-1 pt-0.5">
@@ -158,38 +160,18 @@ function Identity({
   )
 }
 
-function Section({
-  title,
-  count,
-  children,
-}: {
-  title: string
-  count?: number
-  children: React.ReactNode
-}) {
-  return (
-    <section className="border-t border-hairline px-4 py-4">
-      <h3 className="mb-2.5 flex items-center gap-2">
-        <span className="eyebrow">{title}</span>
-        {count !== undefined && (
-          <span className="numeric text-hint text-muted-foreground">{count}</span>
-        )}
-      </h3>
-      {children}
-    </section>
-  )
-}
+/** One group of the inspector: the pane's shared section, as Files' and a remote session's. */
+const Section = PaneSection
 
 function Facts({ facts }: { facts: { label: string; value: string }[] }) {
   return (
-    <dl className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)] gap-x-3 gap-y-2 text-body">
+    <DetailList size="body" className="gap-y-2">
       {facts.map((fact) => (
-        <div key={fact.label} className="contents">
-          <dt className="truncate text-muted-foreground">{fact.label}</dt>
-          <dd className="min-w-0 break-words">{fact.value}</dd>
-        </div>
+        <Detail key={fact.label} label={fact.label} className="break-words">
+          {fact.value}
+        </Detail>
       ))}
-    </dl>
+    </DetailList>
   )
 }
 
