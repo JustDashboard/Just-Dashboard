@@ -2,11 +2,157 @@
 
 A table for readings read down their columns, framed, one line per row (D7).
 
-**Members:** `ui/table` (`Table`, `TableHeader`, `TableRow`, `TableCell`).
+**Members:** `Table`, `TableHeader`, `TableBody`, `TableFooter`, `TableHead`, `SortHead`,
+`TableRow`, `TableCell`, `TableCaption`, `stickyTableHeader`, `ROW_NAME`, `SECONDARY_COLUMN`
+(`components/ui/table.tsx`); `TABLE_BLEED` (`components/row-list.tsx`); `RowLink`
+(`components/row-link.tsx`).
 
-**Status: moved text.** WP-34 rewrites this page in wave 1 as purpose, anatomy, use when and when
-not (and what instead), props, states, the phone, accessibility, an example call site, what enforces
-it, and related families. Until then it holds the rules that were in `design-system.md`, below.
+## Purpose
+
+A table is for things compared on three or more readings, read down a column: which process holds
+the memory, which volume is largest and unbacked, which statement takes the runtime. A row may open
+its thing's page, and the table is still a table of readings with a destination on its name
+(Processes, Packages, Services, Volumes). It is not for a list of things you open and do not
+compare: that is a `ChoiceList` of cards ([`card-row.md`](card-row.md), D5). A few things each with
+a name and a state is a `RowList` ([`list-row.md`](list-row.md)).
+
+## Anatomy
+
+```
+ Name ▾          State        CPU      Memory   [ verbs ]     ← TableHead / SortHead, h-10, 11px muted
+ ───────────────────────────────────────────────────────────
+ [mark] web      ● Running    12%      180 MB   ⋯             ← TableRow, a hairline under it
+        image    for 6d                                       ← the name cell's second line
+```
+
+- The cells are one step denser than body text (`text-xs`) and their figures tabular (`.numeric`)
+  by default. The first column takes the row's name, as a `RowLink` or a link, under a mark.
+- A column of verbs, a mark or a spacer has no visible title. It still has a name:
+  `<TableHead label="Actions" />` draws it for a screen reader only.
+- Inside a plain `Panel`, `TABLE_BLEED` on the table's `containerClassName` (or a flush
+  `PanelBody`) lines the first column's words up with the section title. Never type the `-mx-4`.
+- A capped table (`containerClassName="max-h-…"`) keeps its head with `stickyTableHeader`.
+
+## Use when, and when not
+
+| Use a table when | Use instead |
+| --- | --- |
+| Many things compared on three or more readings | |
+| Rows that open a page and are read down their columns | |
+| Things you open and do not compare | `ChoiceList` of `ChoiceRow` cards |
+| A few things with a name and a state | `RowList` |
+| Label and value pairs about one thing | `DetailList` ([`values-facts.md`](values-facts.md)) |
+
+## Props
+
+| Part | Prop | Does |
+| --- | --- | --- |
+| `Table` | `containerClassName` | On the scroll container: a height cap, `TABLE_BLEED`. A container that scrolls and holds nothing focusable becomes a named region and a tab stop, so its rows can be reached. |
+| `TableHead` | `label` | The column's name for a screen reader where it has no visible title. Drawn only without children. |
+| `TableHead`, `TableCell` | `secondary` | Not drawn below `sm` (`SECONDARY_COLUMN`). Put it on the head and every cell of the column. |
+| `TableRow` | `onActivate` | The whole row is the pointer's target for its primary action. A press on a control inside the row is left to that control. Enter and Space work on a row that is a stop itself. |
+| `SortHead` | `label`, `active`, `descending`, `onSort` | A head that orders the rows: `aria-sort` on the `th` (`none` on the columns not in use), the words a `type="button"` with the focus ring, one chevron on the column in use. |
+| `SortHead` | `align` | `"right"` for a column of figures: the chevron goes before the words, so the words keep the figures' edge. |
+| `SortHead` | `after`, `secondary`, `className` | Something beside the button and not in it (an `InfoTip`); the phone rule; the `th`'s width. |
+
+```tsx
+const by = (column: SortKey) => ({
+  active: sort.key === column,
+  descending: sort.dir === "desc",
+  onSort: () => onSort(column),
+})
+
+<TableHeader className={stickyTableHeader}>
+  <TableRow>
+    <SortHead label="Container" {...by("name")} />
+    <SortHead label="CPU" {...by("cpu")} align="right" className="w-32" />
+    <TableHead secondary className="w-36">Ports</TableHead>
+    <TableHead label="Actions" className="w-28" />
+  </TableRow>
+</TableHeader>
+```
+
+## States
+
+- **Loading.** The table's own shape with bones in its cells, or the page's skeleton for the
+  section, so nothing under it moves when the rows land (D11).
+- **Empty.** `EmptyNote` in the section for a filter that matches nothing; `EmptyState` when the
+  table is the page's subject ([`states.md`](states.md)).
+- **Selected.** `data-state="selected"` on the row (the selection fill); `aria-current` where the
+  row is the page being shown, as the compose table's own container is.
+- **Never open.** A row is one line, one height in every state. Nothing expands under it
+  ([`../patterns/rows-never-grow.md`](../patterns/rows-never-grow.md)).
+
+## The phone
+
+A table has one phone answer, chosen by what its rows are (MOB-11):
+
+1. **A table of readings** keeps its table and drops the columns a phone can do without:
+   `secondary` on the head and every cell, so what is left is the name, its state and one value.
+   It never scrolls sideways for its main reading.
+2. **A table whose rows open something** becomes rows below `sm`: the name over one line of its
+   state and one or two readings, the way the containers list draws its phone rows. The section
+   around it loses its frame (`Panel framed={!phone}`), a title and a hairline, because a frame
+   around a list of rows on a phone is padding that cuts the rows short. Audit's trail and a
+   container's compose neighbours are the references.
+3. Which shape is drawn is chosen once with `useBreakpoint`, never as a hidden twin (§12 below).
+
+## Accessibility
+
+- **A row is not a second, nameless stop.** `onActivate` is the pointer's convenience. The keyboard
+  reaches a row by its name control, marked `{...ROW_NAME}` (the `data-workspace-primary` a
+  `Workspace` already puts the keyboard back on). A row holding one is no tab stop itself. A row
+  that holds none stays a stop so it can be reached, and should get a name control, or at least an
+  `aria-label`. Before 0.9.0 every activatable row was a stop beside its own name button: two
+  presses of Tab a row, the first reading every cell as one name (A11Y-10).
+- **Every header cell has a name**: a visible title, or `label` (axe `empty-table-header`).
+- **A sortable head says its order**: `aria-sort` on the `th`, and its words are a real button with
+  the focus ring. There is one `SortHead`; it replaced five copies, one of which said nothing to a
+  screen reader (DBO-07, A11Y-19).
+- A name control takes the focus ring (`focus-ring`) and `rounded-sm`, so the ring has corners.
+
+## Example
+
+```tsx
+<Table className="table-fixed" containerClassName={cn("max-h-[calc(100svh-22rem)]", TABLE_BLEED)}>
+  <TableHeader className={stickyTableHeader}>
+    <TableRow>
+      <TableHead>Timer</TableHead>
+      <TableHead secondary className="w-36">Next run</TableHead>
+      <TableHead label="Actions" className="w-24" />
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    {timers.map((timer) => (
+      <TableRow key={timer.unit} onActivate={() => open(timer)}>
+        <TableCell>
+          <button type="button" {...ROW_NAME} onClick={() => open(timer)}
+            className="truncate rounded-sm text-body font-medium focus-ring hover:underline">
+            {timer.name}
+          </button>
+        </TableCell>
+        <TableCell secondary><RunAt at={timer.next} /></TableCell>
+        <TableCell><VerbActions dim verbs={verbs(timer)} /></TableCell>
+      </TableRow>
+    ))}
+  </TableBody>
+</Table>
+```
+
+## What enforces it
+
+- `src/components/ui/table.test.js`: `SortHead` puts `aria-sort` on the `th` and draws a
+  `type="button"` with the focus ring and one chevron; `TableHead label` and `secondary`; a row
+  that opens something starts as a stop until its name is found.
+- The axe probe in the captures (`empty-table-header`), and the browser specs of the pages that
+  draw these tables (`audit-ui`, `container-page`, `processes-ui`, `packages-ui`,
+  `database-performance`, `files-ui`).
+
+## Related
+
+[`list-row.md`](list-row.md) for `RowList`, `RowLink` and `TABLE_BLEED`; [`card-row.md`](card-row.md)
+for things you open; [`surfaces.md`](surfaces.md) for when a section takes a frame;
+[`search-toolbar.md`](search-toolbar.md) for the toolbar over a table.
 
 ## 12. A table is a layout, not a contract
 

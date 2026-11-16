@@ -11,6 +11,7 @@ import { Status, StatusDot } from "@/components/status-dot"
 import { Sparkline } from "@/components/sparkline"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
+  ROW_NAME,
   SortHead,
   stickyTableHeader,
   Table,
@@ -289,7 +290,8 @@ function Identity({
       <ProductLogo id={containerProduct(container)} size="sm" fallback={Box} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          <RowLink title={container.name} onClick={() => onOpen(container.id)}>
+          {/* The row's name (ROW_NAME): it lands once RowLink passes its props on. */}
+          <RowLink {...ROW_NAME} title={container.name} onClick={() => onOpen(container.id)}>
             {container.name}
           </RowLink>
         </div>
