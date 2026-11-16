@@ -1,12 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { CheckCircle, CrossCircle } from "@/components/icons"
-import { cn } from "@/lib/utils"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/loading"
-import { Pane, PaneHeader } from "@/components/panel"
+import { ConsoleView } from "@/components/console-view"
+import { streamKind } from "@/components/transcript-line"
 
 /**
  * Watching a long command run, instead of waiting for one.
@@ -131,6 +128,12 @@ export function useRunConsole() {
   return { run, reset, lines, state, exitCode, running: state === "running" }
 }
 
+/**
+ * A compose run's console (`ConsoleView`): each line numbered and drawn by
+ * its stream, the service that wrote it before it, and the status it exited
+ * with when it failed. It rises into place, since it mounts when a command
+ * starts or its output arrives.
+ */
 export function RunConsole({
   lines,
   state,
@@ -146,69 +149,28 @@ export function RunConsole({
   onDismiss?: () => void
   className?: string
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [following, setFollowing] = useState(true)
-
-  useEffect(() => {
-    if (!following) return
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [lines, following])
-
+  const shown = useMemo(
+    () =>
+      lines.map((line, i) => ({
+        key: i,
+        line: { number: i + 1, text: line.text, kind: streamKind(line.stream) },
+        prefix: line.service,
+      })),
+    [lines],
+  )
   if (state === "idle") return null
-
   return (
-    // `animate-rise`: the console is not here a moment ago — it mounts when a
-    // command starts or its output arrives, and four pixels plus opacity is
-    // what says "this is new" without pretending anything is still moving.
-    <Pane className={cn("animate-rise bg-surface-sunken", className)}>
-      <PaneHeader className="gap-2 px-3">
-        {state === "running" && <Spinner className="size-3.5 text-muted-foreground" />}
-        {state === "ok" && <CheckCircle className="size-3.5 text-success" />}
-        {state === "failed" && <CrossCircle className="size-3.5 text-destructive" />}
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-          {title ?? "Output"}
-          {state === "failed" && exitCode !== undefined && (
-            <span className="ml-2 font-normal text-muted-foreground">
-              exited with status {exitCode}
-            </span>
-          )}
-        </span>
-        {onDismiss && state !== "running" && (
-          <Button size="xs" variant="ghost" onClick={onDismiss}>
-            Dismiss
-          </Button>
-        )}
-      </PaneHeader>
-      <div
-        ref={scrollRef}
-        onScroll={() => {
-          const el = scrollRef.current
-          if (!el) return
-          setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
-        }}
-        className="max-h-72 min-h-24 overflow-auto p-2.5 font-mono text-hint leading-relaxed"
-      >
-        {lines.length === 0 ? (
-          <p className="text-muted-foreground">Starting…</p>
-        ) : (
-          lines.map((line, i) => (
-            <div
-              key={i}
-              className={cn(
-                "break-all whitespace-pre-wrap",
-                // A step marker is the runner's own voice rather than the
-                // command's, so it reads as a heading in the stream.
-                line.stream === "status" && "mt-1.5 font-medium text-primary",
-                line.stream === "stderr" && "text-warning",
-              )}
-            >
-              {line.service && <span className="mr-2 text-muted-foreground">{line.service} |</span>}
-              {line.text}
-            </div>
-          ))
-        )}
-      </div>
-    </Pane>
+    <ConsoleView
+      title={title ?? "Output"}
+      state={state}
+      detail={
+        state === "failed" && exitCode !== undefined ? `exited with status ${exitCode}` : undefined
+      }
+      lines={shown}
+      empty="Starting…"
+      onDismiss={onDismiss}
+      rise
+      className={className}
+    />
   )
 }

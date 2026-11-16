@@ -1133,9 +1133,7 @@ test("a page opened while the module installs shows that install and starts no s
   // The install already running is on screen, and the button waits for it.
   await expect(page.getByText(/Unpacking libnginx-mod-stream/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Installing libnginx-mod-stream…" })).toBeDisabled()
-  await expect(
-    page.getByText("This keeps running if you close the page — reopen it from the recent list."),
-  ).toBeVisible()
+  await expect(page.getByText("Keeps running if you leave", { exact: true })).toBeVisible()
   // The recent list the console names is beside the button.
   const steps = page.getByRole("list", { name: "Before a stream can forward" })
   await expect(steps.getByRole("button", { name: "htop", exact: true })).toBeVisible()
