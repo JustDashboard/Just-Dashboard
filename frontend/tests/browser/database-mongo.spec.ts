@@ -2219,9 +2219,9 @@ test.describe("schema", () => {
     // usage and no plan to explain.
     await mockMongo(page, { summaries: { 5: { flavor: "ferretdb", flavorLabel: "FerretDB" } } })
     await page.goto(`${SCHEMA}?db=${DB}&collection=users`)
-    const strip = page.getByRole("group", { name: "Schema views" })
-    await expect(strip.getByRole("button", { name: "Analysis" })).toBeVisible()
-    await expect(strip.getByRole("button", { name: "Validation" })).toHaveCount(0)
+    const strip = page.getByRole("tablist", { name: "Schema views" })
+    await expect(strip.getByRole("tab", { name: "Analysis" })).toBeVisible()
+    await expect(strip.getByRole("tab", { name: "Validation" })).toHaveCount(0)
     await page.goto(collection("users"))
     await expect(documents(page)).toHaveCount(2)
     await expect(page.getByRole("button", { name: "Explain" })).toHaveCount(0)

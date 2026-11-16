@@ -32,6 +32,7 @@ import { lastRead, noteRead, ownEcho } from "@/components/database/redis/own-rea
 import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisBytes, RedisKeyMeta, RedisMetaFact } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
+import { ObjectHead } from "@/components/database/workbench/chrome"
 
 /** What every type's editor is handed: the key, what is known of it, and how to say it changed. */
 export type KeyEditorProps = {
@@ -69,7 +70,6 @@ type ReadMeta = RedisKeyMeta & {
 export function KeyPane({
   redis,
   name,
-  leading,
   confirm,
   onRail,
   onOpen,
@@ -77,8 +77,6 @@ export function KeyPane({
 }: {
   redis: Redis
   name: RedisBytes
-  /** The control that brings the rail back, when it is hidden. */
-  leading?: React.ReactNode
   confirm: (request: ConfirmRequest) => void
   /** The keys changed: the rail should read them again. */
   onRail: () => void
@@ -217,7 +215,7 @@ export function KeyPane({
 
   if (gone) {
     return (
-      <Blank leading={leading}>
+      <Blank>
         <EmptyState
           mark={<EngineMark engine={engine} />}
           className="border-0"
@@ -239,7 +237,7 @@ export function KeyPane({
   }
   if (meta.error && !read) {
     return (
-      <Blank leading={leading}>
+      <Blank>
         <ReadError error={meta.error} onRetry={meta.refresh} className="m-4" />
       </Blank>
     )
@@ -257,102 +255,103 @@ export function KeyPane({
 
   return (
     <div data-slot="redis-key" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="shrink-0 space-y-2.5 border-b border-hairline px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          {leading}
-          {read ? (
-            <KindMark type={read.type} className="size-4" />
-          ) : (
-            <Skeleton className="size-4" />
-          )}
-          <h2 title={label} className="min-w-0 truncate font-mono text-sm leading-6 font-medium">
-            {label || <span className="text-muted-foreground">(empty name)</span>}
-          </h2>
-          {read && <KindTag type={read.type} />}
-          {isBinary(name) && <Tag>binary name</Tag>}
-          <span className="min-w-0 flex-1" />
-          <VerbActions verbs={verbs} menuLabel={`More actions for ${label}`} />
-        </div>
-        {read ? (
-          // The key as one sentence under its name, as a table's facts are
-          // under its: "expires in 2h · 1,200 fields · 48 KB in memory ·
-          // listpack". The expiry is still the fact that is pressed to change it.
-          <p
-            key="facts"
-            data-slot="facts-line"
-            className="min-w-0 animate-rise text-body text-muted-foreground"
-          >
-            <FactLine>
-              <LineFact title="Expiry">
-                <span className="text-foreground">
-                  <TtlFact
-                    target={target}
-                    name={name}
-                    pttl={read.pttl}
-                    readAt={read.readAt}
-                    editable={canWrite}
-                    onChanged={meta.refresh}
-                  />
-                </span>
-              </LineFact>
-              {sizeOf(read.type, read.length) && (
-                <LineFact title="Holds">
-                  <span className="numeric text-foreground">
-                    {read.type === "string" ? bytes(read.length) : sizeOf(read.type, read.length)}
+      <ObjectHead
+        mark={
+          read ? <KindMark type={read.type} className="size-4" /> : <Skeleton className="size-4" />
+        }
+        name={label || "(empty name)"}
+        title={label}
+        kind={
+          (read || isBinary(name)) && (
+            <span className="flex items-center gap-1.5">
+              {read && <KindTag type={read.type} />}
+              {isBinary(name) && <Tag>binary name</Tag>}
+            </span>
+          )
+        }
+        verbs={<VerbActions verbs={verbs} menuLabel={`More actions for ${label}`} />}
+        facts={
+          read ? (
+            // The key as one sentence under its name, as a table's facts are
+            // under its: "expires in 2h · 1,200 fields · 48 KB in memory ·
+            // listpack". The expiry is still the fact that is pressed to change it.
+            <p
+              key="facts"
+              data-slot="facts-line"
+              className="min-w-0 animate-rise text-body text-muted-foreground"
+            >
+              <FactLine>
+                <LineFact title="Expiry">
+                  <span className="text-foreground">
+                    <TtlFact
+                      target={target}
+                      name={name}
+                      pttl={read.pttl}
+                      readAt={read.readAt}
+                      editable={canWrite}
+                      onChanged={meta.refresh}
+                    />
                   </span>
                 </LineFact>
-              )}
-              {keyFact({
-                label: "Memory",
-                fact: "memory",
-                meta: read,
-                value: read.memory === undefined ? undefined : bytes(read.memory),
-                tail: "in memory",
-              })}
-              {keyFact({
-                label: "Encoding",
-                fact: "encoding",
-                meta: read,
-                value: read.encoding,
-                mono: true,
-              })}
-              {read.frequency !== undefined ? (
-                <LineFact title="Access frequency">
-                  access frequency{" "}
-                  <span className="numeric text-foreground">{grouped(read.frequency)}</span>
-                </LineFact>
-              ) : (
-                keyFact({
-                  label: "Idle when opened",
-                  fact: "idleSeconds",
-                  lead: "idle when opened",
-                  meta: echoed
-                    ? {
-                        ...read,
-                        idleSeconds: undefined,
-                        unavailable: {
-                          idleSeconds:
-                            "This page had read the key itself just before opening it — the key list reads each key it shows — and a read resets the server's idle clock.",
-                        },
-                      }
-                    : (opened ?? read),
-                  value:
-                    echoed || opened?.idleSeconds === undefined
-                      ? undefined
-                      : duration(opened.idleSeconds),
-                  tip: "How long nothing had read or written the key when this page opened it.",
-                })
-              )}
-            </FactLine>
-          </p>
-        ) : (
-          <div className="flex h-5 items-center gap-3" aria-hidden>
-            {[16, 14, 14, 20].map((width, i) => (
-              <Skeleton key={i} className="h-3.5" style={{ width: `${width * 4}px` }} />
-            ))}
-          </div>
-        )}
-      </div>
+                {sizeOf(read.type, read.length) && (
+                  <LineFact title="Holds">
+                    <span className="numeric text-foreground">
+                      {read.type === "string" ? bytes(read.length) : sizeOf(read.type, read.length)}
+                    </span>
+                  </LineFact>
+                )}
+                {keyFact({
+                  label: "Memory",
+                  fact: "memory",
+                  meta: read,
+                  value: read.memory === undefined ? undefined : bytes(read.memory),
+                  tail: "in memory",
+                })}
+                {keyFact({
+                  label: "Encoding",
+                  fact: "encoding",
+                  meta: read,
+                  value: read.encoding,
+                  mono: true,
+                })}
+                {read.frequency !== undefined ? (
+                  <LineFact title="Access frequency">
+                    access frequency{" "}
+                    <span className="numeric text-foreground">{grouped(read.frequency)}</span>
+                  </LineFact>
+                ) : (
+                  keyFact({
+                    label: "Idle when opened",
+                    fact: "idleSeconds",
+                    lead: "idle when opened",
+                    meta: echoed
+                      ? {
+                          ...read,
+                          idleSeconds: undefined,
+                          unavailable: {
+                            idleSeconds:
+                              "This page had read the key itself just before opening it — the key list reads each key it shows — and a read resets the server's idle clock.",
+                          },
+                        }
+                      : (opened ?? read),
+                    value:
+                      echoed || opened?.idleSeconds === undefined
+                        ? undefined
+                        : duration(opened.idleSeconds),
+                    tip: "How long nothing had read or written the key when this page opened it.",
+                  })
+                )}
+              </FactLine>
+            </p>
+          ) : (
+            <div className="flex h-5 items-center gap-3" aria-hidden>
+              {[16, 14, 14, 20].map((width, i) => (
+                <Skeleton key={i} className="h-3.5" style={{ width: `${width * 4}px` }} />
+              ))}
+            </div>
+          )
+        }
+      />
 
       {meta.error && read && (
         <p
@@ -425,11 +424,10 @@ export function KeyPane({
   )
 }
 
-/** The pane with nothing of a key to show: the rail's toggle, and what stands in the key's place. */
-function Blank({ leading, children }: { leading?: React.ReactNode; children: React.ReactNode }) {
+/** The pane with nothing of a key to show: what stands in the key's place. */
+function Blank({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {leading && <div className="flex h-9 shrink-0 items-center px-2">{leading}</div>}
       <div className="flex min-h-0 flex-1 flex-col justify-center">{children}</div>
     </div>
   )
