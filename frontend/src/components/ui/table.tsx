@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { ChevronDown } from "@/components/icons"
 import { useRevealOnWheel } from "@/hooks/use-reveal-on-wheel"
 import { cn } from "@/lib/utils"
 
@@ -105,11 +106,29 @@ function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
 const INTERACTIVE =
   "a, button, input, select, textarea, label, [role='checkbox'], [role='menuitem'], [contenteditable='true']"
 
+/**
+ * Spread on the control that is a row's name, the one that opens what the
+ * row's press opens (a `RowLink`, the name's link): `<Link {...ROW_NAME}>`.
+ * A row holding one leaves the keyboard to it and is no tab stop itself. It
+ * is the mark a `Workspace` already looks for when it puts the keyboard back
+ * on a row, so the two agree on where a row's place is.
+ */
+const ROW_NAME = { "data-workspace-primary": "" } as const
+
+/**
+ * A column that a phone does without. Below `sm` it is not drawn, so a table
+ * of readings keeps the columns that say what each row is and how it is, and
+ * the rest wait for a wider screen (or the page the row opens). Put it on the
+ * head and on every cell of the column.
+ */
+const SECONDARY_COLUMN = "max-sm:hidden"
+
 function TableRow({
   className,
   onActivate,
   onClick,
   onKeyDown,
+  ref,
   ...props
 }: React.ComponentProps<"tr"> & {
   /**
@@ -117,20 +136,48 @@ function TableRow({
    * asking for a click on the few characters of the name. A click that landed
    * on a control inside the row is left to that control, so the row's gesture
    * and its buttons never fight over the same press.
+   *
+   * It is a convenience for the pointer. The keyboard's way in is the row's
+   * name, the control marked with `ROW_NAME`, which says what it opens. A row
+   * that was a tab stop beside its own name button cost two presses of Tab,
+   * and the first announced every cell of the row as one name (A11Y-10). A
+   * row with no name control is still a stop, so it can be reached: give it
+   * an `aria-label`, or better, a name control.
    */
   onActivate?: () => void
 }) {
+  const own = React.useRef<HTMLTableRowElement | null>(null)
+  // A stop until the row is seen to hold its name: which control that is
+  // arrives with the row's data, so it is looked for after every render.
+  const [stop, setStop] = React.useState(Boolean(onActivate))
+  // No dependency list on purpose: the children are what changes, and the
+  // update is skipped when the answer is the same, so it settles in one pass.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
+  React.useLayoutEffect(() => {
+    const next = Boolean(onActivate && !own.current?.querySelector("[data-workspace-primary]"))
+    setStop((previous) => (previous === next ? previous : next))
+  })
+  const attach = React.useCallback(
+    (node: HTMLTableRowElement | null) => {
+      own.current = node
+      if (typeof ref === "function") return ref(node)
+      if (ref) ref.current = node
+    },
+    [ref],
+  )
   return (
     <tr
       data-slot="table-row"
-      tabIndex={onActivate ? 0 : undefined}
+      ref={attach}
+      tabIndex={stop ? 0 : undefined}
       className={cn(
         // Hover is a wash, selection is a fill, focus is a ring — three
         // mechanisms, so a row that is all three at once still reads. These
         // were all `bg-row-hover`, which meant a keyboard user could not tell
         // the row they had arrived at from the one under the pointer.
         "border-b border-hairline transition-colors hover:bg-row-hover has-aria-expanded:bg-row-hover data-[state=selected]:bg-accent",
-        onActivate && "cursor-pointer focus-ring-inset",
+        onActivate && "cursor-pointer",
+        stop && "focus-ring-inset",
         className,
       )}
       onClick={(event) => {
@@ -142,7 +189,8 @@ function TableRow({
       onKeyDown={(event) => {
         onKeyDown?.(event)
         if (!onActivate || event.defaultPrevented) return
-        if (event.key !== "Enter" || event.target !== event.currentTarget) return
+        if (event.key !== "Enter" && event.key !== " ") return
+        if (event.target !== event.currentTarget) return
         event.preventDefault()
         onActivate()
       }}
@@ -151,7 +199,23 @@ function TableRow({
   )
 }
 
-function TableHead({ className, ...props }: React.ComponentProps<"th">) {
+function TableHead({
+  className,
+  label,
+  secondary,
+  children,
+  ...props
+}: React.ComponentProps<"th"> & {
+  /**
+   * The column's name for a screen reader, where it has no visible title: a
+   * column of verbs, a spacer, a mark. A header cell with nothing in it is
+   * read as a nameless column (axe `empty-table-header`). Drawn only when the
+   * head has no children of its own.
+   */
+  label?: string
+  /** A column a phone does without (`SECONDARY_COLUMN`). */
+  secondary?: boolean
+}) {
   return (
     <th
       data-slot="table-head"
@@ -160,10 +224,76 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
         // tracked-out caps a nine-column header was the loudest line in the
         // table, above rows it exists only to name.
         "h-10 px-4 text-left align-middle text-hint font-medium whitespace-nowrap text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        secondary && SECONDARY_COLUMN,
         className,
       )}
       {...props}
-    />
+    >
+      {children ?? (label ? <span className="sr-only">{label}</span> : null)}
+    </th>
+  )
+}
+
+/**
+ * A column's head that orders the rows under it.
+ *
+ * The head says which way the column runs (`aria-sort` on the `th`, `none`
+ * on the others), its words are a real button with the focus ring, and one
+ * chevron, drawn only on the column in use, points the way the rows run. On
+ * a right-aligned column of figures the chevron goes before the words, so
+ * the words stay on the edge the figures end on. It was written five times,
+ * with arrows in two and chevrons in three, and the Files copy said nothing
+ * to a screen reader and drew no ring (DBO-07, A11Y-19).
+ */
+function SortHead({
+  label,
+  active,
+  descending,
+  onSort,
+  align = "left",
+  after,
+  secondary,
+  className,
+}: {
+  label: string
+  /** This column is the one the rows are ordered by. */
+  active: boolean
+  /** Which way, when `active`. */
+  descending: boolean
+  onSort: () => void
+  align?: "left" | "right"
+  /** Beside the head's button and not part of it: what the column means, as an `InfoTip`. */
+  after?: React.ReactNode
+  secondary?: boolean
+  className?: string
+}) {
+  const right = align === "right"
+  return (
+    <TableHead
+      aria-sort={active ? (descending ? "descending" : "ascending") : "none"}
+      secondary={secondary}
+      className={cn(right && "text-right", className)}
+    >
+      <button
+        type="button"
+        onClick={onSort}
+        className={cn(
+          "-mx-1 inline-flex items-center gap-1 rounded-sm px-1 focus-ring transition-colors hover:text-foreground",
+          right && "flex-row-reverse",
+          active && "text-foreground",
+        )}
+      >
+        {label}
+        {active && (
+          <ChevronDown
+            aria-hidden
+            data-sort-glyph=""
+            className={cn("size-3 shrink-0", !descending && "rotate-180")}
+          />
+        )}
+      </button>
+      {after && <span className="ml-1 inline-flex align-middle">{after}</span>}
+    </TableHead>
   )
 }
 
@@ -174,12 +304,20 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
  * shimmered as they polled. On a cell of words it changes only the tracking,
  * by a hundredth of an em.
  */
-function TableCell({ className, ...props }: React.ComponentProps<"td">) {
+function TableCell({
+  className,
+  secondary,
+  ...props
+}: React.ComponentProps<"td"> & {
+  /** A column a phone does without (`SECONDARY_COLUMN`). */
+  secondary?: boolean
+}) {
   return (
     <td
       data-slot="table-cell"
       className={cn(
         "numeric px-4 py-3 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        secondary && SECONDARY_COLUMN,
         className,
       )}
       {...props}
@@ -198,6 +336,9 @@ function TableCaption({ className, ...props }: React.ComponentProps<"caption">) 
 }
 
 export {
+  ROW_NAME,
+  SECONDARY_COLUMN,
+  SortHead,
   stickyTableHeader,
   Table,
   TableHeader,
