@@ -669,8 +669,7 @@ function ListEditor({
               aria-selected={index === highlight}
               className={cn(
                 "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 font-mono text-xs select-none",
-                option.special &&
-                  "font-sans text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase",
+                option.special && "caps font-sans text-micro",
                 index === highlight && "bg-menu-hover",
               )}
               onPointerMove={() => setHighlight(index)}

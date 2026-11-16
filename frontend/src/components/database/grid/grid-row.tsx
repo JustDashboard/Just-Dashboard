@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { InsertedRow, UpdatedRow } from "./change-set"
 import { CellEditor } from "./cell-editor"
 import type { OrderedColumn } from "./layout"
-import { KIND_HUE } from "./legend"
+import { CHANGE_STATE, KIND_HUE } from "./legend"
 import { formatCell, isTruncatedValue, type EditValue } from "./values"
 import type { CellValue, GridColumn, GridColumnKind, GridRow } from "./types"
 
@@ -35,8 +35,7 @@ const VALUE_TEXT = Object.fromEntries(
 ) as Record<GridColumnKind, string>
 
 /** NULL, the empty string and a pending default are words about a value, not values. */
-const ABSENT_TEXT =
-  "truncate font-sans text-micro font-medium tracking-[0.06em] text-muted-foreground/70 uppercase"
+const ABSENT_TEXT = "caps truncate font-sans"
 
 const LEAD_TEXT = "mr-2 shrink-0 font-sans text-hint text-muted-foreground"
 
@@ -263,17 +262,6 @@ const ROW_CLASS: Record<"plain" | "selected" | "inserted" | "deleted", string> =
 const GUTTER =
   "sticky left-0 z-10 flex h-full min-w-0 cursor-default items-center gap-1.5 border-r border-b border-hairline bg-(--jd-grid-ground) [background-image:linear-gradient(var(--wash),var(--wash))] px-2 select-none"
 
-/** The change glyph beside a row number: the same three signs a diff uses. */
-const STATE_MARK: Record<Exclude<RowState, "none">, { sign: string; word: string; hue: string }> = {
-  inserted: { sign: "+", word: "New row", hue: "font-mono font-semibold text-(--git-added)" },
-  updated: { sign: "~", word: "Edited", hue: "font-mono font-semibold text-(--git-modified)" },
-  deleted: {
-    sign: "−",
-    word: "Marked for deletion",
-    hue: "font-mono font-semibold text-(--git-deleted)",
-  },
-}
-
 export interface GridRowProps {
   id: string
   /** Position in the grid as drawn. */
@@ -324,7 +312,7 @@ export interface GridRowProps {
 export const GridRowView = memo(function GridRowView(props: GridRowProps) {
   const { index, label, insert, update, deleted, clipped, error } = props
   const state: RowState = insert ? "inserted" : deleted ? "deleted" : update ? "updated" : "none"
-  const mark = state === "none" ? null : STATE_MARK[state]
+  const mark = state === "none" ? null : CHANGE_STATE[state]
   const wash = props.selected
     ? "selected"
     : state === "inserted" || state === "deleted"
@@ -388,9 +376,9 @@ export const GridRowView = memo(function GridRowView(props: GridRowProps) {
             <Warning aria-label={error} className="size-3 shrink-0 text-destructive" />
           ) : (
             mark && (
-              <span className={mark.hue}>
+              <span className={cn("font-mono font-semibold", mark.hue)}>
                 <span aria-hidden>{mark.sign}</span>
-                <span className="sr-only">{mark.word}</span>
+                <span className="sr-only">{mark.long}</span>
               </span>
             )
           )}

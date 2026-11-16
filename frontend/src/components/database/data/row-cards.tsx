@@ -8,7 +8,7 @@ import { PaneFooter, PaneHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tag } from "@/components/tag"
-import { isDefault, type EditValue } from "@/components/database/grid"
+import { CHANGE_STATE, isDefault, type EditValue } from "@/components/database/grid"
 import { ValueText } from "@/components/database/kit/value-text"
 import {
   drawnRows,
@@ -20,25 +20,8 @@ import {
 } from "@/components/database/data/rows"
 import { grouped } from "@/lib/format"
 
-/** The same three words and hues the row panel and the grid's gutter use. */
-const STATE_WORD: Record<RowState, string> = {
-  inserted: "new",
-  updated: "edited",
-  deleted: "to delete",
-  clean: "",
-}
-const STATE_HUE: Record<RowState, string> = {
-  inserted: "text-(--git-added)",
-  updated: "text-(--git-modified)",
-  deleted: "text-(--git-deleted)",
-  clean: "",
-}
-const STATE_EDGE: Record<RowState, string> = {
-  inserted: "border-l-(--git-added)",
-  updated: "border-l-(--git-modified)",
-  deleted: "border-l-(--git-deleted)",
-  clean: "border-l-transparent",
-}
+/** A clean row's edge: the same width as a changed one's, so the cards line up. */
+const CLEAN_EDGE = "border-l-transparent"
 
 /** How many of a row's first columns make its title. */
 const TITLE_COLUMNS = 2
@@ -192,7 +175,7 @@ function RowCard({
         // One height in every state, and off-screen cards cost nothing: a
         // page can be a thousand of them.
         "flex h-[52px] w-full items-center gap-2 border-b border-l-2 border-hairline pr-2 pl-2.5 text-left focus-ring-inset [contain-intrinsic-size:auto_52px] [content-visibility:auto] hover:bg-row-hover",
-        STATE_EDGE[row.state],
+        row.state === "clean" ? CLEAN_EDGE : CHANGE_STATE[row.state].edge,
         active && "bg-row-hover",
       )}
     >
@@ -237,8 +220,13 @@ function RowCard({
         )}
       </span>
       {row.state !== "clean" && (
-        <span className={cn("shrink-0 font-mono text-hint", STATE_HUE[row.state])}>
-          {STATE_WORD[row.state]}
+        <span
+          className={cn(
+            "shrink-0 font-mono text-hint",
+            row.state !== "clean" && CHANGE_STATE[row.state].hue,
+          )}
+        >
+          {row.state !== "clean" && CHANGE_STATE[row.state].short}
         </span>
       )}
       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />

@@ -16,11 +16,13 @@ import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes, grouped } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/search-input"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {
+  CHANGE_STATE,
   duplicateValues,
   exceedsLimit,
   isDefault,
@@ -50,14 +52,6 @@ import type {
 
 /** How many tables that point here are counted for one row. */
 const REFERENCES = 12
-
-const STATE_WORD = { inserted: "new", updated: "edited", deleted: "to delete", clean: "" } as const
-const STATE_HUE = {
-  inserted: "text-(--git-added)",
-  updated: "text-(--git-modified)",
-  deleted: "text-(--git-deleted)",
-  clean: "",
-} as const
 
 /**
  * The active row, read down instead of across: every column with room for
@@ -207,8 +201,13 @@ export function RowInspector({
         </span>
         {/* "New row" already says what the word would. */}
         {row && row.state !== "clean" && !(row.state === "inserted" && rowNumber === null) && (
-          <span className={`shrink-0 font-mono text-hint ${STATE_HUE[row.state]}`}>
-            {STATE_WORD[row.state]}
+          <span
+            className={cn(
+              "shrink-0 font-mono text-hint",
+              row.state !== "clean" && CHANGE_STATE[row.state].hue,
+            )}
+          >
+            {row.state !== "clean" && CHANGE_STATE[row.state].short}
           </span>
         )}
         <span className="flex-1" />
