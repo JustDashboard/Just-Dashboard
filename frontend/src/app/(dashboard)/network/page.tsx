@@ -129,7 +129,7 @@ export default function NetworkOverviewPage() {
   const nodeOf = (id: string) => flowNode(id, data!, links)
   return (
     <Page rise>
-      <PageContext eyebrow="Network" title="Network" />
+      <PageContext title="Network" />
       <NetworkIdentity
         overview={data}
         links={links}

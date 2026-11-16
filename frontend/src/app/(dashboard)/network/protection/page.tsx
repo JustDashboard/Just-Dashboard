@@ -198,7 +198,7 @@ export default function NetworkProtectionPage() {
 
   return (
     <Page rise>
-      <PageContext eyebrow="Network" title="Protection" />
+      <PageContext title="Protection" />
       {/* The line and its views are one block, as a process's page has them:
           the strip's hairline is the rule under the line. */}
       <div className="flex min-w-0 flex-col gap-4">

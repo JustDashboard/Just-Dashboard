@@ -98,7 +98,7 @@ export function ToolsPanel() {
 
   return (
     <>
-      <PageContext eyebrow="Network" title="Tools" />
+      <PageContext title="Tools" />
       {/* One frame around the whole workbench: the strip, then the rail and
           the pane with a hairline between them. Below `md` it runs to the
           window's edges, one pane at a time with a bar at the foot. */}

@@ -139,7 +139,7 @@ export default function NetworkGatewayPage() {
 
   return (
     <Page rise>
-      <PageContext eyebrow="Network" title="Gateway" />
+      <PageContext title="Gateway" />
       <HostIdentity
         label="About the gateway"
         mark={firewallProduct(view?.capability.firewall)}

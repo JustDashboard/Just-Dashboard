@@ -480,7 +480,7 @@ test("read access opens local tools without reading or starting retained runs", 
   const state = await fixture(page, [run()], reader)
   for (const path of ["/network/runs/baseline", "/network/runs?run=baseline", "/network/runs"]) {
     await page.goto(path)
-    await expect(page.getByText("Saved diagnostics need the admin capability")).toBeVisible()
+    await expect(page.getByText("Saved diagnostics need an administrator")).toBeVisible()
     await expect(page.getByRole("button", { name: "Rerun", exact: true })).toHaveCount(0)
     await expect(page.getByRole("button", { name: /actions/i })).toHaveCount(0)
   }
@@ -635,6 +635,24 @@ test("the chips narrow the list, and the rail walks what is left with the view k
   await expect(page).toHaveURL(/\/network\/runs\/second\?tab=details$/)
   await rail.getByRole("button", { name: /^All/ }).click()
   await expect(rail.getByRole("link")).toHaveCount(3)
+})
+
+test("on a phone a run's line is as tall while it is read as once it is", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const record = run()
+  const state = await fixture(page, [record])
+  state.hold = true
+  await page.goto(`/network/runs/${record.id}`)
+  const line = page.locator("[data-slot='host-identity']").first()
+  await expect(line).toHaveAttribute("aria-busy", "true")
+  await risen(page)
+  const loading = (await line.boundingBox())!
+  state.release()
+  await expect(page.getByRole("region", { name: `About ${record.name}` })).toBeVisible()
+  await risen(page)
+  const loaded = (await page.getByRole("region", { name: `About ${record.name}` }).boundingBox())!
+  expect(loaded.height).toBeCloseTo(loading.height, 0)
+  expect(loaded.y).toBeCloseTo(loading.y, 0)
 })
 
 test("a run that is gone says so and leads back to the list", async ({ page }) => {

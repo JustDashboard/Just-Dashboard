@@ -84,15 +84,6 @@ export function RunResult({ run }: { run: DiagnosticRun }) {
           {run.error}
         </Well>
       )}
-      {run.scope.limitations.length > 0 && (
-        <ul className="space-y-1" aria-label="Scope limits">
-          {run.scope.limitations.map((line) => (
-            <li key={line} className="text-hint text-muted-foreground">
-              {line}
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   )
 }
@@ -197,6 +188,17 @@ export function RunDetails({ run }: { run: DiagnosticRun }) {
         <Detail label="Outcome source">
           {run.outcomeSource?.replaceAll("_", " ") || "Awaiting outcome"}
         </Detail>
+        {/* What the run could not see is a fact of its record, not a list
+            under its result. */}
+        {run.scope.limitations.length > 0 && (
+          <Detail label="Scope limits">
+            <ul className="space-y-1" aria-label="Scope limits">
+              {run.scope.limitations.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </Detail>
+        )}
         <Detail label="Run">
           <span className="font-mono break-all">{run.id}</span>
         </Detail>
