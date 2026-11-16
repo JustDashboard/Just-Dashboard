@@ -94,6 +94,7 @@ import { EmptyState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { SplitGlyph } from "@/components/terminal/split-glyph"
 
 const AGENTS = {
   codex: { name: "Codex", command: "codex --yolo", logo: "openai" },
@@ -826,17 +827,21 @@ export default function TerminalPage() {
           </Tooltip>
         ))}
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Split terminal"
-              title="Split terminal"
-              disabled={!activeWindow || creating || !data.persistent}
-            >
-              <Plus className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Split terminal"
+                  disabled={!activeWindow || creating || !data.persistent}
+                >
+                  <SplitGlyph />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Split terminal</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent
             align="end"
             onCloseAutoFocus={(event) => {
