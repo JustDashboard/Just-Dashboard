@@ -273,13 +273,15 @@ export function PortChanges({
       <PanelHeader
         title={
           history?.recordingSince ? (
-            <>
+            // One line with a gap, as the firewall's "Rules" and its tip are:
+            // bare in the heading, the ⓘ touched the word and sat off its line.
+            <span className="inline-flex items-center gap-1.5">
               Changes
               <InfoTip label="How the changes are kept">
                 Compared once a minute, kept {history.retentionDays} days, recording since{" "}
                 {calendarDate(history.recordingSince)}.
               </InfoTip>
-            </>
+            </span>
           ) : (
             "Changes"
           )
