@@ -31,12 +31,6 @@ function liveTraffic(page: Page) {
   return page.getByRole("region", { name: "Live traffic" })
 }
 
-function tile(page: Page, label: string) {
-  return liveTraffic(page)
-    .locator("[data-slot='stat-tile']")
-    .filter({ has: page.locator(".eyebrow").getByText(label, { exact: true }) })
-}
-
 function counters(page: Page) {
   return liveTraffic(page).getByRole("region", { name: "nginx counters" })
 }
@@ -96,14 +90,10 @@ test("live traffic adds up every site's minutes, the ingress's routes included",
 
   const panel = liveTraffic(page)
   await expect(panel).toContainText("Last hour across 2 sites, by the minute")
-  // The last whole minute, not the one still filling.
-  await expect(tile(page, "Requests")).toContainText("60")
-  await expect(tile(page, "This hour")).toContainText("106")
-  await expect(tile(page, "Server errors")).toContainText("5.7%")
-  await expect(tile(page, "Server errors")).toContainText("6 this hour")
-  await expect(
-    panel.getByRole("img", { name: "Requests a minute over the last hour" }),
-  ).toBeVisible()
+  // The chart carries the minutes and the band under it the hour: no tiles
+  // restate them over the chart.
+  await expect(panel.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Traffic", exact: true })).toContainText("106")
   await expect(panel.getByRole("heading", { name: "Requests a minute" })).toBeVisible()
   // A poll is not a socket: nothing here breathes as live.
   await expect(panel.locator(".animate-breathe")).toHaveCount(0)
@@ -225,7 +215,7 @@ test("the band keeps its blocks and its height while the hour's reading lands", 
   await expect(blocks).toHaveCount(3)
   await risen(page)
   const after = await band.boundingBox()
-  // Live traffic above draws the same tiles and chart before the read as after,
+  // Live traffic above draws the same chart before the read as after,
   // and anything under a pixel is not a shift.
   expect(after?.height).toBeCloseTo(before?.height ?? 0, 0)
   expect(after?.y).toBeCloseTo(before?.y ?? 0, 0)
@@ -475,7 +465,7 @@ test("live traffic fits a phone", async ({ page }) => {
   await page.goto("/proxy")
 
   const panel = liveTraffic(page)
-  await expect(tile(page, "Requests")).toBeVisible()
+  await expect(panel.getByRole("heading", { name: "Requests a minute" })).toBeVisible()
   const toggle = panel.getByRole("switch", { name: "Live metrics" })
   await toggle.scrollIntoViewIfNeeded()
   await expect(toggle).toBeInViewport()
@@ -483,10 +473,7 @@ test("live traffic fits a phone", async ({ page }) => {
     .locator("[data-slot='page']")
     .evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(overflow).toBeLessThanOrEqual(1)
-  const tiles = await panel
-    .locator("[data-slot='stat-tile']")
-    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width))
-  // Stacked, each the panel's width, so no reading is cut.
-  expect(tiles).toHaveLength(4)
-  for (const width of tiles) expect(width).toBeGreaterThan(300)
+  // The chart takes the panel's width, so no reading is cut.
+  const chart = await panel.locator("[data-slot=panel-body]").first().boundingBox()
+  expect(chart?.width ?? 0).toBeGreaterThan(300)
 })

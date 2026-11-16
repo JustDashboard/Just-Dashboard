@@ -1986,6 +1986,33 @@ for (const width of [1280, 390]) {
     const loaded = await identity.boundingBox()
     expect(Math.abs(loaded!.y - loading!.y)).toBeLessThan(1)
     expect(Math.abs(loaded!.x - loading!.x)).toBeLessThan(1)
+    // The loading line keeps the command's place, so it is as tall as the
+    // line it becomes and the picture under it does not move.
+    expect(Math.abs(loaded!.height - loading!.height)).toBeLessThan(1)
+  })
+
+  test(`a stream's own line is one height loading and loaded at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProxy(page, { included: true })
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/proxy/streams/", async (route) => {
+      await held
+      return json(route, { ...streamStatus({ streams: carrying }) })
+    })
+    await page.goto("/proxy/streams/postgres-replica")
+    const identity = page.locator("[data-slot='host-identity']")
+    await expect(identity).toContainText("Reading postgres-replica…")
+    await risen(page)
+    const loading = await identity.boundingBox()
+    release()
+    await expect(page.getByRole("region", { name: "About postgres-replica" })).toBeVisible()
+    await risen(page)
+    const loaded = await identity.boundingBox()
+    expect(Math.abs(loaded!.y - loading!.y)).toBeLessThan(1)
+    // On a phone too: the loading line keeps a place for the state and the
+    // verbs the loaded line has, so the views under it do not jump.
+    expect(Math.abs(loaded!.height - loading!.height)).toBeLessThan(1)
   })
 }
 

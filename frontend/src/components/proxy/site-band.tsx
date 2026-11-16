@@ -54,11 +54,11 @@ export function SiteMark({
         lead={<ProjectMark deployment={deployment} size={size} />}
         ids={[engine]}
         size={size}
-        ring="ring-(--choice-surface)"
+        ring="ring-choice-surface"
       />
     )
   if (!app?.product || app.product === engine) return <ProductLogo id={engine} size={size} />
-  return <ProductLogos ids={[app.product, engine]} size={size} ring="ring-(--choice-surface)" />
+  return <ProductLogos ids={[app.product, engine]} size={size} ring="ring-choice-surface" />
 }
 
 /**
