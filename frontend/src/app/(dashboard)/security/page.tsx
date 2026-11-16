@@ -61,7 +61,7 @@ export default function SecurityOverviewPage() {
       : sshReading(sshd.data ?? undefined)
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Protection" title="Security" />
 
       <ExposureIdentity exposure={exposure} />

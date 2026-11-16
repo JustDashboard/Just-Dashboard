@@ -22,7 +22,9 @@ import { FactDot, HostIdentity } from "@/components/identity-header"
 import { deniedSources } from "@/components/network/firewall-reading"
 import { PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Segments } from "@/components/segments"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ListToolbar } from "@/components/toolbar"
 import { ProductGlyph, ProductLogo, platformProduct } from "@/components/product-logo"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
@@ -51,7 +53,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useHeldList } from "@/components/workspace/held-list"
 import { useFilterHistory } from "@/components/workspace/history"
@@ -266,11 +267,6 @@ function LoginsIdentity({
   )
 }
 
-/** A section's count, at the far end of its title line. */
-function Count({ children }: { children: React.ReactNode }) {
-  return <span className="numeric text-hint text-muted-foreground">{children}</span>
-}
-
 /** One line in a section that has nothing to list, at the height of the row that would stand there. */
 function Nothing({ children }: { children: React.ReactNode }) {
   return (
@@ -310,7 +306,7 @@ function CurrentSessions({ poll }: { poll: PollState<LoginSession[]> }) {
   return (
     <>
       <Panel plain id="sessions" className="scroll-mt-6">
-        <PanelHeader title="Signed in" actions={data && <Count>{sessions.length}</Count>} />
+        <PanelHeader title="Signed in" count={data && sessions.length} />
         <PanelBody>
           {loading && !data && !error ? (
             <Skeleton className="h-14.5 rounded-xl" />
@@ -445,14 +441,11 @@ function AttackersPanel({
     <Panel plain id="attackers" className="scroll-mt-6">
       <PanelHeader
         title="Attackers"
-        actions={
-          data && (
-            <Count>
-              {data.attempts === 0
-                ? `none in ${windowWords(data.windowHours)}`
-                : `${attemptsWords(data)} ${data.attempts === 1 ? "attempt" : "attempts"} from ${plural(data.addresses, "address", "addresses")}${data.since ? ` · since ${relativeTime(data.since)}` : ""}`}
-            </Count>
-          )
+        count={
+          data &&
+          (data.attempts === 0
+            ? `none in ${windowWords(data.windowHours)}`
+            : `${attemptsWords(data)} ${data.attempts === 1 ? "attempt" : "attempts"} from ${plural(data.addresses, "address", "addresses")}${data.since ? ` · since ${relativeTime(data.since)}` : ""}`)
         }
       />
       <PanelBody flush>
@@ -592,43 +585,49 @@ function LoginHistoryPanel({ history }: { history: PollState<LoginRecord[]> }) {
     <Panel plain id="recent" className="scroll-mt-6">
       <PanelHeader
         title={showFailed ? "Failed login attempts" : "Recent logins"}
-        actions={data && data.length > 0 && <Count>{plural(data.length, "record")}</Count>}
+        count={data && data.length > 0 && plural(data.length, "record")}
       />
       {!noRecord(error) && !(error && !data) && (
-        <PanelToolbar className="border-b-0 pb-0">
-          {admin && (
-            <ToggleGroup
-              type="single"
-              value={showFailed ? "failed" : "ok"}
-              onValueChange={(next) => next && setFailed(next === "failed")}
-              variant="outline"
-              size="sm"
-              aria-label="Which logins to show"
-            >
-              <ToggleGroupItem value="ok" className="px-2.5 text-hint">
-                Successful
-              </ToggleGroupItem>
-              <ToggleGroupItem value="failed" className="px-2.5 text-hint">
-                Failed
-              </ToggleGroupItem>
-            </ToggleGroup>
-          )}
-          {held.pending > 0 && (
-            <Button size="xs" aria-label={`Show ${held.pending} new logins`} onClick={held.reveal}>
-              <span role="status">{held.pending} new logins</span> · Show
-            </Button>
-          )}
-          <span className="flex-1" />
-          <SearchInput
-            dense
-            data-workspace-search
-            aria-label="Filter login records"
-            placeholder="User, terminal or address"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            containerClassName="sm:w-64"
-          />
-        </PanelToolbar>
+        // The list's one toolbar: the search first, then which logins and
+        // the held rows under it, as every list in the area has it.
+        <ListToolbar
+          className="pt-3"
+          search={
+            <SearchInput
+              data-workspace-search
+              aria-label="Filter login records"
+              placeholder="User, terminal or address"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          }
+          chips={
+            (admin || held.pending > 0) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {admin && (
+                  <Segments
+                    label="Which logins to show"
+                    value={showFailed ? "failed" : "ok"}
+                    onChange={(next) => setFailed(next === "failed")}
+                    options={[
+                      { value: "ok", label: "Successful" },
+                      { value: "failed", label: "Failed" },
+                    ]}
+                  />
+                )}
+                {held.pending > 0 && (
+                  <Button
+                    size="xs"
+                    aria-label={`Show ${held.pending} new logins`}
+                    onClick={held.reveal}
+                  >
+                    <span role="status">{held.pending} new logins</span> · Show
+                  </Button>
+                )}
+              </div>
+            )
+          }
+        />
       )}
       <PanelBody flush className="pt-3">
         {noRecord(error) ? (
@@ -700,7 +699,7 @@ function RecordTable({ records, failed }: { records: LoginRecord[]; failed: bool
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
       <Table containerClassName="max-h-[30rem] max-sm:hidden">
-        <TableHeader className="sticky top-0 z-10 [&_tr]:border-b">
+        <TableHeader className="sticky top-0 z-raised [&_tr]:border-b">
           <TableRow>
             <TableHead>Account</TableHead>
             <TableHead>Terminal</TableHead>

@@ -55,7 +55,7 @@ export function LineRow({ className, children, ...props }: React.ComponentProps<
     <li
       data-slot="line-row"
       className={cn(
-        "grid h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4",
+        "grid h-14 min-w-0 grid-cols-main-end items-center gap-x-4",
         WIDE_ROW,
         className,
       )}

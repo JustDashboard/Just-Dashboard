@@ -8,7 +8,7 @@ import { IntrusionPanels } from "@/components/security/intrusion-panels"
 // hands out inside a Suspense boundary.
 export default function SecurityIntrusionPage() {
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <Suspense>
         <IntrusionPanels />
       </Suspense>

@@ -10,7 +10,6 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { TunnelHostname, TunnelStatus } from "@/lib/proxy/types-tunnel"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
@@ -45,6 +44,7 @@ import {
   tunnelNameProblem,
   type TunnelLine,
 } from "@/components/proxy/tunnel-model"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** Hostnames drawn in the picture; the rest are counted, and every one is in the list under it. */
 const PICTURED = 4
@@ -110,7 +110,7 @@ export function TunnelPage() {
   }
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {header}
       {status.connected ? (
         <Connected status={status} admin={admin} onAnswer={settle} />
@@ -253,7 +253,7 @@ function Connected({
                   .filter(Boolean)
                   .join(" · ")}
               >
-                cloudflared <span className="font-mono text-[0.9em]">{connector.version}</span>
+                cloudflared <span className="code-inline">{connector.version}</span>
                 {connector.state === "running" && !connector.foreign
                   ? up > 60
                     ? `, up ${duration(up).split(" ")[0]}`
@@ -449,7 +449,7 @@ function HostnameRow({ hostname, tunnelId }: { hostname: TunnelHostname; tunnelI
  * start; narrow, in one column.
  */
 function TunnelPicture({ status }: { status: TunnelStatus }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const edge = useRef<HTMLDivElement>(null)
   const connector = useRef<HTMLDivElement>(null)
@@ -698,18 +698,15 @@ function Setup({
               <>
                 <FactDot />
                 <span>
-                  to <span className="font-mono text-[0.9em]">{status.origin.service}</span>
+                  to <span className="code-inline">{status.origin.service}</span>
                 </span>
               </>
             )}
           </>
         }
       />
+      {/* The picture says it: cloudflared dials out, so no port opens here. */}
       <TunnelPicture status={status} />
-      <p className="mx-auto max-w-2xl text-center text-body text-pretty text-muted-foreground">
-        cloudflared dials out from this server to Cloudflare, which answers for your domains over
-        HTTPS, so no port opens here.
-      </p>
       <div className="mx-auto w-full max-w-3xl min-w-0 space-y-6">
         {!admin ? (
           <Notice title="Only an administrator connects a tunnel">

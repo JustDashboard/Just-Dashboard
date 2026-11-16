@@ -332,7 +332,7 @@ function Identify({ socket }: { socket: Socket }) {
         <Field
           label="Server name"
           htmlFor={`${id}-name`}
-          hint="Sent as SNI and Host; leave blank to ask by address"
+          info="Sent as SNI and Host; leave blank to ask by address."
         >
           <Input
             id={`${id}-name`}

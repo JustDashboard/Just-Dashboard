@@ -1,5 +1,6 @@
 import { Bug } from "@/components/icons"
-import { HostIdentity } from "@/components/identity-header"
+import { FactLine } from "@/components/fact-line"
+import { ProductLogo } from "@/components/product-logo"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
@@ -7,11 +8,14 @@ import { WireMark } from "@/components/wire/wire"
 import type { EngineId } from "@/components/security/intrusion-model"
 
 /**
- * The line an engine's view opens on: the engine as its own mark, its name
- * with its state after it, a line of facts, and its one command at the far
- * end. The same line the page opens on, a step in, so the three views read as
- * three of one kind. Suricata has no mark in the logo collection and keeps a
- * glyph on the tile, never a guessed logo.
+ * The line an engine's view opens on, one step down from the page's own
+ * identity line (PGP-22): the section head's anatomy with the engine's mark
+ * at 32px before its name, its state and its facts on the one line —
+ * "fail2ban · running · 1 jail · 41 bans" — and its one command at the far
+ * end, over a hairline. A full identity line here, under the engine tabs,
+ * matched the page's own header in size, and the page read as two headers.
+ * Suricata has no mark in the logo collection and keeps a glyph on the tile,
+ * never a guessed logo.
  */
 export function EngineHead({
   id,
@@ -30,16 +34,25 @@ export function EngineHead({
   command?: React.ReactNode
 }) {
   return (
-    <HostIdentity
-      label={`About ${name}`}
-      slot="engine-head"
-      mark={id === "suricata" ? undefined : id}
-      fallback={Bug}
-      title={title ?? name}
-      state={state}
-      facts={facts}
-      command={command}
-    />
+    <section
+      aria-label={`About ${name}`}
+      data-slot="engine-head"
+      className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-hairline pb-3"
+    >
+      <ProductLogo
+        id={id === "suricata" ? undefined : id}
+        fallback={Bug}
+        className="size-8 rounded-lg [&_img]:size-5 [&>svg]:size-4"
+      />
+      <h2 className="min-w-0 truncate text-title leading-tight font-semibold tracking-tight">
+        {title ?? name}
+      </h2>
+      <span className="flex shrink-0 items-center text-xs">{state}</span>
+      <span className="min-w-0 flex-[1_1_12rem] text-xs text-muted-foreground">
+        <FactLine>{facts}</FactLine>
+      </span>
+      {command && <div className="ml-auto flex shrink-0 items-center gap-2">{command}</div>}
+    </section>
   )
 }
 
