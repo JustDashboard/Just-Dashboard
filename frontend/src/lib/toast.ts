@@ -29,18 +29,6 @@ type Options = {
 }
 
 /**
- * How long a toast that is not a failure stays. Sonner's own four seconds is
- * under the five a short line needs to be found and read by somebody whose
- * eyes were on the form, and a success often carries a second line.
- */
-export const TOAST_MS = 6_000
-
-/** A passing toast: the caller's duration, or the default. */
-function passing(options?: Options) {
-  return { ...options, duration: options?.duration ?? TOAST_MS }
-}
-
-/**
  * The failures on screen, by what they say. A failure stays until dismissed,
  * so the same one raised again (a second press on a dead button, a poll that
  * keeps failing) would otherwise pile up copies of one sentence. The earlier
@@ -55,15 +43,15 @@ export function failureReason(cause: unknown): string {
 
 export const notify = {
   success(title: string, options?: Options) {
-    return sonner.success(title, passing(options))
+    return sonner.success(title, options)
   },
 
   info(title: string, options?: Options) {
-    return sonner.info(title, passing(options))
+    return sonner.info(title, options)
   },
 
   warning(title: string, options?: Options) {
-    return sonner.warning(title, passing(options))
+    return sonner.warning(title, options)
   },
 
   /**
@@ -77,7 +65,9 @@ export const notify = {
    * "Not connected" explains why a press did nothing, and a reader who looked
    * away for four seconds was left with a button that silently does not work.
    * The toaster draws a close button on every toast, and a caller that knows
-   * its failure is passing gives a `duration`.
+   * its failure is passing gives a `duration`. Only failures wait: a toast
+   * stands over whatever is in the corner under it, so a success keeps
+   * sonner's own short life.
    *
    * The reason is the API's message, which is worded to sit inside other text:
    * "not found", "too many requests, slow down". Under a title it stands

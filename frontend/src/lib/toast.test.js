@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import { TOAST_MS, failureReason, notify } from "./toast"
+import { failureReason, notify } from "./toast"
 
 // Sonner keeps its toasts in a store of its own, so what was asked of it can be
 // read back without a toaster on a page. The toaster (`components/ui/sonner`)
@@ -62,11 +62,12 @@ describe("notify.error", () => {
 })
 
 describe("the passing toasts", () => {
-  test("stay six seconds, past the five a line needs to be read", () => {
-    expect(TOAST_MS).toBeGreaterThanOrEqual(5_000)
+  // A toast stands over the corner's controls while it is up, so a success
+  // keeps sonner's own short life; only a failure waits to be read.
+  test("leave by themselves, on the toaster's own timer", () => {
     for (const kind of ["success", "info", "warning"]) {
       const id = notify[kind]("Saved")
-      expect(byId(id).duration).toBe(TOAST_MS)
+      expect(byId(id).duration).toBeUndefined()
     }
   })
 
