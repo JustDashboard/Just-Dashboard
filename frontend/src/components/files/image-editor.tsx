@@ -23,7 +23,7 @@ import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { SidePanel } from "@/components/side-panel"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FileIcon } from "./file-icon"
+import { FileIcon } from "@/components/file-icon"
 import { editorHref } from "./search"
 import { Notice } from "@/components/state"
 import { Spinner } from "@/components/loading"
@@ -97,7 +97,7 @@ export function ImageEditorSheet({
     <SidePanel
       open={path !== null}
       onOpenChange={requestClose}
-      width="xl"
+      size="xl"
       title={path?.split("/").pop() ?? "Image"}
       description={path ?? undefined}
       bodyClassName="flex min-h-0 flex-1 flex-col p-0"
@@ -784,8 +784,13 @@ export function ImageEditor({
         </div>
       </div>
       {conflict && (
-        <div role="alert">
-          <Notice title="Image changed on the server" tone="warning" className="mx-3 my-2">
+        <div>
+          <Notice
+            title="Image changed on the server"
+            tone="warning"
+            live="alert"
+            className="mx-3 my-2"
+          >
             <p>Your edits are kept. Save as a new file to keep both.</p>
             <div className="mt-2 flex flex-wrap gap-2">
               <Button size="sm" variant="outline" asChild>

@@ -83,7 +83,7 @@ function Workspace() {
 
   return (
     <Page rise>
-      <PageContext eyebrow="Account" title="Workspace" />
+      <PageContext title="Workspace" />
       <HostIdentity
         fallback={GridSquare}
         title="Your sidebar"

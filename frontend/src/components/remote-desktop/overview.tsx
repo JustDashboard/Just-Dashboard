@@ -128,7 +128,7 @@ export function RemoteDesktopOverview() {
   if (!data) {
     return (
       <Page rise>
-        <PageContext eyebrow="Workspace" title="Remote Desktop" />
+        <PageContext title="Remote Desktop" />
         {error ? (
           <ErrorState error={error} onRetry={refresh} />
         ) : (
@@ -152,7 +152,7 @@ export function RemoteDesktopOverview() {
   if (data.engine.state === "missing" && data.computers.length === 0) {
     return (
       <Page rise>
-        <PageContext eyebrow="Workspace" title="Remote Desktop" />
+        <PageContext title="Remote Desktop" />
         <EngineSetup onReady={refresh} />
       </Page>
     )
@@ -177,7 +177,7 @@ export function RemoteDesktopOverview() {
 
   return (
     <Page rise>
-      <PageContext eyebrow="Workspace" title="Remote Desktop" />
+      <PageContext title="Remote Desktop" />
 
       {identity}
 

@@ -19,6 +19,7 @@ import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { OneTimeCodeInput } from "@/components/account/one-time-code"
 import { VerbActions, type Verb } from "@/components/verbs"
 
 /**
@@ -239,16 +240,7 @@ function AddPasskey({
         </Field>
         {totp && (
           <Field label="Code from your authenticator" htmlFor="passkey-code">
-            <Input
-              id="passkey-code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              placeholder="000000"
-              className="max-w-48 text-center font-mono tracking-[0.4em]"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-            />
+            <OneTimeCodeInput id="passkey-code" value={code} onChange={setCode} />
           </Field>
         )}
         {error && (

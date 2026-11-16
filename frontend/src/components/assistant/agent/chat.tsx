@@ -51,7 +51,7 @@ import {
 import { FormNote } from "@/components/form"
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox"
 import type { PastedImage } from "@/components/assistant/agent/images"
-import { Markdown } from "@/components/git/markdown"
+import { Markdown } from "@/components/markdown"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"

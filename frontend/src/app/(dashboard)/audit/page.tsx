@@ -259,7 +259,7 @@ export default function AuditPage() {
   if (!admin || refused(error) || refused(day.error)) {
     return (
       <Page rise>
-        <PageContext eyebrow="Advanced" title="Audit log" />
+        <PageContext title="Audit log" />
         <EmptyState
           icon={Notes}
           title="The audit log is for administrators"
@@ -280,7 +280,7 @@ export default function AuditPage() {
       }}
     >
       <Page rise>
-        <PageContext eyebrow="Advanced" title="Audit log" />
+        <PageContext title="Audit log" />
 
         {/* The line and the day under it are one block: what happened, then
             when. Both stand at their final height before the day is read. */}

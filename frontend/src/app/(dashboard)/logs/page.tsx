@@ -521,11 +521,7 @@ function LogsScreen() {
       }}
     >
       <Page fill className="gap-4 md:gap-5 md:max-lg:h-auto md:max-lg:overflow-visible">
-        <PageContext
-          eyebrow="Server"
-          title="Logs"
-          actions={identity ? undefined : <WorkspaceHelp />}
-        />
+        <PageContext title="Logs" actions={identity ? undefined : <WorkspaceHelp />} />
         {identity}
 
         {/* One frame around the whole workbench. The rail and the lines are

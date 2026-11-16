@@ -542,7 +542,7 @@ export function RepoWorkspace({
       ]}
     >
       <CommitAuthors.Provider value={authors.data}>
-        <Page fill className="gap-3 p-0 lg:px-3 lg:py-3">
+        <Page fill="workspace" className="gap-3">
           {operation && (
             <Notice tone="warning" title={`A ${operation} is in progress`}>
               {operation === "bisect"

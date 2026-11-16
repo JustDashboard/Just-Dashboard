@@ -105,7 +105,7 @@ export function AssistantSettingsSheet({
       onOpenChange={(next) => !next && onClose()}
       title={settings?.configured ? "Assistant settings" : "Set up the assistant"}
       description="Choose the model provider the dashboard's assistant asks"
-      width="md"
+      size="md"
       footer={
         <>
           <FormNote className="mr-auto">Saved once the provider answers a check.</FormNote>

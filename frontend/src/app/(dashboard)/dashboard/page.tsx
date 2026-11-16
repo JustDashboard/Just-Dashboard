@@ -97,7 +97,6 @@ export default function DashboardVersionPage() {
   if (!report) {
     return (
       <PageState
-        eyebrow="Settings"
         title="Version"
         error={error}
         skeleton={
@@ -124,7 +123,7 @@ export default function DashboardVersionPage() {
   return (
     <Page rise>
       {dialog}
-      <PageContext eyebrow="Settings" title="Version" />
+      <PageContext title="Version" />
 
       <Identity
         report={report}

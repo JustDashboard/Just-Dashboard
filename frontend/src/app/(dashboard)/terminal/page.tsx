@@ -724,7 +724,7 @@ export default function TerminalPage() {
 
   if (loading)
     return (
-      <Page fill className="p-2 lg:p-3">
+      <Page fill="workspace">
         <h1 className="sr-only">Terminal</h1>
         <LoadingPanel rows={4} />
       </Page>
@@ -962,12 +962,12 @@ export default function TerminalPage() {
   )
 
   return (
-    <Page fill className="gap-2 p-0 lg:px-3 lg:py-3">
+    <Page fill="workspace" className="gap-2">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Terminal</h1>
       {data.persistenceError && (
-        <div role="alert" className="max-lg:px-2 max-lg:pt-2">
-          <Notice icon={ShieldOff} tone="danger" title="New terminals are unavailable">
+        <div className="max-lg:px-2 max-lg:pt-2">
+          <Notice icon={ShieldOff} tone="danger" live="alert" title="New terminals are unavailable">
             {data.persistenceError}. Existing sessions keep running on the server.
           </Notice>
         </div>

@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { FilterChip } from "@/components/chips"
-import { DiffView } from "@/components/files/diff-view"
+import { DiffView } from "@/components/diff-view"
 import { Modal } from "@/components/modal"
 import {
   Select,

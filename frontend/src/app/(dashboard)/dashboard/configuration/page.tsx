@@ -251,7 +251,6 @@ function Configuration() {
   if ((loading && !report) || (error && !(removing && report))) {
     return (
       <PageState
-        eyebrow="Settings"
         title="Configuration"
         error={error ?? undefined}
         // The identity line, the path and the column, at about their heights.
@@ -354,7 +353,7 @@ function Configuration() {
   return (
     <Page rise>
       {dialog}
-      <PageContext eyebrow="Settings" title="Configuration" />
+      <PageContext title="Configuration" />
 
       {/* The install's identity line, laid out as a project's: the address
           it answers at is the name with its state beside it, the checkout it

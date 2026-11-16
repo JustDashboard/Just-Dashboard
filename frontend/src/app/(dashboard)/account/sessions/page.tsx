@@ -20,7 +20,7 @@ export default function AccountSessionsPage() {
   const sessions = useSessions()
   return (
     <Page rise>
-      <PageContext eyebrow="Account" title="Sessions" />
+      <PageContext title="Sessions" />
       <SessionsView sessions={sessions} />
     </Page>
   )

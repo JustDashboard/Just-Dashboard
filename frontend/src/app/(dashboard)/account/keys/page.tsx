@@ -26,7 +26,7 @@ export default function AccountKeysPage() {
   const users = useDashboardUsers(can("system.admin"))
   return (
     <Page rise>
-      <PageContext eyebrow="Account" title="API keys" />
+      <PageContext title="API keys" />
       <ApiKeysView keys={keys} users={users.data ?? undefined} />
     </Page>
   )

@@ -39,7 +39,7 @@ import {
   kindOfEntry,
   useFolderColour,
   type FolderColour,
-} from "@/components/files/file-icon"
+} from "@/components/file-icon"
 import { FolderColourSwatches } from "@/components/files/folder-colour"
 import { copyText } from "@/lib/clipboard"
 import { baseOf, parentOf, rawUrl } from "@/components/files/media"

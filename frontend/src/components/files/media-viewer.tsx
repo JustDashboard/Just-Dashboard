@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
 import { ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
-import { FileIcon } from "@/components/files/file-icon"
+import { FileIcon } from "@/components/file-icon"
 import { mediaKind, rawUrl } from "@/components/files/media"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
 

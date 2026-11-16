@@ -23,7 +23,7 @@ export default function AccountUsersPage() {
   const users = useDashboardUsers()
   return (
     <Page rise>
-      <PageContext eyebrow="Account" title="Users" />
+      <PageContext title="Users" />
       <DashboardUsersView users={users} />
     </Page>
   )

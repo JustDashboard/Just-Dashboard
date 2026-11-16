@@ -236,7 +236,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     )
   if (!board)
     return (
-      <Page fill className="max-w-none p-2 lg:p-3">
+      <Page fill="workspace">
         <h1 className="sr-only">Drawing</h1>
         <LoadingPanel />
       </Page>
@@ -641,7 +641,7 @@ function LoadedBoard({ board }: { board: Board }) {
   const said = SAVE_WORDS[saveState]
 
   return (
-    <Page fill className="max-w-none gap-0 p-0 lg:px-3 lg:py-3">
+    <Page fill="workspace">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Drawing: {name.trim() || board.name}</h1>
       <div

@@ -103,7 +103,7 @@ export function ServerMapPage() {
   const ready = map && memory.document
 
   return (
-    <Page fill className="max-w-none gap-2 p-0 lg:px-3 lg:py-3">
+    <Page fill="workspace" className="gap-2">
       <PageContext title="Map" />
       <div
         ref={root}

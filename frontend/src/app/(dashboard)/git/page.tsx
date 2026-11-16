@@ -211,7 +211,7 @@ export default function GitPage() {
         }}
       />
     ) : (
-      <Page fill className="px-2 py-2 md:px-3 md:py-3">
+      <Page fill="workspace">
         <LoadingPanel rows={8} />
       </Page>
     )
@@ -252,7 +252,7 @@ export default function GitPage() {
       }}
     >
       <Page rise>
-        <PageContext eyebrow="Workspace" title="Git" actions={<WorkspaceHelp />} />
+        <PageContext title="Git" actions={<WorkspaceHelp />} />
 
         {selected && repos.data && !active && (
           <ErrorState
