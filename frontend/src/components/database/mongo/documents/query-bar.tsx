@@ -6,6 +6,7 @@ import { ClockRewind, SettingsSliders } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { ChipCount } from "@/components/chips"
+import { Field } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -238,17 +239,12 @@ export function QueryBar({
             const id = `mongo-query-${option.field}`
             const problem = problems[option.field]
             return (
-              <div key={option.field} className="min-w-0 space-y-1">
-                <label htmlFor={id} className="eyebrow block">
-                  {option.label}
-                </label>
+              <Field key={option.field} label={option.label} htmlFor={id} error={problem}>
                 {option.number ? (
                   <Input
                     id={id}
                     inputMode="numeric"
                     value={draft[option.field]}
-                    aria-invalid={Boolean(problem) || undefined}
-                    aria-describedby={problem ? `${id}-problem` : undefined}
                     placeholder={option.placeholder}
                     className="numeric h-9 bg-surface-sunken px-2 font-mono shadow-none sm:h-8 sm:text-xs dark:bg-surface-sunken"
                     onChange={(event) => set(option.field, event.target.value)}
@@ -258,23 +254,12 @@ export function QueryBar({
                     id={id}
                     dense
                     value={draft[option.field]}
-                    invalid={Boolean(problem)}
-                    aria-describedby={problem ? `${id}-problem` : undefined}
                     placeholder={option.placeholder}
                     onChange={(value) => set(option.field, value)}
                     onSubmit={onFind}
                   />
                 )}
-                {problem && (
-                  <p
-                    id={`${id}-problem`}
-                    role="alert"
-                    className="text-hint leading-relaxed text-destructive"
-                  >
-                    {problem}
-                  </p>
-                )}
-              </div>
+              </Field>
             )
           })}
         </div>
