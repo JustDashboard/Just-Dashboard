@@ -86,7 +86,9 @@ export function SystemCronPanel({
           <Table className="table-fixed" containerClassName="w-auto group-data-[plain]/panel:-mx-4">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
-                <TableHead>Job</TableHead>
+                {/* The whole row on a phone: the file rows span four columns, and a
+                    fixed table gave the three hidden ones a share of the width. */}
+                <TableHead className="max-md:w-full">Job</TableHead>
                 <TableHead className="hidden w-[30%] lg:table-cell">Schedule</TableHead>
                 <TableHead className="hidden w-24 xl:table-cell">Runs as</TableHead>
                 <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
