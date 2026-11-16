@@ -240,6 +240,9 @@ export function Generate() {
     generation.data ??
     (generation.error || kept?.result.target !== target?.id ? undefined : kept?.result)
   const writing = generation.loading || (armed && wanted !== asked.key && !reason && !problem)
+  // Before anything is written the output's empty state holds the one Generate;
+  // the head's appears once there is something to write again.
+  const untouched = !shown && !writing && !generation.error && !(!beside && browsing)
 
   const generate = () => {
     if (!wanted) return
@@ -322,9 +325,13 @@ export function Generate() {
                     >
                       {entry.label}
                     </span>
-                    <Tag className="max-w-full">
-                      <LanguageMark language={entry.language} />
-                    </Tag>
+                    {/* "Prisma" over "prisma" says the name twice: the tag is for a
+                        language other than the generator's own name. */}
+                    {entry.language?.toLowerCase() !== entry.label.toLowerCase() && (
+                      <Tag className="max-w-full">
+                        <LanguageMark language={entry.language} />
+                      </Tag>
+                    )}
                   </span>
                 </ChoiceCard>
               )
@@ -419,7 +426,7 @@ export function Generate() {
               actions={
                 <>
                   {browseButton}
-                  {!reason && (
+                  {!reason && !untouched && (
                     <Button
                       size="sm"
                       onClick={generate}

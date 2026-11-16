@@ -1970,7 +1970,7 @@ test("a search of ticked tables reads those tables and no others, and says which
   const { sent } = await mockWork(page)
   await page.goto("/databases/1/search")
   // The scope is chosen before the scan: which of this schema's tables are read.
-  await page.getByRole("button", { name: "Every table (3)" }).click()
+  await page.getByRole("button", { name: "Every table 3" }).click()
   const list = page.getByRole("list", { name: "The tables read" })
   await expect(list.getByRole("listitem")).toHaveCount(3)
   // The view is left out, as a search of the whole schema leaves it out.
