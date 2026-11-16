@@ -12,6 +12,36 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
+// ContainerLiveness is what a readiness gate reads of its candidate between
+// attempts: whether it is up, and how often it has died.
+type ContainerLiveness struct {
+	Status       string
+	Running      bool
+	Restarting   bool
+	ExitCode     int
+	RestartCount int
+}
+
+// ContainerLiveness reads the container's state from one inspect and nothing
+// else: no log, no health output.
+func (c *Client) ContainerLiveness(ctx context.Context, id string) (ContainerLiveness, error) {
+	cli, err := c.api()
+	if err != nil {
+		return ContainerLiveness{}, err
+	}
+	inspected, err := cli.ContainerInspect(ctx, id)
+	if err != nil {
+		return ContainerLiveness{}, err
+	}
+	if inspected.ContainerJSONBase == nil || inspected.State == nil {
+		return ContainerLiveness{}, nil
+	}
+	return ContainerLiveness{
+		Status: inspected.State.Status, Running: inspected.State.Running, Restarting: inspected.State.Restarting,
+		ExitCode: inspected.State.ExitCode, RestartCount: inspected.RestartCount,
+	}, nil
+}
+
 // ContainerHealth returns only the Engine's closed health state. Health-log
 // output is deliberately excluded because application health commands often
 // echo connection strings or tokens and deployment evidence never needs it.

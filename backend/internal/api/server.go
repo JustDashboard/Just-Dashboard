@@ -390,6 +390,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// The host's own alerts read the recorder's history and Docker, both
 	// started above, and tell the same channels.
 	s.modules.hostAlerts.Start(ctx)
+	// Before the engine claims a run, so a deploy of a project whose
+	// database link was committed as text already reads the link.
+	s.repairLinkedDatabaseVariables(ctx)
 	if err := s.startDeployEngine(ctx); err != nil {
 		return err
 	}
