@@ -160,13 +160,14 @@ export function RoutesTable({
           )
         }
       >
-        {/* On a phone the chips take the head's second row, beside the note,
-            as their place does while the routes are read: a framed panel is
-            the screen's width there, and the chips fitted beside the title,
-            so the head grew shorter when the routes landed. */}
+        {/* On a phone the chips take the head's second row of their own, as
+            their place does while the routes are read, and the note stays
+            beside the title: a framed panel is the screen's width there, and
+            with the count out of the title the chips fitted beside it, so the
+            head grew shorter when the routes landed. */}
         <ChipStrip
           aria-label="Routing table"
-          className="mr-auto max-sm:grow max-sm:basis-[calc(100%-2rem)]"
+          className="mr-auto max-sm:order-last max-sm:basis-full"
         >
           <FilterChip selected={scope === undefined} onClick={() => setChosen(undefined)}>
             All <ChipCount>{covering.length}</ChipCount>
@@ -574,8 +575,7 @@ export function TableWaiting({
   const wide = useMediaQuery(`(min-width: ${wideFrom})`)
   return (
     <Panel aria-label={title} aria-busy>
-      {/* The count's place is held, so the head is its loaded height. */}
-      <PanelHeader title={title} count={"\u00a0"}>
+      <PanelHeader title={title}>
         {/* The line's own height: the chips or the verb that will stand on it. */}
         <span aria-hidden className={cn("h-7", chips && "max-sm:basis-full")} />
       </PanelHeader>
