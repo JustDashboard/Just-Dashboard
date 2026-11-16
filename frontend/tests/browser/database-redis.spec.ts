@@ -2173,7 +2173,7 @@ test.describe("performance", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Empty the slow log" }).click()
     await expect.poll(() => redis.asked("/redis/slowlog/reset").length).toBe(1)
 
-    await page.getByRole("button", { name: /^Clients/ }).click()
+    await page.getByRole("tab", { name: /^Clients/ }).click()
     await expect(page).toHaveURL(/view=clients/)
     // The connection this request used is marked and cannot be cut.
     await expect(page.getByRole("row").filter({ hasText: "this dashboard" })).toBeVisible()
@@ -2188,7 +2188,7 @@ test.describe("performance", () => {
     await page.goto(`${PERFORMANCE}?view=slowlog`)
     await expect(page.getByRole("row").filter({ hasText: "KEYS" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Empty the log" })).toHaveCount(0)
-    await page.getByRole("button", { name: /^Clients/ }).click()
+    await page.getByRole("tab", { name: /^Clients/ }).click()
     await expect(page.getByRole("row").filter({ hasText: "worker" })).toBeVisible()
     await expect(page.getByRole("button", { name: /^Disconnect / })).toHaveCount(0)
   })

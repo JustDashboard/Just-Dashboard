@@ -1404,7 +1404,9 @@ test.describe("documents", () => {
     await sort.fill("{ age: 5 }")
     await sort.press("Enter")
     // On the sort, in the server's words — and not on the filter, though one is typed.
-    await expect(page.locator("#mongo-query-sort-problem")).toContainText("$sort key ordering")
+    // The option is a Field: its error is what the box is described by.
+    await expect(sort).toHaveAccessibleDescription(/\$sort key ordering/)
+    await expect(sort).toHaveAttribute("aria-invalid", "true")
     await expect(page.locator("#mongo-query-filter-problem")).toHaveCount(0)
     // The documents from before stay, and the line over them says why and asks again.
     const held = page.locator("[data-slot=mongo-read-failed]")
@@ -1419,7 +1421,7 @@ test.describe("documents", () => {
     await expect(page.locator("[data-slot=mongo-query-refusal]")).toContainText(
       "FieldPath field names may not start with",
     )
-    await expect(page.locator("#mongo-query-sort-problem")).toHaveCount(0)
+    await expect(sort).not.toHaveAttribute("aria-invalid", "true")
   })
 
   test("a page that could not be read says which, why, and whose documents are on screen", async ({
