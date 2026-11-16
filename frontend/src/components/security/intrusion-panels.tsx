@@ -228,7 +228,7 @@ export function IntrusionPanels() {
           admin && targets.length > 0 ? (
             <Button size="sm" onClick={() => setBanning(true)}>
               <Slash aria-hidden />
-              <span className="max-sm:sr-only">Ban an address</span>
+              Ban an address
             </Button>
           ) : undefined
         }

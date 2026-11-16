@@ -224,7 +224,7 @@ function Losses({ removal }: { removal: GitRemoval }) {
   if (removal.changes > 0) {
     lines.push({
       icon: Pencil,
-      tone: "text-(--git-modified)",
+      tone: "text-git-modified",
       text: (
         <>
           {plural(removal.changes, "uncommitted change")}
@@ -261,7 +261,7 @@ function Losses({ removal }: { removal: GitRemoval }) {
   if (removal.stashes > 0) {
     lines.push({
       icon: Archive,
-      tone: "text-(--git-untracked)",
+      tone: "text-git-untracked",
       text: <>{plural(removal.stashes, "stash", "stashes")}</>,
     })
   }

@@ -2,13 +2,12 @@
 
 import { memo } from "react"
 import { useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
 import { get } from "@/lib/api"
 import type { ContainerTraffic, NetworkLink } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/hooks/use-now"
 import { Page, PageContext } from "@/components/page"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { useLiveTraffic } from "@/components/network/use-live-traffic"
 import { TRAFFIC_TABS, tabFromParams, type TrafficTab } from "./address"
@@ -81,7 +80,7 @@ export function TrafficPage() {
   const setSpan = (next: TrafficSpan) => rewrite((query) => writeSpan(query, next))
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="Traffic" />
       {/* The strip's hairline is the identity line's: one rule under the
           header, as a process's page and a project's have. */}
@@ -93,20 +92,11 @@ export function TrafficPage() {
           linksError={links.error}
           recording={containers.data?.recording}
         />
-        <TabsPrimitive.List
-          aria-label="Views of the traffic"
-          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-        >
-          {TRAFFIC_TABS.map((view) => (
-            <TabsPrimitive.Trigger
-              key={view.key}
-              value={view.key}
-              className={tabClasses(tab === view.key, "h-10")}
-            >
-              {view.label}
-            </TabsPrimitive.Trigger>
-          ))}
-        </TabsPrimitive.List>
+        <ViewTabList
+          label="Views of the traffic"
+          views={TRAFFIC_TABS.map((view) => ({ key: view.key, label: view.label }))}
+          value={tab}
+        />
         {/* One view is mounted at a time: each polls for itself, and a view
             nobody is looking at must not keep the server busy. */}
         <View tab="bandwidth" shown={tab}>

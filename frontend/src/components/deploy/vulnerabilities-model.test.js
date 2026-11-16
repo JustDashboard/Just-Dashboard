@@ -13,7 +13,6 @@ import {
   floorWords,
   inFlight,
   scanVerdict,
-  shortDigest,
   vulnerable,
 } from "./vulnerabilities-model"
 
@@ -177,8 +176,6 @@ describe("vulnerabilities", () => {
     expect(ageWords(9.4)).toBe("9 hours old")
     expect(ageWords(72)).toBe("3 days old")
     expect(ageWords(undefined)).toBe("")
-    expect(shortDigest("sha256:0123456789abcdef0123")).toBe("0123456789ab")
-    expect(shortDigest(undefined)).toBe("")
   })
 })
 

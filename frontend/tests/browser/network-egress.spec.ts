@@ -976,7 +976,10 @@ test.describe("a group's page", () => {
       json(route, { error: { code: "unavailable", message: "netlink is not answering" } }, 503),
     )
     await page.goto("/network/egress/providers")
-    await expect(page.getByText("netlink is not answering")).toBeVisible()
+    // The rail says its own failure in place of its rows; the body says the group's.
+    await expect(
+      page.getByText("netlink is not answering").filter({ visible: true }).last(),
+    ).toBeVisible()
     await expect(page.getByRole("link", { name: "Egress groups" }).first()).toBeVisible()
     await expect(page.getByText("Reading the group")).toHaveCount(0)
   })

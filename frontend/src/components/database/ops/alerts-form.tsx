@@ -140,37 +140,38 @@ export function AlertForm({
       </Field>
 
       <Field label="Watch for">
-        <div role="group" aria-label="Alert kind">
-          <ChoiceGrid columns={2} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-            {offered.map((option) => {
-              const Glyph = KIND_GLYPH[option]
-              return (
-                <ChoiceCard
-                  key={option}
-                  selected={draft.kind === option}
-                  onClick={() => choose(option)}
-                  className="min-h-0 gap-1 p-2.5"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <Glyph
-                      aria-hidden
-                      className={cn(
-                        "size-4 shrink-0",
-                        draft.kind === option ? "text-brand" : "text-muted-foreground",
-                      )}
-                    />
-                    <ChoiceCardTitle className="truncate">
-                      {ALERT_KINDS[option].label}
-                    </ChoiceCardTitle>
-                  </span>
-                  <ChoiceCardHint className="line-clamp-2">
-                    {ALERT_KINDS[option].hint}
-                  </ChoiceCardHint>
-                </ChoiceCard>
-              )
-            })}
-          </ChoiceGrid>
-        </div>
+        <ChoiceGrid
+          mode="single"
+          label="Alert kind"
+          columns={2}
+          className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2"
+        >
+          {offered.map((option) => {
+            const Glyph = KIND_GLYPH[option]
+            return (
+              <ChoiceCard
+                key={option}
+                selected={draft.kind === option}
+                onClick={() => choose(option)}
+                className="min-h-0 gap-1 p-2.5"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Glyph
+                    aria-hidden
+                    className={cn(
+                      "size-4 shrink-0",
+                      draft.kind === option ? "text-brand" : "text-muted-foreground",
+                    )}
+                  />
+                  <ChoiceCardTitle className="truncate">
+                    {ALERT_KINDS[option].label}
+                  </ChoiceCardTitle>
+                </span>
+                <ChoiceCardHint className="line-clamp-2">{ALERT_KINDS[option].hint}</ChoiceCardHint>
+              </ChoiceCard>
+            )
+          })}
+        </ChoiceGrid>
         {draft.scope === "every" && !own.includes(draft.kind) && (
           <FormNote className="mt-2 animate-rise">
             {engine.label} has no {ALERT_KINDS[draft.kind].label.toLowerCase()} to watch; the rule

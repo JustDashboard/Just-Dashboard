@@ -1,16 +1,17 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useRef } from "react"
 import { Fingerprint, LockClosed, ShieldCheck } from "@/components/icons"
 import { parseAgent } from "@/lib/clients"
 import { cn } from "@/lib/utils"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import type { DashboardUser, SessionInfo } from "@/lib/types"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { ProductGlyphs } from "@/components/product-logo"
 import { AccountWireMark } from "@/components/account/marks"
 import { displayNameOf } from "@/components/user-avatar"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * What a sign-in passes on its way to this server, drawn as the path a
@@ -34,7 +35,7 @@ export function SignInPath({
   required: boolean
   sessions?: SessionInfo[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const you = useRef<HTMLDivElement>(null)
   const password = useRef<HTMLDivElement>(null)
@@ -108,7 +109,7 @@ export function SignInPath({
               align="center"
               mark={
                 <WireMark tone="logo">
-                  <LockClosed aria-hidden className="text-[var(--tag-blue)]" />
+                  <LockClosed aria-hidden className="text-tag-blue" />
                 </WireMark>
               }
               eyebrow="First factor"
@@ -151,11 +152,7 @@ export function SignInPath({
               align="center"
               mark={<WireHost />}
               eyebrow="This server"
-              title={
-                count === undefined
-                  ? "Signed in"
-                  : `${count} ${count === 1 ? "session" : "sessions"}`
-              }
+              title={count === undefined ? "Signed in" : plural(count, "session")}
               hint={
                 clients.length > 0 ? (
                   <span className="inline-flex items-center gap-1.5">

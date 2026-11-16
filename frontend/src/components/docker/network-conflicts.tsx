@@ -14,7 +14,7 @@ import { LoadingRows } from "@/components/loading"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
-import { Hint } from "./explain"
+import { FormNote } from "@/components/form"
 
 const LEVEL_TONE: Record<NetworkConflict["level"], DotTone> = {
   block: "danger",
@@ -40,7 +40,7 @@ export function ConflictList({
   conflicts: NetworkConflict[]
   emptyLabel: string
 }) {
-  if (conflicts.length === 0) return <Hint>{emptyLabel}</Hint>
+  if (conflicts.length === 0) return <FormNote>{emptyLabel}</FormNote>
   return (
     <ul aria-label="What this change runs into" className="space-y-2">
       {orderedConflicts(conflicts).map((conflict, index) => (

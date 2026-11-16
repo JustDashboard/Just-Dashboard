@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback } from "react"
-import Link from "next/link"
 import { plural } from "@/lib/format"
 import type { DeploymentSharedVariable, DeploymentSummary } from "@/lib/types"
 import { Code, LockClosed, Plus } from "@/components/icons"
@@ -27,14 +26,7 @@ export function SharedVariablesPage() {
   const fleet = useFleet()
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Shared variables"
-      />
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Shared variables" />
       <SharedVariables
         scope={{ kind: "server" }}
         frame={({ count, variables, failed, actions, body }) => (

@@ -3,15 +3,14 @@
 import { useId, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, FileText, Warning } from "@/components/icons"
-import { ApiError, errorMessage, get, put } from "@/lib/api"
-import { bytes, compactCount, plural } from "@/lib/format"
+import { ApiError, get, put } from "@/lib/api"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { ProxyMetrics } from "@/lib/proxy/types-metrics"
 import type { SiteTrafficReading } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { TileTrend } from "@/components/sparkline"
+import { Stale } from "@/components/stale"
 import { ChartPanel } from "@/components/chart-panel"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
 import { Status } from "@/components/status-dot"
@@ -32,7 +31,7 @@ import {
   readingsStopped,
   type MetricsSeries,
 } from "@/components/proxy/live-metrics-series"
-import { edgeTraffic, errorRateTone, share } from "@/components/proxy/site-traffic"
+import { edgeTraffic } from "@/components/proxy/site-traffic"
 
 /**
  * Module constants: `ChartPanel` is memoised on its props, and a series array
@@ -63,12 +62,14 @@ export function LiveTraffic({
   nginx,
   sites,
   error,
+  onRetry,
 }: {
   admin: boolean
   /** nginx is on this host, so its own counters are offered under the chart. */
   nginx: boolean
   sites?: SiteTrafficReading[]
   error?: Error
+  onRetry?: () => void
 }) {
   const read = useMemo(() => (sites ?? []).filter((s) => s.status === "available"), [sites])
   const points = useMemo(() => edgeTraffic(read), [read])
@@ -82,99 +83,29 @@ export function LiveTraffic({
       })),
     [points],
   )
-  const total = read.reduce((sum, s) => sum + s.requests, 0)
-  const failed = points.reduce((sum, p) => sum + p.failed, 0)
-  const served = read.reduce((sum, s) => sum + s.bytes, 0)
-  // The minute happening now is still filling; the one before it is whole.
-  const lastWhole = points.length > 1 ? points[points.length - 2] : points[0]
-  const failRate = total > 0 ? failed / total : 0
 
   return (
     <Panel plain aria-label="Live traffic">
       <PanelHeader
         title="Live traffic"
-        actions={
+        count={
           sites &&
-          read.length > 0 && (
-            <span className="numeric text-hint text-muted-foreground">
-              {`Last hour across ${plural(read.length, "site")}, by the minute`}
-            </span>
-          )
+          read.length > 0 &&
+          `Last hour across ${plural(read.length, "site")}, by the minute`
         }
       />
       <PanelBody className="space-y-4 pt-2">
         {error ? (
-          <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
-            {"Couldn't read the sites' access logs."}
-          </p>
+          <ErrorState error={error} what="the sites' access logs" onRetry={onRetry} />
         ) : sites && read.length === 0 ? (
           <QuietEdge sites={sites} />
         ) : (
-          // The same tiles and chart before the first read as after it, so the
-          // band under them is not pushed down when the readings land.
+          // The same chart before the first read as after it, so the band
+          // under it is not pushed down when the readings land. Four tiles
+          // stood over it (Requests, This hour, Server errors, Served): the
+          // chart's legend says the minutes, and the band under it the
+          // hour's requests and 5xx, so the tiles said each figure twice.
           <div className="animate-rise space-y-4">
-            <StatGrid columns={4} framed>
-              <StatTile
-                label="Requests"
-                value={sites && lastWhole ? compactCount(lastWhole.total) : "—"}
-                trailing="last minute"
-                trend={
-                  <Trend>
-                    <TileTrend
-                      values={points.map((p) => p.total)}
-                      color="var(--chart-2)"
-                      label="Requests a minute over the last hour"
-                    />
-                  </Trend>
-                }
-              />
-              <StatTile
-                label="This hour"
-                value={sites ? compactCount(total) : "—"}
-                trailing="requests"
-                hint={
-                  sites
-                    ? `${(total / 60).toFixed(total >= 600 ? 0 : 1)} a minute on average`
-                    : "\u00a0"
-                }
-              />
-              <StatTile
-                label="Server errors"
-                value={sites ? share(failRate) : "—"}
-                trailing="5xx"
-                tone={failed > 0 ? errorRateTone(failRate) : "default"}
-                trend={
-                  <Trend>
-                    <TileTrend
-                      values={points.map((p) => p.failed)}
-                      color="var(--chart-3)"
-                      label="5xx responses a minute over the last hour"
-                    />
-                  </Trend>
-                }
-                hint={
-                  !sites
-                    ? "\u00a0"
-                    : failed > 0
-                      ? `${failed.toLocaleString()} this hour`
-                      : "None this hour"
-                }
-              />
-              <StatTile
-                label="Served"
-                value={sites ? bytes(served) : "—"}
-                trailing="this hour"
-                trend={
-                  <Trend>
-                    <TileTrend
-                      values={points.map((p) => p.bytes)}
-                      color="var(--chart-5)"
-                      label="Bytes served a minute over the last hour"
-                    />
-                  </Trend>
-                }
-              />
-            </StatGrid>
             {/* As tall as the chart and its legend, which an empty chart does not draw. */}
             <div className="min-h-[329px]">
               <ChartPanel
@@ -194,11 +125,6 @@ export function LiveTraffic({
       </PanelBody>
     </Panel>
   )
-}
-
-/** A tile's trend, its band held when there is no line to draw so the tiles keep their height. */
-function Trend({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-9">{children}</div>
 }
 
 /**
@@ -260,9 +186,7 @@ function NginxCounters({ admin }: { admin: boolean }) {
   const state = switching ? (
     <Status state="activating" label={switching === "on" ? "Switching on…" : "Switching off…"} />
   ) : metrics.error && report ? (
-    <span title={errorMessage(metrics.error)}>
-      <Status verdict="warning" label="Not updating" />
-    </span>
+    <Stale error={metrics.error} />
   ) : report?.enabled ? (
     report.error ? (
       <Status verdict="warning" label="No answer" />

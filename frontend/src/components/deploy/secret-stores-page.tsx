@@ -8,7 +8,6 @@ import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentSummary,
@@ -20,19 +19,18 @@ import type {
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { SidePanel } from "@/components/side-panel"
 import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Segments } from "@/components/segments"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import { SecretStoreMark } from "@/components/deploy/secret-store-picker"
@@ -56,6 +54,7 @@ import {
   storeSettingsProblem,
   validStoreName,
 } from "@/components/deploy/secret-stores"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Draft = {
   id?: number
@@ -166,7 +165,7 @@ export function SecretStoresPage() {
   )
   const fleet = useFleet()
   // Beside the name where a row has the room, under it on a phone.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const [draft, setDraft] = useState<Draft>()
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string>()
@@ -266,95 +265,78 @@ export function SecretStoresPage() {
 
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Secret stores"
-      />
-      {stores.error && !list ? (
-        <ErrorState error={stores.error} onRetry={stores.refresh} />
-      ) : (
-        <>
-          {/* Nothing is wired before the first store, and a picture of two
-              empty rings says less than the cards under it: no picture then. */}
-          {(!list || list.length > 0) && (
-            <div className="mx-auto w-full max-w-5xl lg:py-2">
-              <StoresPicture
-                stores={list}
-                projects={fleet.projects}
-                loading={!list || fleet.waiting}
-                onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
-              />
-            </div>
-          )}
-          <Panel plain>
-            <PanelHeader
-              title="Stores"
-              actions={
-                <span className="flex flex-wrap items-center gap-3">
-                  {list && list.length > 0 && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {storesCount(list)}
-                    </span>
-                  )}
-                  {admin && list && list.length > 0 && (
-                    <Button size="sm" onClick={() => open(emptyDraft("vault"))}>
-                      <Plus className="size-3.5" />
-                      Add store
-                    </Button>
-                  )}
-                </span>
-              }
-            />
-            <PanelBody>
-              {!list ? (
-                <LoadingRows rows={2} className="[&>*]:h-14 [&>*]:rounded-xl" />
-              ) : list.length === 0 ? (
-                admin ? (
-                  // The empty page is the sheet's first question: which store.
-                  <ChoiceGrid columns={3} className="animate-rise">
-                    {STORE_KINDS.map((option, index) => (
-                      <ChoiceCard
-                        key={option.kind}
-                        verb={`Add ${option.title}`}
-                        logo={<StoreLogo kind={option.kind} size="md" />}
-                        title={option.title}
-                        description={option.short}
-                        index={index}
-                        onClick={() => open(emptyDraft(option.kind))}
-                      />
-                    ))}
-                  </ChoiceGrid>
-                ) : (
-                  <EmptyNote>No secret stores</EmptyNote>
-                )
-              ) : (
-                <ChoiceList aria-label="Secret stores" className="animate-rise">
-                  {list.map((store) => (
-                    <StoreRow
-                      key={store.id}
-                      store={store}
-                      wide={wide}
-                      verbs={verbsFor(store)}
-                      onEdit={admin ? () => open(draftOf(store)) : undefined}
-                    />
-                  ))}
-                </ChoiceList>
-              )}
-            </PanelBody>
-          </Panel>
-        </>
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Secret stores" />
+      {/* Nothing is wired before the first store, and a picture of two
+          empty rings says less than the cards under it: no picture then. */}
+      {(!list || list.length > 0) && (
+        <div className="mx-auto w-full max-w-5xl lg:py-2">
+          <StoresPicture
+            stores={list}
+            projects={fleet.projects}
+            loading={!list || fleet.waiting}
+            onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
+          />
+        </div>
       )}
+      <Panel plain>
+        <PanelHeader
+          title="Stores"
+          count={list && list.length > 0 ? storesCount(list) : undefined}
+          actions={
+            admin && (
+              <Button size="sm" onClick={() => open(emptyDraft("vault"))}>
+                <Plus className="size-3.5" />
+                Add store
+              </Button>
+            )
+          }
+        />
+        <PanelBody>
+          {stores.error && !list ? (
+            <ErrorState error={stores.error} onRetry={stores.refresh} />
+          ) : !list ? (
+            <ChoiceListSkeleton rows={2} />
+          ) : list.length === 0 ? (
+            admin ? (
+              // The empty page is the sheet's first question: which store.
+              <ChoiceGrid columns={3} className="animate-rise">
+                {STORE_KINDS.map((option, index) => (
+                  <ChoiceCard
+                    key={option.kind}
+                    verb={`Add ${option.title}`}
+                    logo={<StoreLogo kind={option.kind} size="md" />}
+                    title={option.title}
+                    description={option.short}
+                    index={index}
+                    onClick={() => open(emptyDraft(option.kind))}
+                  />
+                ))}
+              </ChoiceGrid>
+            ) : (
+              <EmptyNote>No secret stores</EmptyNote>
+            )
+          ) : (
+            <ChoiceList aria-label="Secret stores" className="animate-rise">
+              {list.map((store) => (
+                <StoreRow
+                  key={store.id}
+                  store={store}
+                  wide={wide}
+                  verbs={verbsFor(store)}
+                  onEdit={admin ? () => open(draftOf(store)) : undefined}
+                />
+              ))}
+            </ChoiceList>
+          )}
+        </PanelBody>
+      </Panel>
 
       <SidePanel
         open={Boolean(draft)}
         onOpenChange={(next) => !next && close()}
-        title={draft?.id ? `Edit ${draft.name}` : "Add store"}
+        title={draft?.id ? `Edit ${editing?.name ?? draft.name}` : "Add store"}
         description="A deployment's variables read a key from it as ${{store.NAME/path#KEY}}, fresh for each run. Values are never stored here."
-        width="md"
+        size="md"
         footer={
           <>
             <Button variant="outline" onClick={close} disabled={saving}>
@@ -683,9 +665,7 @@ function StoreReaders({ store, className }: { store: SecretStore; className?: st
               {project.uses.map((use) => (
                 <span key={`${use.environmentId}-${use.variable}`} className="block break-words">
                   {use.environmentName} as <span className="font-mono">{use.variable}</span>
-                  <span className="block font-mono break-all text-muted-foreground/80">
-                    {use.reference}
-                  </span>
+                  <span className="block font-mono break-all text-faint">{use.reference}</span>
                 </span>
               ))}
             </li>
@@ -783,7 +763,7 @@ function StoreForm({
         {name && validStoreName(name) && (
           <FormNote className="animate-rise">
             Variables read it as{" "}
-            <span className="font-mono text-foreground/90">
+            <span className="font-mono text-foreground">
               {storeReference({ store: name, ...info.sample })}
             </span>
             {info.keyOptional &&
@@ -840,27 +820,17 @@ function StoreForm({
               </Field>
             </FieldRow>
             <Field label="Cloud" htmlFor="store-cloud">
-              <ToggleGroup
+              <Segments
                 id="store-cloud"
-                type="single"
-                variant="outline"
-                aria-label="Azure cloud"
+                label="Azure cloud"
+                size="field"
                 value={draft.settings.cloud ?? "public"}
-                onValueChange={(next) => {
-                  if (next) setting({ cloud: next as SecretStoreSettings["cloud"] })
-                }}
-                className="w-full sm:w-auto"
-              >
-                {AZURE_CLOUDS.map((option) => (
-                  <ToggleGroupItem
-                    key={option.value}
-                    value={option.value}
-                    className="h-11 flex-1 sm:h-9 sm:flex-none"
-                  >
-                    {option.label}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
+                options={AZURE_CLOUDS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+                onChange={(next) => setting({ cloud: next as SecretStoreSettings["cloud"] })}
+              />
             </Field>
           </>
         )}
@@ -960,29 +930,23 @@ function StoreForm({
 
       <FormSection title="Sign-in">
         {vaultLike && (
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            aria-label="Sign in with"
+          <Segments
+            label="Sign in with"
+            size="field"
             value={draft.settings.auth ?? "token"}
-            onValueChange={(next) => {
-              if (!next) return
+            options={[
+              { value: "token", label: "Token" },
+              { value: "approle", label: "AppRole" },
+            ]}
+            onChange={(next) =>
               // Signing in another way needs that way's credentials.
               onChange({
                 ...draft,
-                settings: { ...draft.settings, auth: next as "token" | "approle" },
+                settings: { ...draft.settings, auth: next },
                 credentials: next === saved?.settings.auth && editing ? undefined : {},
               })
-            }}
-            className="w-full sm:w-auto"
-          >
-            <ToggleGroupItem value="token" className="h-11 flex-1 sm:h-9 sm:flex-none">
-              Token
-            </ToggleGroupItem>
-            <ToggleGroupItem value="approle" className="h-11 flex-1 sm:h-9 sm:flex-none">
-              AppRole
-            </ToggleGroupItem>
-          </ToggleGroup>
+            }
+          />
         )}
         {vaultLike && draft.settings.auth === "approle" && (
           <Field label="AppRole mount" htmlFor="store-auth-mount">

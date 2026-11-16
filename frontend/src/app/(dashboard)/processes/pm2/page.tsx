@@ -265,7 +265,7 @@ function PM2Applications() {
         return false
       }}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         {header}
 
         <HostIdentity
@@ -470,11 +470,11 @@ function PM2Applications() {
               </span>
               {counts.errored > 0 && (
                 <>
-                  <span className="text-muted-foreground/40">·</span>
+                  <span className="text-faint">·</span>
                   <span>crashing applications first</span>
                 </>
               )}
-              <span className="text-muted-foreground/40">·</span>
+              <span className="text-faint">·</span>
               <span>read from PM2 every {POLL / 1000}s</span>
             </PanelFooter>
           )}
@@ -657,7 +657,7 @@ function PM2Rows({
   return (
     <>
       <div className="hidden min-w-0 xl:block">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead>Application</TableHead>

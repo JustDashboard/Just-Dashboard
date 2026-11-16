@@ -26,7 +26,7 @@ import {
   toHex,
 } from "@/components/database/redis/bytes"
 import { EditorStrip, saveFrom } from "@/components/database/redis/keys/editor-parts"
-import { respaceJson } from "@/components/database/redis/keys/json-doc"
+import { respaceJson } from "@/components/database/kit/json-doc"
 import type { KeyEditorProps } from "@/components/database/redis/keys/key-pane"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisBytes, RedisMembers } from "@/components/database/redis/types"
@@ -210,7 +210,7 @@ export function StringEditor({ redis, name, meta, epoch, onChanged }: KeyEditorP
             together and stay against the right edge. */}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-x-2 gap-y-1 py-1.5">
           {dirty && (
-            <span className="text-hint font-medium text-(--git-modified)">Unsaved changes</span>
+            <span className="text-hint font-medium text-git-modified">Unsaved changes</span>
           )}
           {draft !== undefined && (
             <Button size="xs" variant="ghost" disabled={busy} onClick={() => setDraft(null)}>
@@ -367,9 +367,7 @@ function HexDump({ bytes }: { bytes: Uint8Array }) {
   const { attach, onScroll, slice, height, offset } = useRowWindow(count, HEX_ROW)
   const lines = hexLines(bytes, slice.start * 16, slice.end * 16)
   if (bytes.length === 0) {
-    return (
-      <p className="p-3 text-xs text-muted-foreground/60 italic">The value is empty: zero bytes.</p>
-    )
+    return <p className="p-3 text-xs text-faint italic">The value is empty: zero bytes.</p>
   }
   return (
     <div
@@ -387,7 +385,7 @@ function HexDump({ bytes }: { bytes: Uint8Array }) {
               key={line.offset}
               className="flex h-5 items-center gap-4 font-mono text-xs whitespace-pre"
             >
-              <span className="text-muted-foreground/60">{line.offset}</span>
+              <span className="text-faint">{line.offset}</span>
               <span className="w-[49ch] shrink-0">{line.hex}</span>
               <span className="text-muted-foreground">{line.text}</span>
             </div>

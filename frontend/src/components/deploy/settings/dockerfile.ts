@@ -40,7 +40,7 @@ const INSTRUCTIONS = new Set([
 
 const FROM_ARGS = /^((?:--\S+\s+)*)(\S+)(?:(\s+)([Aa][Ss])(\s+)(\S+))?/
 const TOKEN =
-  /(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)|("(?:[^"\\]|\\.)*"|'[^']*')|(\s--[a-z-]+(?==|\s|$))/g
+  /(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)|("(?:[^"\\]|\\.)*"|'[^']*')|((?:^|\s)--[a-z-]+(?==|\s|$))/g
 
 function pushPlain(pieces: DockerfilePiece[], text: string) {
   if (text) pieces.push({ kind: "plain", text })

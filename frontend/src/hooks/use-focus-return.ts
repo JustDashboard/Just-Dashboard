@@ -1,15 +1,15 @@
 "use client"
 
-import { useCallback, useLayoutEffect, useRef } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react"
 
 /**
  * The control a menu was opened from, for an element inside that menu.
  *
  * A menu's content is labelled by its trigger (`aria-labelledby`), and a
  * submenu's by the item that opened it, which sits in the menu above: the walk
- * ends on the button outside every menu.
+ * ends on the button outside every menu. `null` for an element in no menu.
  */
-function menuOpener(inside: Element): HTMLElement | null {
+export function menuOpener(inside: Element): HTMLElement | null {
   let menu = inside.closest('[role="menu"]')
   let opener: HTMLElement | null = null
   for (let depth = 0; menu && depth < 6; depth++) {
@@ -20,6 +20,18 @@ function menuOpener(inside: Element): HTMLElement | null {
     menu = labelled.closest('[role="menu"]')
   }
   return opener
+}
+
+/**
+ * The control a press came from: the element itself, or, for a row of a menu
+ * (which leaves with the menu), the button the menu was opened from. `null`
+ * when nothing but the document held the keyboard.
+ */
+export function openerOf(active: Element | null): HTMLElement | null {
+  // Read as "can take the keyboard" rather than `instanceof HTMLElement`, so
+  // an SVG link counts and the walk can be held in a unit test without a DOM.
+  if (!active || active === document.body || !("focus" in active)) return null
+  return menuOpener(active) ?? (active as HTMLElement)
 }
 
 /** The first of these that is still in the document and can take the keyboard. */
@@ -93,5 +105,66 @@ export function useFocusReturn(open: boolean): (event: Event) => void {
     if (!target) return
     event.preventDefault()
     target.focus()
+  }, [])
+}
+
+const DIALOG = '[role="dialog"],[role="alertdialog"]'
+/** What a page opens over itself. Focus inside one is not a place to come back to. */
+const LAYER = `${DIALOG},[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper]`
+
+/**
+ * A page's fallback for the keyboard after a dialog it opened has gone.
+ *
+ * `useFocusReturn` above (every `Modal` and `ConfirmDialog` runs it) hands
+ * the keyboard back to what opened the dialog. That fails in one case: the
+ * opener went with what the dialog did — the Delete in a key's row, when the
+ * key is gone — and the keyboard falls to the body, so the next Tab starts
+ * from the top of the window. This keeps a short trail of what held focus on
+ * the page itself and, once a dialog has left and nothing holds the keyboard,
+ * gives it to the newest of them still standing: the row behind the one that
+ * was removed, the list it was in.
+ *
+ * It never takes the keyboard from anything. It acts only when a dialog has
+ * left and focus is on the body, so where the dialog's own hand-back landed,
+ * it stays; and it gives way to a page that said it hands the keyboard back
+ * itself (`claimFocusReturn`). A reader who clicks an empty part of the page
+ * has put focus nowhere on purpose, and it stays there too.
+ */
+export function useFocusTrail() {
+  useEffect(() => {
+    let trail: HTMLElement[] = []
+    const onFocusIn = (event: FocusEvent) => {
+      const el = event.target
+      if (!(el instanceof HTMLElement) || el.closest(LAYER)) return
+      trail = [el, ...trail.filter((other) => other !== el)].slice(0, 8)
+    }
+    const restore = () => {
+      if (performance.now() < claimedUntil) return
+      const active = document.activeElement
+      if (active && active !== document.body) return
+      // Another dialog took this one's place: it has the keyboard now.
+      if (document.querySelector(DIALOG)) return
+      firstReachable(trail.map((el) => (el.hasAttribute("disabled") ? null : el)))?.focus({
+        preventScroll: true,
+      })
+    }
+    // A dialog is drawn in a layer of its own under the body, and leaves it
+    // when its closing motion ends.
+    const observer = new MutationObserver((records) => {
+      const closed = records.some((record) =>
+        Array.from(record.removedNodes).some(
+          (node) =>
+            node instanceof HTMLElement &&
+            (node.matches(DIALOG) || node.querySelector(DIALOG) !== null),
+        ),
+      )
+      if (closed) setTimeout(restore, 0)
+    })
+    observer.observe(document.body, { childList: true })
+    document.addEventListener("focusin", onFocusIn)
+    return () => {
+      observer.disconnect()
+      document.removeEventListener("focusin", onFocusIn)
+    }
   }, [])
 }

@@ -33,10 +33,10 @@ export function InterfacesLog() {
             views={kindViews}
             storageKey="network.interfaces.log"
             pickerLabel="Link log"
-            paneClassName="h-[min(75vh,40rem)] min-h-80"
+            paneClassName="h-workbench min-h-80"
           />
         ) : (
-          <LoadingRows rows={6} className="h-[min(75vh,40rem)] min-h-80" />
+          <LoadingRows rows={6} className="h-workbench min-h-80" />
         )}
       </PanelBody>
     </Panel>

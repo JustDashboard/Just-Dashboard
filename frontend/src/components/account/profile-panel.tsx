@@ -179,8 +179,7 @@ export function ProfileSection({ user }: { user: DashboardUser }) {
           <span>in the rail</span>
           <FactDot />
           <span className="truncate">
-            <span className="font-mono text-[var(--tag-blue)]">@{draft.username}</span> in the audit
-            log
+            <span className="font-mono text-tag-blue">@{draft.username}</span> in the audit log
           </span>
         </span>
       }

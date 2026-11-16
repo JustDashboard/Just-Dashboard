@@ -262,7 +262,7 @@ function PlanTree({ rows }: { rows: PlanRow[] }) {
   return (
     <div data-slot="plan-tree" className="@container min-h-0 flex-1 overflow-auto">
       <div className="min-w-0">
-        <div className="sticky top-0 z-10 flex h-8 items-center gap-3 border-b border-hairline bg-card px-2.5 text-hint font-medium text-muted-foreground">
+        <div className="sticky top-0 z-raised flex h-8 items-center gap-3 border-b border-hairline bg-card px-2.5 text-hint font-medium text-muted-foreground">
           <span className="min-w-0 flex-1">Step</span>
           {costed && <MeasureHead measure="cost" />}
           {counted && <MeasureHead measure="rows" wide />}

@@ -323,7 +323,7 @@ export function HealthChecks({
         onOpenChange={(next) => !next && setOpen(undefined)}
         title={editing ? editing.name || `Health check ${(open ?? 0) + 1}` : "Health check"}
         description="What this check probes, when it runs and how long it keeps trying."
-        width="sm"
+        size="sm"
         // The name already holds a sensible value; landing in it would select it.
         initialFocus="body"
         footer={
@@ -422,7 +422,7 @@ function CheckEditor({
       </div>
 
       <p className="min-w-0 font-mono text-xs break-words text-muted-foreground">
-        <span className="text-foreground/80">{checkSummary(check, port)}</span> · gives up after{" "}
+        <span className="text-muted-foreground">{checkSummary(check, port)}</span> · gives up after{" "}
         <span className="whitespace-nowrap">~{formatDuration(givesUpAfter(check))}</span>
       </p>
 

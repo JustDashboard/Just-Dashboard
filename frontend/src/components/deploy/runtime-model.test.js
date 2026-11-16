@@ -6,7 +6,7 @@ import {
   publishedPorts,
   releaseEvents,
   runtimeContainer,
-  shortDigest,
+  newestReadings,
   wantsFailureReading,
 } from "./runtime-model"
 
@@ -77,16 +77,6 @@ describe("isImageDigest", () => {
     expect(isImageDigest("postgres:16-alpine")).toBe(false)
     expect(isImageDigest(`ghcr.io/acme/api@sha256:${"ab12".repeat(16)}`)).toBe(false)
     expect(isImageDigest(undefined)).toBe(false)
-  })
-})
-
-describe("shortDigest", () => {
-  test("drops the algorithm and keeps twelve digits", () => {
-    expect(shortDigest(`sha256:${"ab12".repeat(16)}`)).toBe("ab12ab12ab12")
-  })
-  test("says nothing for an image the engine could not name", () => {
-    expect(shortDigest("")).toBeUndefined()
-    expect(shortDigest(undefined)).toBeUndefined()
   })
 })
 
@@ -223,5 +213,43 @@ describe("which services a domain reaches", () => {
         () => false,
       ),
     ).toEqual([])
+  })
+})
+
+describe("newestReadings", () => {
+  const row = (ts, values) => ({
+    ts,
+    cpu: null,
+    mem: null,
+    pids: null,
+    netRx: null,
+    netTx: null,
+    blockRead: null,
+    blockWrite: null,
+    ...values,
+  })
+
+  test("each figure is the newest row that has it, and the moment is the newest row with any", () => {
+    const newest = newestReadings([
+      row(1, { cpu: 10, mem: 100, netRx: 5, netTx: 6, blockRead: 1, blockWrite: 2 }),
+      row(2, { cpu: 12, pids: 4 }),
+      row(3, { cpu: 15.5 }),
+      row(4, {}),
+    ])
+    expect(newest).toEqual({
+      cpu: 15.5,
+      pids: 4,
+      mem: 100,
+      netRx: 5,
+      netTx: 6,
+      blockRead: 1,
+      blockWrite: 2,
+      ts: 3,
+    })
+  })
+
+  test("an empty history has nothing to fall back to", () => {
+    expect(newestReadings([])).toEqual({})
+    expect(newestReadings([row(4, {})])).toEqual({})
   })
 })

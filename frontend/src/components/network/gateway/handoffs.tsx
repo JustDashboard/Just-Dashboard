@@ -9,7 +9,9 @@ import { ProductLogos } from "@/components/product-logo"
  * the certificates that make the first one HTTPS. They live in Proxy & TLS,
  * where the engine that does them is configured, so each is a lit card that
  * goes there rather than a second form here that would write the same thing
- * twice. Each is drawn as the product that does the work.
+ * twice. Each is drawn as the product that does the work, with its title and
+ * arrow and nothing under them: a card you open says where it goes, not what
+ * is behind it.
  */
 export function ProxyHandoffs() {
   return (
@@ -20,7 +22,6 @@ export function ProxyHandoffs() {
         verb="Open reverse proxy sites"
         logo={<ProductLogos ids={["caddy", "nginx"]} />}
         title="Reverse proxy"
-        description="Serve a domain from a container or a machine, with automatic certificates and load balancing across several upstreams."
       />
       <ChoiceCard
         index={1}
@@ -28,7 +29,6 @@ export function ProxyHandoffs() {
         verb="Open TCP and UDP streams"
         logo={<ProductLogos ids={["nginx"]} />}
         title="TCP and UDP streams"
-        description="Pass a port that is not HTTP, such as a database or a game, to an upstream or a pool of them."
       />
       <ChoiceCard
         index={2}
@@ -36,7 +36,6 @@ export function ProxyHandoffs() {
         verb="Open certificates"
         logo={<ProductLogos ids={["lets-encrypt"]} />}
         title="Certificates"
-        description="The certificates behind those sites: issued, renewed and watched for expiry."
       />
     </ChoiceGrid>
   )

@@ -66,7 +66,7 @@ function ColumnFacts({ column }: { column: GridColumn }) {
         </Tag>
       </div>
       {facts.length > 0 && (
-        <dl className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-hint">
+        <dl className="mt-1.5 grid grid-cols-start-main gap-x-3 gap-y-0.5 text-hint">
           {facts.map(([label, value]) => (
             <div key={label} className="contents">
               <dt className="text-muted-foreground">{label}</dt>
@@ -224,7 +224,7 @@ export const GridHeader = memo(function GridHeader({
         className={cn(
           HEAD,
           sortable && "cursor-pointer",
-          pin >= 0 && "sticky z-10",
+          pin >= 0 && "sticky z-raised",
           pinEdge && "border-r-border",
           moving === column.key && "opacity-50",
         )}
@@ -268,7 +268,7 @@ export const GridHeader = memo(function GridHeader({
         <span
           aria-hidden
           data-resize={index}
-          className="absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize after:absolute after:inset-y-1.5 after:left-1/2 after:w-px after:-translate-x-1/2 hover:after:bg-border-strong"
+          className="absolute inset-y-0 -right-1 z-sticky w-2 cursor-col-resize after:absolute after:inset-y-1.5 after:left-1/2 after:w-px after:-translate-x-1/2 hover:after:bg-border-strong"
         />
       </div>
     )
@@ -284,7 +284,7 @@ export const GridHeader = memo(function GridHeader({
       <div
         role="columnheader"
         aria-colindex={1}
-        className="sticky left-0 z-10 flex h-full items-center border-r border-hairline bg-(--jd-grid-ground)"
+        className="sticky left-0 z-raised flex h-full items-center border-r border-hairline bg-(--jd-grid-ground)"
       >
         {selectable ? (
           // A real control, so it has a name and a state to be read by. Not a

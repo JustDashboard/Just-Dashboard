@@ -8,13 +8,11 @@ import { IdentityHeader } from "@/components/identity-header"
 import { Fact } from "@/components/fact-line"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Section } from "@/components/section"
-import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { SaveBarProvider } from "@/components/settings/save-bar"
 import { SettingSection } from "@/components/settings/setting-card"
 import { SettingsColumn } from "@/components/settings/settings-column"
-import { ROLE_MARK } from "@/components/account/capabilities"
+import { RoleTag } from "@/components/account/role"
 import { AccessPicture } from "@/components/account/access-picture"
 import { ProfileSection } from "@/components/account/profile-panel"
 import { RoleLadder } from "@/components/account/role-ladder"
@@ -65,7 +63,6 @@ function Profile() {
   const twoFactor = user.totpEnabled
   const current = sessions.data?.find((s) => s.current)
   const agent = current && parseAgent(current.userAgent)
-  const RoleMark = ROLE_MARK[user.role]
   const people = users.data ?? []
 
   return (
@@ -77,7 +74,7 @@ function Profile() {
         title={
           <span className="inline-flex min-w-0 items-center gap-2.5">
             <span className="truncate font-mono">@{user.username}</span>
-            <Tag icon={RoleMark}>{user.role}</Tag>
+            <RoleTag role={user.role} />
           </span>
         }
         facts={
@@ -117,17 +114,15 @@ function Profile() {
       />
 
       <Section title="Signed in as you">
-        {sessions.data && (keys.data || keys.error) ? (
-          <AccessPicture
-            user={user}
-            required={Boolean(status?.require2fa)}
-            sessions={sessions.data}
-            // An administrator is handed everyone's keys; only this account's act as it.
-            keys={keys.data?.filter((k) => k.userId === user.id)}
-          />
-        ) : (
-          <LoadingRows rows={3} />
-        )}
+        {/* Until both reads land the picture waits at its loaded shape, so the
+            page has its final shape before the sessions arrive (D11). */}
+        <AccessPicture
+          user={user}
+          required={Boolean(status?.require2fa)}
+          sessions={sessions.data && (keys.data || keys.error) ? sessions.data : undefined}
+          // An administrator is handed everyone's keys; only this account's act as it.
+          keys={keys.data?.filter((k) => k.userId === user.id)}
+        />
       </Section>
 
       <SettingsColumn>

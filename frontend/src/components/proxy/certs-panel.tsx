@@ -24,6 +24,7 @@ import { tabClasses } from "@/components/tabs"
 import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ListToolbar } from "@/components/toolbar"
 import { SearchInputSkeleton } from "@/components/search-input"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -162,7 +163,7 @@ export function CertificatesPage() {
   }
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Proxy" title="Certificates" />
       <CertificatesIdentity />
       <CertificateRun />
@@ -505,11 +506,15 @@ function countCertificates(all: Certificate[]) {
 function InventoryLoading() {
   return (
     <div className="min-w-0 space-y-4" aria-busy="true" data-slot="cert-list-loading">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <SearchInputSkeleton />
-        <Skeleton className="h-8 w-[10.5rem]" />
-      </div>
-      <Skeleton className="h-7 w-24" />
+      <ListToolbar
+        search={<SearchInputSkeleton />}
+        sort={
+          // Marked as the select it stands for, so the toolbar gives it the
+          // select's phone height and the list lands where this stands.
+          <Skeleton data-slot="select-trigger" className="h-8 w-44 rounded-md max-sm:h-10" />
+        }
+        chips={<Skeleton className="h-7 w-24" />}
+      />
       <ul className="min-w-0 space-y-2">
         {[0, 1, 2].map((i) => (
           <li key={i}>

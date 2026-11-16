@@ -104,7 +104,7 @@ export function DNSRecordPanel({
       onOpenChange={close}
       title={hostname ?? "DNS record"}
       description="The DNS record this domain needs, what its zone holds, and the press that writes it."
-      width="md"
+      size="md"
       initialFocus="body"
       footer={
         <>

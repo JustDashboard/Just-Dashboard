@@ -9,17 +9,7 @@ import { ProductLogo } from "@/components/product-logo"
 import { Status, type DotTone } from "@/components/status-dot"
 import { EmptyNote } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  stickyTableHeader,
-} from "@/components/ui/table"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { copyText } from "@/lib/clipboard"
 import {
   ownerLabel,
@@ -29,6 +19,7 @@ import {
   type IPAMOwner,
   type IPAMReservation,
 } from "@/lib/network/ipam"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const OWNER_PRODUCT: Partial<Record<IPAMOwner, string>> = {
   docker_network: "docker",
@@ -72,7 +63,7 @@ export function IPAMReservations({
   const router = useRouter()
   // From `sm` a card is one line; narrower, how the hand-off stands takes a
   // second line under the block on every card alike.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const held = reservations.filter((row) => row.state !== "released").length
   return (
     <Panel plain aria-label="Reservations">
@@ -194,8 +185,11 @@ const COVERAGE_TONE: Record<IPAMCoverage["state"], DotTone> = {
 
 /**
  * What the planner could and could not read: every source it asked, the
- * state it came back in and the reason. A source that is "unknown" or
- * "unreadable" is why a free block is only free within readable evidence.
+ * state it came back in and the reason, a line each. A source that is
+ * "unknown" or "unreadable" is why a free block is only free within readable
+ * evidence. It was a framed table, which for the one or two sources a host
+ * has was a frame around a single row; what the planner cannot vouch for is
+ * behind the tip on the head.
  */
 export function IPAMCoverageTable({
   coverage,
@@ -209,65 +203,55 @@ export function IPAMCoverageTable({
   const gaps = coverage.filter((row) => row.state !== "observed").length
   if (!loading && coverage.length === 0 && limitations.length === 0) return null
   return (
-    <div className="space-y-3">
-      <Panel aria-label="Coverage">
-        <PanelHeader
-          title="Coverage"
-          actions={
-            !loading && (
-              <span className="numeric text-hint text-muted-foreground">
-                {gaps === 0 ? "every source read" : `${gaps} ${gaps === 1 ? "gap" : "gaps"}`}
-              </span>
-            )
-          }
-        />
+    <Panel plain aria-label="Coverage">
+      <PanelHeader
+        title="Coverage"
+        count={
+          loading
+            ? undefined
+            : gaps === 0
+              ? "every source read"
+              : `${gaps} ${gaps === 1 ? "gap" : "gaps"}`
+        }
+        actions={
+          limitations.length > 0 && (
+            <InfoTip label="What the plan cannot vouch for">
+              {limitations.map((detail, i) => (
+                <p key={i}>{detail}</p>
+              ))}
+            </InfoTip>
+          )
+        }
+      />
+      <PanelBody>
         {loading ? (
           <div aria-hidden className="divide-y divide-hairline">
             {[0, 1].map((i) => (
-              <div key={i} className="flex h-11 items-center gap-6 px-4">
+              <div key={i} className="flex h-10 items-center gap-6">
                 <Skeleton className="h-3.5 w-28" />
                 <Skeleton className="h-3.5 w-20" />
-                <Skeleton className="h-3.5 w-64" />
+                <Skeleton className="h-3.5 w-64 max-sm:hidden" />
               </div>
             ))}
           </div>
         ) : coverage.length === 0 ? (
-          <EmptyNote className="px-5 py-5">No sources reported.</EmptyNote>
+          <EmptyNote>No sources reported.</EmptyNote>
         ) : (
-          <Table className="table-fixed" containerClassName="max-h-[19.5rem]">
-            <TableHeader className={stickyTableHeader}>
-              <TableRow>
-                <TableHead className="w-[28%] sm:w-[22%]">Source</TableHead>
-                <TableHead className="w-28">State</TableHead>
-                <TableHead>What was read</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {coverage.map((row, i) => (
-                <TableRow key={i} className="h-11">
-                  <TableCell className="truncate font-mono" title={row.source}>
-                    {row.source}
-                  </TableCell>
-                  <TableCell>
-                    <Status tone={COVERAGE_TONE[row.state]} label={row.state} />
-                  </TableCell>
-                  <TableCell
-                    className="text-muted-foreground max-sm:whitespace-normal sm:truncate"
-                    title={row.detail}
-                  >
-                    {row.detail}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <ul aria-label="Sources" className="divide-y divide-hairline">
+            {coverage.map((row, i) => (
+              <li key={i} className="flex h-10 min-w-0 items-center gap-x-4 text-body">
+                <span className="w-24 shrink-0 truncate font-mono sm:w-32" title={row.source}>
+                  {row.source}
+                </span>
+                <Status tone={COVERAGE_TONE[row.state]} label={row.state} className="shrink-0" />
+                <span className="min-w-0 truncate text-muted-foreground" title={row.detail}>
+                  {row.detail}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
-      </Panel>
-      {limitations.map((detail, i) => (
-        <p key={i} className="text-hint text-muted-foreground">
-          {detail}
-        </p>
-      ))}
-    </div>
+      </PanelBody>
+    </Panel>
   )
 }

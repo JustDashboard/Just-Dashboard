@@ -210,7 +210,7 @@ function Explain({
               >
                 <span className="min-w-0 flex-1">Step</span>
                 <span className="w-20 text-right">Returned</span>
-                <span className="w-20 text-right max-sm:hidden">Documents</span>
+                <span className="w-34 text-right max-sm:hidden">Documents</span>
                 <span className="w-16 text-right max-sm:hidden">Keys</span>
                 <span className="w-14 text-right">ms</span>
               </li>
@@ -257,7 +257,7 @@ function PlanRow({
           style={{ paddingLeft: `${depth * 16}px` }}
         >
           {depth > 0 && (
-            <span aria-hidden className="shrink-0 text-muted-foreground/50">
+            <span aria-hidden className="shrink-0 text-faint">
               └
             </span>
           )}
@@ -274,8 +274,30 @@ function PlanRow({
           )}
         </div>
         <span className="numeric w-20 shrink-0 text-right text-xs">{figure(node.returned)}</span>
-        <span className="numeric w-20 shrink-0 text-right text-xs max-sm:hidden">
-          {figure(node.docsExamined)}
+        {/* The share of the busiest step's documents, beside the figure as the
+            SQL plan draws it: a bar under the row made every row taller once
+            the plan had run. */}
+        <span
+          title={
+            executed && node.docsExamined
+              ? `${node.stage} examined ${figure(node.docsExamined)} documents`
+              : undefined
+          }
+          className="flex w-34 shrink-0 items-center justify-end gap-2 max-sm:hidden"
+        >
+          {executed && node.docsExamined !== null && node.docsExamined > 0 && (
+            <span className="w-12 shrink-0">
+              <Meter
+                size="cell"
+                decorative
+                value={share * 100}
+                tone={scan ? "warning" : "default"}
+              />
+            </span>
+          )}
+          <span className="numeric min-w-0 truncate text-right text-xs">
+            {figure(node.docsExamined)}
+          </span>
         </span>
         <span className="numeric w-16 shrink-0 text-right text-xs max-sm:hidden">
           {figure(node.keysExamined)}
@@ -284,16 +306,6 @@ function PlanRow({
           {figure(node.timeMs)}
         </span>
       </div>
-      {executed && node.docsExamined !== null && node.docsExamined > 0 && (
-        <div style={{ paddingLeft: `${depth * 16 + (depth > 0 ? 20 : 0)}px` }} className="pt-1">
-          <Meter
-            size="thin"
-            value={share * 100}
-            tone={scan ? "warning" : "default"}
-            label={`${node.stage} examined ${figure(node.docsExamined)} documents`}
-          />
-        </div>
-      )}
     </li>
   )
 }

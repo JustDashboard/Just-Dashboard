@@ -5,7 +5,7 @@ import { Box, Database, NetworkDevice } from "@/components/icons"
 import { useViewState } from "@/lib/view-state"
 import type { ComposeStack, Container, DockerNetwork, VolumeDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { WireMark } from "@/components/wire/wire"
+import { WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { ProductGlyph, hasProductLogo, imageProducts } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { WireFlow, type WireFlowNode, type WireState } from "@/components/wire/wire-flow"
@@ -121,8 +121,14 @@ export function EnginePicture({
         heading: "always",
         count: picture.totals.networks + picture.totals.volumes,
         loadingRows: rows.end,
-        empty: "No networks or volumes to read",
+        // An empty lane is a dashed node level with the hub, with what it
+        // means as its caption (PGH-25), never a sentence floating in the
+        // picture. Lists the route did not read are "not read": "no volumes"
+        // beside a Disk reading of nine was a contradiction.
         nodes: [
+          ...(picture.end.length === 0 && !loading
+            ? [emptyLane(networks === undefined || volumes === undefined)]
+            : []),
           ...networksShown.map(node),
           ...(picture.more.networks.length > 0
             ? [more("networks", picture.more.networks, "more networks", "/docker/networks")]
@@ -135,6 +141,19 @@ export function EnginePicture({
       }}
     />
   )
+}
+
+/** The far lane with nothing in it: a dashed ring where a network or a volume would go. */
+function emptyLane(unread: boolean): WireFlowNode {
+  const words = unread ? "Networks and volumes not read" : "No networks or volumes"
+  return {
+    id: "empty",
+    placeholder: true,
+    name: words,
+    mark: (size) => <WirePlaceholder size={size} fallback={NetworkDevice} />,
+    eyebrow: unread ? "Not read" : "None",
+    title: <span className="block truncate font-normal text-muted-foreground">{words}</span>,
+  }
 }
 
 function node(item: EngineNode): WireFlowNode {
@@ -153,12 +172,7 @@ function node(item: EngineNode): WireFlowNode {
           <Glyph item={item} className={off ? "opacity-60 grayscale" : undefined} />
         </WireMark>
         {(item.kind === "stack" || item.kind === "container") && (
-          <span
-            aria-hidden
-            className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background"
-          >
-            <StatusDot tone={DOT[item.state]} live={item.state === "up"} />
-          </span>
+          <StatusDot tone={DOT[item.state]} live={item.state === "up"} corner="md" />
         )}
       </span>
     ),

@@ -478,7 +478,7 @@ function Outline({
             )}
           >
             <span className="min-w-0 flex-1 truncate">{section.key}</span>
-            <span className="numeric font-normal tracking-normal text-muted-foreground/60 normal-case">
+            <span className="numeric font-normal tracking-normal text-faint normal-case">
               {section.line}
             </span>
           </button>
@@ -515,7 +515,7 @@ function Outline({
                           className="shrink-0"
                         />
                       )}
-                      <span className="numeric w-6 shrink-0 text-right text-hint text-muted-foreground/60">
+                      <span className="numeric w-6 shrink-0 text-right text-hint text-faint">
                         {child.line}
                       </span>
                     </button>

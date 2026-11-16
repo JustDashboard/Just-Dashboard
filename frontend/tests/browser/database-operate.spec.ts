@@ -3142,10 +3142,16 @@ test("accounts that cannot be read say so in the server's words without metric c
     "/databases/1/access",
   )
   await visit(page, "/databases/1/access/reporting")
-  const failed = page.locator("[data-slot=page] [role=alert]:visible")
+  // The account's own failure is said in its column; the list beside it could
+  // not be read either, and the rail says so in its own place.
+  const failed = page
+    .locator("[data-slot=page] [role=alert]:visible")
+    .filter({ hasText: "Permission denied for pg_authid" })
   await expect(failed).toContainText("Could not read the account")
-  await expect(failed).toContainText("Permission denied for pg_authid")
   await expect(failed.getByRole("button", { name: "Try again" })).toBeVisible()
+  await expect(
+    page.getByRole("navigation", { name: "Accounts" }).getByRole("alert"),
+  ).toContainText("SELECT command denied for table user")
 })
 
 test("a key–value server's users are rules, and the dashboard's own user keeps what would cut it off", async ({

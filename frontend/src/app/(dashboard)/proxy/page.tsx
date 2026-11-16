@@ -20,8 +20,8 @@ import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { FactDot } from "@/components/identity-header"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
+import { Fact } from "@/components/fact-line"
 import { Status, type DotTone } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -45,7 +45,7 @@ import { EngineSetup } from "@/components/proxy/engine-setup"
 import { PARTICIPLE, engineRun } from "@/components/proxy/engine-lifecycle"
 import { LiveTraffic } from "@/components/proxy/live-metrics"
 import { engineProduct } from "@/components/proxy/marks"
-import { RouteMark, ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
+import { HourWords, RouteMark, ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { isParked } from "@/components/proxy/site-order"
 import {
   noAnswerLabel,
@@ -71,7 +71,6 @@ import {
   upstreamsOf,
   upstreamTone,
 } from "@/components/proxy/upstream-health"
-import { trafficLabel } from "@/components/proxy/site-traffic"
 import { RecentChanges } from "@/components/proxy/activity"
 import { frontDoorLine, frontDoors } from "@/components/proxy/front-door"
 import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
@@ -91,7 +90,7 @@ function readable<T>(poll: PollState<Reading<T>>): Reading<T> | undefined {
 }
 
 /** One of the engine line's facts about what it serves. */
-type Fact = {
+type InventoryFact = {
   key: string
   href: string
   text?: string
@@ -319,14 +318,7 @@ export default function ProxyOverviewPage() {
   // Loading until the status first answers, and its error once it fails —
   // the page used to render nothing at all.
   if (!status) {
-    return (
-      <PageState
-        eyebrow="Advanced"
-        title="Proxy & TLS"
-        error={statusError}
-        onRetry={refreshStatus}
-      />
-    )
+    return <PageState title="Proxy & TLS" error={statusError} onRetry={refreshStatus} />
   }
 
   const hasEngine = status.nginx || status.caddy
@@ -347,12 +339,12 @@ export default function ProxyOverviewPage() {
 
   // The four figures the tiles held, as facts after the engine's own: each
   // opens its page, and one whose source failed says so with the reason.
-  const certTone: Fact["tone"] = badCerts.some((c) => c.expired || c.error || c.staging)
+  const certTone: InventoryFact["tone"] = badCerts.some((c) => c.expired || c.error || c.staging)
     ? "danger"
     : badCerts.length > 0
       ? "warning"
       : undefined
-  const facts: Fact[] = [
+  const facts: InventoryFact[] = [
     {
       key: "sites",
       href: "/proxy/sites",
@@ -408,12 +400,21 @@ export default function ProxyOverviewPage() {
   // With one, a zero count of certificates or streams is dropped too: the
   // Certificates block says "No certificates yet" with the way to issue one,
   // and a host with no streams has nothing to open on Streams.
-  const none = (fact: Fact) =>
+  const none = (fact: InventoryFact) =>
     (fact.key === "certificates" && certificates?.length === 0) ||
     (fact.key === "streams" && streamStatus?.streams.length === 0)
+  // The facts that want action lead: on a phone the line is one line that
+  // clips what does not fit, and "2 certificates, 2 not valid" was clipped
+  // behind "3 sites, 2 on TLS". Danger first, then a source that failed and
+  // warnings, then the expected counts; each keeps its order within its rank.
+  const urgency = (fact: InventoryFact) =>
+    fact.tone === "danger" ? 0 : fact.error || fact.tone === "warning" ? 1 : 2
   const inventory = facts
     .filter((fact) => hasEngine || fact.key === "ports")
     .filter((fact) => fact.error || (fact.text && !none(fact)))
+    .map((fact, at) => ({ fact, at }))
+    .sort((a, b) => urgency(a.fact) - urgency(b.fact) || a.at - b.at)
+    .map(({ fact }) => fact)
   // The way to the Alerts page, which is a rule's own page now; what fires
   // is said on the line itself, where it is seen without opening the menu.
   const alertVerbs: Verb[] = admin
@@ -424,7 +425,7 @@ export default function ProxyOverviewPage() {
   const labelOf = (site: string) => hosts.find((v) => v.name === site)?.serverNames[0] ?? site
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title="Proxy & TLS" />
       {statusError && <ErrorState error={statusError} onRetry={refreshStatus} />}
 
@@ -442,14 +443,19 @@ export default function ProxyOverviewPage() {
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
         inventory={
           <>
-            {inventory.map((fact) => (
-              <Fragment key={fact.key}>
-                <FactDot />
-                {fact.error ? (
-                  <span className="font-medium text-warning" title={errorMessage(fact.error)}>
-                    {`couldn't read ${fact.key}`}
-                  </span>
-                ) : (
+            {/* What is firing is the most urgent fact the line has. */}
+            {firingFact(admin && !alerts.error ? alerts.data : undefined)}
+            {inventory.map((fact) =>
+              fact.error ? (
+                <Fact
+                  key={fact.key}
+                  className="font-medium text-warning"
+                  title={errorMessage(fact.error)}
+                >
+                  {`couldn't read ${fact.key}`}
+                </Fact>
+              ) : (
+                <Fact key={fact.key}>
                   <Link
                     href={fact.href}
                     title={fact.title}
@@ -461,11 +467,18 @@ export default function ProxyOverviewPage() {
                   >
                     {fact.text}
                   </Link>
-                )}
-              </Fragment>
-            ))}
-            <Firing alerts={admin && !alerts.error ? alerts.data : undefined} />
-            <Freshness at={updatedAt} refreshing={refreshing} late={late} />
+                </Fact>
+              ),
+            )}
+            {/* "Updated just now" would spend the line's width on the one
+                reading that is nearly always fine; the menu says it beside
+                Refresh. Hidden as a whole fact, so it takes its dot with it. */}
+            <Fact
+              className={late.length > 0 ? "font-medium text-warning" : "sr-only"}
+              title={late.length > 0 ? late.join(", ") : undefined}
+            >
+              <Freshness at={updatedAt} refreshing={refreshing} late={late} />
+            </Fact>
           </>
         }
         modules={status.nginx && <ModulesFact admin={admin} installer={installer} />}
@@ -525,6 +538,7 @@ export default function ProxyOverviewPage() {
               nginx={status.nginx}
               sites={siteTraffic}
               error={traffic.error}
+              onRetry={traffic.refresh}
             />
           )}
 
@@ -547,50 +561,36 @@ export default function ProxyOverviewPage() {
           {/* Route destinations need room for both ends; verdicts fit in the rail. */}
           <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem] [&>*]:min-w-0">
             <Panel plain>
+              {/* The section's one verb as a small outline button on the
+                  title line (D6), the count, and the way on. The head keeps
+                  a control's height before the upstream check answers, so
+                  the rows under it do not step down when the button lands. */}
               <PanelHeader
                 title="Routes"
+                className="[&>div:last-child]:min-h-7"
+                count={
+                  // The eight that need the reader most, and how many the Sites page has.
+                  hosts.length > 0 &&
+                  routes.total > routes.shown.length &&
+                  `Showing ${routes.shown.length} of ${routes.total}`
+                }
                 actions={
-                  hosts.length > 0 && (
-                    // As tall as the button the upstream check brings with it:
-                    // the head grew when the check answered, and the rows
-                    // under it stepped down.
-                    <div className="flex min-h-6 items-center gap-3">
-                      {admin && upstreamReport && (
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          onClick={checkUpstreams}
-                          pending={checking}
-                        >
-                          Check upstreams
-                        </Button>
-                      )}
-                      {/* The eight that need the reader most, and how many the Sites page has. */}
-                      {routes.total > routes.shown.length && (
-                        <span className="numeric text-hint text-muted-foreground">
-                          Showing {routes.shown.length} of {routes.total}
-                        </span>
-                      )}
-                      <Link
-                        href="/proxy/sites"
-                        className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                      >
-                        All sites <ArrowRight className="size-3" />
-                      </Link>
-                    </div>
+                  hosts.length > 0 &&
+                  admin &&
+                  upstreamReport && (
+                    <Button size="xs" variant="outline" onClick={checkUpstreams} pending={checking}>
+                      Check upstreams
+                    </Button>
                   )
                 }
+                link={hosts.length > 0 ? { href: "/proxy/sites", label: "All sites" } : undefined}
               />
               <PanelBody flush>
                 {vhosts.loading ? (
                   // Rows of a route's own height, so the log under the list
                   // moves by the difference in their number and not by a list
                   // arriving where two lines of text stood.
-                  <div className="space-y-2">
-                    {[0, 1, 2].map((row) => (
-                      <Skeleton key={row} className="h-[3.875rem] w-full rounded-xl" />
-                    ))}
-                  </div>
+                  <ChoiceListSkeleton rows={3} mark="md" lines={2} />
                 ) : vhosts.error ? (
                   <ErrorState error={vhosts.error} onRetry={vhosts.refresh} className="mt-2" />
                 ) : hosts.length === 0 ? (
@@ -682,11 +682,7 @@ export default function ProxyOverviewPage() {
                           }
                           trailing={
                             <span className="flex shrink-0 items-center gap-4">
-                              {load && (
-                                <span className="numeric text-hint text-muted-foreground max-md:hidden">
-                                  {trafficLabel(load)}
-                                </span>
-                              )}
+                              {load && <HourWords hour={load} className="max-md:hidden" />}
                               <UpstreamWord targets={reached} />
                               {ports.length > 0 && (
                                 <span
@@ -778,22 +774,8 @@ function Freshness({
   late: string[]
 }) {
   const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
-  if (late.length > 0)
-    return (
-      <>
-        <FactDot />
-        <span className="font-medium text-warning" title={late.join(", ")}>
-          {noAnswerLabel(late)}
-        </span>
-      </>
-    )
-  // "Updated just now" would spend the line's width on the one reading that
-  // is nearly always fine; the menu says it beside Refresh.
-  return (
-    <span className="sr-only">
-      {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
-    </span>
-  )
+  if (late.length > 0) return noAnswerLabel(late)
+  return refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)
 }
 
 /**
@@ -801,14 +783,13 @@ function Freshness({
  * way to that page with nothing beside it said nothing about whether anybody
  * was being told something right now. Nothing firing is nothing to say.
  */
-function Firing({ alerts }: { alerts?: ProxyAlerts }) {
+function firingFact(alerts?: ProxyAlerts) {
   const subjects = alerts?.subjects ?? []
   const firing = subjects.filter((s) => s.state === "firing").length
   const holding = subjects.filter((s) => s.state === "pending").length
   if (firing === 0 && holding === 0) return null
   return (
-    <>
-      <FactDot />
+    <Fact>
       <Link
         href="/proxy/alerts"
         className={cn(
@@ -818,6 +799,6 @@ function Firing({ alerts }: { alerts?: ProxyAlerts }) {
       >
         {firing > 0 ? `${plural(firing, "alert")} firing` : `${plural(holding, "alert")} holding`}
       </Link>
-    </>
+    </Fact>
   )
 }

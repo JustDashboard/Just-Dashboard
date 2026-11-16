@@ -242,7 +242,10 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         // layout hands the rail that panel, a level below this one
         // (`components/database/shell/nav-scope.tsx`).
         children: [
-          { title: "Control center", href: "/databases", icon: Layers },
+          // Named as the page, its tab and its title are: it was "Control
+          // center" here and "Databases" everywhere else, as Projects is
+          // Projects in its row and on its page.
+          { title: "Databases", href: "/databases", icon: Layers },
           { title: "Map", href: "/databases/map", icon: Route },
           {
             title: "Add a database",

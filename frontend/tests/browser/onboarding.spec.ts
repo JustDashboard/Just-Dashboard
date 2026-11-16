@@ -256,7 +256,8 @@ test("Workspace is one line that says where the answer stands, over one column o
     expect(sections).toHaveLength(2)
     expect(sections[1].x).toBe(sections[0].x)
     expect(sections[1].width).toBe(sections[0].width)
-    expect(sections[1].y).toBeGreaterThanOrEqual(sections[0].bottom)
+    // Allow a float's rounding: CI read 792.388916 against 792.388946.
+    expect(sections[1].y).toBeGreaterThanOrEqual(sections[0].bottom - 0.01)
     expect(sections[0].width).toBeLessThanOrEqual(768)
 
     // The purposes are a grid of cards of one height, and the rail's entries are full-width

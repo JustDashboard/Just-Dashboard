@@ -23,6 +23,7 @@ import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { useCallback } from "react"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * The home of a database that is not answering.
@@ -85,8 +86,8 @@ function StateNotice() {
   const bound = summary?.consumers ?? 0
   const without = bound > 0 && (
     <p>
-      {plural(bound, "deployment environment")} {bound === 1 ? "is" : "are"} bound to it and{" "}
-      {bound === 1 ? "is" : "are"} without a database until it is back.
+      {plural(bound, "deployment environment")} {agree(bound, "is", "are")} bound to it and{" "}
+      {agree(bound, "is", "are")} without a database until it is back.
     </p>
   )
 

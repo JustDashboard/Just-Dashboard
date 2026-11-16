@@ -294,7 +294,7 @@ function Ports({ listen }: { listen: string[] }) {
   const ports = [...new Set(listen.map((l) => l.match(/(\d+)/)?.[1]).filter(Boolean))]
   if (ports.length === 0) return null
   return (
-    <span className="numeric font-mono text-[var(--tag-pink)]">
+    <span className="numeric font-mono text-tag-pink">
       {ports.map((port) => `:${port}`).join(" ")}
     </span>
   )

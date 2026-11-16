@@ -197,8 +197,8 @@ export default function NetworkProtectionPage() {
   ]
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="Protection" />
+    <Page rise>
+      <PageContext title="Protection" />
       {/* The line and its views are one block, as a process's page has them:
           the strip's hairline is the rule under the line. */}
       <div className="flex min-w-0 flex-col gap-4">
@@ -290,7 +290,7 @@ export default function NetworkProtectionPage() {
                 >
                   {v.label}
                   {v.key === "kernel" && staged > 0 && (
-                    <ChipCount className="text-[var(--git-modified)]">{staged}</ChipCount>
+                    <ChipCount className="text-git-modified">{staged}</ChipCount>
                   )}
                 </TabsPrimitive.Trigger>
               ))}

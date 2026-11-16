@@ -37,7 +37,6 @@ import {
   statusClass,
 } from "@/lib/requests"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ClientMark, NETWORK_GLYPH, NetworkFact } from "@/components/client-mark"
 import { FactDot } from "@/components/identity-header"
 import { PaneFooter } from "@/components/panel"
@@ -55,6 +54,7 @@ import {
   clientName,
   isPrivate,
 } from "@/components/deploy/request-marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The requests, and the chrome that belongs to them.
@@ -163,7 +163,7 @@ export function RequestConsole({
   const [open, setOpen] = useState<string | null>(null)
   const { highlight } = useLogView()
   const plain = !highlight
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const keys = entries.map((entry, i) => requestKey(entry, i))
   const arrived = useArrivals(keys)
   const rising = paused === false && following
@@ -259,7 +259,7 @@ export function RequestConsole({
               // Padded above as well as below, so once it sticks to the top
               // of the pane its labels stay centred in the band rather than
               // pressed against the band's top edge.
-              <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-hairline bg-surface-sunken px-0 py-1 pr-4 font-sans text-hint font-medium text-muted-foreground">
+              <div className="sticky top-0 z-raised flex items-center gap-3 border-b border-hairline bg-surface-sunken px-0 py-1 pr-4 font-sans text-hint font-medium text-muted-foreground">
                 <span aria-hidden className="w-0.5 shrink-0" />
                 <span className="w-16 shrink-0">Time</span>
                 <span className="w-12 shrink-0">Method</span>
@@ -317,7 +317,7 @@ export function RequestConsole({
                       />
                       <span
                         title={timestamp(entry.time)}
-                        className="numeric w-16 shrink-0 text-muted-foreground/70 select-none"
+                        className="numeric w-16 shrink-0 text-faint select-none"
                       >
                         {clock(entry.time)}
                       </span>
@@ -335,7 +335,7 @@ export function RequestConsole({
                       <span className="flex min-w-0 flex-1" title={requestURI(entry)}>
                         <RequestPath path={entry.path} query={entry.query} plain={plain} />
                       </span>
-                      <span className="numeric hidden w-16 shrink-0 text-right text-muted-foreground/70 lg:block">
+                      <span className="numeric hidden w-16 shrink-0 text-right text-faint lg:block">
                         {entry.size ? bytes(entry.size, 0) : "—"}
                       </span>
                       <ClientCell

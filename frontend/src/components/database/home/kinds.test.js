@@ -6,6 +6,9 @@ describe("the hues a home tells kinds apart with", () => {
     expect(keyType("string")).toEqual({ label: "String", color: "var(--tag-blue)" })
     expect(keyType("zset")).toEqual({ label: "Sorted set", color: "var(--tag-pink)" })
     expect(keyType("ReJSON-RL").label).toBe("JSON")
+    // Both of the names a JSON key goes by, as the Keys page reads them.
+    expect(keyType("json")).toEqual(keyType("ReJSON-RL"))
+    expect(keyType("json").color).toBe("var(--tag-slate)")
   })
 
   test("a type nobody knows keeps its own word and the quiet ink", () => {

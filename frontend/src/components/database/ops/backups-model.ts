@@ -6,6 +6,7 @@ import type {
   DbDumpOrigin,
   DbTransferResult,
 } from "@/components/database/ops/backups-types"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * What the Backups page says about a database's dumps, worked out from what
@@ -94,7 +95,7 @@ export function contentsWords(
   const parts: string[] = []
   if (contents.databases && contents.databases.length > 0) {
     parts.push(
-      `${contents.databases.length === 1 ? "Database" : "Databases"} ${contents.databases.join(", ")}`,
+      `${agree(contents.databases.length, "Database", "Databases")} ${contents.databases.join(", ")}`,
     )
   }
   const scope = contents.schemaOnly ? "Structure" : contents.dataOnly ? "Data" : ""

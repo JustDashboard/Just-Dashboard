@@ -3,10 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
 import {
   ArrowCircleUp,
-  ArrowLeft,
   Box,
   ChevronDown,
   ChevronUp,
@@ -69,7 +67,9 @@ import {
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconAction } from "@/components/icon-action"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { HostFact, IdentityHeader, IdentityVerbs } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { VerdictButton } from "@/components/docker/docker-identity"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import {
@@ -82,10 +82,9 @@ import {
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
-import { VerbMenu, type Verb } from "@/components/verbs"
-import { Button } from "@/components/ui/button"
+import type { Verb } from "@/components/verbs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
@@ -524,6 +523,7 @@ function StackBody({
 
   const control = Boolean(data?.managed) && can("system.admin")
   const busy = runner.running
+  const verbs = useStackVerbs({ data, run, confirmRun, busy })
   // Deploy where the reader has just read what it will do: the preview, and
   // the editor that saved a file nothing runs yet.
   const deploy =
@@ -673,72 +673,56 @@ function StackBody({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6 md:gap-8">
       <div className="flex min-w-0 shrink-0 flex-col gap-4">
+        {/* The back line holds the way back, the walk and the help; the
+            verbs are the identity line's (PGH-02). */}
         <PageContext
-          eyebrow={
-            <Link
-              href="/docker/stacks"
-              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-            >
-              <ArrowLeft className="size-3" /> Stacks
-            </Link>
-          }
+          back={{ href: "/docker/stacks", label: "Stacks" }}
           title={name}
           actions={
             data && (
-              <>
-                <StackActions data={data} confirmRun={confirmRun} run={run} busy={busy} />
-                <span className="flex items-center max-sm:hidden">
-                  <IconAction
-                    label="Previous stack"
-                    disabled={previous.disabled}
-                    onClick={previous.run}
-                  >
-                    <ChevronUp />
-                  </IconAction>
-                  <IconAction label="Next stack" disabled={next.disabled} onClick={next.run}>
-                    <ChevronDown />
-                  </IconAction>
-                  <WorkspaceHelp />
-                </span>
-              </>
+              <span className="flex items-center max-sm:hidden">
+                <IconAction
+                  label="Previous stack"
+                  disabled={previous.disabled}
+                  onClick={previous.run}
+                >
+                  <ChevronUp />
+                </IconAction>
+                <IconAction label="Next stack" disabled={next.disabled} onClick={next.run}>
+                  <ChevronDown />
+                </IconAction>
+                <WorkspaceHelp />
+              </span>
             )
           }
         />
         {data && (
-          <HostIdentity
+          <IdentityHeader
             className="animate-rise border-b-0 pb-0"
             logo={<StackMark stack={data} containers={containers} />}
             title={name}
-            facts={
-              <StackFacts data={data} running={counts.running + counts.starting} ports={ports} />
-            }
-            aside={
+            facts={stackFacts({ data, running: counts.running + counts.starting, ports })}
+            {...IdentityVerbs({ verbs, name })}
+            state={
               pending ? (
-                <span className="flex items-center gap-2 px-1.5 text-xs font-medium">
-                  <Status tone="notice" label={<TextShimmer>{`${pending.label}…`}</TextShimmer>} />
-                </span>
+                <Status tone="notice" label={<TextShimmer>{`${pending.label}…`}</TextShimmer>} />
               ) : verdict.bucket && verdict.tone !== "running" ? (
-                <button
-                  type="button"
-                  aria-pressed={state === verdict.bucket}
-                  title="Show only these services"
-                  onClick={() => {
+                <VerdictButton
+                  pressed={state === verdict.bucket}
+                  onPress={() => {
                     setTab("services")
                     setState(state === verdict.bucket ? "" : (verdict.bucket ?? ""))
                     showServices()
                   }}
-                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
                 >
                   <Status tone={verdict.tone} label={verdict.label} />
-                </button>
+                </VerdictButton>
               ) : (
-                <span className="px-1.5 py-1">
-                  <Status
-                    tone={verdict.tone}
-                    live={verdict.tone === "running" && containers !== undefined}
-                    label={verdict.label}
-                  />
-                </span>
+                <Status
+                  tone={verdict.tone}
+                  live={verdict.tone === "running" && containers !== undefined}
+                  label={verdict.label}
+                />
               )
             }
           />
@@ -778,35 +762,19 @@ function StackBody({
           />
 
           <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
-            {/* The same underlined strip every switcher between views of one
-                  page wears (§8): the brand underline says where you are and
-                  the label stays ink. It was a filled tab list, a control with a
-                  face on a page that had stopped drawing boxes. */}
-            <TabsPrimitive.List
-              aria-label="Stack views"
-              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-            >
-              {tabs.map((entry) => (
-                <TabsPrimitive.Trigger
-                  key={entry.value}
-                  value={entry.value}
-                  className={tabClasses(tab === entry.value, "h-10")}
-                >
-                  {entry.label}
-                  {entry.count !== undefined && (
-                    <span className="numeric text-hint font-medium text-muted-foreground">
-                      {entry.count}
-                    </span>
-                  )}
-                  {"unsaved" in entry && entry.unsaved && (
-                    <span
-                      title="An edit that is not saved yet"
-                      className="size-1.5 rounded-full bg-warning"
-                    />
-                  )}
-                </TabsPrimitive.Trigger>
-              ))}
-            </TabsPrimitive.List>
+            <ViewTabList
+              label="Stack views"
+              value={tab}
+              views={tabs.map((entry) => ({
+                key: entry.value,
+                label: entry.label,
+                count: entry.count,
+                dot:
+                  "unsaved" in entry && entry.unsaved
+                    ? { tone: "warning" as const, label: "Unsaved" }
+                    : undefined,
+              }))}
+            />
             <TabsContent value="services" className="min-h-0 flex-1 overflow-y-auto pt-5">
               {data.services.length === 0 ? (
                 <EmptyState
@@ -982,8 +950,13 @@ function StackMark({ stack, containers }: { stack: StackDetail; containers?: Con
  * uncommitted changes mean compose will deploy something that is in no
  * commit, and "behind" means a pull would change what deploying does), and
  * how much of it runs and how much of it is reachable.
+ *
+ * A checkout that is dirty or behind leads, so a phone's one line of facts
+ * never clips it. The facts are built by a plain function, not drawn as a
+ * component, so the identity line receives the `Fact`s themselves and puts
+ * its dots only between them.
  */
-function StackFacts({
+function stackFacts({
   data,
   running,
   ports,
@@ -993,42 +966,44 @@ function StackFacts({
   ports: number
 }) {
   const file = data.configPath?.split("/").pop()
+  const git = data.git
+  const gitFact = git && (
+    <Fact key="git">
+      <Link
+        href={`/git?repo=${encodeURIComponent(git.path)}`}
+        title={git.subject}
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
+      >
+        <HostFact product="git">{git.branch ?? "repository"}</HostFact>
+        {git.dirty && (
+          <span className="numeric" style={{ color: "var(--git-modified)" }}>
+            {git.changes} uncommitted
+          </span>
+        )}
+        {git.behind > 0 && <span className="numeric">{git.behind} behind</span>}
+      </Link>
+    </Fact>
+  )
+  const leads = Boolean(git && (git.dirty || git.behind > 0))
   return (
     <>
-      <HostFact product="docker-compose">{file ?? "Compose"}</HostFact>
+      {leads && gitFact}
+      <Fact key="file" product="docker-compose">
+        {file ?? "Compose"}
+      </Fact>
       {data.workingDir && (
-        <>
-          <FactDot />
-          <span className="truncate font-mono">{data.workingDir}</span>
-        </>
+        <Fact key="dir" mono>
+          {data.workingDir}
+        </Fact>
       )}
-      {data.git && (
-        <>
-          <FactDot />
-          <Link
-            href={`/git?repo=${encodeURIComponent(data.git.path)}`}
-            title={data.git.subject}
-            className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
-          >
-            <HostFact product="git">{data.git.branch ?? "repository"}</HostFact>
-            {data.git.dirty && (
-              <span className="numeric" style={{ color: "var(--git-modified)" }}>
-                {data.git.changes} uncommitted
-              </span>
-            )}
-            {data.git.behind > 0 && <span className="numeric">{data.git.behind} behind</span>}
-          </Link>
-        </>
-      )}
-      <FactDot />
-      <span className="numeric">
+      {!leads && gitFact}
+      <Fact key="running" className="numeric">
         {running} of {plural(data.total || data.services.length, "service")} running
-      </span>
+      </Fact>
       {ports > 0 && (
-        <>
-          <FactDot />
-          <span className="numeric">{plural(ports, "port")} published</span>
-        </>
+        <Fact key="ports" className="numeric">
+          {plural(ports, "port")} published
+        </Fact>
       )}
     </>
   )
@@ -1061,17 +1036,12 @@ function ServicesPanel({
   const wide = useMediaQuery(WIDE_BESIDE_RAIL)
   const roomy = useMediaQuery(ROOMY_BESIDE_RAIL)
   return (
-    <Panel aria-label="Services">
-      <PanelHeader
-        title={
-          <>
-            Services
-            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-              {all}
-            </span>
-          </>
-        }
-      >
+    <Panel
+      // Framed: a table: the frame is the edge of its scroll (§2).
+      framed
+      aria-label="Services"
+    >
+      <PanelHeader title="Services" count={all}>
         <ChipStrip aria-label="State" className="mr-auto">
           {STATES.map(({ value, label, tone }) => {
             const count = counts[value]
@@ -1135,7 +1105,7 @@ function ServicesPanel({
         <span>failing first, then by name</span>
         {busy && (
           <>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>the verbs wait for the command above to finish</span>
           </>
         )}
@@ -1144,20 +1114,20 @@ function ServicesPanel({
   )
 }
 
-function StackActions({
+function useStackVerbs({
   data,
   run,
   confirmRun,
   busy,
 }: {
-  data: StackDetail
+  data?: StackDetail
   run: (action: ComposeActionKey) => Promise<void>
   confirmRun: (action: ComposeActionKey, title: string, description: React.ReactNode) => void
   busy: boolean
-}) {
+}): Verb[] {
   const { can } = useAuth()
   const router = useRouter()
-  if (!data.managed || !can("system.admin")) return null
+  if (!data || !data.managed || !can("system.admin")) return []
   const quiet = (fn: () => Promise<void>) => () => {
     fn().catch((err) => notify.error(String(err)))
   }
@@ -1167,11 +1137,11 @@ function StackActions({
    *
    * `Up` and `Down` are precise and mean nothing without the compose reference
    * — and `Down` is the worst of the two, because it sounds like the opposite
-   * of `Up` and is not: it deletes the containers and the project network. Two
-   * are pressed often enough to sit inline; the rest are behind one menu, one
-   * word to a line. Every confirmation still carries both
-   * the blast radius and the exact command being run, so an operator who knows
-   * compose can check the translation.
+   * of `Up` and is not: it deletes the containers and the project network.
+   * Deploy is the line's one command; the rest are behind ⋯, one word to a
+   * line (PGH-02). Every confirmation still carries both the blast radius and
+   * the exact command being run, so an operator who knows compose can check
+   * the translation.
    */
   const act = (action: ComposeActionKey, extra?: React.ReactNode) => {
     const meta = COMPOSE_ACTIONS[action]
@@ -1189,7 +1159,26 @@ function StackActions({
   }
 
   const verbs: Verb[] = []
+  if (can("service.control")) {
+    // Deploy is not destructive: it starts what is missing and replaces what
+    // changed. It gets no confirmation for the same reason it is the command.
+    verbs.push({
+      key: "up",
+      label: COMPOSE_ACTIONS.up.label,
+      icon: Play,
+      inline: true,
+      disabled: busy,
+      run: quiet(() => run("up")),
+    })
+  }
   if (can("destructive")) {
+    verbs.push({
+      key: "restart",
+      label: COMPOSE_ACTIONS.restart.label,
+      icon: RotateClockwise,
+      disabled: busy,
+      run: () => act("restart"),
+    })
     verbs.push({
       key: "update",
       label: COMPOSE_ACTIONS.update.label,
@@ -1232,25 +1221,5 @@ function StackActions({
         ),
     })
   }
-
-  return (
-    <>
-      {can("service.control") && (
-        /* Deploy is not destructive: it starts what is missing and replaces
-           what changed. It gets no confirmation for the same reason it is the
-           primary button. */
-        <Button size="sm" onClick={quiet(() => run("up"))} pending={busy}>
-          <Play className="size-3.5" />
-          {COMPOSE_ACTIONS.up.label}
-        </Button>
-      )}
-      {can("destructive") && (
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => act("restart")}>
-          <RotateClockwise className="size-3.5" />
-          {COMPOSE_ACTIONS.restart.label}
-        </Button>
-      )}
-      {verbs.length > 0 && <VerbMenu verbs={verbs} label={`More actions for ${data.name}`} />}
-    </>
-  )
+  return verbs
 }

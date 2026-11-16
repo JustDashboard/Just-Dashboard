@@ -11,7 +11,6 @@ import { useSessionState } from "@/lib/view-state"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Code } from "@/components/icons"
 import { HostFact, HostIdentity } from "@/components/identity-header"
-import { PageContext } from "@/components/page"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
@@ -32,16 +31,8 @@ import {
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { programHref, programId, trafficHref } from "./address"
 import { FactGroups, FactRowHeld } from "./facts"
-import {
-  BackLink,
-  DetailRail,
-  DetailShell,
-  RailGhosts,
-  RailRow,
-  StepArrows,
-  steps,
-  type Step,
-} from "./detail-shell"
+import { DetailPage, useSiblingSteps } from "@/components/detail-page"
+import { Rail, RailLine, RailName, RailRow } from "@/components/rail"
 
 const num = (value: number) => value.toLocaleString()
 
@@ -78,7 +69,7 @@ export function EBPFProgramPage() {
     )
   }, [list.data, query, type])
   const open = (next: number) => router.push(programHref(next, type))
-  const step = steps(
+  const step = useSiblingSteps(
     programs.map((p) => p.id),
     id,
     open,
@@ -93,7 +84,7 @@ export function EBPFProgramPage() {
   const back = trafficHref({ tab: "ebpf", type })
 
   return (
-    <DetailShell
+    <DetailPage
       name="eBPF program"
       what="program"
       stateKey="network.traffic.program"
@@ -101,16 +92,18 @@ export function EBPFProgramPage() {
         list.refresh()
         detail.refresh()
       }}
-      previous={step.previous}
-      next={step.next}
+      steps={step}
       rail={
-        <DetailRail
-          label="Programs"
+        <Rail
           slot="program-rail"
-          current={id}
-          query={query}
-          onQuery={setQuery}
-          placeholder="Name, type or ID"
+          label="Programs"
+          rows={programs}
+          keyOf={(p) => String(p.id)}
+          current={(p) => p.id === id}
+          loading={!list.data && !list.error}
+          error={!list.data ? list.error : undefined}
+          onRetry={list.refresh}
+          search={{ placeholder: "Name, type or ID", query, onQuery: setQuery }}
           caption={
             list.data ? (
               type ? (
@@ -127,7 +120,7 @@ export function EBPFProgramPage() {
               "Reading the programs…"
             )
           }
-          filter={
+          action={
             type && id !== null ? (
               <Link
                 href={programHref(id)}
@@ -138,18 +131,15 @@ export function EBPFProgramPage() {
               </Link>
             ) : undefined
           }
-          empty={list.data && programs.length === 0 ? "No program matches." : undefined}
-        >
-          {!list.data && !list.error && <RailGhosts />}
-          {programs.map((p) => (
+          empty="No program matches."
+          row={(p, current) => (
             <RailRow
-              key={p.id}
-              id={String(p.id)}
+              item={String(p.id)}
               name={p.name || "unnamed"}
               label={`${p.name || "unnamed"}, program ${p.id}`}
-              current={p.id === id}
-              onOpen={() => open(p.id)}
-              leading={
+              current={current}
+              href={programHref(p.id, type)}
+              mark={
                 <ProductLogo
                   id="linux"
                   size="sm"
@@ -157,20 +147,31 @@ export function EBPFProgramPage() {
                   className="size-7 rounded-md [&_img]:size-4"
                 />
               }
-              detail={observer.has(p.id) ? `${p.type} · this dashboard’s observer` : p.type}
-              trailing={p.id}
-            />
-          ))}
-        </DetailRail>
+              end={
+                <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
+                  {p.id}
+                </span>
+              }
+            >
+              <RailName current={current} mono>
+                {p.name || "unnamed"}
+              </RailName>
+              <RailLine>
+                {observer.has(p.id) ? `${p.type} · this dashboard’s observer` : p.type}
+              </RailLine>
+            </RailRow>
+          )}
+        />
       }
-      header={
+      back={{ href: back, label: "eBPF programs" }}
+      title={
+        detail.data?.name ? `${detail.data.name}, eBPF program ${id}` : `eBPF program ${id ?? ""}`
+      }
+      identity={
         <ProgramHeader
           id={id}
-          back={back}
           detail={detail.data}
           missing={detail.error instanceof ApiError && detail.error.status === 404}
-          previous={step.previous}
-          next={step.next}
         />
       }
     >
@@ -187,33 +188,22 @@ export function EBPFProgramPage() {
       ) : (
         <ProgramBody key={id} id={id} back={back} detail={detail} />
       )}
-    </DetailShell>
+    </DetailPage>
   )
 }
 
 function ProgramHeader({
   id,
-  back,
   detail: d,
   missing,
-  previous,
-  next,
 }: {
   id: number | null
-  back: string
   detail: EBPFProgramDetail | undefined
   missing: boolean
-  previous: Step
-  next: Step
 }) {
   const places = d ? d.devices.length + d.cgroups.length + d.links.length : 0
   return (
     <>
-      <PageContext
-        eyebrow={<BackLink href={back}>eBPF programs</BackLink>}
-        title={d?.name ? `${d.name}, eBPF program ${id}` : `eBPF program ${id ?? ""}`}
-        actions={<StepArrows what="program" previous={previous} next={next} />}
-      />
       {id !== null && (
         <HostIdentity
           label={`About program ${id}`}

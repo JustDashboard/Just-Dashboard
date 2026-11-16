@@ -87,7 +87,7 @@ import { withoutPlatformVariables } from "@/components/deploy/settings/dotenv"
  * and the command, which stay where the reader left them.
  */
 const LAYOUT =
-  "grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[20rem_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)]"
+  "grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[20rem_minmax(0,1fr)] xl:grid-rows-fill"
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
@@ -971,7 +971,7 @@ export function Configure({
             </p>
           </FlowPanelBody>
           <FlowActions>
-            <Button asChild className="h-11 sm:h-9">
+            <Button asChild>
               <Link href={`/deploy/${created.projectId}/deployments`}>
                 Open deployment
                 <ArrowRight className="size-4" />
@@ -1094,7 +1094,7 @@ export function Configure({
               <>
                 <Button
                   variant="ghost"
-                  className="h-11 text-muted-foreground sm:h-9"
+                  className="text-muted-foreground"
                   onClick={back}
                   disabled={Boolean(busy)}
                 >
@@ -1103,7 +1103,6 @@ export function Configure({
                 {last && (
                   <Button
                     variant="ghost"
-                    className="h-11 sm:h-9"
                     onClick={() => void submit("save")}
                     pending={busy === "save"}
                     disabled={Boolean(busy)}
@@ -1116,7 +1115,6 @@ export function Configure({
           >
             {last ? (
               <Button
-                className="h-11 sm:h-9"
                 onClick={() => void submit("deploy")}
                 pending={busy === "deploy"}
                 disabled={Boolean(busy) || assistantWorking}
@@ -1129,7 +1127,7 @@ export function Configure({
                     : "Deploy"}
               </Button>
             ) : (
-              <Button className="h-11 sm:h-9" onClick={advance} disabled={Boolean(busy)}>
+              <Button onClick={advance} disabled={Boolean(busy)}>
                 <ArrowRight className="size-4" />
                 Continue
               </Button>

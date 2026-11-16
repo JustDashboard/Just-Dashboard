@@ -298,7 +298,7 @@ function Endpoint({ ip, port }: { ip: string; port?: number }) {
       {port !== undefined && port > 0 && (
         <>
           <span className="text-muted-foreground">:</span>
-          <span className="text-[var(--tag-pink)]">{port}</span>
+          <span className="text-tag-pink">{port}</span>
         </>
       )}
     </span>

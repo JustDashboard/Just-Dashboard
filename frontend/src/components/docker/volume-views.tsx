@@ -4,7 +4,6 @@ import Link from "next/link"
 import { Archive, Box, CloudUpload, Database, Servers, Warning } from "@/components/icons"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import type { BackupJob, VolumeDetail } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { destinations } from "@/components/backups/marks"
 import { scheduleLabel, targetLabel } from "@/components/backups/shared"
 import { DatabaseStorageWarning, looksLikeDatabase } from "@/components/docker/shared"
@@ -28,11 +27,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { cn } from "@/lib/utils"
-
-/** A section's count, at the far end of its title line. */
-function Count({ children }: { children: React.ReactNode }) {
-  return <span className="numeric text-hint text-muted-foreground">{children}</span>
-}
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * What is in the volume: the file browser every page embeds, clamped to the
@@ -87,13 +82,13 @@ export function VolumeMounts({
   productOf: Map<string, string>
   stacks: Set<string>
 }) {
-  const roomy = useMediaQuery("(min-width: 640px)")
+  const roomy = useBreakpoint("sm")
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <PruneNotice volume={volume} stacks={stacks} />
       {volume.usedBy.length > 0 && (
         <Panel plain>
-          <PanelHeader title="Mounted by" actions={<Count>{volume.usedBy.length}</Count>} />
+          <PanelHeader title="Mounted by" count={volume.usedBy.length} />
           <ChoiceList className="pt-3" aria-label="Containers mounting this volume">
             {volume.usedBy.map((user) => (
               <ChoiceRow
@@ -226,14 +221,11 @@ export function VolumeBackups({
   local: boolean
   onBackUp?: () => void
 }) {
-  const roomy = useMediaQuery("(min-width: 640px)")
+  const roomy = useBreakpoint("sm")
   const covering = backup?.jobs ?? []
   return (
     <Panel plain>
-      <PanelHeader
-        title="Backup jobs"
-        actions={covering.length > 0 && <Count>{covering.length}</Count>}
-      />
+      <PanelHeader title="Backup jobs" count={covering.length > 0 && covering.length} />
       <div className="pt-3">
         {coverage === "reading" ? (
           <LoadingRows rows={2} />
@@ -353,7 +345,7 @@ export function VolumeConfiguration({ volume }: { volume: VolumeDetail }) {
         </DetailList>
       </Panel>
       <Panel plain>
-        <PanelHeader title="Labels" actions={labels.length > 0 && <Count>{labels.length}</Count>} />
+        <PanelHeader title="Labels" count={labels.length > 0 && labels.length} />
         {labels.length > 0 ? (
           <DetailList className="pt-3">
             {labels.map(([key, value]) => (

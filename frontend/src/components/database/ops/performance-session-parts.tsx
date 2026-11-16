@@ -85,7 +85,7 @@ export function Who({ session }: { session: DbActivity }) {
       {session.user ? <Named name={session.user} className="font-medium" /> : <NoFigure />}
       {session.application && (
         <>
-          <span aria-hidden className="text-muted-foreground/60">
+          <span aria-hidden className="text-faint">
             ·
           </span>
           <Named name={session.application} />

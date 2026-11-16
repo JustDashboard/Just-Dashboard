@@ -1,9 +1,9 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useRef, type RefObject } from "react"
 import type { ApiToken, Role } from "@/lib/types"
 import { LineChart, Rocket, Sparkles } from "@/components/icons"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireHost, WireMark, WireNode } from "@/components/wire/wire"
 import { useNow } from "@/hooks/use-now"
@@ -18,6 +18,7 @@ import {
   type Line,
 } from "@/components/account/access"
 import { KeyWireMark, WireMore, keyHint } from "@/components/account/marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** How many keys the picture draws before it counts the rest. */
 const SHOWN = 6
@@ -71,7 +72,7 @@ function doorName(token: ApiToken) {
  * and the keys' path here are one picture at one size.
  */
 export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const now = useNow(15_000)
   const container = useRef<HTMLDivElement>(null)
   const server = useRef<HTMLDivElement>(null)
@@ -159,12 +160,10 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
             }
             eyebrow="Role"
             title={name}
-            hint={
-              held.length === 0 ? "no key" : `${held.length} ${held.length === 1 ? "key" : "keys"}`
-            }
+            hint={held.length === 0 ? "no key" : plural(held.length, "key")}
           />
         ) : (
-          <div ref={roleRef[role]} className="relative z-10 flex">
+          <div ref={roleRef[role]} className="relative z-raised flex">
             <WireMark tone="logo" size="md" className={held.length === 0 ? "opacity-50" : ""}>
               <Mark aria-hidden style={{ color: hue }} />
             </WireMark>
@@ -205,7 +204,7 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
           <div role="group" aria-label="Roles" className="mt-10 flex justify-center gap-8">
             {roles}
           </div>
-          <div ref={server} className="relative z-10 mt-10 flex">
+          <div ref={server} className="relative z-raised mt-10 flex">
             <WireHost />
           </div>
           <p className="mt-2 font-mono text-hint text-muted-foreground">{host}/api/v1</p>
@@ -247,7 +246,7 @@ function KeyNode({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={node} className="relative z-10 flex">
+        <div ref={node} className="relative z-raised flex">
           <KeyWireMark name={token.name} />
         </div>
         <span className="sr-only">{`${token.name}: ${hint}`}</span>

@@ -12,6 +12,7 @@ import type {
   RedisACLRequest,
   RedisACLUser,
 } from "@/components/database/ops/access-types"
+import { capitalize, agree } from "@/components/database/kit/figures"
 
 /**
  * What the Access page works out from what the server lists: which account is
@@ -165,7 +166,7 @@ export function grantSummary(
   }
   if (parts.length === 0) return "No grant of its own"
   const line = parts.join(" · ")
-  return line[0].toUpperCase() + line.slice(1)
+  return capitalize(line)
 }
 
 /** An account's name as the create route takes it. */
@@ -601,7 +602,7 @@ export function plannedRequests(
       Boolean(columnLevel?.privileges.some((one) => one.toUpperCase() === "ALL")) &&
       columnLevel !== undefined &&
       levelPrivileges(columnLevel).every((one) => privileges.includes(one))
-    const act = `${action === "grant" ? "Grant on" : "Revoke on"} ${columns.length === 1 ? "column" : "columns of"}`
+    const act = `${action === "grant" ? "Grant on" : "Revoke on"} ${agree(columns.length, "column", "columns of")}`
     planned.push({
       action,
       about: `${act} ${columnWords(cell, columns)}`,
@@ -642,7 +643,7 @@ export function scopeKey(scope: Pick<Cell, "level" | "database" | "schema">): st
 /** How many changes are waiting, in the change bar's words. */
 export function pendingWords(wanted: Wanted, memberships: readonly Membership[]): string {
   const count = Object.keys(wanted).length + memberships.length
-  return count === 1 ? "1 change not applied" : `${count} changes not applied`
+  return `${plural(count, "change")} not applied`
 }
 
 // ---------------------------------------------------------------------------

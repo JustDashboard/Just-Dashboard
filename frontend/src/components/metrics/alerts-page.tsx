@@ -1,10 +1,8 @@
 "use client"
 
-import { useId, useRef, useState, type RefObject } from "react"
+import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import {
-  ArrowRight,
   Archive,
   Bell,
   Box,
@@ -48,20 +46,14 @@ import {
 } from "@/lib/host-alerts"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { ProductGlyph, ProductLogo, ProductLogos, hasProductLogo } from "@/components/product-logo"
+import { Field, FieldRow, FormNote } from "@/components/form"
+import { ProductLogo } from "@/components/product-logo"
 import { Bone } from "@/components/bone"
 import { FactDot, HostIdentity } from "@/components/identity-header"
-import { ChannelGlyph } from "@/components/deploy/vocabulary"
 import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
-import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { SidePanel, SidePanelFooter } from "@/components/side-panel"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -79,11 +71,19 @@ import {
   AllClear,
   ChannelTests,
   HistoryRow,
-  PictureChannel,
+  NothingTold,
   SubjectCard,
-  isFiring,
-  pictureTargets,
 } from "@/components/alerts/alert-parts"
+import {
+  AlertsPicture,
+  KindCards,
+  KindTile,
+  PAIRED_HEAD,
+  RuleForm,
+  RuleSheet,
+  isFiring,
+} from "@/components/alerts/kit"
+import type { AlertArea, AlertKindSpec, AlertKinds } from "@/components/alerts/kinds"
 
 /**
  * The host's alerts: rules over the machine's own readings — its CPU and
@@ -96,7 +96,7 @@ import {
  * what is firing first because that is what a reader comes for, then the
  * rules as rows that open their form in a sheet, and beside them what was
  * told lately and a test per channel. The parts that do not know which
- * readings they show are `components/alerts/alert-parts.tsx`.
+ * readings they show are the alerts kit (`components/alerts/`).
  */
 
 const KIND_ICON: Record<HostAlertKind, Icon> = {
@@ -111,16 +111,7 @@ const KIND_ICON: Record<HostAlertKind, Icon> = {
 }
 
 /** What a rule watches, as the picture's left column draws it. */
-type Area = {
-  key: string
-  title: string
-  /** The product the area is drawn as, where it has one. */
-  product?: string
-  fallback: Icon
-  kinds: HostAlertKind[]
-}
-
-const AREAS: Area[] = [
+const AREAS: AlertArea<HostAlertKind>[] = [
   { key: "cpu", title: "CPU", fallback: Cpu, kinds: ["cpu_high"] },
   { key: "memory", title: "Memory", fallback: Gauge, kinds: ["memory_high"] },
   { key: "filesystems", title: "Filesystems", fallback: Database, kinds: ["disk_filling"] },
@@ -143,65 +134,25 @@ const AREAS: Area[] = [
   { key: "accounts", title: "Accounts", fallback: Users, kinds: ["account_changed"] },
 ]
 
-function areaOf(kind: HostAlertKind) {
-  return AREAS.find((area) => area.kinds.includes(kind)) ?? AREAS[0]
-}
-
 /**
- * A rule's tile: what it watches, drawn as that product where it is one —
- * Docker with a stopped glyph in the corner for a container gone down — and
- * as the kind's own glyph where it is the machine itself.
+ * The host's kinds, as the alerts kit reads them: each one's words from
+ * `lib/host-alerts` (the form's sentence as the hint, the line it is added
+ * with as the add card's fact), its glyph, and the areas above.
  */
-function KindTile({
-  kind,
-  tone,
-  size = "md",
-  className,
-}: {
-  kind: HostAlertKind
-  tone?: "danger" | "warning"
-  size?: "sm" | "md"
-  className?: string
-}) {
-  const product = areaOf(kind).product
-  const Glyph = KIND_ICON[kind]
-  if (!hasProductLogo(product))
-    return (
-      <ProductLogo
-        size={size}
-        fallback={Glyph}
-        className={cn(
-          tone === "danger" && "border-rule-danger [&_svg]:text-destructive",
-          tone === "warning" && "border-rule-warning [&_svg]:text-warning",
-          className,
-        )}
-      />
-    )
-  return (
-    <span className={cn("relative flex shrink-0", className)}>
-      <ProductLogo
-        id={product}
-        size={size}
-        className={cn(
-          tone === "danger" && "border-rule-danger",
-          tone === "warning" && "border-rule-warning",
-        )}
-      />
-      <span
-        aria-hidden
-        className={cn(
-          "absolute -right-1 -bottom-1 flex size-4.5 items-center justify-center rounded-md border bg-background",
-          tone === "danger"
-            ? "border-rule-danger text-destructive"
-            : tone === "warning"
-              ? "border-rule-warning text-warning"
-              : "border-hairline text-muted-foreground",
-        )}
-      >
-        <Glyph className="size-3" />
-      </span>
-    </span>
-  )
+const HOST_KINDS: AlertKinds<HostAlertKind> = {
+  kinds: Object.fromEntries(
+    HOST_ALERT_KINDS.map((kind) => [
+      kind,
+      {
+        label: HOST_ALERT_WORDS[kind].label,
+        hint: HOST_ALERT_WORDS[kind].hint,
+        fact: hostAlertFact(kind),
+        icon: KIND_ICON[kind],
+      },
+    ]),
+  ) as Record<HostAlertKind, AlertKindSpec>,
+  order: HOST_ALERT_KINDS,
+  areas: AREAS,
 }
 
 export function HostAlertsPage() {
@@ -318,7 +269,7 @@ export function HostAlertsPage() {
   }
 
   const subjectFor = (rule: HostAlertRule) => ({
-    mark: <KindTile kind={rule.kind} />,
+    mark: <KindTile kinds={HOST_KINDS} kind={rule.kind} />,
     name: HOST_ALERT_WORDS[rule.kind].label,
     facts: <span>{describeHostAlert(rule.kind, rule.params)}</span>,
   })
@@ -392,16 +343,9 @@ export function HostAlertsPage() {
   ).length
   const history = data?.history ?? []
 
-  const context = (
-    <PageContext
-      eyebrow={
-        <Link href="/metrics" className="rounded-sm focus-ring hover:underline">
-          Metrics
-        </Link>
-      }
-      title="Alerts"
-    />
-  )
+  // No way back above the line: the rail names Alerts under Monitoring, as
+  // it names the proxy's Alerts, and a sub-page the rail names carries none.
+  const context = <PageContext title="Alerts" />
 
   if (!admin)
     return (
@@ -508,9 +452,16 @@ export function HostAlertsPage() {
               nothing under it moves when they land. */}
           <div className="relative animate-rise py-2 lg:py-6">
             <AlertsPicture
+              kinds={HOST_KINDS}
               rules={rules}
               subjects={subjects}
               channels={channelList}
+              title={on === 0 ? "No rules on" : plural(on, "rule")}
+              reach={
+                channelList.length === 0
+                  ? "telling nobody yet"
+                  : `telling ${plural(told, "channel")}`
+              }
               waiting={waiting}
               onAdd={(kind) => edit({ kind })}
             />
@@ -521,6 +472,7 @@ export function HostAlertsPage() {
               <Panel plain aria-label="Firing">
                 <PanelHeader
                   title="Firing"
+                  className={PAIRED_HEAD}
                   actions={
                     (firing > 0 || holding > 0) && (
                       <span className="numeric text-hint text-muted-foreground">
@@ -551,7 +503,9 @@ export function HostAlertsPage() {
                           key={`${subject.ruleId}:${subject.subject}`}
                           subject={subject}
                           kindLabel={HOST_ALERT_WORDS[subject.kind]?.label ?? subject.kind}
-                          tile={(tone) => <KindTile kind={subject.kind} tone={tone} />}
+                          tile={(tone) => (
+                            <KindTile kinds={HOST_KINDS} kind={subject.kind} tone={tone} />
+                          )}
                           admin={admin}
                           busy={busy === `mute:${subject.ruleId}:${subject.subject}`}
                           onMute={(on) => void setMuted(subject, on)}
@@ -565,13 +519,10 @@ export function HostAlertsPage() {
               <Panel plain aria-label="Rules">
                 <PanelHeader
                   title="Rules"
-                  actions={
-                    rules.length > 0 && (
-                      <span className="numeric text-hint text-muted-foreground">
-                        {plural(rules.length, "rule")}
-                        {paused > 0 && ` · ${paused} paused`}
-                      </span>
-                    )
+                  className={PAIRED_HEAD}
+                  count={
+                    rules.length > 0 &&
+                    `${plural(rules.length, "rule")}${paused > 0 ? ` · ${paused} paused` : ""}`
                   }
                 />
                 <PanelBody>
@@ -582,19 +533,7 @@ export function HostAlertsPage() {
                       ))}
                     </div>
                   ) : rules.length === 0 ? (
-                    // What can be watched, each a rule one press away. The
-                    // paragraph that stood over them said what the cards and
-                    // the line above already say.
-                    <ChoiceGrid
-                      columns={2}
-                      role="group"
-                      aria-label="Rules to add"
-                      className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2"
-                    >
-                      {HOST_ALERT_KINDS.map((kind) => (
-                        <KindCard key={kind} kind={kind} onClick={() => edit({ kind })} />
-                      ))}
-                    </ChoiceGrid>
+                    <KindCards kinds={HOST_KINDS} onAdd={(kind) => edit({ kind })} />
                   ) : (
                     <ChoiceList aria-label="Alert rules" className="animate-rise">
                       {rules.map((rule) => {
@@ -606,6 +545,7 @@ export function HostAlertsPage() {
                             key={rule.id}
                             leading={
                               <KindTile
+                                kinds={HOST_KINDS}
                                 kind={rule.kind}
                                 tone={fires > 0 ? "danger" : undefined}
                                 className={cn(!rule.enabled && "opacity-50 grayscale")}
@@ -667,11 +607,8 @@ export function HostAlertsPage() {
                 <Panel plain aria-label="Muted">
                   <PanelHeader
                     title="Muted"
-                    actions={
-                      <span className="numeric text-hint text-muted-foreground">
-                        {muted.length} nobody is told about
-                      </span>
-                    }
+                    className={PAIRED_HEAD}
+                    count={`${muted.length} nobody is told about`}
                   />
                   <PanelBody>
                     <ul aria-label="Muted" className="space-y-2">
@@ -680,7 +617,9 @@ export function HostAlertsPage() {
                           key={`${subject.ruleId}:${subject.subject}`}
                           subject={subject}
                           kindLabel={HOST_ALERT_WORDS[subject.kind]?.label ?? subject.kind}
-                          tile={(tone) => <KindTile kind={subject.kind} tone={tone} />}
+                          tile={(tone) => (
+                            <KindTile kinds={HOST_KINDS} kind={subject.kind} tone={tone} />
+                          )}
                           admin={admin}
                           busy={busy === `mute:${subject.ruleId}:${subject.subject}`}
                           onMute={(on) => void setMuted(subject, on)}
@@ -696,24 +635,14 @@ export function HostAlertsPage() {
               <Panel plain aria-label="Recently told">
                 <PanelHeader
                   title="Recently told"
-                  actions={
-                    history.length > 0 && (
-                      <span className="numeric text-hint text-muted-foreground">
-                        newest {Math.min(history.length, 100)}
-                      </span>
-                    )
-                  }
+                  className={PAIRED_HEAD}
+                  count={history.length > 0 && `newest ${Math.min(history.length, 100)}`}
                 />
                 <PanelBody>
                   {waiting ? (
                     <Skeleton className="h-28 rounded-xl" />
                   ) : history.length === 0 ? (
-                    <EmptyState
-                      icon={Bell}
-                      title="Nothing told yet"
-                      description="What a rule tells a channel is kept here, newest first."
-                      className="py-8"
-                    />
+                    <NothingTold />
                   ) : (
                     <ul aria-label="Alert history" className="animate-rise">
                       {history.slice(0, 12).map((event) => (
@@ -724,7 +653,7 @@ export function HostAlertsPage() {
                           kindLabel={HOST_ALERT_WORDS[event.kind]?.label ?? event.kind}
                           tile={
                             HOST_ALERT_WORDS[event.kind] ? (
-                              <KindTile kind={event.kind} size="sm" />
+                              <KindTile kinds={HOST_KINDS} kind={event.kind} size="sm" />
                             ) : (
                               <ProductLogo size="sm" fallback={Bell} />
                             )
@@ -740,33 +669,12 @@ export function HostAlertsPage() {
               <Panel plain aria-label="Channels">
                 <PanelHeader
                   title="Channels"
-                  actions={
-                    <Link
-                      href="/deploy/notifications"
-                      className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                    >
-                      Notifications <ArrowRight className="size-3" />
-                    </Link>
-                  }
+                  className={PAIRED_HEAD}
+                  link={{ href: "/deploy/notifications", label: "Notifications" }}
                 />
                 <PanelBody>
                   {channels.loading && !channels.data ? (
                     <Skeleton className="h-28 rounded-xl" />
-                  ) : channels.data && channelList.length === 0 ? (
-                    // The services a channel can be, drawn as themselves, and
-                    // the way to add one: channels are the deployments'
-                    // Notifications', made there.
-                    <EmptyState
-                      mark={<ProductLogos ids={["slack", "discord", "telegram"]} size="md" />}
-                      title="No channels yet"
-                      description="A rule tells nobody until there is a channel to tell."
-                      action={
-                        <Button size="sm" variant="outline" asChild>
-                          <Link href="/deploy/notifications">Add a channel</Link>
-                        </Button>
-                      }
-                      className="py-8"
-                    />
                   ) : (
                     <ChannelTests
                       channels={channelList}
@@ -784,15 +692,9 @@ export function HostAlertsPage() {
         </>
       )}
 
-      <SidePanel
-        open={Boolean(editing)}
-        onOpenChange={(open) => !open && closeForm()}
-        title={editing?.rule ? "Edit alert" : "Add alert"}
-        description="What to watch, and who is told when it starts and when it stops."
-        width="lg"
-      >
+      <RuleSheet open={Boolean(editing)} editing={Boolean(editing?.rule)} onClose={closeForm}>
         {editing && (
-          <RuleForm
+          <HostRuleForm
             key={session}
             rule={editing.rule}
             kind={editing.kind}
@@ -805,269 +707,14 @@ export function HostAlertsPage() {
             onCancel={closeForm}
           />
         )}
-      </SidePanel>
+      </RuleSheet>
       {dialog}
     </Page>
   )
 }
 
-/**
- * A rule that could be added: what it watches and the line it would be added
- * with. The two sentences each card carried are the form's, where the kind is
- * chosen with room to read them.
- */
-function KindCard({ kind, onClick }: { kind: HostAlertKind; onClick: () => void }) {
-  return (
-    <ChoiceCard
-      onClick={onClick}
-      title={HOST_ALERT_WORDS[kind].hint}
-      className="min-h-0 flex-row items-center gap-3 px-3 py-2.5"
-    >
-      <KindTile kind={kind} size="sm" />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <ChoiceCardTitle className="truncate">{HOST_ALERT_WORDS[kind].label}</ChoiceCardTitle>
-        <ChoiceCardHint className="truncate leading-snug">{hostAlertFact(kind)}</ChoiceCardHint>
-      </span>
-      <Plus aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-    </ChoiceCard>
-  )
-}
-
-/**
- * What the rules watch, wired through this server to who is told — the proxy
- * page's picture, read left to right. A watched area is drawn as itself; its
- * wire is red while something there fires, amber while one holds, moving
- * where a rule watches it and dashed where none does, and pressing an
- * unwatched one opens a rule for it.
- */
-function AlertsPicture({
-  rules,
-  subjects,
-  channels,
-  waiting,
-  onAdd,
-}: {
-  rules: HostAlertRule[]
-  subjects: HostAlertSubject[]
-  channels: NotificationChannel[]
-  /** The rules are not read yet: what is watched keeps its place, without its words. */
-  waiting?: boolean
-  onAdd?: (kind: HostAlertKind) => void
-}) {
-  const wide = useMediaQuery("(min-width: 1024px)")
-  const router = useRouter()
-  const container = useRef<HTMLDivElement>(null)
-  const hub = useRef<HTMLDivElement>(null)
-  const enabled = rules.filter((rule) => rule.enabled)
-  // A rule with no channels named tells every enabled one.
-  const reaches = (channel: NotificationChannel) =>
-    channel.enabled &&
-    enabled.some((rule) => rule.channels.length === 0 || rule.channels.includes(channel.id))
-  const targets = pictureTargets(channels)
-  const told = channels.filter(reaches).length
-  const title = waiting ? (
-    <Bone className="w-16" />
-  ) : enabled.length === 0 ? (
-    "No rules on"
-  ) : (
-    plural(enabled.length, "rule")
-  )
-  const reach = waiting ? (
-    <Bone className="w-24" />
-  ) : channels.length === 0 ? (
-    "telling nobody yet"
-  ) : (
-    `telling ${plural(told, "channel")}`
-  )
-
-  const areas = AREAS.map((area, index) => (
-    <PictureArea
-      key={area.key}
-      area={area}
-      index={index}
-      rules={enabled.filter((rule) => area.kinds.includes(rule.kind))}
-      subjects={subjects.filter((s) => area.kinds.includes(s.kind))}
-      containerRef={container}
-      hubRef={hub}
-      compact={!wide}
-      waiting={waiting}
-      onAdd={onAdd}
-    />
-  ))
-  const channelNodes = targets.map((target) => (
-    <PictureChannel
-      key={target.key}
-      channel={target.channel}
-      kind={target.kind}
-      live={target.channel ? reaches(target.channel) : false}
-      containerRef={container}
-      hubRef={hub}
-      compact={!wide}
-      onAdd={() => router.push("/deploy/notifications")}
-    />
-  ))
-
-  return (
-    <div ref={container} className="relative mx-auto max-w-5xl">
-      {wide ? (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(3rem,0.4fr)_auto_minmax(4.5rem,0.5fr)_minmax(0,1.1fr)] items-center">
-          <div
-            role="group"
-            aria-label="What the rules watch"
-            className="flex flex-col items-end gap-4"
-          >
-            {areas}
-          </div>
-          <div aria-hidden />
-          <WireNode
-            nodeRef={hub}
-            align="center"
-            mark={<WireHost />}
-            eyebrow="This server"
-            title={title}
-            hint={reach}
-          />
-          <div aria-hidden />
-          <div role="group" aria-label="Who is told" className="flex flex-col gap-4">
-            {channelNodes}
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center text-center">
-          <p className="eyebrow">This server</p>
-          <p className="text-body leading-snug font-medium">{title}</p>
-          <p className="text-hint leading-snug text-muted-foreground">{reach}</p>
-          <div
-            role="group"
-            aria-label="What the rules watch"
-            className="mt-5 flex flex-wrap justify-center gap-4"
-          >
-            {areas}
-          </div>
-          <div ref={hub} className="relative z-10 mt-10 flex">
-            <WireHost size="md" />
-          </div>
-          <div
-            role="group"
-            aria-label="Who is told"
-            className="mt-10 flex flex-wrap justify-center gap-4"
-          >
-            {channelNodes}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function PictureArea({
-  area,
-  index,
-  rules,
-  subjects,
-  containerRef,
-  hubRef,
-  compact,
-  waiting,
-  onAdd,
-}: {
-  area: Area
-  index: number
-  rules: HostAlertRule[]
-  subjects: HostAlertSubject[]
-  containerRef: RefObject<HTMLDivElement | null>
-  hubRef: RefObject<HTMLDivElement | null>
-  compact: boolean
-  waiting?: boolean
-  onAdd?: (kind: HostAlertKind) => void
-}) {
-  const mark = useRef<HTMLDivElement>(null)
-  const Glyph = area.fallback
-  const { firing, holding } = hostAlertCounts(subjects)
-  const watched = rules.length > 0
-  const tone = firing > 0 ? "danger" : holding > 0 ? "warning" : undefined
-  const size = compact ? "sm" : "md"
-  const glyph = hasProductLogo(area.product) ? (
-    <ProductGlyph id={area.product} />
-  ) : (
-    <Glyph aria-hidden />
-  )
-  const drawn = watched ? (
-    <WireMark tone={tone ?? "logo"} size={size}>
-      {glyph}
-    </WireMark>
-  ) : waiting ? (
-    <WirePlaceholder size={size} product={area.product} fallback={Glyph} />
-  ) : (
-    <WireLink
-      label={`Watch ${area.title.toLowerCase()}`}
-      onClick={onAdd ? () => onAdd(area.kinds[0]) : undefined}
-    >
-      <WirePlaceholder size={size} product={area.product} fallback={Glyph} />
-    </WireLink>
-  )
-  const words = !watched
-    ? "not watched"
-    : firing > 0
-      ? `${firing} firing`
-      : holding > 0
-        ? `${holding} holding`
-        : `${plural(rules.length, "rule")}, all quiet`
-  const beam = (
-    <AnimatedBeam
-      containerRef={containerRef}
-      fromRef={mark}
-      toRef={hubRef}
-      still={!watched || tone !== undefined}
-      dashed={!watched}
-      tone={tone ?? "default"}
-      duration={2.4}
-      delay={(index % 5) * 0.35}
-    />
-  )
-  if (compact)
-    return (
-      <div className="min-w-0">
-        {beam}
-        <div ref={mark} className="relative z-10 flex">
-          {drawn}
-        </div>
-        <span className="sr-only">{`${area.title}: ${words}`}</span>
-      </div>
-    )
-  return (
-    <div className="min-w-0">
-      {beam}
-      <WireNode
-        nodeRef={mark}
-        align="end"
-        mark={drawn}
-        title={watched ? area.title : <span className="text-muted-foreground">{area.title}</span>}
-        hint={
-          waiting ? (
-            <Bone className="w-16" />
-          ) : (
-            <span
-              className={cn(
-                tone === "danger" && "font-medium text-destructive",
-                tone === "warning" && "font-medium text-warning",
-              )}
-            >
-              {words}
-            </span>
-          )
-        }
-      />
-    </div>
-  )
-}
-
-/**
- * One rule as a form: what to watch, its line and minutes where the kind has
- * them, and who to tell. It brings its own footer, so the command stays beside
- * the rule it saves.
- */
-function RuleForm({
+/** One host rule as a form: the kit's shape, with the kind's line and minutes. */
+function HostRuleForm({
   rule,
   kind: preset,
   channels,
@@ -1090,7 +737,6 @@ function RuleForm({
   const [selected, setSelected] = useState<number[]>(rule?.channels ?? [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
-  const formId = useId()
   const fields = hostAlertFields(kind)
   const draft = hostAlertDraft(kind, { threshold, minutes })
 
@@ -1150,39 +796,19 @@ function RuleForm({
   )
 
   return (
-    <form
-      id={formId}
-      className="flex flex-col gap-6"
-      onSubmit={(event) => {
-        event.preventDefault()
-        void save()
-      }}
+    <RuleForm
+      editing={Boolean(rule)}
+      onCancel={onCancel}
+      kinds={HOST_KINDS}
+      kind={kind}
+      onKind={choose}
+      channels={channels}
+      selected={selected}
+      onSelected={setSelected}
+      sentence={`${HOST_ALERT_WORDS[kind].label}: ${describeHostAlert(kind, draft.params)}.`}
+      saving={saving}
+      onSave={() => void save()}
     >
-      <Field label="Watch for">
-        <div role="group" aria-label="Alert kind">
-          <ChoiceGrid columns={2} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-            {HOST_ALERT_KINDS.map((option) => (
-              <ChoiceCard
-                key={option}
-                selected={kind === option}
-                onClick={() => choose(option)}
-                className="min-h-0 flex-row gap-3 p-3"
-              >
-                <KindTile kind={option} size="sm" />
-                <span className="min-w-0 space-y-0.5">
-                  <ChoiceCardTitle className="truncate">
-                    {HOST_ALERT_WORDS[option].label}
-                  </ChoiceCardTitle>
-                  <ChoiceCardHint className="line-clamp-2">
-                    {HOST_ALERT_WORDS[option].hint}
-                  </ChoiceCardHint>
-                </span>
-              </ChoiceCard>
-            ))}
-          </ChoiceGrid>
-        </div>
-      </Field>
-
       {fields.threshold ? (
         <FieldRow>
           <Field
@@ -1232,60 +858,6 @@ function RuleForm({
         </FormNote>
       )}
       {error && <FormNote tone="danger">{error}</FormNote>}
-
-      <Field label="Tell">
-        {channels.length === 0 ? (
-          <FormNote>
-            No notification channels yet — the rule reaches every channel you add later.{" "}
-            <Link
-              href="/deploy/notifications"
-              className="text-foreground underline-offset-2 hover:underline"
-            >
-              Add a channel
-            </Link>
-          </FormNote>
-        ) : (
-          <div className="space-y-1.5">
-            <OptionList>
-              {channels.map((channel) => (
-                <OptionRow
-                  key={channel.id}
-                  title={
-                    <span className="inline-flex items-center gap-2">
-                      <ChannelGlyph channel={channel} />
-                      {channel.name}
-                    </span>
-                  }
-                  hint={`${channel.target || channel.url}${channel.enabled ? "" : " · paused"}`}
-                  checked={selected.includes(channel.id)}
-                  onCheckedChange={(on) =>
-                    setSelected((prev) =>
-                      on ? [...prev, channel.id] : prev.filter((id) => id !== channel.id),
-                    )
-                  }
-                />
-              ))}
-            </OptionList>
-            <FormNote>
-              {selected.length === 0
-                ? "None chosen: every enabled channel is told."
-                : `${selected.length} chosen.`}
-            </FormNote>
-          </div>
-        )}
-      </Field>
-
-      <SidePanelFooter>
-        <p className="mr-auto min-w-0 basis-full text-hint text-muted-foreground sm:basis-auto">
-          {HOST_ALERT_WORDS[kind].label}: {describeHostAlert(kind, draft.params)}.
-        </p>
-        <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
-          Cancel
-        </Button>
-        <Button type="submit" form={formId} pending={saving}>
-          {rule ? "Save alert" : "Add alert"}
-        </Button>
-      </SidePanelFooter>
-    </form>
+    </RuleForm>
   )
 }

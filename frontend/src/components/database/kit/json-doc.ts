@@ -1,14 +1,21 @@
+import { plural } from "@/lib/format"
+
 /**
  * A JSON document read as a tree without being turned into JavaScript values,
  * and changed one node at a time by rewriting only that node's characters.
  *
- * The tree a reader edits a `jsonb` field through must not be `JSON.parse`'s:
- * that reads `9007199254740993` as …992, moves the key `"10"` ahead of `"b"`
- * and keeps one of two keys that share a name — and writing the document back
- * after one field was changed would write all of that with it. So a node here
- * is where it stands in the text (`start`, `end`), a number is the digits it
- * was written with, and every edit is a splice: the rest of the document goes
+ * The tree a reader edits a `jsonb` field or a RedisJSON key through must not
+ * be `JSON.parse`'s: that reads `9007199254740993` as …992, moves the key
+ * `"10"` ahead of `"b"` and keeps one of two keys that share a name — and
+ * writing the document back after one field was changed would write all of
+ * that with it. So a node here is where it stands in the text (`start`,
+ * `end`), a number is the digits it was written with, an object is its pairs
+ * in their order, and every edit is a splice: the rest of the document goes
  * back to the database character for character as it came.
+ *
+ * The one parser serves both editors. The data page's field edits by span;
+ * the Redis key editor builds new nodes and prints them (`printJsonDoc`), and
+ * reads only the span-free shape (`BareJsonNode`) every parsed node also is.
  */
 
 export type JsonNode =
@@ -26,6 +33,18 @@ export interface JsonEntry {
   keyEnd: number
   value: JsonNode
 }
+
+/**
+ * A node without its place in the text: what a node built in an editor is
+ * before it is printed, and what every parsed `JsonNode` also is.
+ */
+export type BareJsonNode =
+  | { kind: "object"; entries: { key: string; value: BareJsonNode }[] }
+  | { kind: "array"; items: BareJsonNode[] }
+  | { kind: "string"; value: string }
+  | { kind: "number"; raw: string }
+  | { kind: "boolean"; value: boolean }
+  | { kind: "null" }
 
 const WHITESPACE = " \t\n\r"
 
@@ -260,10 +279,127 @@ export function moveChild(text: string, parent: JsonNode, from: number, to: numb
   return out + text.slice(parent.end)
 }
 
-/** How many values a container holds, as its closed row says it: "3 keys", "1 item". */
-export function sizeOf(node: JsonNode): string {
-  const n =
-    node.kind === "object" ? node.entries.length : node.kind === "array" ? node.items.length : 0
-  const word = node.kind === "array" ? "item" : "key"
-  return `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`
+/**
+ * The document as text. With `indent` it is laid out a level per line, as
+ * `JSON.stringify(value, null, indent)` would; without, it is compact. A
+ * number comes out as the digits it went in as.
+ */
+export function printJsonDoc(node: BareJsonNode, indent = 0, depth = 0): string {
+  const line = indent ? `\n${" ".repeat(indent * (depth + 1))}` : ""
+  const close = indent ? `\n${" ".repeat(indent * depth)}` : ""
+  const colon = indent ? ": " : ":"
+  switch (node.kind) {
+    case "object":
+      if (node.entries.length === 0) return "{}"
+      return `{${node.entries
+        .map(
+          (entry) =>
+            `${line}${JSON.stringify(entry.key)}${colon}${printJsonDoc(entry.value, indent, depth + 1)}`,
+        )
+        .join(",")}${close}}`
+    case "array":
+      if (node.items.length === 0) return "[]"
+      return `[${node.items.map((item) => `${line}${printJsonDoc(item, indent, depth + 1)}`).join(",")}${close}]`
+    case "string":
+      return JSON.stringify(node.value)
+    case "number":
+      return node.raw
+    case "boolean":
+      return String(node.value)
+    case "null":
+      return "null"
+  }
+}
+
+/**
+ * The same document with other spacing: laid out a level per line with
+ * `indent`, or compact without. Only the space between tokens is touched —
+ * every string, number and name is copied as it was written, so `1.10` stays
+ * `1.10`, `1e3` stays `1e3`, a twenty-digit integer keeps its digits and an
+ * escape stays the escape it was. `null` when the text is not one JSON value.
+ */
+export function respaceJson(text: string, indent = 0): string | null {
+  try {
+    JSON.parse(text)
+  } catch {
+    return null
+  }
+  let out = ""
+  let depth = 0
+  let at = 0
+  const line = () => (indent ? `\n${" ".repeat(indent * depth)}` : "")
+  while (at < text.length) {
+    const ch = text[at]
+    if (WHITESPACE.includes(ch)) {
+      at++
+    } else if (ch === '"') {
+      const start = at
+      at++
+      while (text[at] !== '"') at += text[at] === "\\" ? 2 : 1
+      at++
+      out += text.slice(start, at)
+    } else if (ch === "{" || ch === "[") {
+      let next = at + 1
+      while (WHITESPACE.includes(text[next])) next++
+      if (text[next] === "}" || text[next] === "]") {
+        // An empty container stays on its line, as `JSON.stringify` writes it.
+        out += ch + text[next]
+        at = next + 1
+      } else {
+        depth++
+        out += ch + line()
+        at++
+      }
+    } else if (ch === "}" || ch === "]") {
+      depth--
+      out += line() + ch
+      at++
+    } else if (ch === ",") {
+      out += `,${line()}`
+      at++
+    } else if (ch === ":") {
+      out += indent ? ": " : ":"
+      at++
+    } else {
+      const start = at
+      while (at < text.length && !WHITESPACE.includes(text[at]) && !",]}".includes(text[at])) at++
+      out += text.slice(start, at)
+    }
+  }
+  return out
+}
+
+/** The node under a run of keys and positions, or `undefined` where the path leads nowhere. */
+export function nodeAt(
+  node: BareJsonNode,
+  path: readonly (string | number)[],
+): BareJsonNode | undefined {
+  let at: BareJsonNode | undefined = node
+  for (const segment of path) {
+    if (!at) return undefined
+    if (at.kind === "object" && typeof segment === "string") {
+      at = at.entries.find((entry) => entry.key === segment)?.value
+    } else if (at.kind === "array" && typeof segment === "number") {
+      at = at.items[segment]
+    } else {
+      return undefined
+    }
+  }
+  return at
+}
+
+/** How many pairs or items a container holds, as its closed row says it: "3 keys", "1 item". */
+export function nodeSize(node: BareJsonNode): string {
+  if (node.kind === "object") return plural(node.entries.length, "key")
+  if (node.kind === "array") return plural(node.items.length, "item")
+  return ""
+}
+
+/**
+ * Whether a JSONPath names exactly one place: `$`, then only member names and
+ * positions. A path with a wildcard, a filter, a slice or `..` matches a set
+ * of places, and what is under one of its matches has no address to write to.
+ */
+export function definitePath(path: string): boolean {
+  return /^\$(?:\.[A-Za-z_$][\w$]*|\[\d+\]|\["(?:[^"\\]|\\.)*"\])*$/.test(path.trim())
 }

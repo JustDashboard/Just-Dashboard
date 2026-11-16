@@ -128,8 +128,8 @@ export default function NetworkOverviewPage() {
   const failed = !data && Boolean(overview.error)
   const nodeOf = (id: string) => flowNode(id, data!, links)
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="Network" />
+    <Page rise>
+      <PageContext title="Network" />
       <NetworkIdentity
         overview={data}
         links={links}
@@ -699,7 +699,6 @@ function TrafficChart({ links, live }: { links: NetworkLink[]; live: LiveTraffic
                   ))}
                 </span>
               ))}
-            <span>Select a stretch of the chart to see what carried it.</span>
           </p>
         )
       }

@@ -30,7 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { AddressLine } from "@/components/network/address"
+import { AddressLine } from "@/components/address"
 import { LinkMark, OWNER_LABEL, ROLE_LABEL, kindLabel } from "@/components/network/marks"
 import { describeDevice, deviceState } from "./device-facts"
 

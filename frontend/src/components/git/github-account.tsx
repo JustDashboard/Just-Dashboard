@@ -253,7 +253,7 @@ export function GitHubAccountControl({
                 {account.committerEmail && (
                   <Detail
                     label="Commits as"
-                    className="truncate font-mono text-hint text-foreground/85"
+                    className="truncate font-mono text-hint text-foreground"
                   >
                     <span title={`${account.committerName} <${account.committerEmail}>`}>
                       {account.committerName} &lt;{account.committerEmail}&gt;
@@ -261,7 +261,7 @@ export function GitHubAccountControl({
                   </Detail>
                 )}
                 {account.owner && (
-                  <Detail label="Host account" className="font-mono text-hint text-foreground/85">
+                  <Detail label="Host account" className="font-mono text-hint text-foreground">
                     {account.owner}
                   </Detail>
                 )}

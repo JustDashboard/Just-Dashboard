@@ -1644,9 +1644,13 @@ test("statements are ranked by their share, ordered by the server, and one opens
     format: "text",
   })
 
+  // Query takes the statement out of the address once it has a tab, so what
+  // is asserted is the tab it opened in, as the schema's Open in Query is.
   await aboutStatement(page).getByRole("button", { name: "Open in Query" }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  expect(new URL(page.url()).searchParams.get("sql")).toBe("SELECT count(*) FROM order_items")
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
+  await expect(page.locator("[data-slot=sql-editor] .view-lines")).toHaveText(
+    "SELECT count(*) FROM order_items",
+  )
 })
 
 test("statement statistics that are off say how to turn them on, to the role that may", async ({
@@ -2942,9 +2946,7 @@ test("the queries are named in the engine's words, from the registry and from wh
   await expect(page.getByText("1 statement", { exact: true })).toBeVisible()
   // The engine keeps statement statistics: the third reading is offered.
   await page.getByRole("button", { name: "Top statements" }).click()
-  await expect(region(page, "Top statements").locator("[data-slot=rank-list] button")).toHaveCount(
-    3,
-  )
+  await expect(region(page, "Top statements").locator("[data-slot=rank-row] > a")).toHaveCount(3)
 
   // A list read from the server's own query table is a list of queries.
   await mockOps(page, {
@@ -3587,16 +3589,22 @@ for (const width of [1280, 390]) {
     await visit(page, "/databases/1/performance/tables/public.sessions_log")
     await expect(page.getByText("Reading its figures…")).toBeVisible()
     const tableLine = await topOf(page, line)
+    // The loading line holds a place for the verbs, so at 390 too the views
+    // under it stay where they are when the line is read.
+    const tableStrip = await topOf(page, strip)
     tables.release(null)
     await expect(about(page, "About public.sessions_log")).toContainText("a vacuum is due")
     expect(await topOf(page, line)).toBe(tableLine)
+    expect(await topOf(page, strip)).toBe(tableStrip)
 
     await visit(page, "/databases/1/performance/sessions/52")
     await expect(page.locator(line).getByText("Reading the sessions…")).toBeVisible()
     const sessionLine = await topOf(page, line)
+    const sessionStrip = await topOf(page, strip)
     activity.release(null)
     await expect(about(page, "About session 52")).toContainText("Active")
     expect(await topOf(page, line)).toBe(sessionLine)
+    expect(await topOf(page, strip)).toBe(sessionStrip)
   })
 }
 
@@ -3644,7 +3652,7 @@ test("a top statement on Logs opens the statement's page, not a dialog of its ow
   })
   await visit(page, "/databases/1/logs")
   await page.getByRole("button", { name: "Top statements" }).click()
-  const top = region(page, "Top statements").locator("[data-slot=rank-list] button")
+  const top = region(page, "Top statements").locator("[data-slot=rank-row] > a")
   await expect(top).toHaveCount(3)
   await top.nth(1).click()
   await expect(dialog(page)).toHaveCount(0)

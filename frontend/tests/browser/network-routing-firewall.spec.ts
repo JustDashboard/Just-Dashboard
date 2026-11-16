@@ -731,7 +731,9 @@ test("enabling shows the preflight's refusal before anything is sent, and sends 
   })
   await page.goto("/network/firewall")
   await loaded(page)
-  await page.getByRole("switch", { name: "Firewall enabled" }).click()
+  // Turning it on is a verb in the line's menu, not a bare switch beside the command.
+  await page.getByRole("button", { name: "Firewall actions" }).click()
+  await page.getByRole("menuitem", { name: "Enable" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByTestId("firewall-preflight")).toContainText(
     "The server will refuse this change",

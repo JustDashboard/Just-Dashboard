@@ -294,9 +294,7 @@ function SourceOrigin({
         <>
           {host && <ProductGlyph id={host} />}
           {!compact && d.sourceRepository && (
-            <span className="min-w-0 truncate font-mono text-foreground/85">
-              {d.sourceRepository}
-            </span>
+            <span className="min-w-0 truncate font-mono text-foreground">{d.sourceRepository}</span>
           )}
           <BranchChip branch={d.sourceRef || "main"} className="max-w-[10rem] shrink-0" />
           {/* The commit line carries the revision when the engine recorded
@@ -326,7 +324,7 @@ function SourceOrigin({
       return (
         <>
           {product && <ProductGlyph id={product} />}
-          <span className="min-w-0 truncate font-mono text-foreground/85">
+          <span className="min-w-0 truncate font-mono text-foreground">
             {reference || "Docker image"}
           </span>
         </>
@@ -399,7 +397,7 @@ function LiveLine({ deployment: d }: { deployment: DeploymentSummary }) {
   return (
     <p className="flex h-4.5 min-w-0 items-center gap-1.5">
       <ProductGlyphs ids={imageProducts(images)} max={3} />
-      <span className="min-w-0 truncate font-mono text-foreground/80">{images.join(", ")}</span>
+      <span className="min-w-0 truncate font-mono text-muted-foreground">{images.join(", ")}</span>
     </p>
   )
 }
@@ -429,7 +427,7 @@ export function SourceSummary({
       <span className="flex max-w-full min-w-0 items-center gap-1.5">
         <SourceOrigin deployment={deployment} pulls={pulls} compact />
         {commit?.subject && (
-          <span className="min-w-0 truncate text-foreground/80">{commit.subject}</span>
+          <span className="min-w-0 truncate text-muted-foreground">{commit.subject}</span>
         )}
       </span>
     )
@@ -518,7 +516,7 @@ function RowTraffic({ pulse }: { pulse: TrafficPulse }) {
         height={16}
         label="Requests per minute, last hour"
       />
-      <span className="numeric text-foreground/85">{perMinute(pulse.perMinute)}/min</span>
+      <span className="numeric text-foreground">{perMinute(pulse.perMinute)}/min</span>
       {pulse.errorRate >= FAILING_NOTICE && <FailingShare rate={pulse.errorRate} />}
     </span>
   )
@@ -556,9 +554,7 @@ function TrafficCell({
         label="Requests per minute, last hour"
       />
       <span className="flex min-w-0 flex-col leading-4">
-        <span className="numeric truncate text-foreground/85">
-          {perMinute(pulse.perMinute)}/min
-        </span>
+        <span className="numeric truncate text-foreground">{perMinute(pulse.perMinute)}/min</span>
         {pulse.errorRate >= FAILING_NOTICE ? (
           <FailingShare rate={pulse.errorRate} className="truncate" />
         ) : (
@@ -641,7 +637,7 @@ export function ProjectCard({
                   about a hundred pixels, and the name is what is read. The
                   verbs take the name's line only, so the state and the host
                   run on under them to the card's edge. */}
-              <div className="grid h-10 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5">
+              <div className="grid h-10 min-w-0 grid-cols-start-main-end items-center gap-x-3 gap-y-0.5">
                 <ProjectMark deployment={deployment} size="md" className="row-span-2" />
                 <Link
                   href={base}

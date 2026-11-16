@@ -80,8 +80,8 @@ export function WelcomeFlow() {
   }
 
   return (
-    <Page ref={page} register="flow" className="min-h-full animate-rise px-4 md:px-8">
-      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
+    <Page rise ref={page} register="flow" className="min-h-full px-4 md:px-8">
+      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-overlay size-full" />
       {/* There is no rail on this screen — the rail is what it decides — so
           the mark and the one way out that is not an answer sit above it. */}
       <div className="flex shrink-0 items-center justify-between gap-4">

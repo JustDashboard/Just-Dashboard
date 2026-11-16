@@ -273,7 +273,7 @@ test("read-only accounts are shown no diagnostic they cannot start, and no sourc
   await page.goto("/network/investigate?target=private.corp")
   await expect(page).toHaveURL(/\/network\/tools\?tool=path&target=private\.corp$/)
   await expect(
-    page.getByText("Server diagnostics need the admin capability", { exact: true }),
+    page.getByText("Server diagnostics need an administrator", { exact: true }),
   ).toBeVisible()
   await expect(pane(page)).toHaveCount(0)
   await expect(page.getByLabel("Destination", { exact: true })).toHaveCount(0)

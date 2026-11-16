@@ -130,12 +130,7 @@ function user(container: ImageDetail["usedBy"][number]): WireFlowNode {
         <WireMark size={size}>
           <Box aria-hidden />
         </WireMark>
-        <span
-          aria-hidden
-          className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background"
-        >
-          <StatusDot state={container.state} />
-        </span>
+        <StatusDot state={container.state} corner="md" />
       </span>
     ),
     eyebrow: container.stack ? (

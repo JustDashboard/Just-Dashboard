@@ -657,7 +657,11 @@ test("the firewall page opens on its defaults and offers the controls that set t
   await expect(page.getByText("1 IPv6 twin folded away", { exact: true })).toBeVisible()
   await expect(page.getByRole("radiogroup", { name: "Inbound default" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Add rule" })).toBeVisible()
-  await expect(page.getByRole("switch", { name: "Firewall enabled" })).toBeChecked()
+  // Enforcing is the line's state; turning it off is a verb in its menu.
+  await expect(identity).toContainText("Active")
+  await page.getByRole("button", { name: "Firewall actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Disable" })).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(page.getByRole("row").filter({ hasText: "repeat offender" })).toBeVisible()
 
   // The rules folded by where they lead: each port admitted, and the default
@@ -755,7 +759,7 @@ test("a jail's page bans an address by hand and the tuning offers the caller's o
     .poll(() => mutations.find((m) => m.path === "/fail2ban/sshd/ban")?.body)
     .toEqual({ ip: "192.0.2.200" })
 
-  await page.getByRole("button", { name: "Actions for sshd" }).click()
+  await page.getByRole("button", { name: "More actions for sshd" }).click()
   await page.getByRole("menuitem", { name: "Tune" }).click()
   await page.getByRole("button", { name: "Never ban my address" }).click()
   await expect
@@ -799,7 +803,7 @@ test("connections offers a block only for an address that is not private", async
   await page.goto("/network/connections")
   await loaded(page)
 
-  await expect(page.getByRole("radio", { name: "From the internet 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^From the internet\s*1$/ })).toBeVisible()
   const internet = page.locator("[data-slot=choice-row]").filter({ hasText: "203.0.113.50" })
   await internet.getByRole("button", { name: "Actions for 203.0.113.50" }).click()
   await expect(page.getByRole("menuitem", { name: "Block at the firewall" })).toBeVisible()
@@ -1361,7 +1365,7 @@ test("limited readers see no SSH, diagnostic, firewall or failed-login mutations
   await expect(page.getByText("SSH needs the admin capability", { exact: true })).toBeVisible()
   await page.goto("/network/tools")
   await expect(
-    page.getByText("Server diagnostics need the admin capability", { exact: true }),
+    page.getByText("Server diagnostics need an administrator", { exact: true }),
   ).toBeVisible()
   await expect(page.getByText("calculated in this browser", { exact: true })).toBeVisible()
   await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveCount(0)
@@ -1623,7 +1627,8 @@ test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
   await page.goto("/network/firewall")
-  await page.getByRole("switch", { name: "Firewall enabled" }).click()
+  await page.getByRole("button", { name: "Firewall actions" }).click()
+  await page.getByRole("menuitem", { name: "Disable" }).click()
   await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await expect(
     page.getByRole("dialog").getByRole("button", { name: "Disable", exact: true }),

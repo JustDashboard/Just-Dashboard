@@ -2,14 +2,7 @@
 
 import Link from "next/link"
 import { useState } from "react"
-import {
-  ArrowLeft,
-  ArrowRight,
-  FileText,
-  FolderOpen,
-  SettingsSliders,
-  Trash,
-} from "@/components/icons"
+import { ArrowRight, FileText, FolderOpen, SettingsSliders, Trash } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { SaveBarProvider } from "@/components/settings/save-bar"
 import { Segments } from "@/components/segments"
@@ -88,67 +81,63 @@ function Defaults() {
   )
   const waiting = !data && loading
   return (
-    <Page className="animate-rise">
+    <Page rise>
+      {/* A sub-page the rail does not name keeps its way back, as Groups
+          does. The identity line is the page's, full width as every
+          settings page's is; only the form is centred under it. */}
       <PageContext
-        eyebrow={
-          <Link
-            href="/system-users"
-            className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-          >
-            <ArrowLeft className="size-3" /> System users
-          </Link>
-        }
+        back={{ href: "/system-users", label: "System users" }}
         title="Account defaults"
       />
       <SaveBarProvider>
-        <div className="mx-auto w-full max-w-3xl min-w-0 space-y-8 pb-20">
-          <HostIdentity
-            mark={platformProduct(host?.platform)}
-            fallback={SettingsSliders}
-            title="Account defaults"
-            state={
-              data ? (
-                data.passwordMaxDays < 0 ? (
-                  <Status tone="notice" label="passwords never expire" />
-                ) : (
-                  <Status
-                    tone="running"
-                    label={`passwords last ${plural(data.passwordMaxDays, "day")}`}
-                  />
-                )
-              ) : null
-            }
-            facts={
-              data ? (
-                <>
-                  {/* Held to the line's height: a mono word in a sans line
-                      makes the line a pixel taller than it is while waiting. */}
-                  <span className="inline-flex h-4 min-w-0 items-center gap-1.5">
-                    <ShellGlyph shell={data.shell} />
-                    <span className="truncate font-mono leading-4">{data.shell}</span>
-                  </span>
-                  {data.quality.available && (
-                    <>
-                      <FactDot />
-                      <span className="numeric">
-                        at least {plural(data.quality.minLength, "character")}
-                      </span>
-                    </>
-                  )}
-                  <FactDot />
-                  <span className="numeric">
-                    {data.skel.length === 0
-                      ? "a new home starts empty"
-                      : `${plural(data.skel.length, "file")} in a new home`}
-                  </span>
-                </>
-              ) : error ? (
-                <span>Not read</span>
+        <HostIdentity
+          mark={platformProduct(host?.platform)}
+          fallback={SettingsSliders}
+          title="Account defaults"
+          state={
+            data ? (
+              data.passwordMaxDays < 0 ? (
+                <Status tone="notice" label="passwords never expire" />
               ) : (
-                <TextShimmer>Reading the defaults…</TextShimmer>
+                <Status
+                  tone="running"
+                  label={`passwords last ${plural(data.passwordMaxDays, "day")}`}
+                />
               )
-            }
-          />
+            ) : null
+          }
+          facts={
+            data ? (
+              <>
+                {/* Held to the line's height: a mono word in a sans line
+                      makes the line a pixel taller than it is while waiting. */}
+                <span className="inline-flex h-4 min-w-0 items-center gap-1.5">
+                  <ShellGlyph shell={data.shell} />
+                  <span className="truncate font-mono leading-4">{data.shell}</span>
+                </span>
+                {data.quality.available && (
+                  <>
+                    <FactDot />
+                    <span className="numeric">
+                      at least {plural(data.quality.minLength, "character")}
+                    </span>
+                  </>
+                )}
+                <FactDot />
+                <span className="numeric">
+                  {data.skel.length === 0
+                    ? "a new home starts empty"
+                    : `${plural(data.skel.length, "file")} in a new home`}
+                </span>
+              </>
+            ) : error ? (
+              <span>Not read</span>
+            ) : (
+              <TextShimmer>Reading the defaults…</TextShimmer>
+            )
+          }
+        />
+        <div className="mx-auto w-full max-w-3xl min-w-0 space-y-8 pb-20">
           {error && !data && <ReadFailed error={error} onRetry={refresh} />}
           {(data || waiting) && (
             <DefaultsForm
@@ -301,6 +290,7 @@ function DefaultsForm({
               type="number"
               min={0}
               className="numeric"
+              placeholder="Never locks"
               value={draft.inactive}
               disabled={waiting}
               onChange={(e) => set({ inactive: e.target.value })}

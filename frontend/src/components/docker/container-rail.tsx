@@ -22,7 +22,6 @@ import {
   containerBucket,
   containerWord,
   exitCodeOf,
-  exitWords,
   matchingContainers,
   oomKilledIds,
   recentEntries,
@@ -30,6 +29,7 @@ import {
   type ContainerBucket,
   type ContainerSort,
 } from "@/components/docker/containers"
+import { exitWords } from "@/components/docker/words"
 
 const BUCKETS = new Set<string>(["running", "failing", "starting", "paused", "stopped"])
 

@@ -116,7 +116,12 @@ test("a pinned SFTP job names its server and fingerprint, can be pinned again, a
     page.getByText("SFTP · backup@nas.example.test:2222:/volume1/backups").first(),
   ).toBeVisible()
 
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const edit = page.getByRole("dialog", { name: "Edit Offsite to the NAS" })
   await expect(edit.getByText(FINGERPRINT)).toBeVisible()
   // Saved credentials stand behind empty fields.
@@ -172,7 +177,11 @@ test("an rclone destination takes a pasted remote and is named for its service",
 
   // Editing keeps the saved remote unless a new one is pasted.
   await page.goto("/backups/10")
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const edit = page.getByRole("dialog", { name: "Edit Drive copy" })
   await expect(edit.getByText(/Saved for Google Drive/)).toBeVisible()
   const saved = page.waitForRequest(

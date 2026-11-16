@@ -13,7 +13,7 @@ import {
   FolderColourProvider,
   FolderSwatch,
   type FolderColour,
-} from "@/components/files/file-icon"
+} from "@/components/file-icon"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,

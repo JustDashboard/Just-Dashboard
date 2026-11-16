@@ -4,11 +4,12 @@ import { useState } from "react"
 import { Copy, Download, Layers, Pencil, RefreshClockwise, Trash } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { bytes, duration } from "@/lib/format"
+import { bytes, duration, grouped } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact, InfoTip } from "@/components/form"
-import { Metric, MetricStrip } from "@/components/detail-list"
+import { Fact as LineFact, FactLine } from "@/components/fact-line"
 import { EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -273,41 +274,59 @@ export function KeyPane({
           <VerbActions verbs={verbs} menuLabel={`More actions for ${label}`} />
         </div>
         {read ? (
-          <MetricStrip key="facts" className="animate-rise">
-            <Metric
-              label="Expires"
-              value={
-                <TtlFact
-                  target={target}
-                  name={name}
-                  pttl={read.pttl}
-                  readAt={read.readAt}
-                  editable={canWrite}
-                  onChanged={meta.refresh}
-                />
-              }
-            />
-            {sizeOf(read.type, read.length) && (
-              <Metric
-                label="Holds"
-                value={read.type === "string" ? bytes(read.length) : sizeOf(read.type, read.length)}
-              />
-            )}
-            <Fact
-              label="Memory"
-              fact="memory"
-              meta={read}
-              value={read.memory === undefined ? undefined : bytes(read.memory)}
-            />
-            <Fact label="Encoding" fact="encoding" meta={read} value={read.encoding} mono />
-            {read.frequency !== undefined ? (
-              <Metric label="Access frequency" value={read.frequency.toLocaleString()} />
-            ) : (
-              <Fact
-                label="Idle when opened"
-                fact="idleSeconds"
-                meta={
-                  echoed
+          // The key as one sentence under its name, as a table's facts are
+          // under its: "expires in 2h · 1,200 fields · 48 KB in memory ·
+          // listpack". The expiry is still the fact that is pressed to change it.
+          <p
+            key="facts"
+            data-slot="facts-line"
+            className="min-w-0 animate-rise text-body text-muted-foreground"
+          >
+            <FactLine>
+              <LineFact title="Expiry">
+                <span className="text-foreground">
+                  <TtlFact
+                    target={target}
+                    name={name}
+                    pttl={read.pttl}
+                    readAt={read.readAt}
+                    editable={canWrite}
+                    onChanged={meta.refresh}
+                  />
+                </span>
+              </LineFact>
+              {sizeOf(read.type, read.length) && (
+                <LineFact title="Holds">
+                  <span className="numeric text-foreground">
+                    {read.type === "string" ? bytes(read.length) : sizeOf(read.type, read.length)}
+                  </span>
+                </LineFact>
+              )}
+              {keyFact({
+                label: "Memory",
+                fact: "memory",
+                meta: read,
+                value: read.memory === undefined ? undefined : bytes(read.memory),
+                tail: "in memory",
+              })}
+              {keyFact({
+                label: "Encoding",
+                fact: "encoding",
+                meta: read,
+                value: read.encoding,
+                mono: true,
+              })}
+              {read.frequency !== undefined ? (
+                <LineFact title="Access frequency">
+                  access frequency{" "}
+                  <span className="numeric text-foreground">{grouped(read.frequency)}</span>
+                </LineFact>
+              ) : (
+                keyFact({
+                  label: "Idle when opened",
+                  fact: "idleSeconds",
+                  lead: "idle when opened",
+                  meta: echoed
                     ? {
                         ...read,
                         idleSeconds: undefined,
@@ -316,24 +335,20 @@ export function KeyPane({
                             "This page had read the key itself just before opening it — the key list reads each key it shows — and a read resets the server's idle clock.",
                         },
                       }
-                    : (opened ?? read)
-                }
-                value={
-                  echoed || opened?.idleSeconds === undefined
-                    ? undefined
-                    : duration(opened.idleSeconds)
-                }
-                tip="How long nothing had read or written the key when this page opened it."
-              />
-            )}
-          </MetricStrip>
+                    : (opened ?? read),
+                  value:
+                    echoed || opened?.idleSeconds === undefined
+                      ? undefined
+                      : duration(opened.idleSeconds),
+                  tip: "How long nothing had read or written the key when this page opened it.",
+                })
+              )}
+            </FactLine>
+          </p>
         ) : (
-          <div className="flex gap-6" aria-hidden>
+          <div className="flex h-5 items-center gap-3" aria-hidden>
             {[16, 14, 14, 20].map((width, i) => (
-              <div key={i} className="space-y-1.5">
-                <Skeleton className="h-2.5 w-12" />
-                <Skeleton className="h-4" style={{ width: `${width * 4}px` }} />
-              </div>
+              <Skeleton key={i} className="h-3.5" style={{ width: `${width * 4}px` }} />
             ))}
           </div>
         )}
@@ -421,12 +436,19 @@ function Blank({ leading, children }: { leading?: React.ReactNode; children: Rea
 }
 
 /** A fact the server may not have: its value, or a dash with the server's reason behind it. */
-function Fact({
+/**
+ * One fact of the key's line that the server may not have answered: the
+ * reading, or a dash with why it is not known. Called rather than rendered,
+ * so `FactLine` sees the fact itself among its children and gives it its dot.
+ */
+function keyFact({
   label,
   fact,
   meta,
   value,
   mono,
+  lead,
+  tail,
   tip,
 }: {
   label: string
@@ -434,30 +456,33 @@ function Fact({
   meta: RedisKeyMeta
   value: string | undefined
   mono?: boolean
-  /** What the figure is a reading of, where its name does not say it all. */
+  /** Words before the reading: "idle when opened 38m". */
+  lead?: string
+  /** Words after it: "48 KB in memory". */
+  tail?: string
+  /** What the figure is a reading of, where its words do not say it all. */
   tip?: string
 }) {
   const why = meta.unavailable?.[fact]
   if (value === undefined && !why) return null
   return (
-    <Metric
-      label={label}
-      value={
-        value !== undefined ? (
-          tip ? (
-            <span className="flex items-center gap-1">
-              {value}
-              <InfoTip label={`About ${label.toLowerCase()}`}>{tip}</InfoTip>
-            </span>
-          ) : (
-            <span className={mono ? "font-mono text-xs" : undefined}>{value}</span>
-          )
-        ) : (
-          <span className="flex items-center gap-1 text-muted-foreground">
-            —<InfoTip label={`Why ${label.toLowerCase()} is not known`}>{why}</InfoTip>
+    <LineFact key={fact} title={label}>
+      <span className="inline-flex items-center gap-1">
+        {(lead || (value === undefined && !tail)) && <span>{lead ?? label.toLowerCase()}</span>}
+        {value !== undefined ? (
+          <span className={cn("text-foreground", mono ? "font-mono text-xs" : "numeric")}>
+            {value}
           </span>
-        )
-      }
-    />
+        ) : (
+          <span>{tail ? `${label.toLowerCase()} —` : "—"}</span>
+        )}
+        {value !== undefined && tail && <span>{tail}</span>}
+        {value !== undefined ? (
+          tip && <InfoTip label={`About ${label.toLowerCase()}`}>{tip}</InfoTip>
+        ) : (
+          <InfoTip label={`Why ${label.toLowerCase()} is not known`}>{why}</InfoTip>
+        )}
+      </span>
+    </LineFact>
   )
 }

@@ -25,6 +25,7 @@ import {
   UserSettings,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
+import { breakpointQuery } from "@/lib/breakpoints"
 import { forgeRepository } from "@/lib/git-repos"
 import { cn } from "@/lib/utils"
 import type {
@@ -75,7 +76,8 @@ import { PaneHeader } from "@/components/panel"
 import { PaneBar } from "@/components/phone-panes"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
+import { Tabs as TabsPrimitive } from "radix-ui"
 import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -84,7 +86,7 @@ import { VerbMenu, type Verb } from "@/components/verbs"
 type Tab = "changes" | "history" | "branches" | "github"
 
 // Where the three columns stop fitting: `lg`, the breakpoint their widths use.
-const onePane = () => window.matchMedia("(max-width: 1023.98px)").matches
+const onePane = () => window.matchMedia(breakpointQuery("lg", "below")).matches
 
 // The preview is the column that needs the room — a diff is wider than a
 // file name or a commit subject — so the other two start narrow and can be
@@ -540,7 +542,7 @@ export function RepoWorkspace({
       ]}
     >
       <CommitAuthors.Provider value={authors.data}>
-        <Page fill className="gap-3 p-0 lg:px-3 lg:py-3">
+        <Page fill="workspace" className="gap-3">
           {operation && (
             <Notice tone="warning" title={`A ${operation} is in progress`}>
               {operation === "bisect"
@@ -631,7 +633,7 @@ export function RepoWorkspace({
             <PaneHeader
               className={cn("@container h-auto min-h-12 px-2 py-1.5", reading && "max-lg:hidden")}
             >
-              <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 @4xl:flex">
+              <div className="grid w-full min-w-0 grid-cols-main-end items-center gap-x-2 gap-y-1.5 @4xl:flex">
                 <div className="flex min-w-0 items-center gap-2 @4xl:flex-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -676,7 +678,7 @@ export function RepoWorkspace({
                               href={forge.url}
                               target="_blank"
                               rel="noreferrer"
-                              className="max-w-[14rem] truncate text-foreground/75 hover:text-foreground hover:underline"
+                              className="max-w-[14rem] truncate text-muted-foreground hover:text-foreground hover:underline"
                             >
                               {forge.slug}
                             </a>
@@ -894,92 +896,122 @@ export function RepoWorkspace({
                   max={TREE.max}
                   onChange={(px, commit) => setTreeWidth(clamp(px, TREE.min, TREE.max), commit)}
                   onReset={resetTreeWidth}
-                  className="absolute inset-y-0 -right-1 z-20"
+                  className="absolute inset-y-0 -right-1 z-sticky"
                 />
               </div>
 
-              <div
+              {/* The column's views as real tabs: arrow keys move along the
+                  strip and each tab names the panel it shows. They were
+                  role=tab buttons with no tablist, axe's critical on /git. */}
+              <TabsPrimitive.Root
+                value={shown}
+                onValueChange={(next) => pick(next as Tab)}
                 className={cn(
                   "relative flex min-h-0 flex-1 flex-col lg:w-(--jd-work) lg:flex-none lg:shrink-0 lg:border-r",
                   (treeShown || reading) && "max-lg:hidden",
                 )}
               >
-                <div className="flex h-9 shrink-0 [scrollbar-width:none] items-center overflow-x-auto border-b border-hairline px-1 max-lg:hidden">
-                  <TabButton
-                    active={shown === "changes"}
-                    onClick={() => pick("changes")}
-                    icon={<Pencil />}
-                  >
-                    Changes
-                    {changeCount > 0 && (
-                      <ChipCount className="text-(--git-modified) opacity-100">
-                        {changeCount}
-                      </ChipCount>
-                    )}
-                  </TabButton>
-                  <TabButton
-                    active={shown === "history"}
-                    onClick={() => pick("history")}
-                    icon={<SourceCommit />}
-                  >
-                    History
-                  </TabButton>
-                  <TabButton
-                    active={shown === "branches"}
-                    onClick={() => pick("branches")}
-                    icon={<SourceBranch />}
-                  >
-                    Branches
-                  </TabButton>
-                  <TabButton
-                    active={shown === "github"}
-                    onClick={() => pick("github")}
-                    icon={<GitHubMark />}
-                  >
-                    GitHub
-                    {openPulls > 0 && (
-                      <ChipCount className="inline-flex items-center gap-0.5 text-(--pull-open) opacity-100">
-                        <SourcePull aria-hidden className="size-3" />
-                        {openPulls}
-                      </ChipCount>
-                    )}
-                  </TabButton>
-                  <span className="flex-1" />
-                  {shown === "changes" && (
+                <ViewTabList
+                  label="Repository views"
+                  size="sm"
+                  value={shown}
+                  views={[
+                    {
+                      key: "changes",
+                      label: (
+                        <>
+                          <TabGlyph>
+                            <Pencil />
+                          </TabGlyph>
+                          Changes
+                          {changeCount > 0 && (
+                            <ChipCount className="text-git-modified opacity-100">
+                              {changeCount}
+                            </ChipCount>
+                          )}
+                        </>
+                      ),
+                    },
+                    {
+                      key: "history",
+                      label: (
+                        <>
+                          <TabGlyph>
+                            <SourceCommit />
+                          </TabGlyph>
+                          History
+                        </>
+                      ),
+                    },
+                    {
+                      key: "branches",
+                      label: (
+                        <>
+                          <TabGlyph>
+                            <SourceBranch />
+                          </TabGlyph>
+                          Branches
+                        </>
+                      ),
+                    },
+                    {
+                      key: "github",
+                      label: (
+                        <>
+                          <TabGlyph>
+                            <GitHubMark />
+                          </TabGlyph>
+                          GitHub
+                          {openPulls > 0 && (
+                            <ChipCount className="inline-flex items-center gap-0.5 text-pull-open opacity-100">
+                              <SourcePull aria-hidden className="size-3" />
+                              {openPulls}
+                            </ChipCount>
+                          )}
+                        </>
+                      ),
+                    },
+                  ]}
+                  className="px-1 max-lg:hidden"
+                  trailing={
                     <>
-                      <IconAction
-                        label="Previous changed file (Alt+↑)"
-                        onClick={() => changeBy(-1)}
-                      >
-                        <ChevronUp />
-                      </IconAction>
-                      <IconAction label="Next changed file (Alt+↓)" onClick={() => changeBy(1)}>
-                        <ChevronDown />
-                      </IconAction>
+                      {shown === "changes" && (
+                        <>
+                          <IconAction
+                            label="Previous changed file (Alt+↑)"
+                            onClick={() => changeBy(-1)}
+                          >
+                            <ChevronUp />
+                          </IconAction>
+                          <IconAction label="Next changed file (Alt+↓)" onClick={() => changeBy(1)}>
+                            <ChevronDown />
+                          </IconAction>
+                        </>
+                      )}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-pressed={graphOpen}
+                            aria-label="Branch graph"
+                            className={cn(
+                              "size-7 shrink-0 p-0",
+                              graphOpen
+                                ? "bg-accent text-foreground"
+                                : "text-muted-foreground hover:text-foreground",
+                            )}
+                            onClick={() => setGraphOpen((v) => !v)}
+                          >
+                            <SourceFork className="size-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>See every branch and where it forked</TooltipContent>
+                      </Tooltip>
                     </>
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-pressed={graphOpen}
-                        aria-label="Branch graph"
-                        className={cn(
-                          "size-7 shrink-0 p-0",
-                          graphOpen
-                            ? "bg-accent text-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        onClick={() => setGraphOpen((v) => !v)}
-                      >
-                        <SourceFork className="size-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>See every branch and where it forked</TooltipContent>
-                  </Tooltip>
-                </div>
-                {shown === "changes" && (
+                  }
+                />
+                <TabsPrimitive.Content value="changes" className={PANEL}>
                   <ChangesPanel
                     repoPath={repo.path}
                     status={status}
@@ -993,8 +1025,8 @@ export function RepoWorkspace({
                     active={activeKey}
                     onChanged={onChanged}
                   />
-                )}
-                {shown === "history" && (
+                </TabsPrimitive.Content>
+                <TabsPrimitive.Content value="history" className={PANEL}>
                   <HistoryPanel
                     // A commit, a reset or a switch changes what history is, so the
                     // list is keyed on the tip and remounts when it moves.
@@ -1012,8 +1044,8 @@ export function RepoWorkspace({
                     active={activeKey}
                     onChanged={onChanged}
                   />
-                )}
-                {shown === "branches" && (
+                </TabsPrimitive.Content>
+                <TabsPrimitive.Content value="branches" className={PANEL}>
                   <BranchesPanel
                     key={`${head.head ?? ""}:${head.branch}`}
                     repoPath={repo.path}
@@ -1026,8 +1058,8 @@ export function RepoWorkspace({
                     onSelect={setPreview}
                     onChanged={onChanged}
                   />
-                )}
-                {shown === "github" && (
+                </TabsPrimitive.Content>
+                <TabsPrimitive.Content value="github" className={PANEL}>
                   <GitHubPanel
                     repoPath={repo.path}
                     branch={branch}
@@ -1043,7 +1075,7 @@ export function RepoWorkspace({
                     activePull={activePull}
                     onChanged={onChanged}
                   />
-                )}
+                </TabsPrimitive.Content>
                 <ResizeHandle
                   side="left"
                   label="Changes panel width"
@@ -1052,9 +1084,9 @@ export function RepoWorkspace({
                   max={WORK.max}
                   onChange={(px, commit) => setWorkWidth(clamp(px, WORK.min, WORK.max), commit)}
                   onReset={resetWorkWidth}
-                  className="absolute inset-y-0 -right-1 z-20"
+                  className="absolute inset-y-0 -right-1 z-sticky"
                 />
-              </div>
+              </TabsPrimitive.Root>
 
               <div
                 data-slot="git-preview"
@@ -1083,7 +1115,7 @@ export function RepoWorkspace({
                     label: "Changes",
                     icon: <Pencil />,
                     count: changeCount,
-                    countClassName: "bg-(--git-modified)",
+                    countClassName: "bg-git-modified",
                   },
                   { key: "history", label: "History", icon: <SourceCommit /> },
                   { key: "branches", label: "Branches", icon: <SourceBranch /> },
@@ -1092,7 +1124,7 @@ export function RepoWorkspace({
                     label: "GitHub",
                     icon: <GitHubMark />,
                     count: openPulls,
-                    countClassName: "bg-(--pull-open)",
+                    countClassName: "bg-pull-open",
                   },
                   { key: "files", label: "Files", icon: <FolderOpen /> },
                 ]}
@@ -1182,37 +1214,21 @@ function previewKey(p: GitPreview | null): string | undefined {
 }
 
 /**
- * A tab of the middle column, with the glyph of what it holds — the edit
- * pencil, the commit on its line, the branch, GitHub's own mark — in the
- * location blue while it is the one open (§3), so four words in one grey are
- * found by their marks before they are read.
+ * The glyph of what a tab of the middle column holds — the edit pencil, the
+ * commit on its line, the branch, GitHub's own mark — in the location blue
+ * while it is the one open (§3), so four words in one grey are found by their
+ * marks before they are read.
  */
-function TabButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: React.ReactNode
-  children: React.ReactNode
-}) {
+function TabGlyph({ children }: { children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={tabClasses(active, "h-9 gap-1.5 px-2")}
+    <span
+      aria-hidden
+      className="flex text-muted-foreground in-data-[state=active]:text-brand [&_svg]:size-3.5"
     >
-      <span
-        aria-hidden
-        className={cn("flex [&_svg]:size-3.5", active ? "text-brand" : "text-muted-foreground")}
-      >
-        {icon}
-      </span>
       {children}
-    </button>
+    </span>
   )
 }
+
+/** A view of the middle column, filling it as the list it holds did. */
+const PANEL = "flex min-h-0 flex-1 flex-col outline-none"

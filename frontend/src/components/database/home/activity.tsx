@@ -1,6 +1,5 @@
 "use client"
 
-import { NotUpdating } from "@/components/database/home/blocks"
 import {
   CHART_UNITS,
   drawnRows,
@@ -19,6 +18,7 @@ import { duration } from "@/lib/format"
 import type { MetricEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { memo, useMemo } from "react"
+import { Stale } from "@/components/stale"
 
 /**
  * Recorded engine activity, available before this page is opened.
@@ -59,7 +59,6 @@ export const Activity = memo(function Activity({
   const offered = useMemo(() => offeredViews(views, newest), [views, newest])
   if (offered.length === 0) return null
 
-  const held = heldSeconds(samples)
   const note = loading
     ? "Reading the server…"
     : error && samples.length === 0
@@ -72,21 +71,13 @@ export const Activity = memo(function Activity({
         title="Activity"
         actions={
           <>
-            {/* What was a sentence under the charts: how much is recorded and
-                how long it is kept, on the line that picks the window. */}
-            <span
-              className="text-hint text-muted-foreground max-sm:hidden"
-              title={`Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed.`}
-            >
-              {held > 0
-                ? `${duration(held)} recorded, kept for ${keptFor(retentionHours)}`
-                : `kept for ${keptFor(retentionHours)}`}
-            </span>
-            {error && samples.length > 0 && <NotUpdating error={error} />}
+            {error && samples.length > 0 && <Stale error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }
-      />
+      >
+        <HistoryFact samples={samples} retentionHours={retentionHours} />
+      </PanelHeader>
       <PanelBody>
         <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2 [&>*]:min-w-0">
           {offered.map((view, index) => (
@@ -105,6 +96,42 @@ export const Activity = memo(function Activity({
     </Panel>
   )
 })
+
+/**
+ * What the record holds and how long it is kept, on the line that picks the
+ * window: "2h recorded, kept for 7 days". The Home's Activity and
+ * Performance's Overview head the same record with it, in the same words and
+ * at every width; the Home had its own shorter line, hidden on a phone. How
+ * it is collected is on the pointer.
+ */
+export function HistoryFact({
+  samples,
+  retentionHours,
+}: {
+  samples: readonly Sample[]
+  retentionHours: number
+}) {
+  const held = heldSeconds(samples)
+  return (
+    <span
+      data-slot="history-fact"
+      // Beside the actions from `sm`, the actions' own 6px from them. On a
+      // phone a row of its own under the title's: the words grow when the
+      // record lands, and in the actions' run they pushed the range under
+      // the title, so everything below the head moved down a line.
+      className="min-w-0 truncate text-hint text-muted-foreground max-sm:order-last max-sm:w-full sm:-mr-2.5 sm:ml-auto"
+      title={`Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed.`}
+    >
+      {held > 0 && (
+        <>
+          <span className="numeric font-medium text-foreground">{duration(held)}</span>{" "}
+          recorded,{" "}
+        </>
+      )}
+      kept for {keptFor(retentionHours)}
+    </span>
+  )
+}
 
 /** The recorded window the charts cover, as one row of presses. */
 export function HistoryRange({

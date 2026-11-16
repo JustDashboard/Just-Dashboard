@@ -173,7 +173,7 @@ function ProfileForm() {
               <ShellGlyph shell={user.shell} />
               {user.shell}
             </span>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span className="font-mono">{user.primaryGroup ?? `gid ${user.gid}`}</span>
           </span>
         }

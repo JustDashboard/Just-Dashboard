@@ -2,11 +2,18 @@
 
 import { useEffect, useRef, useState } from "react"
 import { ApiError, errorMessage } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { CodeEditor } from "@/components/code-editor"
-import { FieldCheck, FormFact, FormFacts, OptionList, OptionRow } from "@/components/form"
-import { Modal } from "@/components/modal"
+import {
+  FieldCheck,
+  FieldChecks,
+  FormFact,
+  FormFacts,
+  OptionList,
+  OptionRow,
+} from "@/components/form"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
@@ -92,15 +99,21 @@ function grammarOf(reading: Reading): string {
 
 function ReadingLine({ reading }: { reading: Reading }) {
   return (
-    <div aria-live="polite" className="min-h-5">
+    <div className="min-h-5">
       {reading.state === "bad" ? (
-        <p className="text-hint text-destructive">{reading.message}</p>
-      ) : reading.state === "shell" ? (
-        <FieldCheck met>
-          Shell syntax: the server reads ObjectId(…), ISODate(…) and unquoted keys
-        </FieldCheck>
+        <p role="alert" className="text-hint text-destructive">
+          {reading.message}
+        </p>
       ) : (
-        <FieldCheck met={reading.state === "json"}>Extended JSON</FieldCheck>
+        <FieldChecks>
+          {reading.state === "shell" ? (
+            <FieldCheck met>
+              Shell syntax: the server reads ObjectId(…), ISODate(…) and unquoted keys
+            </FieldCheck>
+          ) : (
+            <FieldCheck met={reading.state === "json"}>Extended JSON</FieldCheck>
+          )}
+        </FieldChecks>
       )}
     </div>
   )
@@ -296,18 +309,20 @@ function EditDocument({
         )
       }
     >
-      <div className="flex min-w-0 shrink-0 items-center gap-3">
-        <EngineMark engine={engine} size="sm" />
-        <div className="min-w-0 space-y-0.5">
-          <p className="truncate font-mono text-body font-medium">{idLabel(listed.id)}</p>
-          <FormFacts>
+      <DialogSubject
+        mark={<EngineMark engine={engine} size="sm" />}
+        name={idLabel(listed.id)}
+        mono
+        className="shrink-0"
+        facts={
+          <>
             <FormFact label="Collection" mono>
               {target.database}.{target.collection}
             </FormFact>
             {read && <FormFact label="Size">{bytes(read.size)}</FormFact>}
-          </FormFacts>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {conflict === "changed" && (
         <Notice
@@ -448,7 +463,9 @@ function InsertDocument({
         return
       }
       notify.success(
-        result.inserted === 1 ? "Document inserted" : `${result.inserted} documents inserted`,
+        result.inserted === 1
+          ? "Document inserted"
+          : `${plural(result.inserted, "document")} inserted`,
       )
       onOpenChange(false)
     } catch (err) {

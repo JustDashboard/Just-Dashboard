@@ -1,18 +1,7 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
 import { useEffect, useId, useRef, useState } from "react"
-import Link from "next/link"
-import {
-  ChevronDown,
-  Crosshair,
-  Fingerprint,
-  Key,
-  Linked,
-  LockClosed,
-  Trash,
-} from "@/components/icons"
+import { Crosshair, Fingerprint, Key, Linked, LockClosed, Trash } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { KEYCAP } from "@/components/command-search/keycaps"
@@ -20,19 +9,9 @@ import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
 import { Field } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
 import { useFocusReturn } from "@/components/database/schema/focus"
-import { SchemaMark } from "@/components/database/schema/rail"
-import type { DbCatalogSchema } from "@/components/database/schema/types"
-import { useDatabase } from "@/components/database/shell/database-context"
+import { NameMark } from "@/components/database/kit/marks"
 import type { MemoryStatus } from "@/components/database/diagram/memory"
 
 export const FIT = { duration: 300 }
@@ -43,84 +22,6 @@ export const FIT = { duration: 300 }
  * is fitted is fitted clear of them, not under them.
  */
 export const FIT_PADDING = { top: "56px", right: "24px", bottom: "56px", left: "24px" } as const
-
-/**
- * Which schema the picture is of, said in the toolbar and changed there.
- *
- * The diagram used to draw whichever schema the last table selection had left
- * in the address, with nothing on the page saying which or offering another.
- * "Every schema" is a picture of its own — the one that shows a key crossing
- * from one schema into the next — and has its own arrangement. Each choice is
- * a link: a picture is a place, Back returns to the one before it, and a
- * pasted address opens the picture it names.
- */
-export function DiagramSchemaPicker({
-  schemas,
-  current,
-}: {
-  /** Absent while the list is being read, or where it could not be. */
-  schemas: readonly DbCatalogSchema[] | undefined
-  current: string
-}) {
-  const { engine, href } = useDatabase()
-  const own = (schemas ?? []).filter((schema) => !schema.system)
-  const system = (schemas ?? []).filter((schema) => schema.system)
-  const every = `Every ${engine.nouns.container}`
-  const item = (schema: DbCatalogSchema) => (
-    <DropdownMenuItem
-      key={schema.name}
-      asChild
-      className={cn(schema.name === current && "bg-accent")}
-    >
-      <Link href={href("diagram", { schema: schema.name, limit: null, every: null })}>
-        <SchemaMark name={schema.name} />
-        <MenuItemText
-          hint={
-            schema.tables >= 0 && (
-              <span className="numeric text-hint text-muted-foreground">{schema.tables}</span>
-            )
-          }
-        >
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-        </MenuItemText>
-      </Link>
-    </DropdownMenuItem>
-  )
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={`${engine.nouns.container}: ${current || every}`}
-          className="h-7 max-w-56 min-w-0 justify-start gap-1.5 px-1.5"
-        >
-          {current ? <SchemaMark name={current} /> : null}
-          <span className={cn("min-w-0 truncate text-xs", current && "font-mono")}>
-            {current || every}
-          </span>
-          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
-        {/* Said in so many words: an address with the schema left out would be
-            completed from where the reader last was. */}
-        <DropdownMenuItem asChild className={cn(current === "" && "bg-accent")}>
-          <Link href={href("diagram", { every: "1", limit: null })}>{every}</Link>
-        </DropdownMenuItem>
-        {own.length > 0 && <DropdownMenuSeparator />}
-        {own.map(item)}
-        {system.length > 0 && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>The engine&rsquo;s own</DropdownMenuLabel>
-            {system.map(item)}
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
 
 /** Whether the arrangement is kept, in a word the operator can trust. */
 export function Saved({
@@ -270,7 +171,7 @@ export function Legend({ schemas }: { schemas?: readonly string[] }) {
           <span aria-hidden className="h-3 w-px bg-border" />
           {schemas.slice(0, SCHEMAS_NAMED).map((schema) => (
             <span key={schema} className="flex min-w-0 items-center gap-1 font-mono">
-              <SchemaMark name={schema} />
+              <NameMark name={schema} />
               <span className="max-w-28 truncate">{schema}</span>
             </span>
           ))}

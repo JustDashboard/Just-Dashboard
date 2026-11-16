@@ -754,10 +754,8 @@ test("the drawings edited last are each drawn as themselves", async ({ page }) =
   const list = page.getByRole("list", { name: "Recent drawings" })
   const cards = list.locator(":scope > li")
   await expect(cards).toHaveText([/Production map/])
-  await expect(cards.first().getByRole("link", { name: "Open Production map" })).toHaveAttribute(
-    "href",
-    "/excalidraw/4",
-  )
+  // An OpenCard: its name is the button a keyboard opens it by.
+  await expect(cards.first().getByRole("button", { name: "Production map" })).toBeVisible()
   // The picture is the drawing's own shapes.
   await expect(cards.first().locator("svg text", { hasText: "caddy" })).toBeAttached()
   await cards.first().click()

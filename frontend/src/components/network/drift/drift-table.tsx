@@ -1,15 +1,14 @@
 "use client"
 
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { SearchInput } from "@/components/search-input"
 import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
-import { EmptyState } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { Tag } from "@/components/tag"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
-import { Cross, Filter } from "@/components/icons"
-import { Button } from "@/components/ui/button"
+import { Cross } from "@/components/icons"
 import {
   Table,
   TableBody,
@@ -19,7 +18,6 @@ import {
   TableRow,
   stickyTableHeader,
 } from "@/components/ui/table"
-import { hueFor, LANES } from "@/lib/hue"
 import {
   DRIFT_DOMAINS,
   driftCounts,
@@ -31,6 +29,7 @@ import {
 } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { DriftMark, ShortDigest } from "@/components/network/drift/marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export type DriftScope = "all" | "differ" | "incomplete" | "matching"
 
@@ -86,7 +85,7 @@ export function DriftTable({
   query: string
   onQuery: (query: string) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   const counts = driftCounts(rows)
   const sorted = driftSorted(rows)
   const inDomain = domain ? sorted.filter((row) => row.domain === domain) : sorted
@@ -107,17 +106,10 @@ export function DriftTable({
   })
   return (
     <Panel aria-label="Comparisons">
-      <PanelHeader
-        title={
-          <>
-            Comparisons
-            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-              {rows.length}
-            </span>
-          </>
-        }
-      >
-        <ChipStrip aria-label="State" className="mr-auto">
+      <PanelHeader title="Comparisons" count={rows.length}>
+        {/* On a phone the chips take a row of their own, so the count stays
+            at the end of the title's row. */}
+        <ChipStrip aria-label="State" className="mr-auto max-sm:order-last max-sm:basis-full">
           <FilterChip {...chip("all")}>
             All <ChipCount>{rows.length}</ChipCount>
           </FilterChip>
@@ -190,27 +182,20 @@ export function DriftTable({
       </PanelToolbar>
       <PanelBody flush>
         {visible.length === 0 ? (
-          <EmptyState
-            icon={Filter}
-            title="No comparisons match"
-            description="Clear the search, or pick a different state or domain."
-            className="my-4"
-            action={
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  onScope("all")
-                  onDomain(undefined)
-                  onQuery("")
-                }}
-              >
-                Clear filters
-              </Button>
-            }
-          />
+          <EmptyNote
+            action={{
+              label: "Clear filters",
+              onClick: () => {
+                onScope("all")
+                onDomain(undefined)
+                onQuery("")
+              },
+            }}
+          >
+            No comparisons match.
+          </EmptyNote>
         ) : wide ? (
-          <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+          <Table className="table-fixed" containerClassName="max-h-rail">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
                 <TableHead className="w-44">State</TableHead>
@@ -280,13 +265,12 @@ function Compared({ row }: { row: DriftRow }) {
   )
 }
 
-/** A kind in its lane hue, so the routes, devices and files down a column read apart. */
+/**
+ * A kind as a plain tag. It took a chart lane's hue, and the pink it gave
+ * `file` was the pink the page uses for an address prefix.
+ */
 function KindWord({ kind }: { kind: string }) {
-  return (
-    <span className="text-hint font-medium" style={{ color: hueFor(kind, LANES) }}>
-      {driftKindLabel(kind)}
-    </span>
-  )
+  return <Tag>{driftKindLabel(kind)}</Tag>
 }
 
 /** What was expected beside what was found, for the facts both sides name. */

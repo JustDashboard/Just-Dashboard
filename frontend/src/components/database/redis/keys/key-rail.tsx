@@ -4,22 +4,21 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
   ChevronRight,
-  Cross,
   Filter,
   Key,
   Layers,
   Plus,
   RefreshClockwise,
-  SidebarLeftClose,
 } from "@/components/icons"
-import { bytes } from "@/lib/format"
+import { useBelow } from "@/lib/breakpoints"
+import { bytes, grouped } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
 import { useSessionState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/search-input"
-import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
-import { EmptyState } from "@/components/state"
+import { Pane, PaneFooter } from "@/components/panel"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { Spinner } from "@/components/loading"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
@@ -44,15 +43,21 @@ import {
   type KeyList,
   type TreeLevel,
 } from "@/components/database/redis/keys/scan"
-import { ReadError } from "@/components/database/redis/read-error"
 import { ttlShort, ttlWord } from "@/components/database/redis/ttl"
 import type { RedisBytes, RedisKey, RedisTreeFolder } from "@/components/database/redis/types"
 import { usePaged, type Paged } from "@/components/database/redis/use-paged"
 import type { Redis } from "@/components/database/redis/use-redis"
 import { useRovingRows } from "@/components/database/redis/use-roving-rows"
 import { useRowWindow } from "@/components/database/redis/use-row-window"
+import {
+  RAIL_ACTION,
+  RAIL_ROW,
+  RAIL_ROW_PX,
+  RailHead,
+  RailNoMatch,
+  RailSkeleton,
+} from "@/components/database/workbench/rail"
 
-const ROW_HEIGHT = 28
 /** How many namespaces of one level are drawn before the rest are asked for. */
 const FOLDER_PAGE = 200
 
@@ -82,6 +87,7 @@ export function useKeyWalk(redis: Redis, epoch: number, enabled: boolean): Paged
 /** What every row of the rail needs to know about the page around it. */
 type RailContext = {
   redis: Redis
+  saidBeside: boolean
   pattern: string
   type: string
   epoch: number
@@ -117,7 +123,7 @@ export function KeyRail({
   onRefresh,
   onNew,
   onBulk,
-  onHide,
+  saidBeside = false,
 }: {
   redis: Redis
   selected: RedisBytes | undefined
@@ -133,7 +139,8 @@ export function KeyRail({
   onNew: () => void
   /** Open the bulk actions on the pattern and type the rail is narrowed to. */
   onBulk: () => void
-  onHide: () => void
+  /** The pane beside says what is there, or that nothing is: the rail does not say it twice. */
+  saidBeside?: boolean
 }) {
   const { id, target, db, server, select, param, canWrite } = redis
   const pattern = param("pattern")
@@ -202,6 +209,7 @@ export function KeyRail({
 
   const context: RailContext = {
     redis,
+    saidBeside,
     pattern,
     type,
     epoch,
@@ -224,12 +232,11 @@ export function KeyRail({
     ...(view === "tree" && opened.length > 0
       ? [{ key: "collapse", label: "Collapse all", icon: ChevronRight, run: () => setOpened([]) }]
       : []),
-    { key: "hide", label: "Hide the keys", icon: SidebarLeftClose, run: onHide },
   ]
 
   return (
     <Pane flush data-slot="redis-key-rail" className="min-w-0 flex-1">
-      <PaneHeader className="gap-1">
+      <RailHead>
         {server.data ? (
           <DbPicker server={server.data} db={db} onChange={redis.setDb} />
         ) : (
@@ -238,13 +245,13 @@ export function KeyRail({
         <span className="min-w-0 flex-1" />
         <IconAction
           label="Refresh the keys"
-          className="size-7"
+          className={RAIL_ACTION}
           onClick={onRefresh}
           disabled={root.reloading || list.reloading}
         >
           <RefreshClockwise />
         </IconAction>
-        <VerbMenu verbs={verbs} label="More key actions" />
+        {verbs.length > 0 && <VerbMenu verbs={verbs} label="More key actions" />}
         {canWrite && (
           // The page's one command while nothing is open. Beside an open key
           // the command is that key's own — Save — and this one steps back.
@@ -258,7 +265,7 @@ export function KeyRail({
             New key
           </Button>
         )}
-      </PaneHeader>
+      </RailHead>
 
       <div className="flex shrink-0 flex-col gap-2 border-b border-hairline p-2">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -278,7 +285,7 @@ export function KeyRail({
             </div>
           )}
         </div>
-        <ChipStrip aria-label="Key type" role="group" className="max-sm:mx-0 max-sm:px-0">
+        <ChipStrip aria-label="Key type" role="group" bleed={false}>
           {(redis.engine.can("keyTypeFilter") ? kinds : []).map((kind) => {
             const info = REDIS_KINDS[kind]
             const on = type === info.wire
@@ -292,7 +299,7 @@ export function KeyRail({
               >
                 <KindMark type={info.wire} className="size-3" />
                 {info.label}
-                {count !== undefined && <ChipCount>{count.toLocaleString()}</ChipCount>}
+                {count !== undefined && <ChipCount>{grouped(count)}</ChipCount>}
               </FilterChip>
             )
           })}
@@ -323,72 +330,25 @@ export function KeyRail({
 /**
  * The pattern, typed. It is applied on Enter and when the reader pauses: each
  * pattern is a scan of the keyspace, and one per keystroke would be a scan
- * per letter of a name.
+ * per letter of a name. The address can change it from under the box — a
+ * namespace narrowed to, Back — and the box then says what the address says;
+ * what is being typed is not replaced by its own echo (`useDeferredSearch`).
  */
 function PatternBox({ pattern, onApply }: { pattern: string; onApply: (next: string) => void }) {
-  const [draft, setDraft] = useState(pattern)
-  // The address can change the pattern from under the box — a namespace
-  // narrowed to, Back — and the box then says what the address says. What
-  // the reader is in the middle of typing is not replaced by its own echo.
-  const [applied, setApplied] = useState(pattern)
-  if (applied !== pattern) {
-    setApplied(pattern)
-    if (draft.trim() !== pattern) setDraft(pattern)
-  }
-  const apply = useRef(onApply)
-  useEffect(() => {
-    apply.current = onApply
-  })
-  useEffect(() => {
-    if (draft.trim() === pattern) return
-    const timer = setTimeout(() => apply.current(draft.trim()), 450)
-    return () => clearTimeout(timer)
-  }, [draft, pattern])
   return (
     <SearchInput
       dense
       aria-label="Key pattern"
       placeholder="Pattern — user:*"
-      value={draft}
+      value={pattern}
+      onApply={onApply}
+      debounceMs={450}
+      clearLabel="Clear the pattern"
       spellCheck={false}
       autoComplete="off"
-      className="pr-7 font-mono"
+      className="font-mono sm:h-7"
       containerClassName="flex-1 sm:w-auto"
-      onChange={(event) => setDraft(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") onApply(draft.trim())
-        if (event.key === "Escape" && draft) setDraft("")
-      }}
-      trailing={
-        draft && (
-          <button
-            type="button"
-            aria-label="Clear the pattern"
-            onClick={() => {
-              setDraft("")
-              onApply("")
-            }}
-            className="flex size-5 items-center justify-center rounded-sm text-muted-foreground focus-ring hover:text-foreground"
-          >
-            <Cross className="size-3" />
-          </button>
-        )
-      }
     />
-  )
-}
-
-function RailSkeleton() {
-  return (
-    <div className="space-y-1.5 p-2" aria-hidden>
-      {Array.from({ length: 12 }, (_, i) => (
-        <div key={i} className="flex h-5 items-center gap-2">
-          <Skeleton className="size-3.5 shrink-0" />
-          <Skeleton className="h-3" style={{ width: `${38 + ((i * 17) % 44)}%` }} />
-          <Skeleton className="ml-auto h-3 w-8" />
-        </div>
-      ))}
-    </div>
   )
 }
 
@@ -402,8 +362,13 @@ function NoKeys({
   narrowed: boolean
   onNew?: () => void
 }) {
-  const { pattern, type, redis } = context
+  const { pattern, type, redis, saidBeside } = context
   const named = pattern && !hasGlob(pattern)
+  if (!narrowed && saidBeside) {
+    // The pane beside says what the database is made of, and that it is
+    // empty; the way to fill it is the head's New key.
+    return <EmptyNote dense>db{redis.db ?? ""} holds no keys yet.</EmptyNote>
+  }
   if (!narrowed) {
     return (
       <EmptyState
@@ -422,37 +387,29 @@ function NoKeys({
       />
     )
   }
+  // A narrowing that matched nothing is the rails' one sentence and its way
+  // out, not a second empty screen: the box above still holds the pattern.
+  if (named) {
+    return (
+      <EmptyNote
+        dense
+        action={{
+          label: "Search names containing it",
+          onClick: () => redis.select({ pattern: `*${globEscape(pattern)}*` }),
+        }}
+      >
+        No key has that name. A pattern with no * or ? is one key&rsquo;s exact name.
+      </EmptyNote>
+    )
+  }
   return (
-    <EmptyState
-      icon={Filter}
-      className="border-0"
-      title={named ? "No key has that name" : "No key matches"}
-      description={
-        named
-          ? "A pattern with no * or ? is one key's exact name."
-          : `Nothing in db${redis.db ?? ""} matches ${pattern || "*"}${type ? ` as ${kindOf(type).label.toLowerCase()}` : ""}.`
-      }
-      action={
-        <div className="flex flex-wrap justify-center gap-2">
-          {named && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => redis.select({ pattern: `*${globEscape(pattern)}*` })}
-            >
-              Search names containing it
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => redis.select({ pattern: null, type: null })}
-          >
-            Clear the filter
-          </Button>
-        </div>
-      }
-    />
+    <RailNoMatch
+      clearLabel="Clear the filter"
+      onClear={() => redis.select({ pattern: null, type: null })}
+    >
+      Nothing in db{redis.db ?? ""} matches {pattern || "*"}
+      {type ? ` as ${kindOf(type).label.toLowerCase()}` : ""}.
+    </RailNoMatch>
   )
 }
 
@@ -479,9 +436,9 @@ function TreeBody({
       className="min-h-0 flex-1 overflow-auto py-1"
     >
       {root.error && !level ? (
-        <ReadError error={root.error} onRetry={root.reload} className="m-2" />
+        <ErrorState retryable error={root.error} onRetry={root.reload} className="m-2" />
       ) : !level ? (
-        <RailSkeleton />
+        <RailSkeleton groups={0} />
       ) : level.folders.length === 0 && level.keys.length === 0 && root.done ? (
         <NoKeys context={context} narrowed={narrowed} onNew={onNew} />
       ) : (
@@ -534,13 +491,13 @@ function LevelRows({
       ))}
       {level.folders.length > shown && (
         <NoteRow depth={depth} onClick={() => setShown(shown + FOLDER_PAGE)}>
-          Show {Math.min(FOLDER_PAGE, level.folders.length - shown).toLocaleString()} more
-          namespaces of {level.folders.length.toLocaleString()}
+          Show {grouped(Math.min(FOLDER_PAGE, level.folders.length - shown))} more namespaces of{" "}
+          {grouped(level.folders.length)}
         </NoteRow>
       )}
       {level.foldersOmitted > 0 && (
         <NoteRow depth={depth}>
-          {level.foldersOmitted.toLocaleString()} more namespaces — narrow the pattern to see them
+          {grouped(level.foldersOmitted)} more namespaces — narrow the pattern to see them
         </NoteRow>
       )}
       {level.keys.map((entry) => (
@@ -556,7 +513,7 @@ function LevelRows({
       ))}
       {hidden > 0 && typeof prefix === "string" && (
         <NoteRow depth={depth} onClick={() => context.onNarrow(`${globEscape(prefix)}*`)}>
-          {hidden.toLocaleString()} more keys here — list them all
+          {grouped(hidden)} more keys here — list them all
         </NoteRow>
       )}
       {more && (
@@ -571,7 +528,7 @@ function LevelRows({
 const indent = (depth: number) => ({ paddingLeft: `${depth * 14 + 8}px` })
 
 const ROW =
-  "flex h-7 w-full min-w-0 items-center gap-1.5 pr-2 text-left text-xs transition-colors focus-ring-inset hover:bg-row-hover"
+  "flex h-7 max-sm:h-9 w-full min-w-0 items-center gap-1.5 pr-2 text-left text-xs transition-colors focus-ring-inset hover:bg-row-hover"
 
 function FolderRow({
   context,
@@ -648,7 +605,7 @@ function FolderRow({
           )}
           <span className="min-w-0 truncate font-mono">{name || "(empty)"}</span>
           <span className="numeric ml-auto shrink-0 pl-2 text-hint text-muted-foreground">
-            {folder.count.toLocaleString()}
+            {grouped(folder.count)}
           </span>
         </button>
         {listable ? (
@@ -673,7 +630,7 @@ function FolderRow({
             {level.error.message} — try again
           </NoteRow>
         ) : !level.state ? (
-          <div style={indent(depth + 1)} className="flex h-7 items-center gap-2 pr-2">
+          <div style={indent(depth + 1)} className={cn("flex items-center gap-2 pr-2", RAIL_ROW)}>
             <Skeleton className="h-3 w-32" />
           </div>
         ) : (
@@ -707,7 +664,7 @@ function KeyRow({
   onOpen: (key: RedisBytes) => void
 }) {
   const label = bytesLabel(entry.key)
-  const size = entry.type === "string" ? bytes(entry.size, 0) : entry.size.toLocaleString()
+  const size = entry.type === "string" ? bytes(entry.size, 0) : grouped(entry.size)
   // The open key's row is brought into sight when it arrives and when it
   // becomes the open one: the tree opened itself to show where the key is.
   const row = useRef<HTMLButtonElement>(null)
@@ -733,7 +690,7 @@ function KeyRow({
       <span className="min-w-0 truncate font-mono">{name || "(empty name)"}</span>
       <span className="numeric ml-auto flex shrink-0 items-baseline gap-1.5 pl-2 text-hint text-muted-foreground">
         {/* How long it has left, in words: a glyph this small read as a dot. */}
-        {entry.ttl >= 0 && <span className="text-muted-foreground/60">{ttlShort(entry.ttl)}</span>}
+        {entry.ttl >= 0 && <span className="text-faint">{ttlShort(entry.ttl)}</span>}
         {kindOf(entry.type).member && <span>{size}</span>}
       </span>
     </button>
@@ -758,7 +715,7 @@ function NoteRow({
   )
   if (!onClick) {
     return (
-      <div style={indent(depth)} className="flex h-7 items-center pr-2">
+      <div style={indent(depth)} className={cn("flex items-center pr-2", RAIL_ROW)}>
         <span className={cn(text, "pl-4.5")}>{children}</span>
       </div>
     )
@@ -789,6 +746,8 @@ function ListBody({
   onNew?: () => void
 }) {
   const { attach, onKeyDown, onFocus } = useRovingRows<HTMLDivElement>()
+  // The window counts rows in the pixels they are drawn at: 36px under `sm`.
+  const phone = useBelow("sm")
   const keys = list.state?.keys ?? []
   const {
     attach: scroller,
@@ -796,7 +755,7 @@ function ListBody({
     slice,
     height,
     offset,
-  } = useRowWindow(keys.length, ROW_HEIGHT)
+  } = useRowWindow(keys.length, phone ? RAIL_ROW_PX.phone : RAIL_ROW_PX.base)
   return (
     <div
       ref={attach}
@@ -808,9 +767,9 @@ function ListBody({
     >
       <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
         {list.error && !list.state ? (
-          <ReadError error={list.error} onRetry={list.reload} className="m-2" />
+          <ErrorState retryable error={list.error} onRetry={list.reload} className="m-2" />
         ) : !list.state ? (
-          <RailSkeleton />
+          <RailSkeleton groups={0} />
         ) : keys.length === 0 && list.done ? (
           <NoKeys context={context} narrowed={narrowed} onNew={onNew} />
         ) : (

@@ -152,6 +152,8 @@ test("a paused job the job list does not name still has its line, and says so", 
   const jobs = page.getByRole("list", { name: "Backup jobs covering this volume" })
   await expect(jobs.locator("[data-slot=choice-row]")).toHaveCount(1)
   await expect(jobs.getByText("paused", { exact: true })).toBeVisible()
+  // The picture opens the first view, Files (PGH-17), and says it there too.
+  await page.getByRole("tab", { name: "Files" }).click()
   await expect(
     picture(page).getByRole("region", { name: "Backed up by" }).getByText("paused"),
   ).toBeVisible()

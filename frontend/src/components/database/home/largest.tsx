@@ -3,12 +3,14 @@
 import { useMemo } from "react"
 import { bytes } from "@/lib/format"
 import type { PollState } from "@/hooks/use-poll"
-import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
-import { Block, BlockLink, Quiet, Read, staleOf } from "@/components/database/home/blocks"
+import { RankList, RankSkeleton, SplitBar, type RankItem } from "@/components/rank-list"
+import { Block } from "@/components/database/home/blocks"
+import { EmptyNote } from "@/components/state"
 import { byKeyType, keyType, nameHue } from "@/components/database/home/kinds"
 import { compact, type Part } from "@/components/database/home/readings"
 import type { MongoCollections, RedisTree } from "@/components/database/home/types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, staleOf } from "@/components/database/kit/read"
 
 /** How many rows the block ranks. */
 const TOP = 6
@@ -59,23 +61,6 @@ function partSwatch(parts: readonly Part[] | undefined, key: string) {
  * No row carries a share: the read is the largest few, not every table, so a
  * percentage of what was read would not be a percentage of the database.
  */
-/**
- * What a ranked block's figures are of, on its title's line: the share's
- * whole, the window it was counted over. It was a sentence under the list;
- * the whole of it is still on the pointer.
- */
-function HeadFact({ title, children }: { title?: string; children: React.ReactNode }) {
-  return (
-    <span
-      data-slot="head-fact"
-      title={title}
-      className="numeric text-hint text-muted-foreground max-sm:hidden"
-    >
-      {children}
-    </span>
-  )
-}
-
 export function LargestTablesBlock({
   poll,
   parts,
@@ -121,26 +106,29 @@ export function LargestTablesBlock({
     <Block
       title={`Largest ${nouns.objects}`}
       stale={staleOf(poll)}
-      actions={
-        <>
-          {items.length > 0 && poll.data && !poll.data.sizesKnown && (
-            <HeadFact title={`This engine reports no sizes, so they are ranked by ${nouns.rows}.`}>
-              by {nouns.rows}
-            </HeadFact>
-          )}
-          <BlockLink href={href("data")}>All {nouns.objects}</BlockLink>
-        </>
+      count={
+        items.length > 0 &&
+        poll.data &&
+        !poll.data.sizesKnown && (
+          <span
+            data-slot="head-fact"
+            title={`This engine reports no sizes, so they are ranked by ${nouns.rows}.`}
+          >
+            by {nouns.rows}
+          </span>
+        )
       }
+      link={{ href: href("data"), label: `All ${nouns.objects}` }}
     >
-      <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
+      <Read rise poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
-            <Quiet>
+            <EmptyNote>
               {data.reason ??
                 (readOnly
                   ? `No ${nouns.objects} yet. The connection is protected, so none can be made from here.`
                   : `No ${nouns.objects} yet. Create one in ${engine.section("schema")?.title ?? "Query"}, or import a file in ${place}.`)}
-            </Quiet>
+            </EmptyNote>
           ) : (
             <RankList items={items} />
           )
@@ -191,16 +179,16 @@ export function LargestCollectionsBlock({
     <Block
       title={`Largest ${nouns.objects}`}
       stale={staleOf(poll)}
-      actions={<BlockLink href={href("data")}>All {nouns.objects}</BlockLink>}
+      link={{ href: href("data"), label: `All ${nouns.objects}` }}
     >
-      <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
+      <Read rise poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
-            <Quiet>
+            <EmptyNote>
               {readOnly
                 ? `No ${nouns.objects} in ${data.database} yet. The connection is protected, so none can be made from here.`
                 : `No ${nouns.objects} in ${data.database} yet. Insert a ${nouns.row} in ${place} and its ${nouns.object} is made with it.`}
-            </Quiet>
+            </EmptyNote>
           ) : (
             <RankList items={items} />
           )
@@ -255,29 +243,29 @@ export function LargestNamespacesBlock({ poll }: { poll: PollState<RedisTree> })
     <Block
       title="Largest namespaces"
       stale={staleOf(poll)}
-      actions={
-        <>
-          {items.length > 0 && poll.data && (
-            <HeadFact
-              title={
-                poll.data.complete
-                  ? `Keys in database ${poll.data.db}, by the name before the first “${poll.data.delimiter}”.`
-                  : `From the first ${compact(poll.data.scanned)} of ${compact(poll.data.total)} keys in database ${poll.data.db}; the rest are not counted here.`
-              }
-            >
-              {poll.data.complete
-                ? `db ${poll.data.db} · by the name before “${poll.data.delimiter}”`
-                : `the first ${compact(poll.data.scanned)} of ${compact(poll.data.total)} keys`}
-            </HeadFact>
-          )}
-          <BlockLink href={href("data")}>All keys</BlockLink>
-        </>
+      link={{ href: href("data"), label: "All keys" }}
+      count={
+        items.length > 0 &&
+        poll.data && (
+          <span
+            data-slot="head-fact"
+            title={
+              poll.data.complete
+                ? `Keys in database ${poll.data.db}, by the name before the first “${poll.data.delimiter}”.`
+                : `From the first ${compact(poll.data.scanned)} of ${compact(poll.data.total)} keys in database ${poll.data.db}; the rest are not counted here.`
+            }
+          >
+            {poll.data.complete
+              ? `db ${poll.data.db} · by the name before “${poll.data.delimiter}”`
+              : `the first ${compact(poll.data.scanned)} of ${compact(poll.data.total)} keys`}
+          </span>
+        )
       }
     >
-      <Read poll={poll} what="the keyspace" skeleton={<RankSkeleton rows={6} />}>
+      <Read rise poll={poll} what="the keyspace" skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
-            <Quiet>Database {data.db} holds no keys.</Quiet>
+            <EmptyNote>Database {data.db} holds no keys.</EmptyNote>
           ) : (
             <div className="space-y-3">
               <TypeBar types={data.types ?? {}} />
@@ -314,41 +302,19 @@ function TypeBar({ types }: { types: Record<string, number> }) {
     .filter(([, count]) => count > 0)
     .sort((a, b) => byKeyType(a[0], b[0]))
     .map(([type, count]) => ({ type, count, ...keyType(type) }))
-  const total = held.reduce((sum, entry) => sum + entry.count, 0)
-  if (total === 0) return null
+  if (held.length === 0) return null
   return (
-    <div className="space-y-2 pt-1" data-slot="key-types">
-      <div
-        role="img"
-        aria-label={`Keys by type: ${held.map((entry) => `${entry.label} ${entry.count.toLocaleString()}`).join(", ")}`}
-        className="flex h-2 w-full gap-px overflow-hidden rounded-full bg-meter-track"
-      >
-        {held.map((entry) => (
-          <span
-            key={entry.type}
-            className="h-full first:rounded-l-full last:rounded-r-full"
-            style={{
-              width: `${Math.max((entry.count / total) * 100, 1)}%`,
-              backgroundColor: entry.color,
-            }}
-          />
-        ))}
-      </div>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1">
-        {held.map((entry) => (
-          <li key={entry.type} className="flex min-w-0 items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-1.5 shrink-0 rounded-full"
-              style={{ backgroundColor: entry.color }}
-            />
-            <span className="truncate text-hint" style={{ color: entry.color }}>
-              {entry.label}
-            </span>
-            <span className="numeric text-hint text-muted-foreground">{compact(entry.count)}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <SplitBar
+      legend="static"
+      className="pt-1"
+      label={`Keys by type: ${held.map((entry) => `${entry.label} ${entry.count.toLocaleString()}`).join(", ")}`}
+      parts={held.map((entry) => ({
+        key: entry.type,
+        count: entry.count,
+        color: entry.color,
+        label: entry.label,
+        note: compact(entry.count),
+      }))}
+    />
   )
 }

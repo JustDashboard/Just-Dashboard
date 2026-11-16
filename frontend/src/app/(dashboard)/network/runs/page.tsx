@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/use-auth"
 export default function NetworkRunsPage() {
   const { can } = useAuth()
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <Suspense>
         <SavedRuns
           watched={<WatchedProbes admin={can("system.admin")} empty={<WatchedProbesEmpty />} />}

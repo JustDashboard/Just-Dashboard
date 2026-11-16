@@ -220,7 +220,7 @@ test("New project is hidden for a read-only role", async ({ page }) => {
   await expect(page.getByRole("link", { name: "New project", exact: true })).toHaveCount(0)
 })
 
-test("Credentials link sits beside Notifications and opens the credentials page", async ({
+test("the toolbar leaves Notifications and Credentials to the sidebar, and Archived to its ⋯", async ({
   page,
 }) => {
   await mockProject(page)
@@ -229,25 +229,26 @@ test("Credentials link sits beside Notifications and opens the credentials page"
     await json(route, [])
   })
   await page.goto("/deploy")
-  // Scoped to the page: the sidebar's Deployments panel names Credentials too,
-  // and this test is about the link in the page controls.
+  await expect(page.getByRole("heading", { name: "Deployments", exact: true })).toBeVisible()
   await page.screenshot({ path: "test-results/deploy-list-context-1280.png", fullPage: true })
-  await page.getByRole("main").getByRole("link", { name: "Credentials", exact: true }).click()
+  // The sidebar's Deployments group carries them beside the page (PGD-02).
+  const main = page.getByRole("main")
+  await expect(main.getByRole("link", { name: "Notifications", exact: true })).toHaveCount(0)
+  await expect(main.getByRole("link", { name: "Credentials", exact: true })).toHaveCount(0)
+  const rail = page.getByRole("navigation", { name: "Sidebar" })
+  await rail.getByRole("link", { name: "Credentials", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/credentials$/)
   await expect(page.getByRole("heading", { name: "Credentials", exact: true })).toBeVisible()
 })
 
-test("Credentials link is hidden for a read-only role, unlike Notifications", async ({ page }) => {
+test("Credentials is hidden for a read-only role, unlike Notifications", async ({ page }) => {
   await mockProject(page)
   await page.route("**/api/v1/auth/session", (route) =>
     json(route, { ...user, capabilities: ["read"] }),
   )
   await page.goto("/deploy")
   await expect(page.getByRole("heading", { name: "Deployments", exact: true })).toBeVisible()
-  const main = page.getByRole("main")
-  await expect(main.getByRole("link", { name: "Notifications", exact: true })).toBeVisible()
-  await expect(main.getByRole("link", { name: "Credentials", exact: true })).toHaveCount(0)
-  // The rail seals it the same way, from the same capability the backend does.
+  // The rail seals it, from the same capability the backend does.
   const rail = page.getByRole("navigation", { name: "Sidebar" })
   await expect(rail.getByRole("link", { name: "Notifications", exact: true })).toBeVisible()
   await expect(rail.getByRole("link", { name: "Credentials", exact: true })).toHaveCount(0)
@@ -261,7 +262,7 @@ test("on a phone the related pages sit behind one menu beside New project", asyn
   await expect(main.getByRole("link", { name: "New project", exact: true })).toBeVisible()
   // One render per shape: the links are not also drawn and hidden.
   await expect(main.getByRole("link", { name: "Notifications", exact: true })).toHaveCount(0)
-  await main.getByRole("button", { name: "Pages", exact: true }).click()
+  await main.getByRole("button", { name: "More deployment pages", exact: true }).click()
   await expect(page.getByRole("menuitem", { name: /^Credentials/ })).toBeVisible()
   await page.getByRole("menuitem", { name: /^Archived/ }).click()
   await expect(page).toHaveURL(/\/deploy\?view=archived$/)
@@ -481,7 +482,8 @@ test("archived list can be permanently deleted with confirmation and errors rema
     return route.fulfill({ status: 204 })
   })
   await page.goto("/deploy")
-  await page.getByRole("link", { name: "Archived", exact: true }).click()
+  await page.getByRole("button", { name: "More deployment pages", exact: true }).click()
+  await page.getByRole("menuitem", { name: /^Archived/ }).click()
   await expect(page).toHaveURL(/\/deploy\?view=archived$/)
   await expect(page.getByRole("heading", { name: "Archived", exact: true })).toBeVisible()
   await expect(page.getByRole("link", { name: "retired-api" })).toBeVisible()
@@ -640,8 +642,8 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
 
   await row.getByRole("button", { name: "Actions for Ops room" }).click()
   await page.getByRole("menuitem", { name: "Delivery history" }).click()
-  await expect(page.getByRole("heading", { name: "Deliveries · Ops room" })).toBeVisible()
-  const sheet = page.getByRole("dialog", { name: "Deliveries · Ops room" })
+  await expect(page.getByRole("heading", { name: "Ops room · history" })).toBeVisible()
+  const sheet = page.getByRole("dialog", { name: "Ops room · history" })
   await expect(sheet.getByText(/run\.failed/)).toBeVisible()
   await expect(sheet.getByText("Delivered", { exact: true })).toBeVisible()
   await page.keyboard.press("Escape")

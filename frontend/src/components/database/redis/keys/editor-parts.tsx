@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { Cross } from "@/components/icons"
+import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { SearchInput } from "@/components/search-input"
 import { globEscape, hasGlob } from "@/components/database/redis/bytes"
@@ -43,61 +42,26 @@ export function FilterBox({
   placeholder: string
   onApply: (text: string) => void
 }) {
-  const [draft, setDraft] = useState("")
+  // The value in force; the box keeps what is being typed and applies it
+  // after a pause, at once on Enter, and empty on Escape or the clear button.
   const [applied, setApplied] = useState("")
-  const apply = useRef(onApply)
-  useEffect(() => {
-    apply.current = onApply
-  })
-  const send = (text: string) => {
-    setApplied(text)
-    apply.current(text)
-  }
-  useEffect(() => {
-    const typed = draft.trim()
-    if (typed === applied) return
-    const timer = setTimeout(() => {
-      setApplied(typed)
-      apply.current(typed)
-    }, 400)
-    return () => clearTimeout(timer)
-  }, [draft, applied])
   return (
     <SearchInput
       dense
       aria-label={label}
       placeholder={placeholder}
-      value={draft}
+      value={applied}
       spellCheck={false}
       autoComplete="off"
-      // Room for the clear control only once there is something to clear: the
-      // placeholder has the whole box until then.
-      className={cn("font-mono", draft && "pr-7")}
+      stopEscape
+      clearLabel="Clear the filter"
+      className="font-mono"
       containerClassName="min-w-40 flex-1 sm:w-auto sm:max-w-64"
-      onChange={(event) => setDraft(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") send(draft.trim())
-        if (event.key === "Escape" && draft) {
-          event.stopPropagation()
-          setDraft("")
-          send("")
-        }
+      onApply={(text) => {
+        const typed = text.trim()
+        setApplied(typed)
+        onApply(typed)
       }}
-      trailing={
-        draft && (
-          <button
-            type="button"
-            aria-label="Clear the filter"
-            onClick={() => {
-              setDraft("")
-              send("")
-            }}
-            className="flex size-5 items-center justify-center rounded-sm text-muted-foreground focus-ring hover:text-foreground"
-          >
-            <Cross className="size-3" />
-          </button>
-        )
-      }
     />
   )
 }

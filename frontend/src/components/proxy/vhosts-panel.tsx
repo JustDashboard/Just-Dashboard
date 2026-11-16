@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
@@ -34,9 +34,11 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
+import { ListToolbar } from "@/components/toolbar"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { ProductLogos } from "@/components/product-logo"
@@ -59,12 +61,10 @@ import { AccessListsPanel } from "@/components/proxy/access-lists-panel"
 import { RouteResolver } from "@/components/proxy/route-resolver"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useNewSiteLink } from "@/components/proxy/site-link"
-import { DefaultSitePanel } from "@/components/proxy/default-site"
+import { UnknownHostsFact } from "@/components/proxy/default-site"
 import { SiteBand } from "@/components/proxy/site-band"
 import {
-  errorTone,
   siteApp,
-  siteHue,
   siteTraffic,
   sitesVerdict,
   type SiteApp,
@@ -75,6 +75,7 @@ import { SiteRenameDialog } from "@/components/proxy/site-rename"
 import { SiteImportDialog } from "@/components/proxy/site-import"
 import { SiteBackupsPanel } from "@/components/proxy/site-backups"
 import {
+  HourWords,
   RouteMark,
   ServingStatus,
   SiteTLS,
@@ -1104,7 +1105,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     else pendingPoll.refresh()
   }
 
-  const header = <PageContext eyebrow="Proxy" title="Sites" />
+  const header = <PageContext title="Sites" />
 
   // The cards wait for systemd's reading too, and for what nginx has not
   // loaded: drawn before either, a stopped nginx's sites — or an edit nginx
@@ -1115,11 +1116,15 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         {header}
         {/* The page's own silhouette: the line it opens on and the rows
             under it, so nothing moves when the sites land. */}
-        <HostIdentity
+        {/* It keeps a place for the verdict and the verbs, as the loaded
+            line has them, so on a phone it is as tall as the line it becomes. */}
+        <IdentityHeader
+          loading
           fallback={Globe}
           title={<TextShimmer>Reading the sites…</TextShimmer>}
-          facts={<span>&nbsp;</span>}
-          state={<span>&nbsp;</span>}
+          state
+          command
+          menu={false}
         />
         <LoadingRows rows={6} />
       </Page>
@@ -1183,7 +1188,6 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const hour = hasTraffic
     ? hosts.reduce((sum, v) => sum + (siteTraffic(v, trafficPoll.data)?.requests ?? 0), 0)
     : undefined
-  const busiest = Math.max(0, ...hosts.map((v) => siteTraffic(v, trafficPoll.data)?.requests ?? 0))
   const verdict = sitesVerdict({
     stopped: run?.running === false,
     engine: engineName,
@@ -1207,7 +1211,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const tiles = marks.length > 0 ? marks : engines.map((e) => e.id)
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {header}
 
       {/* What the host serves, as one line: its sites as the applications
@@ -1216,50 +1220,42 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           serve and on TLS and the hour's requests, and at its far end the
           command that adds a site with the rest behind the menu. Four tiles
           stood here, each one count with no site named in it; site-band.tsx
-          says where each went. */}
-      <HostIdentity
+          says where each went. The marks stand in the line's own 40px tile,
+          so on a phone its row is as tall as the loading line's. */}
+      <IdentityHeader
         className="animate-rise"
         logo={
           tiles.length > 0 ? (
-            <span className="flex h-12 shrink-0 items-center">
+            <span className="flex h-10 shrink-0 items-center">
               <ProductLogos ids={tiles} size="md" />
             </span>
           ) : undefined
         }
         fallback={Globe}
         title={host?.hostname ?? "This server"}
+        // A fact that wants action (a disabled site nginx still serves) comes
+        // first, so a phone's one line of facts never clips it.
         facts={
           <>
-            {engines.map((engine, i) => (
-              <Fragment key={engine.id}>
-                {i > 0 && <FactDot />}
-                <HostFact product={engine.id}>{engine.name}</HostFact>
-              </Fragment>
-            ))}
-            {engines.length > 0 && <FactDot />}
-            <span className="numeric">{plural(counts.all, "site")}</span>
-            <FactDot />
-            <span className="numeric">{serving} serving</span>
-            <FactDot />
-            <span className="numeric">{counts.tls} on TLS</span>
-            {hour !== undefined && (
-              <>
-                <FactDot />
-                <span className="numeric">{compactCount(hour)} requests in the hour</span>
-              </>
+            {disabledServed > 0 && (
+              <Fact className="numeric">
+                {counts.disabled} disabled,{" "}
+                <span className="text-warning">{disabledHint(disabledServed)}</span>
+              </Fact>
             )}
-            {counts.disabled > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric">
-                  {counts.disabled} disabled
-                  {disabledServed > 0 && (
-                    <>
-                      , <span className="text-warning">{disabledHint(disabledServed)}</span>
-                    </>
-                  )}
-                </span>
-              </>
+            {engines.map((engine) => (
+              <Fact key={engine.id} product={engine.id}>
+                {engine.name}
+              </Fact>
+            ))}
+            <Fact className="numeric">{plural(counts.all, "site")}</Fact>
+            <Fact className="numeric">{serving} serving</Fact>
+            <Fact className="numeric">{counts.tls} on TLS</Fact>
+            {hour !== undefined && (
+              <Fact className="numeric">{compactCount(hour)} requests in the hour</Fact>
+            )}
+            {counts.disabled > 0 && disabledServed === 0 && (
+              <Fact className="numeric">{counts.disabled} disabled</Fact>
             )}
           </>
         }
@@ -1278,32 +1274,30 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       {/* The rows stay on a failed read, and would pass for what nginx
           serves now: the readings and cards below are from the last good one. */}
       {error && (
-        <div role="alert">
-          <Notice tone="warning" icon={Warning} title="Could not read the sites again">
-            <p className="break-words">{failure?.message}</p>
-            {failure?.reason && <p className="break-words">{failure.reason}</p>}
-            <p>The sites below are from the last read, and may be out of date.</p>
-            {failure?.raw && (
-              <details className="mt-1 min-w-0">
-                <summary className="cursor-pointer hover:text-foreground">
-                  What the server said
-                </summary>
-                <pre className="mt-1 overflow-x-auto rounded-sm border border-hairline bg-surface-header/40 p-2 font-mono text-micro break-words whitespace-pre-wrap">
-                  {failure.raw}
-                </pre>
-              </details>
-            )}
-            <Button
-              size="xs"
-              variant="outline"
-              className="mt-1.5"
-              onClick={retry}
-              disabled={retrying}
-            >
-              {retrying ? "Reading…" : "Try again"}
-            </Button>
-          </Notice>
-        </div>
+        <Notice live="alert" tone="warning" icon={Warning} title="Could not read the sites again">
+          <p className="break-words">{failure?.message}</p>
+          {failure?.reason && <p className="break-words">{failure.reason}</p>}
+          <p>The sites below are from the last read, and may be out of date.</p>
+          {failure?.raw && (
+            <details className="mt-1 min-w-0">
+              <summary className="cursor-pointer hover:text-foreground">
+                What the server said
+              </summary>
+              <pre className="mt-1 overflow-x-auto rounded-sm border border-hairline bg-surface-header/40 p-2 font-mono text-micro break-words whitespace-pre-wrap">
+                {failure.raw}
+              </pre>
+            </details>
+          )}
+          <Button
+            size="xs"
+            variant="outline"
+            className="mt-1.5"
+            onClick={retry}
+            disabled={retrying}
+          >
+            {retrying ? "Reading…" : "Try again"}
+          </Button>
+        </Notice>
       )}
 
       {run?.running === false && (
@@ -1366,48 +1360,53 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         <Panel plain aria-label="Sites">
           <PanelHeader
             title="Sites"
-            actions={
-              <span className="numeric text-hint text-muted-foreground">
-                {visible.length === hosts.length
-                  ? plural(hosts.length, "site")
-                  : `${visible.length} of ${plural(hosts.length, "site")}`}
-              </span>
+            count={
+              visible.length === hosts.length
+                ? plural(hosts.length, "site")
+                : `${visible.length} of ${plural(hosts.length, "site")}`
             }
           />
-          <PanelToolbar className="justify-between gap-x-4">
-            <SearchInput
-              ref={searchRef}
-              dense
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Name, domain, upstream, port, file or path"
-              aria-label="Search sites"
-              aria-keyshortcuts="/"
+          <PanelToolbar>
+            <ListToolbar
+              search={
+                <SearchInput
+                  ref={searchRef}
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Name, domain, upstream, port, file or path"
+                  aria-label="Search sites"
+                  aria-keyshortcuts="/"
+                />
+              }
+              sort={
+                <Select value={sort} onValueChange={(value) => setSort(value as SiteSort)}>
+                  <SelectTrigger size="sm" className="w-40" aria-label="Sort sites">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(SORT_LABEL) as SiteSort[])
+                      .filter((key) => key !== "traffic" || hasTraffic)
+                      .map((key) => (
+                        <SelectItem key={key} value={key}>
+                          {SORT_LABEL[key]}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              }
+              chips={
+                <ChipStrip aria-label="Filter sites">
+                  {(Object.keys(CHIP_LABEL) as SiteChip[])
+                    .filter((key) => key === "all" || key === chip || chipCounts[key] > 0)
+                    .map((key) => (
+                      <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
+                        <span className={CHIP_TONE[key]}>{CHIP_LABEL[key]}</span>
+                        <ChipCount>{chipCounts[key]}</ChipCount>
+                      </FilterChip>
+                    ))}
+                </ChipStrip>
+              }
             />
-            <Select value={sort} onValueChange={(value) => setSort(value as SiteSort)}>
-              <SelectTrigger size="sm" className="w-40" aria-label="Sort sites">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(SORT_LABEL) as SiteSort[])
-                  .filter((key) => key !== "traffic" || hasTraffic)
-                  .map((key) => (
-                    <SelectItem key={key} value={key}>
-                      {SORT_LABEL[key]}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <ChipStrip className="basis-full" aria-label="Filter sites">
-              {(Object.keys(CHIP_LABEL) as SiteChip[])
-                .filter((key) => key === "all" || key === chip || chipCounts[key] > 0)
-                .map((key) => (
-                  <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
-                    <span className={CHIP_TONE[key]}>{CHIP_LABEL[key]}</span>
-                    <ChipCount>{chipCounts[key]}</ChipCount>
-                  </FilterChip>
-                ))}
-            </ChipStrip>
           </PanelToolbar>
           <PanelBody flush className="flex min-w-0 flex-col gap-3 pt-3">
             {chosen.length > 0 && (
@@ -1485,7 +1484,6 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                         health={siteUpstreams(vhost, upstreamPoll.data)}
                         app={appOf(vhost)}
                         hour={siteTraffic(vhost, trafficPoll.data)}
-                        busiest={busiest}
                         arrived={arrived.has(siteKey(vhost))}
                         selectable={allChosen.includes(vhost)}
                         selected={selected.includes(vhost.name)}
@@ -1502,7 +1500,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         </Panel>
       )}
 
-      {hasNginx && <DefaultSitePanel admin={admin} />}
+      {hasNginx && <UnknownHostsFact admin={admin} />}
 
       {admin && hasNginx && <AuthFilesPanel />}
       {admin && hasNginx && <AccessListsPanel />}
@@ -1606,8 +1604,6 @@ type CardProps = {
   app?: SiteApp
   /** Its last hour, when the traffic summary could read its log. */
   hour?: SiteTrafficReading
-  /** The busiest site's hour, which a card's meter is drawn against. */
-  busiest: number
   /** New since the last read of the list: it rises in (§11). */
   arrived: boolean
   selectable: boolean
@@ -1661,7 +1657,6 @@ function SiteRow({
   health,
   app,
   hour,
-  busiest,
   arrived,
   selectable,
   selected,
@@ -1749,8 +1744,8 @@ function SiteRow({
               answers, on every row or on none, so the columns after it stand
               in one line down the list. */}
           {handlers.traffic && (
-            <span className="flex w-28 justify-end max-xl:hidden">
-              {hour && !linkOnly && <HourMeter vhost={vhost} hour={hour} busiest={busiest} />}
+            <span className="flex w-36 justify-end max-xl:hidden">
+              {hour && !linkOnly && <HourWords hour={hour} />}
             </span>
           )}
           <span
@@ -1813,52 +1808,6 @@ function listenPorts(listen: string[]): string[] {
     if (port && !ports.includes(port)) ports.push(port)
   }
   return ports
-}
-
-/**
- * The site's last hour: a short bar against the busiest site's, in the
- * site's hue, its requests, and its share answered with a 5xx where that is
- * worth saying.
- */
-function HourMeter({
-  vhost,
-  hour,
-  busiest,
-}: {
-  vhost: VHost
-  hour: SiteTrafficReading
-  busiest: number
-}) {
-  const tone = errorTone(hour.errorRate)
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 text-hint text-muted-foreground"
-      title={`${hour.requests.toLocaleString()} requests in the last hour${tone ? `, ${(hour.errorRate * 100).toFixed(1)}% answered 5xx` : ""}`}
-    >
-      <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-meter-track">
-        <span
-          className="block h-full rounded-full transition-[width] duration-700 ease-out"
-          style={{
-            width: `${busiest > 0 ? (hour.requests / busiest) * 100 : 0}%`,
-            background: siteHue(vhost.name),
-          }}
-        />
-      </span>
-      <span
-        className={cn(
-          "numeric",
-          tone === "danger"
-            ? "text-destructive"
-            : tone === "warning"
-              ? "text-warning"
-              : "text-foreground",
-        )}
-      >
-        {compactCount(hour.requests)}
-      </span>
-      <span>req/h</span>
-    </span>
-  )
 }
 
 /**

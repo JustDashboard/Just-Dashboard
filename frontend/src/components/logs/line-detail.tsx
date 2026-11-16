@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { ClockRewind, Copy, EyeOff, Filter, MoreHorizontal } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
-import { timestamp, truncateMiddle } from "@/lib/format"
+import { grouped, plural, timestamp, truncateMiddle } from "@/lib/format"
 import type { LogLine, LogSearchResult } from "@/lib/types"
 import type { LogFields } from "@/components/logs/types"
 import { LEVEL_LABEL, hideField, onlyField, type LogLevel } from "@/lib/log/filter"
@@ -132,7 +132,7 @@ export function LineDetail({
         )}
         {line.no !== undefined && (
           <span className="numeric ml-auto text-muted-foreground">
-            line {line.no.toLocaleString()}
+            line {grouped(line.no)}
             {line.file && ` of ${line.file}`}
           </span>
         )}
@@ -366,11 +366,7 @@ function LinesAround({
     <div className="mt-3 animate-rise">
       <div className="mb-1.5 flex items-center gap-2 text-hint text-muted-foreground">
         <span className="eyebrow">Lines around this</span>
-        {state.lines && (
-          <span className="numeric">
-            {state.lines.length.toLocaleString()} {state.lines.length === 1 ? "line" : "lines"}
-          </span>
-        )}
+        {state.lines && <span className="numeric">{plural(state.lines.length, "line")}</span>}
         {onMore && state.lines && (
           <Button size="xs" variant="ghost" className="ml-auto h-6" onClick={onMore}>
             More

@@ -184,7 +184,7 @@ export function ExternalChecksPage() {
   ]
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="External checks" />
       <HostIdentity
         fallback={Location}

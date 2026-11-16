@@ -8,7 +8,7 @@ import { SSHPanel } from "@/components/security/ssh-panel"
 // only hands out inside a Suspense boundary.
 export default function SecuritySSHPage() {
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <Suspense>
         <SSHPanel />
       </Suspense>

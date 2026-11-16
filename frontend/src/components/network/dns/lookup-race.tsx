@@ -277,7 +277,7 @@ function Race({ result }: { result: DNSLookup }) {
             <li
               key={`${row.server}:${row.label}`}
               style={{ "--rise-at": `${landed}ms` } as React.CSSProperties}
-              className="grid min-w-0 animate-rise grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-1 py-3 motion-safe:[animation-delay:var(--rise-at)] sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_5rem] sm:items-center"
+              className="grid min-w-0 animate-rise grid-cols-main-end gap-x-6 gap-y-1 py-3 motion-safe:[animation-delay:var(--rise-at)] sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_5rem] sm:items-center"
             >
               <div className="min-w-0">
                 <p className="truncate text-body font-medium">{row.label}</p>

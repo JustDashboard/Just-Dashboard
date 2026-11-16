@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect } from "react"
-import { FormFact, FormFacts } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { FormFact } from "@/components/form"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import type { ChangeCounts } from "@/components/database/grid"
 import { EngineMark } from "@/components/database/kit"
@@ -62,15 +62,16 @@ export function LeaveGuard({
       }
     >
       <div className="space-y-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{table}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={table}
+          mono
+          facts={
+            <>
               <FormFact label="Staged">{changeSummary(counts)}</FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
         <p className="text-body leading-relaxed">
           {heading} leaves the rows these changes were made on. They have not been written to the
           database; going on throws them away.

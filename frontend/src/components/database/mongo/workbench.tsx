@@ -8,17 +8,13 @@ import {
   Layers,
   Pencil,
   SettingsSliders,
-  SidebarLeftClose,
-  SidebarLeftOpen,
   Trash,
 } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { usePanelSize } from "@/lib/panel-size"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { useMemoryState, useViewState } from "@/lib/view-state"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { PaneBar } from "@/components/phone-panes"
-import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import type { Verb } from "@/components/verbs"
@@ -46,10 +42,14 @@ import {
   type Mongo,
 } from "@/components/database/mongo/use-mongo"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
-import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
-
-const RAIL = { base: 300, min: 220, max: 520 }
-const NO_VERBS: Verb[] = []
+import {
+  OBJECT_HEAD,
+  WORKBENCH_PAGE,
+  WorkbenchFrame,
+  WorkbenchSide,
+  sideVerbs,
+  useSideColumn,
+} from "@/components/database/workbench/chrome"
 
 /** The three workbenches a collection opens in, in the rail's order. */
 const WORK: SectionId[] = ["data", "query", "schema"]
@@ -61,11 +61,11 @@ export type Workbench = {
   /** The open collection as the list knows it; `undefined` while the list is unread. */
   collection: MongoCollection | undefined
   /**
-   * What stands at the start of the page's own strip. It was the control
-   * that brought the rail back; the frame's head and a phone's bar do that
-   * now, so it is nothing, and kept for the pages that still take it.
+   * @deprecated Always nothing: the control that brought the rail back is
+   * the frame head's menu and the phone's bar now. Kept until the pages that
+   * still pass it to `WorkbenchHead` stop; WP-39 deletes it.
    */
-  leading: React.ReactNode
+  leading: null
   confirm: (request: ConfirmRequest) => void
   /** Opens Export for the open collection, with the query on screen when there is one. */
   exportCollection: (draft?: QueryDraft) => void
@@ -148,9 +148,11 @@ export function MongoWorkbench({
     null,
   )
 
-  // The rail beside the work where there is room for both, and over it where
-  // there is not: a phone shows the collections until one is opened.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  // The rail beside the work where the frame has room for both, and over it
+  // where it has not: a phone shows the collections until one is opened. The
+  // rule and the widths are every database workbench's (`useSideColumn`).
+  const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
+  const column = useSideColumn("databases.mongo.rail", frameWidth)
   const [railShown, setRailShown] = useViewState(`databases.${id}.mongo.rail`, true)
   // On a phone the frame shows one pane at a time and a bar at its foot
   // moves between them. It opens on the collections while none is chosen —
@@ -162,9 +164,7 @@ export function MongoWorkbench({
     setHeldCollection(collection)
     setRailOver(!collection && !collectionFree)
   }
-  const railVisible = wide ? railShown : railOver
-  const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("databases.mongo.rail", RAIL.base)
-  const railPx = Math.min(Math.max(railWidth, RAIL.min), RAIL.max)
+  const railVisible = column.beside ? railShown : railOver
 
   const listed = catalog.collections.data?.collections ?? []
   const canCreate = canWrite && engine.can("collections") && Boolean(database)
@@ -242,9 +242,6 @@ export function MongoWorkbench({
     ]
   }
 
-  // The rail is brought back from the head's menu beside the work, and by
-  // the bar on a phone: the pages' own strips start with what is open.
-  const leading = null
   const page = engine.section(section)
 
   const current = catalog.current
@@ -255,7 +252,7 @@ export function MongoWorkbench({
     mongo,
     catalog,
     collection: current,
-    leading,
+    leading: null,
     confirm,
     exportCollection: (draft) => setExporting({ collection, draft }),
     exporting: exporter.running !== null,
@@ -271,23 +268,12 @@ export function MongoWorkbench({
           then the rail and the work as two columns of one surface, with a
           hairline between them. */}
       <WorkbenchFrame
+        ref={frame}
         section={section}
         slot="mongo-workbench"
-        style={{ "--jd-mongo-rail": `${railPx}px` } as React.CSSProperties}
-        menu={
-          wide
-            ? [
-                {
-                  key: "rail",
-                  label: `${railShown ? "Hide" : "Show"} the ${engine.nouns.objects}`,
-                  icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
-                  run: () => setRailShown(!railShown),
-                },
-              ]
-            : NO_VERBS
-        }
+        menu={sideVerbs(column, railShown, engine.nouns.objects, () => setRailShown(!railShown))}
         bar={
-          !wide && (
+          !column.beside && (
             <PaneBar<"rail" | "work">
               label={page?.title ?? "Collections"}
               active={railVisible ? "rail" : "work"}
@@ -305,7 +291,7 @@ export function MongoWorkbench({
         }
       >
         {railVisible && (
-          <div className="relative flex shrink-0 border-hairline bg-card max-lg:absolute max-lg:inset-0 max-lg:z-20 lg:w-(--jd-mongo-rail) lg:border-r">
+          <WorkbenchSide column={column} label="Collections panel width">
             <CollectionRail
               mongo={mongo}
               catalog={catalog}
@@ -313,19 +299,8 @@ export function MongoWorkbench({
               verbsFor={verbsFor}
               unsent={unsent}
               onNew={openNew && (() => openNew())}
-              onHide={() => (wide ? setRailShown(false) : setRailOver(false))}
             />
-            <ResizeHandle
-              side="left"
-              label="Collections panel width"
-              value={railPx}
-              min={RAIL.min}
-              max={RAIL.max}
-              onChange={(px, commit) => setRailWidth(px, commit)}
-              onReset={resetRailWidth}
-              className="absolute inset-y-0 -right-1 z-20 max-lg:hidden"
-            />
-          </div>
+          </WorkbenchSide>
         )}
         {standalone && !collection ? (
           children(workbench)
@@ -334,16 +309,10 @@ export function MongoWorkbench({
             mongo={mongo}
             catalog={catalog}
             section={section}
-            leading={leading}
             onNew={openNew && (() => openNew())}
           />
         ) : missing ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {leading && (
-              <div className="flex h-10 shrink-0 items-center border-b border-hairline bg-surface-header px-3">
-                {leading}
-              </div>
-            )}
             <EmptyState
               mark={<EngineMark engine={engine} />}
               className="min-h-0 flex-1 border-0"
@@ -415,18 +384,20 @@ export function MongoWorkbench({
   )
 }
 
-/** The strip at the top of a workbench's own column: the collection's name, then the page's controls. */
+/**
+ * The strip at the top of a workbench's own column: the collection's name,
+ * then the page's controls. On `ObjectHead`'s ground and height.
+ *
+ * @deprecated use `ObjectHead` (`workbench/chrome.tsx`), which draws the
+ * collection's mark, name and kind itself and takes the views as a tablist.
+ * `leading` is ignored: it was always nothing.
+ */
 export function WorkbenchHead({
-  leading,
   children,
 }: {
+  /** @deprecated ignored. */
   leading?: React.ReactNode
   children: React.ReactNode
 }) {
-  return (
-    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline bg-surface-header px-3 py-1">
-      {leading}
-      {children}
-    </div>
-  )
+  return <div className={OBJECT_HEAD}>{children}</div>
 }

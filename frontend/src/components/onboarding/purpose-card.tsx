@@ -1,6 +1,5 @@
 "use client"
 
-import { useId } from "react"
 import { Check } from "@/components/icons"
 import type { PURPOSES } from "@/lib/sidebar-sections"
 import { cn } from "@/lib/utils"
@@ -46,9 +45,9 @@ export function ExperimentalMark({ className }: { className?: string }) {
  * `detail` (the sections it means). The tick has its own column, so nothing
  * on the words' lines can run under it.
  *
- * The control is the whole card (`ChoiceCard`'s compact shape), named by the
- * purpose's title, with the rest of its words as its description. Several
- * purposes are taken at once, so it is a toggle (`aria-pressed`).
+ * The control is the whole card (`ChoiceCard`'s compact shape), named by its
+ * own words, the purpose's title first. Several purposes are taken at once,
+ * so it is a toggle (`aria-pressed`).
  */
 export function PurposeCard({
   purpose,
@@ -67,7 +66,6 @@ export function PurposeCard({
   /** What the purpose holds: the sections it brings into the rail. */
   detail?: React.ReactNode
 }) {
-  const words = useId()
   const hero = size === "hero"
   const experimental = purpose.stage === "experimental"
   const more = Boolean(reading || experimental || detail)
@@ -85,8 +83,8 @@ export function PurposeCard({
     <ChoiceCard
       selected={selected}
       onClick={onSelect}
-      aria-label={purpose.title}
-      aria-describedby={more ? words : undefined}
+      // Named by its own words, title first: a label of the title alone left
+      // the sections it lists out of the name (axe's label-content-name-mismatch).
       className={cn(
         "flex-row items-center",
         hero
@@ -124,7 +122,7 @@ export function PurposeCard({
         {more && (
           // In a row the lines under the name are set solid, so the mark
           // takes exactly the line the sections give up.
-          <span id={words} className={cn("grid min-w-0", hero && "gap-1.5")}>
+          <span className={cn("grid min-w-0", hero && "gap-1.5")}>
             {reading}
             {experimental && <ExperimentalMark />}
             {detail && (

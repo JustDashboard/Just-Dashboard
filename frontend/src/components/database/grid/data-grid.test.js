@@ -170,7 +170,7 @@ describe("how values are drawn", () => {
   test("a boolean is a word, in a sanctioned kind colour and never a palette one", () => {
     expect(rowHTML(html, 0)).toContain(">true<")
     expect(rowHTML(html, 1)).toContain(">false<")
-    expect(html).toContain("text-(--tag-violet)")
+    expect(html).toContain("text-tag-violet")
     expect(html).not.toMatch(/\b(?:text|bg|border)-(?:red|green|blue|amber|violet|pink)-\d{2,3}\b/)
   })
 

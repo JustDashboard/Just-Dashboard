@@ -250,7 +250,7 @@ export function Services() {
         },
       ]}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         {header}
 
         <HostIdentity
@@ -291,39 +291,43 @@ export function Services() {
               )}
             </>
           }
-          aside={
-            <div className="flex flex-wrap items-center gap-3">
-              {failed > 0 ? (
-                <button
-                  type="button"
-                  aria-pressed={state === "failed"}
-                  onClick={() => setState(state === "failed" ? "" : "failed")}
-                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+          // The verdict is the page's state, beside its name, as Docker's
+          // pages say theirs; the right end is the page's command. It stood
+          // at the far right beside Reload unit files.
+          state={
+            failed > 0 ? (
+              <button
+                type="button"
+                aria-pressed={state === "failed"}
+                onClick={() => setState(state === "failed" ? "" : "failed")}
+                className="-mx-1.5 rounded-md px-1.5 py-0.5 focus-ring transition-colors hover:bg-row-hover"
+              >
+                <Status tone="danger" label={`${plural(failed, "service")} failed`} />
+              </button>
+            ) : restarting > 0 ? (
+              <Status tone="warning" label={`${plural(restarting, "service")} restarting`} />
+            ) : (
+              <Status tone="running" label="Nothing failed" />
+            )
+          }
+          command={
+            <span className="flex items-center gap-1">
+              {can("system.admin") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={reloading}
+                  title="systemctl daemon-reload: re-read every unit file after editing one"
+                  onClick={() => void daemonReload()}
                 >
-                  <Status tone="danger" label={`${plural(failed, "service")} failed`} />
-                </button>
-              ) : restarting > 0 ? (
-                <Status tone="warning" label={`${plural(restarting, "service")} restarting`} />
-              ) : (
-                <Status tone="running" label="Nothing failed" />
+                  <RefreshClockwise className="size-3.5" />
+                  {reloading ? "Reloading…" : "Reload unit files"}
+                </Button>
               )}
-              <div className="flex items-center gap-1">
-                {can("system.admin") && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="text-muted-foreground"
-                    disabled={reloading}
-                    title="systemctl daemon-reload: re-read every unit file after editing one"
-                    onClick={() => void daemonReload()}
-                  >
-                    <RefreshClockwise className="size-3.5" />
-                    {reloading ? "Reloading…" : "Reload unit files"}
-                  </Button>
-                )}
+              <span className="max-sm:hidden">
                 <WorkspaceHelp compact />
-              </div>
-            </div>
+              </span>
+            </span>
           }
         />
 
@@ -451,11 +455,11 @@ export function Services() {
                 ? `Showing ${ROWS} of ${visible.length} matching — search to narrow`
                 : `${plural(visible.length, "service")} matching`}
             </span>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>failed first, then by name</span>
             {missing > 0 && (
               <>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span
                   className="numeric"
                   title="Named by another unit, with no unit file on this host"
@@ -466,7 +470,7 @@ export function Services() {
             )}
             {!list.data.ratesReady && (
               <>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span>processor shares arrive with the second read</span>
               </>
             )}
@@ -503,7 +507,7 @@ function UnitRows({ rows, ...rest }: RowsProps & { rows: SystemdUnit[] }) {
   return (
     <>
       <div className="hidden min-w-0 xl:block">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead>Service</TableHead>
@@ -753,7 +757,7 @@ function CpuReading({ unit }: { unit: SystemdUnit }) {
   const value = unit.cpuPercent ?? 0
   const tone = cpuTone(value)
   if (!unit.cpuReady) {
-    return <p className="text-right font-mono text-muted-foreground/60">—</p>
+    return <p className="text-right font-mono text-faint">—</p>
   }
   return (
     <div className="flex items-center justify-end gap-2">
@@ -782,7 +786,7 @@ function CpuReading({ unit }: { unit: SystemdUnit }) {
 function MemoryReading({ unit, heaviest }: { unit: SystemdUnit; heaviest: number }) {
   const memory = unit.memoryBytes ?? 0
   if (memory === 0) {
-    return <p className="text-right font-mono text-muted-foreground/60">—</p>
+    return <p className="text-right font-mono text-faint">—</p>
   }
   return (
     <div

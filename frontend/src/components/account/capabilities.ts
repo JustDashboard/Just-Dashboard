@@ -4,10 +4,8 @@ import {
   FolderOpen,
   Play,
   SettingsGear,
-  ShieldCheck,
   Terminal,
   Trash,
-  Wrench,
   type Icon,
 } from "@/components/icons"
 
@@ -101,30 +99,5 @@ export const ROLE_SUMMARY: Record<Role, string> = {
 /** The roles from the one that only looks up, each adding to the one before it. */
 export const ROLE_LADDER: Role[] = ["readonly", "limited", "admin"]
 
-/** What a role is called on the ladder; the badges and pickers keep the key. */
-export const ROLE_NAME: Record<Role, string> = {
-  readonly: "Read-only",
-  limited: "Limited",
-  admin: "Administrator",
-}
-
-/**
- * A role's hue on the ladder and on the users page's share of roles: none of
- * them red or amber, so no rung reads as a warning.
- */
-export const ROLE_HUE: Record<Role, string> = {
-  readonly: "var(--tag-cyan)",
-  limited: "var(--tag-green)",
-  admin: "var(--tag-violet)",
-}
-
-/**
- * A role's mark, for the pickers that hand one out and the rows that show one:
- * a shield for the role that holds everything, a wrench for the one that
- * operates, an eye for the one that only looks.
- */
-export const ROLE_MARK: Record<Role, Icon> = {
-  admin: ShieldCheck,
-  limited: Wrench,
-  readonly: Eye,
-}
+/** @deprecated import from `@/components/account/role`, where `RoleTag` draws them. */
+export { ROLE_HUE, ROLE_MARK, ROLE_NAME } from "@/components/account/role"

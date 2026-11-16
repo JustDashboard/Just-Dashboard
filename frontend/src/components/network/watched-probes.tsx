@@ -9,7 +9,7 @@ import { notify } from "@/lib/toast"
 import { isProbe, probeStatus, type WatchedEndpoint } from "@/lib/watched-probes"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ErrorState } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { CheckTrend } from "@/components/proxy/watched-domains"
@@ -78,13 +78,7 @@ export function WatchedProbes({
         {watched.error && !watched.data ? (
           <ErrorState error={watched.error} onRetry={watched.refresh} />
         ) : probes.length === 0 ? (
-          (empty ?? (
-            <p className="text-body text-muted-foreground">
-              No probe is watched. Run a TCP port check on the Tools page and watch it to have the
-              server connect on the watch list&rsquo;s schedule, keep each connect time and alert
-              when it stops answering.
-            </p>
-          ))
+          (empty ?? <EmptyNote>No probe is watched.</EmptyNote>)
         ) : (
           <ul className="divide-y divide-hairline">
             {probes.map((row) => {

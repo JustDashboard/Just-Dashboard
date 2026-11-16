@@ -171,9 +171,7 @@ function SizingBody({ sizing, product }: { sizing: EnvironmentSizing; product?: 
             <WireMark tone="logo" size="md">
               {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Box aria-hidden />}
             </WireMark>
-            <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-              <StatusDot tone={verdictTone(sizing.verdict)} />
-            </span>
+            <StatusDot tone={verdictTone(sizing.verdict)} corner="md" />
           </span>
         }
         title={sizingLead(sizing.verdict, sizing.projectName)}

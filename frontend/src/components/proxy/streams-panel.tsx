@@ -36,10 +36,12 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { ListToolbar } from "@/components/toolbar"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { ProductLogo, ProductLogos, hasProductLogo, portProduct } from "@/components/product-logo"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
@@ -292,8 +294,11 @@ export function StreamsPage() {
   const engineTone: DotTone = outage ? "danger" : !live ? "warning" : "running"
 
   const identity = (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise"
+      // While the list is read the line keeps a place for its command, as the
+      // loaded line has one, so on a phone it is as tall as the line it becomes.
+      loading={!data && !error && !noNginx}
       logo={
         products.length > 0 ? (
           <span className="flex h-10 shrink-0 items-center">
@@ -306,68 +311,58 @@ export function StreamsPage() {
       title="Port forwarding"
       // Laid out as a project's header, as the overview's line is: what needs
       // the reader beside the name, one command at the end, the rest in `⋯`.
+      // The state keeps one box whatever it is, so the pressable verdict
+      // does not stand taller than the "Reading" it replaces.
       state={
-        verdict ? (
-          <Verdict
-            verdict={verdict}
-            pressed={verdict.chip !== undefined && chip === verdict.chip}
-            onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
-          />
-        ) : noNginx ? (
-          <Status tone="stopped" label="Not installed" />
-        ) : !data ? (
-          error ? (
-            <Status tone="danger" label="Not read" />
+        <span className="flex h-6 items-center">
+          {verdict ? (
+            <Verdict
+              verdict={verdict}
+              pressed={verdict.chip !== undefined && chip === verdict.chip}
+              onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
+            />
+          ) : noNginx ? (
+            <Status tone="stopped" label="Not installed" />
+          ) : !data ? (
+            error ? (
+              <Status tone="danger" label="Not read" />
+            ) : (
+              <Status tone="unknown" label="Reading" />
+            )
           ) : (
-            <Status tone="unknown" label="Reading" />
-          )
-        ) : (
-          <Status tone="stopped" label="No forwards" />
-        )
+            <Status tone="stopped" label="No forwards" />
+          )}
+        </span>
       }
       // An empty list carries the command in its own empty state.
-      command={listed.length > 0 ? newStream : undefined}
+      command={!data && !error && !noNginx ? true : listed.length > 0 ? newStream : undefined}
       menu={
         directoryVerbs.length > 0 ? (
           <VerbMenu verbs={directoryVerbs} label="More stream directory actions" />
         ) : undefined
       }
+      // The facts that want action (a missing module, a forward open to
+      // anyone) come first, so a phone's one line of facts never clips them.
       facts={
         noNginx ? (
-          <span>nginx is not installed on this host</span>
+          <Fact>nginx is not installed on this host</Fact>
         ) : !data ? (
-          <span>{error ? "couldn't read the streams" : "Reading the streams…"}</span>
+          <Fact>{error ? "couldn't read the streams" : "Reading the streams…"}</Fact>
         ) : (
           <>
-            <HostFact product="nginx">
+            {open > 0 && <Fact className="numeric text-warning">{open} open to anyone</Fact>}
+            <Fact product="nginx">
               <span className={cn(moduleMissing(data.module) && "font-medium text-warning")}>
                 stream module {moduleLabel(data.module)}
               </span>
-            </HostFact>
+            </Fact>
             {/* None is the state beside the name; a count of nothing under it said it twice. */}
             {data.streams.length > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric">{plural(data.streams.length, "forward")}</span>
-              </>
+              <Fact className="numeric">{plural(data.streams.length, "forward")}</Fact>
             )}
-            {open > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric text-warning">{open} open to anyone</span>
-              </>
-            )}
-            {paused > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric">{paused} paused</span>
-              </>
-            )}
+            {paused > 0 && <Fact className="numeric">{paused} paused</Fact>}
             {hour !== undefined && hour > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric">{plural(hour, "session")} in the hour</span>
-              </>
+              <Fact className="numeric">{plural(hour, "session")} in the hour</Fact>
             )}
           </>
         )
@@ -375,11 +370,11 @@ export function StreamsPage() {
     />
   )
 
-  const header = <PageContext eyebrow="Proxy" title="Streams" />
+  const header = <PageContext title="Streams" />
 
   if (noNginx) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         {header}
         {identity}
         {/* The section's own install screen: the module and the forwards
@@ -419,7 +414,7 @@ export function StreamsPage() {
   const drawn = listed.filter((s) => !s.error)
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {header}
       {identity}
 
@@ -427,7 +422,12 @@ export function StreamsPage() {
         // The poll failed after an earlier one did: what is below is that
         // earlier reading, and a directory that became unreadable must not
         // pass for one that is fine.
-        <Notice tone="warning" icon={Warning} title="The list below is from the last read">
+        <Notice
+          live="alert"
+          tone="warning"
+          icon={Warning}
+          title="The list below is from the last read"
+        >
           <div className="space-y-2">
             <p className="break-words">{errorMessage(error)}</p>
             <Button size="sm" variant="outline" onClick={refresh}>
@@ -451,38 +451,40 @@ export function StreamsPage() {
       <Panel plain aria-label="Forwards">
         <PanelHeader
           title="Forwards"
-          actions={
-            listed.length > 0 && (
-              <span className="numeric text-hint text-muted-foreground">
-                {shown.length === listed.length
-                  ? plural(listed.length, "stream")
-                  : `${shown.length} of ${plural(listed.length, "stream")}`}
-              </span>
-            )
+          count={
+            listed.length > 0 &&
+            (shown.length === listed.length
+              ? plural(listed.length, "stream")
+              : `${shown.length} of ${plural(listed.length, "stream")}`)
           }
         />
         {(listed.length > 1 || chip !== "all" || query !== "") && (
           // A chip no stream is under is hidden, except the one chosen: it
           // stays to say why the list is empty, and All is beside it.
-          <PanelToolbar className="justify-between gap-x-4">
-            <SearchInput
-              ref={searchRef}
-              dense
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Name, port, upstream or source"
-              aria-label="Search streams"
-              aria-keyshortcuts="/"
+          <PanelToolbar>
+            <ListToolbar
+              search={
+                <SearchInput
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Name, port, upstream or source"
+                  aria-label="Search streams"
+                  aria-keyshortcuts="/"
+                />
+              }
+              chips={
+                <ChipStrip aria-label="Filter streams">
+                  {STREAM_FILTERS.filter(
+                    ({ key }) => key === "all" || chips[key] > 0 || chip === key,
+                  ).map(({ key, label }) => (
+                    <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
+                      {label} <ChipCount>{chips[key]}</ChipCount>
+                    </FilterChip>
+                  ))}
+                </ChipStrip>
+              }
             />
-            <ChipStrip aria-label="Filter streams">
-              {STREAM_FILTERS.filter(
-                ({ key }) => key === "all" || chips[key] > 0 || chip === key,
-              ).map(({ key, label }) => (
-                <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
-                  {label} <ChipCount>{chips[key]}</ChipCount>
-                </FilterChip>
-              ))}
-            </ChipStrip>
           </PanelToolbar>
         )}
         <PanelBody flush className="pt-3">

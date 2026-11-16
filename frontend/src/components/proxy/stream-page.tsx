@@ -2,9 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, Connection, Warning } from "@/components/icons"
+import { useParams, useRouter } from "next/navigation"
+import { Connection, Warning } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import type {
@@ -36,19 +35,18 @@ import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/identity-header"
-import { Page, PageContext } from "@/components/page"
+import { DetailPage, siblingSteps, useDetailTab, type Step } from "@/components/detail-page"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader, IdentityVerbs } from "@/components/identity-header"
 import { ProductLogo, portProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot, type DotTone } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Segments } from "@/components/segments"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useProxyRead } from "@/components/proxy/proxy-context"
@@ -77,14 +75,7 @@ import {
 import { TestResults, useStreamVerbs } from "@/components/proxy/stream-verbs"
 import { decodeSegment } from "@/lib/route-params"
 
-const BACK = (
-  <Link
-    href="/proxy/streams"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Streams
-  </Link>
-)
+const BACK = { href: "/proxy/streams", label: "Streams" }
 
 const TAB_LABEL: Record<StreamTab, string> = {
   overview: "Overview",
@@ -121,19 +112,16 @@ function dotTone(stream: StreamEntry): DotTone {
  */
 export function StreamPage() {
   const params = useParams<{ name: string }>()
-  const search = useSearchParams()
   const router = useRouter()
   const name = decodeSegment(params.name)
   const { can } = useAuth()
   const admin = can("system.admin")
-  const asked = streamTab(search.get("tab"))
+  // The view is kept in the address and remembered for the visit, as a
+  // site's, a port's and a certificate's are.
+  const [asked, choose] = useDetailTab(STREAM_TABS, { remember: "proxy.stream.tab" })
   // Settings is the form, which only an administrator can use.
   const tab: StreamTab = asked === "settings" && !admin ? "overview" : asked
-  const setTab = useCallback(
-    // Replaced rather than pushed: the view is not a place Back should step through.
-    (next: string) => router.replace(streamHref(name, streamTab(next)), { scroll: false }),
-    [router, name],
-  )
+  const setTab = useCallback((next: string) => choose(streamTab(next)), [choose])
 
   const streams = useProxyRead("streams")
   const listed = useMemo(
@@ -149,78 +137,45 @@ export function StreamPage() {
         .sort(byUrgency),
     [listed, chip, query],
   )
-  const at = railed.findIndex((stream) => stream.name === name)
-  const step = (direction: number) => {
-    const next = at >= 0 ? railed[at + direction] : railed[direction > 0 ? 0 : railed.length - 1]
-    if (next) router.push(streamHref(next.name, tab))
-  }
-  const previous = { disabled: at <= 0, run: () => step(-1) }
-  const next = { disabled: railed.length === 0 || at >= railed.length - 1, run: () => step(1) }
+  const steps = siblingSteps(
+    railed.map((stream) => stream.name),
+    name,
+    (key) => router.push(streamHref(key, tab)),
+  )
   const filterLabel = STREAM_FILTERS.find((f) => f.key === chip)?.label
   const caption = streams.data
     ? `${chip !== "all" || query ? `${railed.length} of ${listed.length}` : `${listed.length} ${listed.length === 1 ? "stream" : "streams"}`}${chip !== "all" ? ` · ${filterLabel}` : " · worst first"}`
     : "Reading the streams…"
 
   return (
-    <Workspace
-      name="Stream"
-      stateKey="proxy.stream.page"
+    <StreamMain
+      key={name}
+      name={name}
+      admin={admin}
+      status={streams.data}
+      error={streams.error}
       refresh={streams.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous stream",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next stream",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
-    >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          <StreamRail
-            className="hidden w-72 shrink-0 xl:flex"
-            streams={railed}
-            current={name}
-            tab={tab}
-            loading={streams.loading}
-            query={query}
-            onQuery={setQuery}
-            filter={chip !== "all" ? chip : undefined}
-            onClearFilter={() => setChip("all")}
-            caption={caption}
-          />
-          <StreamMain
-            key={name}
-            name={name}
-            admin={admin}
-            status={streams.data}
-            error={streams.error}
-            refresh={streams.refresh}
-            tab={tab}
-            setTab={setTab}
-            previous={previous}
-            next={next}
-          />
-        </div>
-      </Page>
-    </Workspace>
+      tab={tab}
+      setTab={setTab}
+      steps={steps}
+      rail={
+        <StreamRail
+          streams={railed}
+          current={name}
+          tab={tab}
+          loading={streams.loading}
+          error={streams.data ? undefined : streams.error}
+          onRetry={streams.refresh}
+          query={query}
+          onQuery={setQuery}
+          filter={chip !== "all" ? chip : undefined}
+          onClearFilter={() => setChip("all")}
+          caption={caption}
+        />
+      }
+    />
   )
 }
-
-type Step = { disabled: boolean; run: () => void }
 
 function StreamMain({
   name,
@@ -230,8 +185,8 @@ function StreamMain({
   refresh,
   tab,
   setTab,
-  previous,
-  next,
+  steps,
+  rail,
 }: {
   name: string
   admin: boolean
@@ -240,8 +195,8 @@ function StreamMain({
   refresh: () => void
   tab: StreamTab
   setTab: (tab: string) => void
-  previous: Step
-  next: Step
+  steps: { previous: Step; next: Step }
+  rail: React.ReactNode
 }) {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
@@ -306,41 +261,58 @@ function StreamMain({
     onDeleted: () => router.push("/proxy/streams"),
   })
 
+  // The frame every detail page has (D9): the way back with the arrows, the
+  // rail from `xl`, and the identity line held still over the views.
+  const frame = (
+    identity: React.ReactNode,
+    body: React.ReactNode,
+    title: React.ReactNode = name,
+  ) => (
+    <DetailPage
+      name="Stream"
+      what="stream"
+      stateKey="proxy.stream.page"
+      refresh={refresh}
+      steps={steps}
+      rail={rail}
+      back={BACK}
+      title={title}
+      identity={identity}
+    >
+      {body}
+    </DetailPage>
+  )
+
   if (!stream) {
     if (!status) {
-      return (
-        <div className="flex min-w-0 flex-1 flex-col gap-5">
-          <PageContext eyebrow={BACK} title={name} />
-          {error ? (
-            <ErrorState error={error} onRetry={refresh} />
-          ) : (
-            <>
-              <HostIdentity
-                className="border-b-0 pb-0"
-                fallback={Connection}
-                title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
-                facts={<span>&nbsp;</span>}
-              />
-              <LoadingRows />
-            </>
-          )}
-        </div>
+      if (error) return frame(undefined, <ErrorState error={error} onRetry={refresh} />)
+      // The line keeps a place for its verbs and its state, as the loaded
+      // line has them, so it is as tall on a phone as the line it becomes.
+      return frame(
+        <IdentityHeader
+          loading
+          className="border-b-0 pb-0"
+          fallback={Connection}
+          title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
+          state
+          command
+          menu={false}
+        />,
+        <LoadingRows />,
       )
     }
-    return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name} />
-        <EmptyState
-          icon={Connection}
-          title={`No stream called ${name}`}
-          description="It may have been deleted or renamed. The Streams list has every forward on this host."
-          action={
-            <Button size="sm" variant="outline" asChild>
-              <Link href="/proxy/streams">All streams</Link>
-            </Button>
-          }
-        />
-      </div>
+    return frame(
+      undefined,
+      <EmptyState
+        icon={Connection}
+        title={`No stream called ${name}`}
+        description="It may have been deleted or renamed. The Streams list has every forward on this host."
+        action={
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/proxy/streams">All streams</Link>
+          </Button>
+        }
+      />,
     )
   }
 
@@ -359,90 +331,65 @@ function StreamMain({
     if (res.name !== name) router.replace(streamHref(res.name, "settings"))
   }
 
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext
-          eyebrow={BACK}
-          title={stream.name}
-          actions={
-            <>
-              {Array.isArray(tested) && <TestResults name={stream.name} results={tested} />}
-              {primary && (
-                <Button
-                  size="sm"
-                  onClick={primary.run}
-                  disabled={primary.disabled}
-                  pending={primary.disabled && primary.key !== "recheck"}
-                >
-                  <primary.icon className="size-4" />
-                  {primary.label}
-                </Button>
-              )}
-              {rest.length > 0 && (
-                <VerbMenu verbs={rest} label={`More actions for ${stream.name}`} />
-              )}
-              <span className="flex items-center">
-                <IconAction
-                  label="Previous stream"
-                  disabled={previous.disabled}
-                  onClick={previous.run}
-                >
-                  <ChevronUp />
-                </IconAction>
-                <IconAction label="Next stream" disabled={next.disabled} onClick={next.run}>
-                  <ChevronDown />
-                </IconAction>
-                <span className="max-sm:hidden">
-                  <WorkspaceHelp compact />
-                </span>
-              </span>
-            </>
-          }
+  // The identity line's verbs by the one rule (`IdentityVerbs`): the command
+  // first, the rest behind `⋯`; a test's outcome stands before them.
+  const lineVerbs = primary
+    ? IdentityVerbs({ verbs: [{ ...primary, inline: true }, ...rest], name: stream.name })
+    : {
+        command: undefined,
+        menu: rest.length > 0 && (
+          <VerbMenu verbs={rest} label={`More actions for ${stream.name}`} />
+        ),
+      }
+
+  const windowed = (tab === "overview" || tab === "clients") && readable
+  const windowChoice = (
+    <Segments
+      label="Window"
+      value={span}
+      onChange={setSpan}
+      options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
+    />
+  )
+
+  return frame(
+    <>
+      <StreamIdentity
+        stream={stream}
+        command={
+          <>
+            {Array.isArray(tested) && <TestResults name={stream.name} results={tested} />}
+            {lineVerbs.command}
+          </>
+        }
+        menu={lineVerbs.menu}
+      />
+      {error && (
+        <Notice tone="warning" icon={Warning} title="This is the stream as it was last read">
+          <div className="space-y-2">
+            <p className="break-words">{errorMessage(error)}</p>
+            <Button size="sm" variant="outline" onClick={refresh}>
+              Try again
+            </Button>
+          </div>
+        </Notice>
+      )}
+      <StateNotice stream={stream} />
+    </>,
+    <>
+      <Tabs value={tab} onValueChange={setTab} className="gap-0">
+        <ViewTabList
+          label={`Views of ${stream.name}`}
+          value={tab}
+          views={views.map((key) => ({ key, label: TAB_LABEL[key] }))}
+          sticky
+          // Beside the views where there is room; on a phone a row of its
+          // own under them, or it squeezed the strip and cut a view's name.
+          trailing={windowed && <span className="max-sm:hidden">{windowChoice}</span>}
         />
-        <StreamIdentity stream={stream} />
+        {windowed && <div className="pt-3 sm:hidden">{windowChoice}</div>}
 
-        {error && (
-          <Notice tone="warning" icon={Warning} title="This is the stream as it was last read">
-            <div className="space-y-2">
-              <p className="break-words">{errorMessage(error)}</p>
-              <Button size="sm" variant="outline" onClick={refresh}>
-                Try again
-              </Button>
-            </div>
-          </Notice>
-        )}
-        <StateNotice stream={stream} />
-      </div>
-
-      <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <div className="flex shrink-0 flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-hairline">
-          <TabsPrimitive.List
-            aria-label={`Views of ${stream.name}`}
-            className="flex min-w-0 [scrollbar-width:none] gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
-          >
-            {views.map((key) => (
-              <TabsPrimitive.Trigger
-                key={key}
-                value={key}
-                className={tabClasses(tab === key, "h-10")}
-              >
-                {TAB_LABEL[key]}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
-          {(tab === "overview" || tab === "clients") && readable && (
-            <Segments
-              label="Window"
-              value={span}
-              onChange={setSpan}
-              options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
-              className="mb-1.5"
-            />
-          )}
-        </div>
-
-        <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="overview" className="pt-6">
           {tab === "overview" && readable && (
             <div className="flex min-w-0 flex-col gap-8">
               <StreamPicture
@@ -461,7 +408,7 @@ function StreamMain({
             </div>
           )}
         </TabsContent>
-        <TabsContent value="clients" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="clients" className="pt-6">
           {tab === "clients" && readable && (
             <div className="flex min-w-0 flex-col gap-6">
               {window && <LogState traffic={window} settingsHref={settingsHref} />}
@@ -482,11 +429,11 @@ function StreamMain({
             </div>
           )}
         </TabsContent>
-        <TabsContent value="connections" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="connections" className="pt-6">
           {tab === "connections" && readable && <StreamConnections name={name} state={sessions} />}
         </TabsContent>
         {admin && (
-          <TabsContent value="settings" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+          <TabsContent value="settings" className="pt-6">
             {tab === "settings" &&
               (stream.paused ? (
                 <PausedSettings
@@ -536,7 +483,8 @@ function StreamMain({
         onSaved={refresh}
       />
       {dialog}
-    </div>
+    </>,
+    stream.name,
   )
 }
 
@@ -546,25 +494,44 @@ function StreamMain({
  * what kind of forward it is, where it goes and who may reach it; its state
  * at the line's end.
  */
-function StreamIdentity({ stream }: { stream: StreamEntry }) {
+function StreamIdentity({
+  stream,
+  command,
+  menu,
+}: {
+  stream: StreamEntry
+  command: React.ReactNode
+  menu: React.ReactNode
+}) {
   const who = restrictionWords(stream)
   const family = listenFamily(stream.address)
+  const reach = (
+    <Fact
+      className={cn(
+        who.mono && "font-mono",
+        who.tone === "danger" && "font-medium text-destructive",
+        who.tone === "warning" && "text-warning",
+      )}
+    >
+      {stream.open ? who.label : `from ${who.label}`}
+    </Fact>
+  )
+  // Who may reach it wants action when it is open to anyone, so it leads the
+  // facts then: a phone's one line of facts never clips it.
+  const urgent = who.tone === "danger" || who.tone === "warning"
   return (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise border-b-0 pb-0"
+      label={`About ${stream.name}`}
+      slot="host-identity"
       logo={
         <span className="relative flex shrink-0">
           <ProductLogo
             id={portProduct(stream.listen)}
             fallback={Connection}
-            className="size-12 rounded-xl [&_img]:size-7"
+            className="size-10 rounded-lg [&_img]:size-6 [&>svg]:size-5"
           />
-          <span
-            aria-hidden
-            className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-background"
-          >
-            <StatusDot tone={dotTone(stream)} live={stream.state === "live"} />
-          </span>
+          <StatusDot corner="lg" tone={dotTone(stream)} live={stream.state === "live"} />
         </span>
       }
       title={
@@ -582,30 +549,26 @@ function StreamIdentity({ stream }: { stream: StreamEntry }) {
       }
       facts={
         stream.error ? (
-          <span className="font-mono">{stream.path}</span>
+          <Fact mono>{stream.path}</Fact>
         ) : (
           <>
+            {urgent && reach}
+            {/* On a phone the line is where it goes and who may reach it:
+                the kind of forward is the page's to say, and a line of
+                facts that wraps moved the views under it as it loaded. */}
             {streamTraits(stream).map((fact) => (
-              <span key={fact} className="contents">
-                <span>{fact}</span>
-                <FactDot />
-              </span>
+              <Fact key={fact} className="max-sm:hidden">
+                {fact}
+              </Fact>
             ))}
-            <span className="font-mono">→ {upstreamsOf(stream).join(", ")}</span>
-            <FactDot />
-            <span
-              className={cn(
-                who.mono && "font-mono",
-                who.tone === "danger" && "font-medium text-destructive",
-                who.tone === "warning" && "text-warning",
-              )}
-            >
-              {stream.open ? who.label : `from ${who.label}`}
-            </span>
+            <Fact mono>→ {upstreamsOf(stream).join(", ")}</Fact>
+            {!urgent && reach}
           </>
         )
       }
-      aside={<Status {...stateStatus(stream)} />}
+      state={<Status {...stateStatus(stream)} />}
+      command={command}
+      menu={menu}
     />
   )
 }

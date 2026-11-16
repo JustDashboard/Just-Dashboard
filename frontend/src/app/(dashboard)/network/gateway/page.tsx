@@ -138,8 +138,8 @@ export default function NetworkGatewayPage() {
   const made = view?.nat.filter((n) => n.owner).length ?? 0
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="Gateway" />
+    <Page rise>
+      <PageContext title="Gateway" />
       <HostIdentity
         label="About the gateway"
         mark={firewallProduct(view?.capability.firewall)}

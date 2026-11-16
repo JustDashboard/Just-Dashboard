@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Key, Trash } from "@/components/icons"
 import { ApiError, errorMessage, put } from "@/lib/api"
-import { calendarDate, timestamp } from "@/lib/format"
+import { calendarDate, plural, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -21,7 +21,6 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag } from "@/components/database/kit"
 import { dropAccountRequest } from "@/components/database/ops/access-drop"
@@ -64,6 +63,7 @@ import {
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
 
 const SHOW_WORDS: Record<AccountShow, string> = {
   "": "",
@@ -195,6 +195,8 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       sessions: role.connections,
     })),
     loading: roles.loading && !down,
+    error: roles.data ? undefined : roles.error,
+    onRetry: roles.refresh,
     search: {
       value: filter.search,
       onChange: filter.setSearch,
@@ -205,7 +207,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       : roles.data
         ? show || filter.search
           ? `${shown.length} of ${accountCounts(all).all}${show ? ` · ${SHOW_WORDS[show]}` : ""}`
-          : `${accountCounts(all).all} ${accountCounts(all).all === 1 ? "account" : "accounts"}`
+          : `${plural(accountCounts(all).all, "account")}`
         : "Reading the accounts…",
     filtered: Boolean(show),
     onClearFilters: () => filter.setShow(""),
@@ -324,7 +326,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
                   It may have been dropped, or the name in the link is misspelt.
                 </NoSuchAccount>
               ) : detail.error ? (
-                <CouldNotRead what="the account" error={detail.error} onRetry={detail.refresh} />
+                <ErrorState what="the account" error={detail.error} onRetry={detail.refresh} />
               ) : (
                 <GrantsSkeleton />
               )

@@ -155,7 +155,7 @@ export function EngineLog({ status }: { status: ProxyStatus }) {
           // The height every service's log takes. It was held to nine tenths
           // of the window, forty rem at the least, so a log that is not
           // streaming was the lower half of the page, empty.
-          paneClassName="h-[min(75vh,40rem)] min-h-80"
+          paneClassName="h-workbench min-h-80"
         />
       </PanelBody>
     </Panel>

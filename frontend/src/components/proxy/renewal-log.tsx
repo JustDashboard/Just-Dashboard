@@ -79,7 +79,7 @@ export function RenewalLog({ certbot }: { certbot: CertbotState | undefined }) {
             views={kindViews}
             storageKey="proxy.certificates.renewals"
             pickerLabel="Renewal log"
-            paneClassName="h-[min(60vh,32rem)] min-h-80"
+            paneClassName="h-[min(60svh,32rem)] min-h-80"
           />
         )}
       </PanelBody>

@@ -3,14 +3,10 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import {
-  CheckCircle,
   ChevronDown,
-  Clock,
   ClockRewind,
   Cross,
-  Filter,
   MagnifyingGlass,
-  Slash,
   TerminalWindow,
   Warning,
   type Icon,
@@ -24,13 +20,13 @@ import type { DeploymentLifecycle, DockerEvent } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { GroupRule } from "@/components/choice-row"
 import { laneStyle } from "@/components/logs/log-text"
 import { FactDot } from "@/components/identity-header"
 import { PaneFooter } from "@/components/panel"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { ProjectEmpty } from "@/components/deploy/project-empty"
 import { LoadingRows } from "@/components/loading"
 import { InfoTip } from "@/components/form"
 import { Status } from "@/components/status-dot"
@@ -43,6 +39,7 @@ import { isCleanExit } from "@/components/deploy/traffic-strip"
 import { EventMark, EventWho, HAPPENED } from "@/components/docker/event-marks"
 import { LinesBlock, OutputLines } from "@/components/deploy/output-lines"
 import { foldRestarts, loopSpan, type FeedItem } from "@/components/deploy/logs-model"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * What Docker did to this deployment's containers.
@@ -122,7 +119,7 @@ export function LifecycleFeed({
   const [kinds, setKinds] = useSessionState<string[]>("deploy.events.kinds", [])
   const [live, setLive] = useState<DockerEvent[]>([])
   const [following, setFollowing] = useState(true)
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   const feed = usePoll<DeploymentLifecycle>(
     (signal) =>
@@ -182,11 +179,7 @@ export function LifecycleFeed({
   if (data && data.status !== "available") {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <EmptyState
-          icon={Slash}
-          title="Container events are unavailable"
-          description={data.reason}
-        />
+        <ProjectEmpty title="Container events are unavailable" reason={data.reason} />
       </div>
     )
   }
@@ -295,7 +288,7 @@ export function LifecycleFeed({
         {!data ? (
           <LoadingRows rows={6} />
         ) : shown.length === 0 ? (
-          <EmptyState
+          <ProjectEmpty
             {...emptyReading({
               filtered,
               moment,
@@ -450,20 +443,18 @@ function emptyReading({
   moment?: string
   since?: string
   retentionDays?: number
-}): { title: string; description: string; icon: Icon } {
+}): { title: string; reason: string } {
   if (filtered) {
     return {
-      icon: Filter,
       title: "Nothing matches that filter",
-      description:
+      reason:
         "No recorded event carries that text or belongs to that kind. Clear the filter to see the whole record.",
     }
   }
   if (moment) {
     return {
-      icon: Clock,
       title: "Nothing happened to the container then",
-      description:
+      reason:
         "No exit, restart, OOM kill or health change within two minutes of that request. Whatever failed, it was not the container's life.",
     }
   }
@@ -471,9 +462,8 @@ function emptyReading({
     ? ` The record is kept for ${plural(retentionDays, "day")} and survives a restart of the dashboard.`
     : ""
   return {
-    icon: CheckCircle,
     title: "Nothing has happened to these containers",
-    description: since
+    reason: since
       ? `No start, stop, restart, exit or health change has been recorded for this deployment since the record began on ${timestamp(since)} — which for a running deployment is the reading you want.${kept}`
       : `No start, stop, restart, exit or health change has been recorded for this deployment yet.${kept}`,
   }

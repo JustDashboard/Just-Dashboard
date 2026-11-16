@@ -77,7 +77,7 @@ export function UpdateDialog({
     >
       <div
         aria-hidden
-        className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-5 py-6"
+        className="grid grid-cols-start-main-end items-center gap-x-3 gap-y-2 px-5 py-6"
       >
         <VersionMark />
         <UpdateWire />
@@ -97,8 +97,8 @@ export function UpdateDialog({
  */
 function VersionMark({ next = false }: { next?: boolean }) {
   return next ? (
-    <span aria-hidden className="flex shrink-0 rounded-[0.875rem] border border-rule-brand p-[2px]">
-      <span className="flex size-[2.375rem] items-center justify-center rounded-[0.625rem] bg-wash-brand text-brand">
+    <span aria-hidden className="flex shrink-0 rounded-tile-lg border border-rule-brand p-[2px]">
+      <span className="flex size-[2.375rem] items-center justify-center rounded-tile-md bg-wash-brand text-brand">
         <LogoGlyph className="h-5 w-auto" />
       </span>
     </span>

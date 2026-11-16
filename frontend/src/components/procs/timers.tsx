@@ -59,8 +59,8 @@ function stateOf(timer: SystemdTimer): Exclude<TimerState, ""> {
  *
  * The head counts what the Timers armed tile used to — armed, running now,
  * stopped — as chips that narrow the table to what they count, and how many
- * start on boot beside them. A row opens the timer's sheet
- * (`timer-sheet.tsx`): its calendar in words, what it runs, how the last run
+ * start on boot beside them. A row opens the timer's own page
+ * (`schedule-page.tsx`): its calendar in words, what it runs, how the last run
  * ended and every run before it. A timer whose service is running says so as
  * it happens.
  */
@@ -198,7 +198,7 @@ function asUnit(timer: SystemdTimer): SystemdUnit {
 }
 
 /**
- * Every verb this operator may use on a timer, for its row and its sheet
+ * Every verb this operator may use on a timer, for its row and its page
  * alike: Run now starts the service the way the timer would, Start and Stop
  * arm and disarm the timer itself, and Enable and Disable say whether it is
  * armed again at boot.
@@ -296,7 +296,7 @@ export function useTimerVerbs({
   }, [timer, can, confirm, act, onChanged])
 }
 
-/** A timer's state as a word: what a row and the sheet's head both say. */
+/** A timer's state as a word: what a row and the page's line both say. */
 export function TimerState({ timer, busy }: { timer: SystemdTimer; busy?: string }) {
   if (busy) {
     return (

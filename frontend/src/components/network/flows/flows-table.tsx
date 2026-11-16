@@ -142,10 +142,10 @@ export function FlowsTable({
           />
           <Input
             aria-label="Observed peer IP"
-            placeholder="Any peer, or a literal IP"
+            placeholder="Any peer, or an IP address"
             value={draft.address}
             onChange={(event) => onDraft({ ...draft, address: event.target.value })}
-            className="min-w-40 flex-1 font-mono max-sm:basis-full sm:max-w-60"
+            className="min-w-40 flex-1 font-mono placeholder:font-sans max-sm:basis-full sm:max-w-60"
             spellCheck={false}
           />
           <Input
@@ -153,7 +153,7 @@ export function FlowsTable({
             placeholder="Any owner, or a full Docker ID"
             value={draft.containerId}
             onChange={(event) => onDraft({ ...draft, containerId: event.target.value })}
-            className="min-w-40 flex-1 font-mono max-sm:basis-full sm:max-w-72"
+            className="min-w-40 flex-1 font-mono placeholder:font-sans max-sm:basis-full sm:max-w-72"
             spellCheck={false}
           />
           <Button type="submit" size="sm" variant="outline" disabled={!flowDateRange(draft.day)}>
@@ -409,7 +409,7 @@ export function FlowRowReading({ row }: { row: FlowRow }) {
           ["Sent", bytesOf(row, "tx")],
           ["Received", bytesOf(row, "rx")],
           ["Retransmits", counted(row.retransmissions)],
-          ["Outstanding-loss gauge max", counted(row.lostGaugeMax)],
+          ["Most counted lost at once", counted(row.lostGaugeMax)],
           [
             "Samples",
             `${row.samples} samples · ${row.measuredIntervals} measured · ${row.skippedIntervals} skipped`,
@@ -421,7 +421,7 @@ export function FlowRowReading({ row }: { row: FlowRow }) {
         ]
   facts.push(
     [
-      "Observed UTC window",
+      "Seen, UTC",
       <span key="window">
         <UTCTime value={row.firstSeen} /> → <UTCTime value={row.lastSeen} />
       </span>,
@@ -434,7 +434,7 @@ export function FlowRowReading({ row }: { row: FlowRow }) {
           ? "Retained packet window; full connection span unknown"
           : "Observed span; no close event",
     ],
-    ["Owner evidence", <Mono key="owner">{ownerEvidence(row)}</Mono>],
+    ["How its owner is known", <Mono key="owner">{ownerEvidence(row)}</Mono>],
     [
       "Socket identity",
       <Mono key="identity">
@@ -443,7 +443,7 @@ export function FlowRowReading({ row }: { row: FlowRow }) {
       </Mono>,
     ],
     [
-      "Read through",
+      "Read by",
       <Mono key="via">
         {row.sourceName} · Boot {row.bootId}
       </Mono>,

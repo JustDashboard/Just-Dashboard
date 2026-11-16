@@ -1,4 +1,5 @@
 import { LANES, hueFor } from "@/lib/hue"
+import { KIND_ORDER, kindLabel, kindOf } from "@/components/database/redis/kinds"
 
 /**
  * The hues the home tells kinds and names apart with (§14): every one a
@@ -12,34 +13,21 @@ const tag = (hue: string) => `var(--tag-${hue})`
 
 /**
  * A key–value store's key types: one type, one hue, wherever the section
- * draws a key. The Keys page has the legend this is taken from, hue for hue;
- * a type neither knows — a module's own — keeps the quiet ink and its own
- * word rather than borrowing a neighbour's colour.
+ * draws a key. The Keys page's legend (`redis/kinds`) is the one table: this
+ * was a copy of it, hue for hue, that had drifted — it knew "ReJSON-RL" but
+ * not "json", so one JSON key was slate on Keys and muted here. A type
+ * neither knows — a module's own — keeps the quiet ink and its own word
+ * rather than borrowing a neighbour's colour.
  */
-const KEY_TYPES: Record<string, Kind> = {
-  string: { label: "String", color: tag("blue") },
-  hash: { label: "Hash", color: tag("violet") },
-  list: { label: "List", color: tag("green") },
-  set: { label: "Set", color: tag("amber") },
-  zset: { label: "Sorted set", color: tag("pink") },
-  stream: { label: "Stream", color: tag("cyan") },
-  "ReJSON-RL": { label: "JSON", color: tag("slate") },
-}
-
-/** The order the types are listed in, where several are: the Keys page's own. */
-const KEY_TYPE_ORDER = Object.keys(KEY_TYPES)
-
 export function keyType(type: string): Kind {
-  return Object.hasOwn(KEY_TYPES, type)
-    ? KEY_TYPES[type]
-    : { label: type || "Module type", color: "var(--muted-foreground)" }
+  return { label: kindLabel(type), color: kindOf(type).color }
 }
 
 /** Types in the legend's order, the ones it does not know after them by name. */
 export function byKeyType(a: string, b: string): number {
   const at = (type: string) => {
-    const index = KEY_TYPE_ORDER.indexOf(type)
-    return index < 0 ? KEY_TYPE_ORDER.length : index
+    const index = KIND_ORDER.indexOf(kindOf(type).id)
+    return index < 0 ? KIND_ORDER.length : index
   }
   return at(a) - at(b) || a.localeCompare(b)
 }

@@ -98,7 +98,7 @@ export function ToolsPanel() {
 
   return (
     <>
-      <PageContext eyebrow="Network" title="Tools" />
+      <PageContext title="Tools" />
       {/* One frame around the whole workbench: the strip, then the rail and
           the pane with a hairline between them. Below `md` it runs to the
           window's edges, one pane at a time with a bar at the foot. */}
@@ -145,9 +145,8 @@ export function ToolsPanel() {
         {!admin && (
           <p className="shrink-0 border-b border-hairline px-3 py-2 text-hint text-muted-foreground">
             <span className="font-medium text-foreground">
-              Server diagnostics need the admin capability
-            </span>{" "}
-            <span>The subnet calculator runs in your browser and needs only read access.</span>
+              Server diagnostics need an administrator
+            </span>
           </p>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">

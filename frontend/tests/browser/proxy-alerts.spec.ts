@@ -38,7 +38,7 @@ test("an administrator can add renewal failure and served certificate alerts", a
   ]) {
     await page.getByRole("button", { name: "Add rule" }).click()
     const form = page.getByRole("dialog", { name: "Add alert" })
-    await form.getByRole("button", { name: new RegExp(label) }).click()
+    await form.getByRole("radio", { name: new RegExp(label) }).click()
     await form.getByRole("button", { name: "Add alert" }).click()
     await expect(sheet.getByText(label, { exact: true })).toBeVisible()
     expect(created.at(-1)).toMatchObject({ kind, params: {}, channels: [] })
@@ -46,7 +46,7 @@ test("an administrator can add renewal failure and served certificate alerts", a
 
   await page.getByRole("button", { name: "Add rule" }).click()
   const gradeForm = page.getByRole("dialog", { name: "Add alert" })
-  await gradeForm.getByRole("button", { name: /Watched TLS grade below minimum/ }).click()
+  await gradeForm.getByRole("radio", { name: /Watched TLS grade below minimum/ }).click()
   await gradeForm
     .getByRole("radiogroup", { name: "Minimum TLS grade" })
     .getByRole("radio", { name: "B" })
