@@ -16,7 +16,6 @@ import {
   type InspectedCell,
   type InspectedRow,
   type RowSource,
-  type RowState,
 } from "@/components/database/data/rows"
 import { grouped } from "@/lib/format"
 
