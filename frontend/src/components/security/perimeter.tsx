@@ -538,7 +538,7 @@ function Ports({ keys }: { keys: string[] }) {
       {keys.slice(0, 4).map((key) => (
         <span key={key} className="mr-1.5">
           <span className="text-muted-foreground">:</span>
-          <span className="text-[var(--tag-pink)]">{key}</span>
+          <span className="text-tag-pink">{key}</span>
         </span>
       ))}
       {keys.length > 4 && <span>+{keys.length - 4}</span>}

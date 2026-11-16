@@ -209,7 +209,7 @@ export function HostLogSection({
             lineVerbs={lineVerbs}
             ask={ask}
             answeredBy={readings}
-            paneClassName="h-[min(75vh,40rem)] min-h-80"
+            paneClassName="h-workbench min-h-80"
           />
         )}
       </PanelBody>

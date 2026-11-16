@@ -404,7 +404,7 @@ test("a test certificate in the inventory reads as one, without the Let's Encryp
     page.locator("[data-slot='host-identity'] img[src='/logos/lets-encrypt.svg']"),
   ).toHaveCount(0)
   await page
-    .locator("[data-slot='page-context']")
+    .locator("[data-slot='host-identity']")
     .getByRole("button", { name: "Replace with a real certificate" })
     .click()
 
@@ -678,8 +678,9 @@ test("a test certificate's row fits a phone with its verb", async ({ page }) => 
     ),
   ).toBe(true)
   await certRow(page, "test.example.com").getByRole("link").click()
+  // The command is the identity line's, not the back-link row's.
   const command = page
-    .locator("[data-slot='page-context']")
+    .locator("[data-slot='host-identity']")
     .getByRole("button", { name: "Replace with a real certificate" })
   await expect(command).toBeInViewport({ ratio: 1 })
   expect(

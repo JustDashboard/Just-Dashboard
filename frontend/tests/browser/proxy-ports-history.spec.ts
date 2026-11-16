@@ -61,10 +61,14 @@ test("a socket the history first saw open today is marked new, and can be listed
 }) => {
   await mockHost(page)
   await page.goto("/proxy/ports")
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = page.locator(
+    "[data-slot='choice-list'][aria-label$='sockets'] > [data-slot='choice-row']",
+  )
   await expect(rows).toHaveCount(7)
 
-  const newMarks = page.getByRole("table").locator("[data-slot='tag']", { hasText: /^New/ })
+  const newMarks = page
+    .locator("[data-slot='choice-list'][aria-label$='sockets']")
+    .locator("[data-slot='tag']", { hasText: /^New/ })
   await expect(newMarks).toHaveCount(2)
   await expect(rows.filter({ hasText: "redis-server" }).locator("[data-slot='tag']")).toHaveText(
     "New, first seen at 11:50",
@@ -101,7 +105,9 @@ test("a socket the history first saw open today is marked new, and can be listed
 test("a host with nothing new offers no New filter", async ({ page }) => {
   await mockHost(page, () => quietHistory(NOON), hostPorts)
   await page.goto("/proxy/ports")
-  await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(7)
+  await expect(
+    page.locator("[data-slot='choice-list'][aria-label$='sockets'] > [data-slot='choice-row']"),
+  ).toHaveCount(7)
   await expect(page.getByRole("button", { name: /^New in 24 hours/ })).toHaveCount(0)
   await expect(page.locator("[data-slot='tag']", { hasText: /^New/ })).toHaveCount(0)
 })
@@ -150,7 +156,12 @@ test("the Changes list says what opened, closed and changed hands, and when", as
   await expect(yesterday).toHaveCount(1)
   await expect(yesterday.first()).toContainText("open since before recording began")
 
-  await expect(changes).toContainText("Compared once a minute, kept 30 days, recording since")
+  // How the changes are kept is the title's ⓘ, not a footnote under them.
+  await expect(changes).not.toContainText("Compared once a minute")
+  await changes.getByRole("button", { name: "How the changes are kept" }).click()
+  await expect(
+    page.getByText(/Compared once a minute, kept 30 days, recording since/),
+  ).toBeVisible()
 })
 
 test("the changes split by who could reach the socket", async ({ page }) => {
@@ -196,7 +207,9 @@ test("the changes follow the list's search, finding a port that changed hands by
   await changes.getByRole("button", { name: "Clear the search" }).click()
   await expect(search).toHaveValue("")
   await expect(changes.locator("li")).toHaveCount(5)
-  await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(7)
+  await expect(
+    page.locator("[data-slot='choice-list'][aria-label$='sockets'] > [data-slot='choice-row']"),
+  ).toHaveCount(7)
 })
 
 test("the window asks the server for what it keeps, and an empty one says which it is", async ({
@@ -259,7 +272,9 @@ test("a history that cannot be read fails alone, leaving the sockets listed", as
     }),
   )
   await page.goto("/proxy/ports")
-  await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(7)
+  await expect(
+    page.locator("[data-slot='choice-list'][aria-label$='sockets'] > [data-slot='choice-row']"),
+  ).toHaveCount(7)
   await expect(changesPanel(page).getByRole("alert")).toContainText("Database is locked")
 })
 
@@ -287,7 +302,9 @@ test("an account that only reads sees the history too", async ({ page }) => {
     4,
   )
   await expect(
-    page.getByRole("table").locator("[data-slot='tag']", { hasText: /^New/ }),
+    page
+      .locator("[data-slot='choice-list'][aria-label$='sockets']")
+      .locator("[data-slot='tag']", { hasText: /^New/ }),
   ).toHaveCount(2)
 })
 

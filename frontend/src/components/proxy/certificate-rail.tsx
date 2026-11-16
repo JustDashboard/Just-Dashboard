@@ -4,24 +4,24 @@ import { ShieldCheck } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { Certificate } from "@/lib/types"
 import { ProductLogo } from "@/components/product-logo"
-import { StatusDot, type DotTone } from "@/components/status-dot"
+import { certificateTone, certificateWords } from "@/lib/certificates"
+import { StatusDot } from "@/components/status-dot"
+import { VERDICT_TONE } from "@/components/tone"
 import { Rail, RailFigure, RailLine, RailName, RailRow, railInk } from "@/components/rail"
-import { expiryTone } from "@/components/proxy/expiry-status"
 import { certificateProduct } from "@/components/proxy/marks"
 
 const SORT_WORDS = { urgency: "most urgent first", expiry: "soonest to expire", name: "by name" }
 
-/** A certificate's days, as its row's reading: the word where days say nothing. */
-function daysWord(cert: Certificate): string {
-  if (cert.error) return "unreadable"
-  if (cert.staging) return "test"
-  if (cert.expired) return "expired"
-  return `${cert.daysLeft}d`
-}
-
-function dotTone(cert: Certificate): DotTone {
-  const tone = expiryTone(cert)
-  return tone === "danger" ? "danger" : tone === "warning" ? "warning" : "running"
+/**
+ * A certificate's time left as its row's reading, in the words every
+ * certificate reading shares (lib/certificates): "29d", "10h" in its last
+ * day, and the state where days say nothing ("Expired", "Test certificate").
+ */
+function railWord(cert: Certificate): string {
+  // The figure column is a few characters wide: a test certificate is
+  // "Test" there, and the row's name says the rest.
+  if (cert.staging && !cert.error) return "Test"
+  return certificateWords(cert, { form: "short" }).replace(/ left$/, "")
 }
 
 /**
@@ -101,12 +101,13 @@ function CertificateRow({
   current: boolean
   href: string
 }) {
-  const tone = expiryTone(cert)
+  const verdict = certificateTone(cert)
+  const word = railWord(cert)
   return (
     <RailRow
       item={cert.path}
       name={cert.name}
-      label={`${cert.name}, ${daysWord(cert)}`}
+      label={`${cert.name}, ${certificateWords(cert, { form: "long" })}`}
       current={current}
       href={href}
       mark={
@@ -117,10 +118,16 @@ function CertificateRow({
           className="size-7 rounded-md [&_img]:size-4"
         />
       }
-      dot={<StatusDot tone={dotTone(cert)} className="size-1.5" />}
+      dot={<StatusDot tone={VERDICT_TONE[verdict]} className="size-1.5" />}
       end={
-        <RailFigure ink={tone === "danger" ? "font-medium text-destructive" : railInk(tone)}>
-          {daysWord(cert)}
+        <RailFigure
+          ink={
+            verdict === "critical"
+              ? "font-medium text-destructive"
+              : railInk(verdict === "warning" ? "warning" : undefined)
+          }
+        >
+          {word}
         </RailFigure>
       }
     >

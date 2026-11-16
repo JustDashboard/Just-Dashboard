@@ -162,16 +162,15 @@ export function DockerPath({ socket }: { socket: Socket }) {
           }}
         />
       ) : (
-        <div className="space-y-2">
-          <Hint>
-            Docker publishes this port through its own NAT, ahead of the firewall&apos;s inbound
-            rules. The path reads each layer it crosses and names the ones nothing here can see.
-          </Hint>
-          <Button size="xs" variant="outline" onClick={() => setShown(true)}>
-            <Route />
-            Trace the path
-          </Button>
-        </div>
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => setShown(true)}
+          title="Docker publishes this port through its own NAT, ahead of the firewall's inbound rules. The path reads each layer it crosses and names the ones nothing here can see."
+        >
+          <Route />
+          Trace the path
+        </Button>
       )}
     </FormSection>
   )

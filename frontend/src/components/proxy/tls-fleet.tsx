@@ -225,7 +225,7 @@ function TLSFleetPage() {
   const loading = fleet.loading && !fleet.data
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Proxy" title="TLS report" />
       <HostIdentity
         // The view strip under the line draws the rule: the line's own under
@@ -474,7 +474,7 @@ function FleetRow({
           </span>
         </span>
       }
-      title={<span className="font-mono text-[0.92em]">{label}</span>}
+      title={<span className="code-inline">{label}</span>}
       description={servedBy.join(" · ") || "not served by a site here"}
       trailing={
         <span className="flex items-center gap-4 text-hint" title={scan?.summary}>

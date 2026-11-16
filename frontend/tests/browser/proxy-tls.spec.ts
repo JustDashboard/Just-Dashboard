@@ -145,7 +145,9 @@ test("the field says what it will scan, and a port that disagrees is refused bef
   const field = page.getByLabel("Domain to scan")
   const port = page.getByLabel("port", { exact: true })
   const button = page.getByRole("button", { name: "Scan", exact: true })
-  await expect(page.getByText("A name, host:port or URL")).toBeVisible()
+  // No standing explanation under the field (D14): the hint arrives with
+  // something to say about what was typed.
+  await expect(page.getByText("A name, host:port or URL")).toHaveCount(0)
 
   await field.fill("imaps://Mail.Example.com/")
   await expect(page.getByText("Scans mail.example.com, port 993")).toBeVisible()
@@ -157,7 +159,7 @@ test("the field says what it will scan, and a port that disagrees is refused bef
   await expect(page.getByText("Scans 2001:db8::1, port 995")).toBeVisible()
 
   await field.fill("mail.example.com:993")
-  await expect(page.getByText("A name, host:port or URL")).toBeVisible()
+  await expect(page.getByText(/^Scans /)).toHaveCount(0)
   await button.click()
   await expect(
     page
@@ -341,7 +343,7 @@ test("a long name in the hint or the refusal wraps under the field", async ({ pa
     await page.goto("/proxy/tls")
     const field = page.getByLabel("Domain to scan")
     const form = page.locator("form").filter({ has: field })
-    await expect(page.getByText("A name, host:port or URL")).toBeVisible()
+    await expect(field).toBeVisible()
     await settled(page)
     const before = await form.boundingBox()
 

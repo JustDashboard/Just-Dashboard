@@ -9,7 +9,7 @@ import type { Job, UpdateReport } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { OptionRow } from "@/components/form"
 import { JobConsole, useJobConsole } from "@/components/job-console"
-import { ProductLogo } from "@/components/product-logo"
+import { MissingThing } from "@/components/missing-thing"
 import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { CERTBOT_PACKAGES } from "@/components/proxy/engine"
@@ -48,6 +48,11 @@ const GAINS = [
  * Installing runs through the Packages page's own route as one job, streamed
  * under the command; when it lands the status is read again and the page
  * draws the engine in this one's place.
+ *
+ * It is `MissingThing` at page size, the screen every section shows for a
+ * thing that is not there (PRX-04): the install as its step, the certbot
+ * option before it, the job's console after it and the rail of what the page
+ * becomes.
  */
 export function EngineSetup({
   status,
@@ -93,79 +98,62 @@ export function EngineSetup({
     }
   }
 
-  return (
-    <section
-      aria-labelledby="engine-setup-title"
-      data-slot="engine-setup"
-      className="grid animate-rise gap-x-14 gap-y-10 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
-    >
-      <div className="min-w-0 space-y-7">
-        <div className="space-y-4">
-          <ProductLogo id="nginx" className="size-12 rounded-xl" />
-          <div className="space-y-2">
-            <h2
-              id="engine-setup-title"
-              className="text-2xl leading-tight font-semibold tracking-tight text-balance"
-            >
-              Put nginx in front of this server
-            </h2>
-            <p className="max-w-xl text-sm leading-relaxed text-pretty text-muted-foreground">
-              nginx answers on ports 80 and 443 and hands each domain to the app behind it. Once it
-              is running, this page draws every route, its certificate and its traffic.
-            </p>
-          </div>
-        </div>
+  const step =
+    admin && !updates.error && !(report && !manager) ? (
+      <span className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
+        <Button
+          size="lg"
+          onClick={() => void install()}
+          pending={busy || updates.loading}
+          disabled={busy || updates.loading}
+        >
+          <Download />
+          {running
+            ? "Installing…"
+            : packages.length > 1
+              ? "Install nginx and certbot"
+              : "Install nginx"}
+        </Button>
+        {manager && (
+          <code className="min-w-0 font-mono text-hint break-all text-muted-foreground">
+            {manager} install {packages.join(" ")}
+          </code>
+        )}
+      </span>
+    ) : undefined
 
-        {!admin ? (
-          <p className="text-body text-muted-foreground">
-            An administrator can install <span className="font-mono text-foreground">nginx</span>{" "}
-            from here.
-          </p>
-        ) : updates.error ? (
-          <ErrorState error={updates.error} onRetry={updates.refresh} />
-        ) : report && !manager ? (
-          <p className="max-w-xl text-body leading-relaxed text-muted-foreground">
-            The dashboard found no package manager it can drive on this host. Install nginx from a
-            shell, then press Refresh.
-          </p>
-        ) : (
-          <div className="max-w-xl space-y-5">
-            {certbotPackages && (
-              <OptionRow
-                title="Also install certbot"
-                hint={
-                  <>
-                    Free certificates from Let&rsquo;s Encrypt for every site, renewed on a timer.
-                    Adds <span className="font-mono">{certbotPackages.join(" ")}</span>.
-                  </>
-                }
-                checked={withCertbot}
-                onCheckedChange={setWithCertbot}
-                disabled={busy}
-              />
+  return (
+    <div data-slot="engine-setup">
+      <MissingThing
+        thing="nginx"
+        title="Put nginx in front of this server"
+        step={step}
+        more={
+          <>
+            {/* The option the install takes, read before the button it changes. */}
+            {step && certbotPackages && (
+              <div className="order-first max-w-xl basis-full">
+                <OptionRow
+                  title="Also install certbot"
+                  hint={
+                    <>
+                      Free certificates from Let&rsquo;s Encrypt for every site, renewed on a timer.
+                      Adds <span className="font-mono">{certbotPackages.join(" ")}</span>.
+                    </>
+                  }
+                  checked={withCertbot}
+                  onCheckedChange={setWithCertbot}
+                  disabled={busy}
+                />
+              </div>
             )}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-              <Button
-                size="lg"
-                onClick={() => void install()}
-                pending={busy || updates.loading}
-                disabled={busy || updates.loading}
-              >
-                <Download />
-                {running
-                  ? "Installing…"
-                  : packages.length > 1
-                    ? "Install nginx and certbot"
-                    : "Install nginx"}
-              </Button>
-              {manager && (
-                <code className="min-w-0 font-mono text-hint break-all text-muted-foreground">
-                  {manager} install {packages.join(" ")}
-                </code>
-              )}
-            </div>
-            {status.ingressState === "provisionable" && (
-              <p className="text-body text-muted-foreground">
+            {admin && updates.error && (
+              <div className="max-w-xl basis-full">
+                <ErrorState error={updates.error} onRetry={updates.refresh} />
+              </div>
+            )}
+            {step && status.ingressState === "provisionable" && (
+              <p className="max-w-xl basis-full text-body text-muted-foreground">
                 Or let a deployment bring its own: a Caddy ingress starts with the first project.{" "}
                 <Link
                   href="/deploy/new"
@@ -175,31 +163,37 @@ export function EngineSetup({
                 </Link>
               </p>
             )}
-          </div>
-        )}
-
-        <JobConsole
-          job={console_.job}
-          lines={console_.lines}
-          onDismiss={console_.dismiss}
-          onCancel={console_.cancel}
-        />
-      </div>
-
-      <ul
-        aria-label="What the page shows once nginx runs"
-        className="min-w-0 divide-y divide-hairline self-start border-y border-hairline"
+          </>
+        }
+        after={
+          <JobConsole
+            job={console_.job}
+            lines={console_.lines}
+            onDismiss={console_.dismiss}
+            onCancel={console_.cancel}
+          />
+        }
+        gains={GAINS}
+        gainsLabel="What the page shows once nginx runs"
       >
-        {GAINS.map(({ icon: Icon, title, text }) => (
-          <li key={title} className="flex min-w-0 gap-3.5 py-4">
-            <Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 space-y-1">
-              <p className="text-body font-medium">{title}</p>
-              <p className="text-xs leading-relaxed text-pretty text-muted-foreground">{text}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
+        nginx answers on ports 80 and 443 and hands each domain to the app behind it. Once it is
+        running, this page draws every route, its certificate and its traffic.
+        {!admin ? (
+          <>
+            {" "}
+            An administrator can install <span className="font-mono text-foreground">
+              nginx
+            </span>{" "}
+            from here.
+          </>
+        ) : report && !manager ? (
+          <>
+            {" "}
+            The dashboard found no package manager it can drive on this host. Install nginx from a
+            shell, then press Refresh.
+          </>
+        ) : null}
+      </MissingThing>
+    </div>
   )
 }

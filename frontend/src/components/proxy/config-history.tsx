@@ -213,7 +213,8 @@ function HistoryBody({
             <Row
               key={revision.id}
               onClick={() => setPicked(revision.id)}
-              className={cn("px-3 py-2", revision.id === selected && "bg-accent")}
+              current={revision.id === selected}
+              className="px-3 py-2"
               title={actionLabel(revision)}
               subtitle={`${revision.actor ? `${revision.actor} · ` : ""}${when(revision)}${
                 revision.existed ? ` · ${bytes(revision.size)}` : ""
@@ -439,7 +440,7 @@ function RestoreDialog({
         <RevisionDiff
           diff={diff}
           empty="The file on disk already holds this revision."
-          className="h-[45vh]"
+          className="h-[45svh]"
         />
         {refused && (
           <div className="space-y-2">

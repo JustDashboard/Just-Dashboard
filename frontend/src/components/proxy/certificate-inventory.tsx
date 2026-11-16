@@ -15,13 +15,19 @@ import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { SearchInput } from "@/components/search-input"
-import { Toolbar } from "@/components/toolbar"
+import { ListToolbar } from "@/components/toolbar"
 import { ProductLogo } from "@/components/product-logo"
 import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ExpiryStatus } from "@/components/proxy/expiry-status"
 import { certificateProduct } from "@/components/proxy/marks"
 import { certificateHref } from "@/components/proxy/certificate-paths"
@@ -96,6 +102,13 @@ export const CertificateSearch = forwardRef<
 })
 
 /** The source chips, drawn only where there is more than one source to tell apart. */
+/** The orders the list takes, as the sort menu words them. */
+export const CERT_SORT_CHOICES: { value: CertSort; label: string }[] = [
+  { value: "urgency", label: "Most urgent first" },
+  { value: "expiry", label: "Soonest to expire" },
+  { value: "name", label: "By name" },
+]
+
 export function SourceChips({
   certs,
   source,
@@ -161,28 +174,26 @@ export function CertificateInventory({
 
   return (
     <div className="min-w-0 space-y-4">
-      <Toolbar className="justify-between">
-        <CertificateSearch ref={searchRef} value={query} onChange={setQuery} />
-        <ToggleGroup
-          type="single"
-          value={sort}
-          onValueChange={(v) => v && setSort(v as CertSort)}
-          variant="outline"
-          size="sm"
-          aria-label="Sort"
-        >
-          <ToggleGroupItem value="urgency" className="text-hint">
-            Urgency
-          </ToggleGroupItem>
-          <ToggleGroupItem value="expiry" className="text-hint">
-            Expiry
-          </ToggleGroupItem>
-          <ToggleGroupItem value="name" className="text-hint">
-            Name
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </Toolbar>
-      <SourceChips certs={certs} source={source} onSource={setSource} />
+      {/* The list's one toolbar: the search, the order at the end, the
+          sources under them, as every list in the area has it. */}
+      <ListToolbar
+        search={<CertificateSearch ref={searchRef} value={query} onChange={setQuery} />}
+        sort={
+          <Select value={sort} onValueChange={(v) => setSort(v as CertSort)}>
+            <SelectTrigger size="sm" className="w-44" aria-label="Sort">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CERT_SORT_CHOICES.map((choice) => (
+                <SelectItem key={choice.value} value={choice.value}>
+                  {choice.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+        chips={<SourceChips certs={certs} source={source} onSource={setSource} />}
+      />
       {ordered.length === 0 ? (
         <EmptyState icon={ShieldCheck} title="No certificates match" />
       ) : (
