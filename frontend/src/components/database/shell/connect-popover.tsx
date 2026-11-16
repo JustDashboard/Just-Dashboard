@@ -1,20 +1,17 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { Check, Copy, Eye, EyeOff, Linked } from "@/components/icons"
+import { Linked } from "@/components/icons"
 import { get } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import type { DbAccess, DbPooler } from "@/lib/types"
-import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
-import { IconAction } from "@/components/icon-action"
 import { Well } from "@/components/panel"
-import { FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Segments } from "@/components/segments"
+import { ConnectionString } from "@/components/database/kit/connection-string"
 import { EngineMark } from "@/components/database/kit/engine-mark"
 import {
   connectFormats,
@@ -49,7 +46,6 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 export function ConnectPopover({ className }: { className?: string }) {
   const { conn, engine } = useDatabase()
   const { admin } = useDatabases()
-  const { copy, copied } = useCopy()
   const [open, setOpen] = useState(false)
   const [from, setFrom] = useState<ConnectTargetId>("host")
   const [through, setThrough] = useState<"direct" | "pooler">("direct")
@@ -122,22 +118,16 @@ export function ConnectPopover({ className }: { className?: string }) {
     }
   }
 
-  const copyIt = async () => {
-    if (!secret) {
-      await copy(text, "Copied")
-      return
-    }
+  /** The string to copy: as drawn where it holds no password, else read for real. */
+  const copied = async () => {
+    if (!secret) return text
     setBusy(true)
     try {
       const url = real ?? (await read())
-      if (url !== null) {
-        await copy(
-          connectSnippet(engine, revealedParts(masked, engine, url), shape),
-          "Connection string copied",
-        )
-      }
+      return url === null ? null : connectSnippet(engine, revealedParts(masked, engine, url), shape)
     } catch (err) {
       notify.error("Could not read the connection string", err)
+      return null
     } finally {
       setBusy(false)
     }
@@ -208,46 +198,17 @@ export function ConnectPopover({ className }: { className?: string }) {
           </Well>
         ) : (
           <>
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <div role="group" aria-label="Shape" className="flex min-w-0 flex-wrap gap-1">
-                {formats.map((f) => (
-                  <FilterChip
-                    key={f.id}
-                    selected={shape === f.id}
-                    onClick={() => setFormat(f.id)}
-                    className={cn(f.id === "cli" && "font-mono")}
-                  >
-                    {f.label}
-                  </FilterChip>
-                ))}
-              </div>
-              {(admin || !secret) && (
-                <div className="flex shrink-0 items-center gap-1 self-start">
-                  {secret && (
-                    <IconAction
-                      label={real ? "Hide the password" : "Show the password"}
-                      onClick={reveal}
-                      disabled={busy}
-                    >
-                      {real ? <EyeOff /> : <Eye />}
-                    </IconAction>
-                  )}
-                  <Button size="sm" variant="outline" onClick={copyIt} disabled={busy}>
-                    {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                    Copy
-                  </Button>
-                </div>
-              )}
-            </div>
-            <Well
-              data-slot="connection-string"
-              className={cn(
-                "max-h-48 break-all whitespace-pre-wrap select-all",
-                real ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {text}
-            </Well>
+            <ConnectionString
+              formats={formats}
+              shape={shape}
+              onShape={setFormat}
+              text={text}
+              muted={!real}
+              copy={admin || !secret}
+              onCopy={copied}
+              busy={busy}
+              reveal={admin && secret ? { shown: Boolean(real), onToggle: reveal } : undefined}
+            />
             <p className="text-hint text-pretty text-muted-foreground">
               {target.note}
               {secret && !admin && " Only an administrator can show or copy the password."}

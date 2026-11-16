@@ -248,7 +248,7 @@ export function ControlCenter() {
       <Page rise>
         {/* The page's commands stay through a failed read: adding a database
             does not need the fleet to have answered. */}
-        <PageContext title="All databases" />
+        <PageContext title="Databases" />
         {opening(fleet.error ? "The databases could not be read" : "Reading the databases…")}
         {fleet.error ? (
           <ErrorState error={fleet.error} onRetry={fleet.refresh} retryable every="30 seconds" />
@@ -296,7 +296,7 @@ export function ControlCenter() {
   if (entries.length === 0) {
     return (
       <Page rise>
-        <PageContext title="All databases" />
+        <PageContext title="Databases" />
         {/* The empty state under it holds the page's one command. */}
         {opening("No database is connected yet", null)}
         <EmptyState
@@ -379,7 +379,7 @@ export function ControlCenter() {
   return (
     <Page rise>
       {/* The commands are at the identity line's end, beside the verdict. */}
-      <PageContext title="All databases" />
+      <PageContext title="Databases" />
 
       <HostIdentity
         label="About the databases on this server"

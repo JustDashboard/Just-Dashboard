@@ -64,7 +64,6 @@ export function SectionFrame({
       )}
     >
       <PageContext
-        eyebrow="Databases"
         title={[conn.name, section !== "home" && page?.title, part].filter(Boolean).join(" · ")}
         actions={actions}
       />
