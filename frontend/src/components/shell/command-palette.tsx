@@ -230,8 +230,8 @@ export function useCommandPalette() {
  *
  * A section's landing page is listed once, under the section's name — but the
  * rail calls the same page something else inside the section (Deployments'
- * "Projects", Databases' "Control center", Processes' "Live"), and a search
- * for the word on screen found nothing. Those names are the page's aliases.
+ * "Projects", Processes' "Live"), and a search for the word on screen found
+ * nothing. Those names are the page's aliases.
  */
 function pagesUnder(
   entry: NavEntry,
@@ -744,8 +744,13 @@ function Palette({
                   key={item.id}
                   value={item.id}
                   onSelect={() => choose(item)}
+                  // The highlight is where the keyboard is, not what is
+                  // chosen, so it is the menus' hover fill (`CommandItem`'s
+                  // own) with the bar that says which row Enter opens. The
+                  // selection fill here made "the arrows are on this" look
+                  // like "this is picked" in the one list where nothing is.
                   className={cn(
-                    "group/result min-h-11 gap-3 rounded-md px-2.5 py-1 text-body data-[selected=true]:bg-accent sm:min-h-9",
+                    "group/result min-h-11 gap-3 rounded-md px-2.5 py-1 text-body sm:min-h-9",
                     "before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-brand before:opacity-0 before:transition-opacity data-[selected=true]:before:opacity-100",
                     arrived.has(item.id) && "animate-rise",
                   )}
