@@ -320,6 +320,9 @@ test.describe("a saved domain's password", () => {
       await route.fallback()
     })
     await page.goto("/deploy/7/settings/domains")
+    // The sign-in's fields are a layer the row's fact opens.
+    const signIn = page.getByRole("button", { name: /^Password · .* on api\.example\.test$/ })
+    await signIn.click()
 
     const secret = "visitor-private-value"
     await page.locator("#domain-password-0").fill(secret)
@@ -342,6 +345,8 @@ test.describe("a saved domain's password", () => {
         protection: { username: "team", hash: "fixture-sealed", password: secret },
       }),
     ])
+    // The press on Save closed the layer; open again, it holds no password.
+    await signIn.click()
     await expect(page.locator("#domain-password-0")).toHaveValue("")
     expect(await stored()).not.toContain(secret)
   })
@@ -350,6 +355,8 @@ test.describe("a saved domain's password", () => {
     const mock = await mockProject(page)
     mock.configuration().domains[0].protection = { username: "team", hash: "fixture-sealed" }
     await page.goto("/deploy/7/settings/domains")
+    const signIn = page.getByRole("button", { name: /^Password · .* on api\.example\.test$/ })
+    await signIn.click()
     await page.locator("#domain-user-0").fill("team-two")
     const stored = await page.evaluate(() =>
       Object.entries(sessionStorage).find(([name]) => name.includes("settings.domains")),
@@ -360,6 +367,7 @@ test.describe("a saved domain's password", () => {
     draft[0].protection.password = "left-over-private-value"
     await page.evaluate(([k, v]) => sessionStorage.setItem(k, v), [name, JSON.stringify(draft)])
     await page.reload()
+    await signIn.click()
     await expect(page.locator("#domain-user-0")).toHaveValue("team-two")
     await expect
       .poll(() => page.evaluate(() => JSON.stringify({ ...sessionStorage })))

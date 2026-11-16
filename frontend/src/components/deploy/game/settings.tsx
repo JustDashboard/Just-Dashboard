@@ -29,20 +29,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
-import {
-  GameIdentity,
-  GameIdentitySkeleton,
-  useGameOverview,
-} from "@/components/deploy/game/identity"
+import { useGameOverview } from "@/components/deploy/game/identity"
 import { groupFacts, groupProperties } from "@/components/deploy/game/settings-model"
-import { HoverTip } from "@/components/deploy/settings/hover-tip"
+import { Explain } from "@/components/explain"
 import { Segments } from "@/components/segments"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { useConfiguration } from "@/components/deploy/settings/use-configuration"
 
 /**
@@ -67,17 +59,12 @@ export function GameSettings({ projectId }: { projectId: number }) {
   // The strip at the head is the deployment's: a game server has saved
   // changes that are not live like any other project.
   const state = useConfiguration(projectId, project.environmentId)
+  // No identity line over the column: Players opens on it, and every other
+  // settings page keeps to the one centred column (PGD-18).
   return (
-    <div className="space-y-6">
-      {overview.data ? (
-        <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
-      ) : (
-        !overview.error && <GameIdentitySkeleton />
-      )}
-      <SettingsPage state={state}>
-        {() => <PropertiesForm projectId={projectId} files={overview.data?.files} />}
-      </SettingsPage>
-    </div>
+    <SettingsPage state={state}>
+      {() => <PropertiesForm projectId={projectId} files={overview.data?.files} />}
+    </SettingsPage>
   )
 }
 
@@ -313,9 +300,9 @@ function PropertyFields({
     )
   // The file's own word for the setting, for a reader who knows the file.
   const named = (property: BlueprintProperty) => (
-    <HoverTip tip={<span className="font-mono">{property.key}</span>}>
+    <Explain face="wrap" tip={<span className="font-mono">{property.key}</span>}>
       <span>{property.label}</span>
-    </HoverTip>
+    </Explain>
   )
 
   const text = known.filter((property) => property.kind === "text")
@@ -449,7 +436,7 @@ function RawFile({ raw, path, label }: { raw: string; path?: string; label?: str
       title={label ?? "The file on disk"}
       state={
         <>
-          {path && <span className="font-mono text-foreground/80">{path}</span>}
+          {path && <span className="font-mono text-muted-foreground">{path}</span>}
           {path && " · "}
           {plural(lines.length, "line")} edited here · the rest kept as written and not shown
         </>
@@ -462,7 +449,7 @@ function RawFile({ raw, path, label }: { raw: string; path?: string; label?: str
               <li key={index} className="flex gap-3 px-3 hover:bg-row-hover">
                 <span
                   aria-hidden
-                  className="numeric w-7 shrink-0 text-right text-muted-foreground/60 select-none"
+                  className="numeric w-7 shrink-0 text-right text-faint select-none"
                 >
                   {index + 1}
                 </span>

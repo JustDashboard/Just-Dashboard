@@ -22,7 +22,6 @@ import type { NotificationChannel, TrafficAlert, TrafficAlertKind } from "@/lib/
 import { ALERT_KINDS, latency } from "@/lib/requests"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
@@ -44,6 +43,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { SettingSection } from "@/components/settings/setting-card"
 import type { Automation } from "@/components/deploy/settings/automation/use-automation"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Traffic alerts: the request record, watched.
@@ -121,7 +121,7 @@ export function ChannelNames({
       {told.map((channel) => (
         <span key={channel.id} className="inline-flex min-w-0 items-center gap-1">
           <ChannelGlyph channel={channel} />
-          <span className="truncate text-foreground/85">{channel.name}</span>
+          <span className="truncate text-foreground">{channel.name}</span>
         </span>
       ))}
     </span>
@@ -328,7 +328,7 @@ export function TrafficAlerts({
         onOpenChange={(open) => !open && setEditing(undefined)}
         title={editing?.rule ? "Edit alert" : "Add alert"}
         description="A rule over this deployment's request record, told to your notification channels once when it crosses its line and once when it comes back."
-        width="md"
+        size="md"
       >
         {editing && (
           <AlertForm
@@ -436,7 +436,7 @@ function AlertRow({
   onEdit?: () => void
   className?: string
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const words = ALERT_KINDS[rule.kind]
   const tone = standing(rule)
   const sentence = words.describe(rule.threshold, rule.windowMinutes)

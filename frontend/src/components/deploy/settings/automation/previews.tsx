@@ -16,7 +16,7 @@ import type {
   DeploymentRunsPage,
   DeploymentTrigger,
 } from "@/lib/types"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { ForgeFace } from "@/components/git/marks"
 import { Modal } from "@/components/modal"
@@ -24,7 +24,6 @@ import { Well } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -167,7 +166,7 @@ function AddressLine({ url, published }: { url: string; published: boolean }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="font-mono text-foreground/85 underline-offset-2 hover:underline"
+      className="font-mono text-foreground underline-offset-2 hover:underline"
     >
       {host}
       <External aria-hidden className="ml-1 inline-block size-3 align-[-1px]" />
@@ -332,7 +331,7 @@ export function Previews({
         previewTriggers.length === 0
           ? "Off — no webhook creates them"
           : patterns.length > 0 && (
-              <span className="font-mono text-foreground/85">{patterns.join(", ")}</span>
+              <span className="font-mono text-foreground">{patterns.join(", ")}</span>
             )
       }
       actions={
@@ -372,7 +371,7 @@ export function Previews({
         )}
 
         {previews.loading && !previews.data ? (
-          <LoadingRows rows={2} />
+          <ChoiceListSkeleton rows={2} />
         ) : previews.error && !previews.data ? (
           <ErrorState error={previews.error} onRetry={previews.refresh} />
         ) : list.length === 0 ? (
@@ -440,7 +439,7 @@ export function Previews({
         onOpenChange={(open) => !open && setVariablesFor(undefined)}
         title={`Preview ${variablesFor?.providerRef ?? ""} variables`}
         description="Configure values used only by this preview before deploying."
-        width="lg"
+        size="lg"
       >
         {variablesFor && (
           <VariablesPanel
@@ -521,7 +520,7 @@ function ApprovalCard({
           <span className="font-mono">{approval.headRepository || approval.repository}</span>
           {approval.headRef && (
             <>
-              <SourceBranch aria-hidden className="mx-1 inline size-3 align-[-2px]" />
+              <SourceBranch aria-hidden className="mx-1 glyph-inline size-3" />
               <span className="font-mono">{approval.headRef}</span>
             </>
           )}
@@ -873,7 +872,7 @@ function PreviewSheet({
       onOpenChange={(open) => !open && onClose()}
       title={<span className="font-mono">{preview?.environmentSlug ?? "Preview"}</span>}
       description="A pull request's own environment, its revision and its runs."
-      width="md"
+      size="md"
       actions={
         preview &&
         verbs.length > 0 && (
@@ -930,7 +929,7 @@ function PreviewSheet({
           {runs.error && !runs.data ? (
             <ErrorState error={runs.error} onRetry={runs.refresh} />
           ) : runs.loading && !runs.data ? (
-            <LoadingRows rows={3} />
+            <ChoiceListSkeleton rows={3} />
           ) : list.length === 0 ? (
             <FormNote>
               Nothing has run here yet — deploy the preview to build its revision.

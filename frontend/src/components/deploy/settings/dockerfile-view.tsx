@@ -11,13 +11,13 @@ import { readDockerfile, type DockerfileKind } from "@/components/deploy/setting
  * readings of state. What the eye should skip is muted.
  */
 const KIND: Record<DockerfileKind, string> = {
-  instruction: "font-semibold text-[var(--tag-blue)]",
-  comment: "italic text-muted-foreground/70",
-  string: "text-[var(--tag-green)]",
-  variable: "text-[var(--tag-amber)]",
-  flag: "text-[var(--tag-cyan)]",
-  stage: "font-medium text-[var(--tag-violet)]",
-  image: "font-medium text-[var(--tag-pink)]",
+  instruction: "font-semibold text-tag-blue",
+  comment: "italic text-faint",
+  string: "text-tag-green",
+  variable: "text-tag-amber",
+  flag: "text-tag-cyan",
+  stage: "font-medium text-tag-violet",
+  image: "font-medium text-tag-pink",
   plain: "",
 }
 
@@ -54,7 +54,7 @@ export function DockerfileView({ source }: { source: string }) {
           >
             <span
               aria-hidden
-              className="numeric shrink-0 pr-3 text-right text-muted-foreground/40 select-none"
+              className="numeric shrink-0 pr-3 text-right text-faint select-none"
               style={{ width: `${gutter + 1.5}ch`, boxSizing: "content-box" }}
             >
               {line.number}

@@ -38,6 +38,16 @@ describe("readDockerfile", () => {
     expect(kinds(lines[2])).toEqual([["comment", "# note"]])
   })
 
+  test("marks a FROM line's own flags, which start the arguments with no space before them", () => {
+    const { lines } = readDockerfile("FROM --platform=$BUILDPLATFORM node:22 AS web")
+    expect(kinds(lines[0]).slice(0, 4)).toEqual([
+      ["instruction", "FROM"],
+      ["plain", " "],
+      ["flag", "--platform"],
+      ["plain", "="],
+    ])
+  })
+
   test("joins back to the source", () => {
     const source = 'FROM --platform=$BUILDPLATFORM node:22 AS  web\n\tRUN echo "hi $X" # tail\n'
     const { lines } = readDockerfile(source)

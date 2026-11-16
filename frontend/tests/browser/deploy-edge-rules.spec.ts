@@ -40,8 +40,10 @@ test("rules are added, ordered and saved with a rate limit and CrowdSec, and eac
   await expect(form).toBeVisible()
   await expect(form.getByText(/No rules: every request reaches the application/)).toBeVisible()
 
-  // A rule that blocks the admin pages.
-  await form.getByRole("button", { name: "Add rule" }).click()
+  // A rule that blocks the admin pages. With none yet, the row where the
+  // first will stand is the section's one Add.
+  await expect(form.getByRole("button", { name: "Add rule" })).toHaveCount(0)
+  await form.getByRole("button", { name: "Add the first rule" }).click()
   const first = form.getByRole("listitem", { name: /^Rule 1:/ })
   await first.getByLabel("Name", { exact: true }).fill("Admin")
   await expect(first.getByLabel("Name", { exact: true })).toHaveValue("admin")
@@ -141,7 +143,7 @@ test("on the Caddy ingress the limit is offered as the host's, and a refused rul
   })
   await expect.poll(() => limits).toEqual([limit("443"), limit("80")])
 
-  await form.getByRole("button", { name: "Add rule" }).click()
+  await form.getByRole("button", { name: "Add the first rule" }).click()
   const rule = form.getByRole("listitem", { name: /^Rule 1:/ })
   await rule.getByRole("combobox", { name: "Path match" }).click()
   await page.getByRole("option", { name: "Pattern" }).click()

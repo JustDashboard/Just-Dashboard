@@ -61,12 +61,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { SettingPicture } from "@/components/settings/setting-picture"
 import { PreviewBranchesForm } from "@/components/deploy/settings/preview-branches"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
@@ -82,7 +78,6 @@ import { WireMark, WireNode } from "@/components/wire/wire"
 import { ProjectMark } from "@/components/project-mark"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useProject } from "@/components/deploy/project-context"
 import { ProjectDatabase } from "@/components/deploy/project-database"
 import {
@@ -90,6 +85,7 @@ import {
   withPreviousConnectionShape,
 } from "@/components/deploy/deployment-defaults"
 import { sectionHref } from "@/components/database/engine"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Databases & backups — what the release reaches and what protects it.
@@ -217,7 +213,7 @@ function DatabasesBody({
   const [column, columnWidth] = useColumnWidth()
   const wide = columnWidth >= 600
   // Where SettingPicture lays its marks out in a row rather than a column.
-  const pictureRow = useMediaQuery("(min-width: 1024px)")
+  const pictureRow = useBreakpoint("lg")
   const databaseDependencies = configuration.dependencies.filter((d) => d.kind === "database")
   const savedOthers = configuration.dependencies.filter((d) => d.kind !== "database")
   // Backup and volume dependencies stage through one draft and one Save, the
@@ -570,7 +566,7 @@ function DatabasesBody({
             {at > 0 && ", "}
             <Link
               href={`/deploy/${projectId}/settings/variables`}
-              className="rounded-sm font-mono text-foreground/90 focus-ring hover:underline"
+              className="rounded-sm font-mono text-foreground focus-ring hover:underline"
             >
               {name}
             </Link>
@@ -1368,7 +1364,7 @@ function BackupPolicy({
           />
         </ChoiceList>
       ) : (
-        <div className="grid min-w-0 animate-rise grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+        <div className="grid min-w-0 animate-rise grid-cols-main-end items-end gap-3">
           <Field label="Backup job" htmlFor={`backup-job-${index}`}>
             <Select
               value={dependency.resourceId ?? ""}
@@ -1464,7 +1460,8 @@ function BackupPolicy({
 
       <OptionList>
         <OptionRow
-          title="Backup before deploy — the release waits for this job to finish"
+          title="Backup before deploy"
+          hint="The release waits for this job to finish"
           checked={Boolean(config.requiredBeforeDeploy)}
           disabled={!canAdmin}
           onCheckedChange={(requiredBeforeDeploy) =>
@@ -1472,7 +1469,8 @@ function BackupPolicy({
           }
         />
         <OptionRow
-          title="Require restore evidence — refuse a release until a restore is verified"
+          title="Require restore evidence"
+          hint="A release is refused until a restore is verified"
           checked={Boolean(config.requireRestoreTest)}
           disabled={!canAdmin}
           onCheckedChange={(requireRestoreTest) =>

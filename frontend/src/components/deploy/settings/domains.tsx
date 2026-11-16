@@ -38,10 +38,17 @@ import type {
   DeploymentRouteHSTS,
   DeploymentTailnetAddress,
   Exposure,
-  ForwardAuthProvider,
 } from "@/lib/types"
 import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
-import { Field, FieldCheck, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import {
+  Field,
+  FieldCheck,
+  FieldChecks,
+  FieldRow,
+  FormNote,
+  OptionList,
+  OptionRow,
+} from "@/components/form"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
@@ -50,6 +57,7 @@ import { Status, type DotTone } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
+import { Explain } from "@/components/explain"
 import { HoverTip } from "@/components/deploy/settings/hover-tip"
 import { Input } from "@/components/ui/input"
 import {
@@ -66,15 +74,11 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Segments } from "@/components/segments"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
-import { Tag } from "@/components/tag"
 import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE, hostOf } from "@/components/deploy/vocabulary"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import {
   draftChanges,
   useConfiguration,
@@ -110,8 +114,9 @@ import {
   HSTS_MAX_AGES,
   HSTS_PRELOAD_MAX_AGE,
   HeaderListField,
-  ListField,
 } from "@/components/proxy/site-form"
+import { ListField } from "@/components/list-field"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
 import { siteHref } from "@/components/proxy/site-tabs"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -330,9 +335,15 @@ function TailnetForm({
             {value.on && (
               <div className="flex flex-col gap-4">
                 <TailnetAddress live={live} saved={Boolean(savedTailnet)} />
-                <TailnetAllowField
+                <ListField
+                  id="tailnet-allow"
+                  label="Who may open it"
+                  placeholder="alice@example.com or tag:ci"
                   values={value.allow}
                   onChange={(allow) => draft.set({ ...value, allow })}
+                  parse={readTailnetEntry}
+                  hint="Tailscale logins and tags. Empty lets everyone on the tailnet in."
+                  info="A login is the account a person signs in to Tailscale with, alice@example.com or alice@github. A tag is a machine's ACL tag, tag:ci; a tagged machine is admitted by its tags alone."
                   disabled={!canAdmin}
                 />
                 <FormNote>
@@ -425,103 +436,6 @@ function TailnetAddress({
         </div>
       </div>
     </div>
-  )
-}
-
-/**
- * Who may open the environment: Tailscale logins and tags, each read the
- * way the server reads it as it is typed, so an entry that would be refused
- * never reaches the list. A login is kept in lower case, since providers do
- * not agree on one; a tag as written, since the tailnet's policy compares
- * tags exactly.
- */
-function TailnetAllowField({
-  values,
-  onChange,
-  disabled,
-}: {
-  values: string[]
-  onChange: (values: string[]) => void
-  disabled: boolean
-}) {
-  const [typed, setTyped] = useState("")
-  const [problem, setProblem] = useState<string>()
-  const add = () => {
-    const read = readTailnetEntry(typed, values)
-    if ("error" in read) {
-      setProblem(read.error)
-      return
-    }
-    onChange([...values, read.entry])
-    setTyped("")
-    setProblem(undefined)
-  }
-  return (
-    <Field
-      label="Who may open it"
-      htmlFor="tailnet-allow"
-      hint="Tailscale logins and tags. Empty lets everyone on the tailnet in."
-      info="A login is the account a person signs in to Tailscale with, alice@example.com or alice@github. A tag is a machine's ACL tag, tag:ci; a tagged machine is admitted by its tags alone."
-      error={problem}
-    >
-      <div className="space-y-2">
-        {values.length > 0 && (
-          <ul aria-label="Admitted on the tailnet" className="flex flex-wrap items-center gap-1.5">
-            {values.map((value) => (
-              <li key={value}>
-                <Tag mono className="gap-1.5 pr-0.5">
-                  {value}
-                  {!disabled && (
-                    <IconAction
-                      type="button"
-                      label={`Remove ${value}`}
-                      size="icon-xs"
-                      className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                      onClick={() => onChange(values.filter((entry) => entry !== value))}
-                    >
-                      <Trash />
-                    </IconAction>
-                  )}
-                </Tag>
-              </li>
-            ))}
-          </ul>
-        )}
-        {!disabled && (
-          <div className="flex items-center gap-2">
-            <Input
-              id="tailnet-allow"
-              value={typed}
-              onChange={(event) => {
-                setTyped(event.target.value)
-                setProblem(undefined)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  add()
-                }
-              }}
-              placeholder="alice@example.com or tag:ci"
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={Boolean(problem)}
-              className="font-mono text-xs"
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={add}
-              disabled={!typed.trim()}
-              aria-label="Add to who may open it"
-            >
-              <Plus className="size-3.5" />
-            </Button>
-          </div>
-        )}
-      </div>
-    </Field>
   )
 }
 
@@ -943,6 +857,16 @@ function DomainRow({
   const passwordHeld = gated && !protection
   const tunnelHeld = !tunnel && (wildcard || fenced)
   const typedProblem = passwordProblem(password)
+  // The sign-in's fields open by themselves when Password is turned on, since
+  // that press is a request to set them; after that the row's fact opens them.
+  const [asking, setAsking] = useState(false)
+  const signInIncomplete = Boolean(
+    protection &&
+    (!protection.username ||
+      protectionUserProblem(protection.username) ||
+      (!protection.hash && !password) ||
+      (password && typedProblem)),
+  )
 
   return (
     <li className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-3 first:pt-0 @min-[44rem]:grid-cols-[2rem_minmax(0,1fr)_auto_auto_auto]">
@@ -1002,12 +926,12 @@ function DomainRow({
           {certificateRead && (
             <span className="flex min-w-0 animate-rise flex-wrap items-center gap-x-3 gap-y-1">
               {renewal ? (
-                <HoverTip tip={renewal}>
+                <Explain face="wrap" tip={renewal}>
                   {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
                   <span tabIndex={0} className="rounded-sm focus-ring">
                     <CertificateStatus domain={certificateRead} named />
                   </span>
-                </HoverTip>
+                </Explain>
               ) : (
                 <CertificateStatus domain={certificateRead} named />
               )}
@@ -1025,6 +949,80 @@ function DomainRow({
                   </span>
                 )}
             </span>
+          )}
+          {/* The sign-in is a fact of the row and its two fields a layer over
+              it, so the list never grows under a row (PGD-26). */}
+          {protection && (
+            <Popover open={asking} onOpenChange={setAsking}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "inline-flex min-w-0 animate-rise items-center gap-1 rounded-sm focus-ring hover:underline",
+                    signInIncomplete ? "text-warning" : "text-muted-foreground",
+                  )}
+                >
+                  <Key aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">
+                    Password · {protection.username || "no user name"}
+                  </span>
+                  <span className="sr-only"> on {host}</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 space-y-4">
+                <Field
+                  label="User name"
+                  htmlFor={`domain-user-${index}`}
+                  error={protectionUserProblem(protection.username)}
+                  hint={!protection.username && <FieldCheck met={false}>Required</FieldCheck>}
+                >
+                  <Input
+                    id={`domain-user-${index}`}
+                    value={protection.username}
+                    readOnly={!canAdmin}
+                    autoComplete="off"
+                    className="font-mono"
+                    onChange={(event) => setProtection({ username: event.target.value })}
+                  />
+                </Field>
+                {/* The rule is what is needed while typing, lit as it is met;
+                    that an empty field keeps the saved one is the placeholder's
+                    "Unchanged", and the rest is behind ⓘ. A password already
+                    saved has met it, so nothing is left to light. */}
+                <Field
+                  label="Password"
+                  htmlFor={`domain-password-${index}`}
+                  info="Asked before every name this environment serves, whichever one it is set on; the application never sees it. Left empty, a saved password stays as it is."
+                  hint={
+                    (password || !protection.hash) && (
+                      <FieldChecks>
+                        <FieldCheck met={password.length > 0 && !typedProblem}>
+                          {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
+                        </FieldCheck>
+                      </FieldChecks>
+                    )
+                  }
+                >
+                  <Input
+                    id={`domain-password-${index}`}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    readOnly={!canAdmin}
+                    className="font-mono"
+                    placeholder={protection.hash ? "Unchanged" : ""}
+                    onChange={(event) => onPassword(event.target.value)}
+                  />
+                </Field>
+                {sharedWith.length > 0 && (
+                  <FormNote tone="warning">
+                    {sharedWith.join(", ")} {sharedWith.length === 1 ? "has" : "have"} this user
+                    name with another password, and the route keeps one password per user. Give each
+                    its own user name, or the same password.
+                  </FormNote>
+                )}
+              </PopoverContent>
+            </Popover>
           )}
         </div>
       </div>
@@ -1047,7 +1045,11 @@ function DomainRow({
               protection: guarded ? (protection ?? savedProtection ?? { username: "" }) : undefined,
               tunnel: through || undefined,
             })
-            if (!guarded) onPassword("")
+            if (guarded && !protection) setAsking(true)
+            if (!guarded) {
+              onPassword("")
+              setAsking(false)
+            }
           }}
           disabled={!canAdmin}
           className="shrink-0"
@@ -1123,66 +1125,6 @@ function DomainRow({
       <div className="col-start-3 row-start-1 flex justify-end @min-[44rem]:col-start-5">
         {verbs.length > 0 && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${host}`} />}
       </div>
-      {protection && (
-        <div className="col-span-full min-w-0 animate-rise pl-11">
-          <div className="ml-1 border-l border-hairline pl-4">
-            <FieldRow>
-              <Field
-                label="User name"
-                htmlFor={`domain-user-${index}`}
-                error={protectionUserProblem(protection.username)}
-                hint={!protection.username && <FieldCheck met={false}>Required</FieldCheck>}
-              >
-                <Input
-                  id={`domain-user-${index}`}
-                  value={protection.username}
-                  readOnly={!canAdmin}
-                  autoComplete="off"
-                  aria-invalid={Boolean(protectionUserProblem(protection.username))}
-                  className="font-mono"
-                  onChange={(event) => setProtection({ username: event.target.value })}
-                />
-              </Field>
-              {/* The rule is what is needed while typing, lit as it is met;
-                  that an empty field keeps the saved one is the placeholder's
-                  "Unchanged", and the rest is behind ⓘ. A password already
-                  saved has met it, so nothing is left to light. */}
-              <Field
-                label="Password"
-                htmlFor={`domain-password-${index}`}
-                info="Asked before every name this environment serves, whichever one it is set on; the application never sees it. Left empty, a saved password stays as it is."
-                hint={
-                  (password || !protection.hash) && (
-                    <span aria-live="polite">
-                      <FieldCheck met={password.length > 0 && !typedProblem}>
-                        {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
-                      </FieldCheck>
-                    </span>
-                  )
-                }
-              >
-                <Input
-                  id={`domain-password-${index}`}
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  readOnly={!canAdmin}
-                  className="font-mono"
-                  placeholder={protection.hash ? "Unchanged" : ""}
-                  onChange={(event) => onPassword(event.target.value)}
-                />
-              </Field>
-            </FieldRow>
-            {sharedWith.length > 0 && (
-              <FormNote tone="warning" className="mt-3">
-                {sharedWith.join(", ")} {sharedWith.length === 1 ? "has" : "have"} this user name
-                with another password, and the route keeps one password per user. Give each its own
-                user name, or the same password.
-              </FormNote>
-            )}
-          </div>
-        </div>
-      )}
       {domain.redirectTo && (
         <div className="col-span-full min-w-0 animate-rise pl-11">
           <div className="ml-1 border-l border-hairline pl-4">
@@ -1453,7 +1395,7 @@ function AddDomainPanel({
           ? "Route a name on Cloudflare through the tunnel."
           : "Point a record at this server and check it before adding it."
       }
-      width="md"
+      size="md"
       footer={
         <>
           {unsaved > 0 && (
@@ -1645,11 +1587,11 @@ function AddDomainPanel({
                 label="Password"
                 htmlFor="add-domain-password"
                 hint={
-                  <span aria-live="polite">
+                  <FieldChecks>
                     <FieldCheck met={password.length > 0 && !typedProblem}>
                       {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
                     </FieldCheck>
-                  </span>
+                  </FieldChecks>
                 }
               >
                 <Input
@@ -2032,28 +1974,18 @@ function RouteSignIn({
       >
         {gate && (
           <div className="flex flex-col gap-3">
-            <ToggleGroup
-              type="single"
-              aria-label="Auth server"
+            <Segments
+              label="Auth server"
               value={gate.provider}
-              onValueChange={(value) =>
-                value && update(chooseSsoProvider(gate, value as ForwardAuthProvider))
-              }
-              variant="outline"
-              size="sm"
-              className="w-full flex-wrap"
+              options={SSO_PROVIDERS.map((provider) => ({
+                value: provider.value,
+                label: provider.label,
+              }))}
+              onChange={(value) => update(chooseSsoProvider(gate, value))}
+              fill
+              className="flex-wrap"
               disabled={disabled}
-            >
-              {SSO_PROVIDERS.map((provider) => (
-                <ToggleGroupItem
-                  key={provider.value}
-                  value={provider.value}
-                  className="flex-1 text-hint"
-                >
-                  {provider.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            />
             <Field
               label="Check address"
               htmlFor="route-sso-verify"
@@ -2084,25 +2016,17 @@ function RouteSignIn({
                 disabled={disabled}
               />
             </Field>
-            <ToggleGroup
-              type="single"
-              aria-label="Who signs in"
+            <Segments
+              label="Who signs in"
               value={gate.previewsOnly ? "previews" : "everywhere"}
-              onValueChange={(value) =>
-                value && update({ previewsOnly: value === "previews" || undefined })
-              }
-              variant="outline"
-              size="sm"
-              className="w-full"
+              options={[
+                { value: "everywhere", label: "Here and on previews" },
+                { value: "previews", label: "Previews only" },
+              ]}
+              onChange={(value) => update({ previewsOnly: value === "previews" || undefined })}
+              fill
               disabled={disabled}
-            >
-              <ToggleGroupItem value="everywhere" className="flex-1 text-hint">
-                Here and on previews
-              </ToggleGroupItem>
-              <ToggleGroupItem value="previews" className="flex-1 text-hint">
-                Previews only
-              </ToggleGroupItem>
-            </ToggleGroup>
+            />
             <FormNote>
               The application is sent Remote-User and Remote-Email, taken from the server&apos;s{" "}
               {preset.sends}, and never the visitor&apos;s own. Names that redirect answer before
