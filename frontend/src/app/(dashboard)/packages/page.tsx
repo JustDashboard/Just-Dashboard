@@ -21,7 +21,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { FactDot, HostIdentity, platformName } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { HostIdentity, platformName } from "@/components/identity-header"
 import { InstallPanel } from "@/components/packages/install-panel"
 import { upgradeDescription } from "@/components/packages/upgrade-description"
 import { PackageLogView } from "@/components/packages/log-view"
@@ -356,19 +357,15 @@ function PackagesPage({ asked }: { asked: string | null }) {
             }
             facts={
               <>
-                <span className="numeric font-medium text-foreground">
+                <Fact className="numeric font-medium text-foreground">
                   {data.packages.length.toLocaleString()} packages
-                </span>
+                </Fact>
                 {data.indexAge && (
-                  <>
-                    <FactDot />
-                    <span className={cn(indexStale && "text-warning")}>
-                      index refreshed {relativeTime(data.indexAge)}
-                    </span>
-                  </>
+                  <Fact className={cn(indexStale && "text-warning")}>
+                    index refreshed {relativeTime(data.indexAge)}
+                  </Fact>
                 )}
-                <FactDot />
-                <span>read {relativeTime(data.readAt)}</span>
+                <Fact>read {relativeTime(data.readAt)}</Fact>
               </>
             }
           />
