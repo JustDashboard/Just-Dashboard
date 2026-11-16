@@ -2,7 +2,14 @@
 
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import type { IDisposable, Terminal } from "@xterm/xterm"
 import type { SearchAddon } from "@xterm/addon-search"
 import {
@@ -77,12 +84,73 @@ type Query = Record<string, string | number | boolean | undefined | null>
 type XtermTheme = NonNullable<Terminal["options"]["theme"]>
 
 /**
- * The neutral ANSI ramp (colours 0, 8, 7, 15) as a percentage of ink mixed into
- * paper. Colour 8 (`brightBlack`) is the most-used of the four — git hashes,
- * vim comments, `ls -l` metadata — so it is lifted far enough off the ground to
- * stay clearly legible rather than merely present.
+ * The neutral ANSI ramp (colours 0 and 7) as a percentage of ink mixed into
+ * paper. Colour 8 (`brightBlack`) is not mixed: it is the most-used of the
+ * neutrals — git hashes, vim comments, `ls -l` metadata — so it is the
+ * product's own dimmest ink, `--faint`, whose floor is 4.5:1. At 44% ink it
+ * read about 3.6:1 on the terminal's ground, which is what axe flagged on the
+ * deployment console (A11Y-16).
  */
-const NEUTRAL_INK = { black: 18, brightBlack: 44, white: 74 } as const
+const NEUTRAL_INK = { black: 18, white: 74 } as const
+
+/**
+ * The least contrast a cell's text may have against its own background, which
+ * xterm enforces cell by cell by moving the foreground's lightness. The
+ * palette above is already past it on the terminal's ground; this is for what
+ * a program chooses itself: dark blue on black, grey on grey, a 256-colour
+ * theme written for a light terminal. 4.5 is the text floor every other ink
+ * in the product keeps. Dim text (SGR 2) is held to half of it by xterm, so
+ * dim still reads as dim.
+ */
+const MINIMUM_CONTRAST = 4.5
+
+/**
+ * Screen reader mode, kept in the browser like the other terminal behaviour
+ * and shared by every terminal on the page.
+ *
+ * A terminal is a canvas: its output does not exist for assistive technology
+ * until xterm mirrors the rows into a live region, and it only does that when
+ * asked, because the mirror is a second copy of every row and costs a busy
+ * terminal real time. A browser cannot tell a page that a screen reader is
+ * running, so it is a switch the reader presses, here and in the settings.
+ */
+const SCREEN_READER_KEY = "jd.terminal.screenReader"
+const screenReaderListeners = new Set<() => void>()
+let screenReader: boolean | undefined
+
+function screenReaderMode(): boolean {
+  if (screenReader !== undefined) return screenReader
+  if (typeof window === "undefined") return false
+  try {
+    screenReader = window.localStorage.getItem(SCREEN_READER_KEY) === "1"
+  } catch {
+    // Storage that cannot be read is a terminal with the mode off, not a failure.
+    screenReader = false
+  }
+  return screenReader
+}
+
+function setScreenReaderMode(on: boolean) {
+  screenReader = on
+  try {
+    if (on) window.localStorage.setItem(SCREEN_READER_KEY, "1")
+    else window.localStorage.removeItem(SCREEN_READER_KEY)
+  } catch {
+    // Private browsing: it still holds for this visit.
+  }
+  for (const listener of screenReaderListeners) listener()
+}
+
+function useScreenReaderMode(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      screenReaderListeners.add(listener)
+      return () => screenReaderListeners.delete(listener)
+    },
+    screenReaderMode,
+    () => false,
+  )
+}
 
 /**
  * The last resort when a canvas 2D context is unavailable (a headless or
@@ -101,7 +169,7 @@ const TERMINAL_FALLBACK: XtermTheme = {
   magenta: "#8e6fd6",
   cyan: "#5ec9c3",
   white: "#c2c2c6",
-  brightBlack: "#6b6b6b",
+  brightBlack: "#8a8a90",
   brightWhite: "#fafafa",
 }
 
@@ -195,7 +263,7 @@ function resolveTerminalTheme(): XtermTheme {
     magenta,
     cyan,
     white: mix("--foreground", n.white, "--background", fb.white!),
-    brightBlack: mix("--foreground", n.brightBlack, "--background", fb.brightBlack!),
+    brightBlack: token("--faint", fb.brightBlack!),
     brightRed: red,
     brightGreen: green,
     brightYellow: yellow,
@@ -429,6 +497,7 @@ export function XtermPane({
   // off by. An open socket starts it over.
   const retriesRef = useRef(0)
   const settings = useTerminalSettings()
+  const readAloud = useScreenReaderMode()
   const snippets = useSnippets()
   const map = useKeymap()
 
@@ -562,10 +631,14 @@ export function XtermPane({
         // double-click, which is the one thing anybody double-clicks a
         // terminal for.
         wordSeparator: " ()[]{}',\"`",
-        // xterm mutes a colour that would be unreadable against the
+        // xterm lifts a colour that would be unreadable against the
         // background. Left off, a script that prints dark grey on the dark
         // theme prints nothing at all.
-        minimumContrastRatio: 1.6,
+        minimumContrastRatio: MINIMUM_CONTRAST,
+        // Read from the store, not from the render: this effect must not
+        // re-run when it changes (see `settingsRef`). The effect below
+        // applies a later press to the live terminal.
+        screenReaderMode: screenReaderMode(),
         // The search addon's match count and highlight-all live behind
         // xterm's "proposed API" flag — the decoration API they are built on
         // is not frozen yet. Without it `findNext` throws where it would have
@@ -1280,6 +1353,13 @@ export function XtermPane({
     fitRef.current?.fit()
   }, [settings])
 
+  // xterm builds or drops its mirror of the rows when the option changes, so
+  // the session and its scrollback stay as they are.
+  useEffect(() => {
+    const term = termRef.current
+    if (term) term.options.screenReaderMode = readAloud
+  }, [readAloud])
+
   // Fullscreen is the browser's, not a CSS class: only the real thing escapes
   // the window chrome, and only it survives the operator pressing Escape,
   // which they will expect to work.
@@ -1546,6 +1626,23 @@ export function XtermPane({
       )}
 
       <div className="relative isolate min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/* The way to the mode from the keyboard, on every terminal: two of
+            the three places a terminal is drawn hide the toolbar that holds
+            the settings. It is the stop before the terminal and is drawn
+            only while the keyboard is on it, as a skip link is. Hidden by
+            its ink and not by a 1px clip: the button's own height and
+            padding outrank `sr-only`, which left an 18px sliver to press. */}
+        {active && visible && (
+          <Button
+            size="xs"
+            variant="outline"
+            aria-pressed={readAloud}
+            onClick={() => setScreenReaderMode(!readAloud)}
+            className="pointer-events-none absolute top-2 left-2 z-pane opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100"
+          >
+            Screen reader mode
+          </Button>
+        )}
         <div
           ref={hostRef}
           className={cn(
@@ -1577,7 +1674,7 @@ export function XtermPane({
             max={scroll.history}
             step={1}
             value={scroll.history - Math.min(scroll.offset, scroll.history)}
-            className="terminal-history absolute top-3 right-0.5 bottom-3 z-20 w-3 cursor-pointer"
+            className="terminal-history absolute top-3 right-0.5 bottom-3 z-sticky w-3 cursor-pointer"
             onPointerDown={() => {
               draggingScroll.current = true
             }}
@@ -1603,15 +1700,15 @@ export function XtermPane({
           />
         )}
         {imageDrag && (
-          <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-md border border-dashed border-primary bg-background/90 text-xs font-medium text-primary shadow-sm">
+          <div className="pointer-events-none absolute inset-2 z-raised flex items-center justify-center rounded-md border border-dashed border-primary bg-background/90 text-xs font-medium text-primary shadow-sm">
             Drop image to upload and paste its path
           </div>
         )}
         {(!atBottom || scrolledBack) && (
           <Button
             size="xs"
-            variant="secondary"
-            className="pointer-events-auto absolute right-7 bottom-4 z-20 shadow-md"
+            variant="outline"
+            className="pointer-events-auto absolute right-7 bottom-4 z-sticky shadow-md"
             onClick={() => {
               // Two scrollbacks can be behind this: the emulator's, when
               // there is no tmux, and tmux's own. Ending both is what "the
@@ -1786,6 +1883,7 @@ function SnippetMenu({
 
 function SettingsMenu() {
   const settings = useTerminalSettings()
+  const readAloud = useScreenReaderMode()
   return (
     <Popover>
       <Tooltip>
@@ -1833,6 +1931,12 @@ function SettingsMenu() {
               void Notification.requestPermission()
             }
           }}
+        />
+        <SettingSwitch
+          label="Screen reader mode"
+          hint="Output is read out as it arrives. Slower on a busy terminal."
+          checked={readAloud}
+          onChange={setScreenReaderMode}
         />
         <div className="space-y-1">
           <div className="flex items-center justify-between">
