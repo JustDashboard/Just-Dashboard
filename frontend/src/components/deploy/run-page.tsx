@@ -840,12 +840,7 @@ export function RunPage() {
               )}
             </div>
           )}
-          <PaneBar
-            label="Deployment"
-            stops={RUN_STOPS}
-            active={stop}
-            onPick={setStop}
-          />
+          <PaneBar label="Deployment" stops={RUN_STOPS} active={stop} onPick={setStop} />
         </div>
       ) : (
         <>
