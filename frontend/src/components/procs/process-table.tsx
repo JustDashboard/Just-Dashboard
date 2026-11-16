@@ -24,6 +24,7 @@ import { ROW_BLEED } from "@/components/row-list"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
+import { Meter } from "@/components/meter"
 import { Status, StatusDot } from "@/components/status-dot"
 import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -280,7 +281,7 @@ export function LiveProcesses() {
         },
       ]}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         <PageContext eyebrow="Processes" title="Live" />
 
         {/* Held open before the metrics socket lands, so the band under it does
@@ -476,7 +477,7 @@ export function LiveProcesses() {
                   ? `Showing the ${data.processes.length} heaviest of ${data.total} matching`
                   : `${plural(data.total, "process", "processes")} matching`}
               </span>
-              <span className="text-muted-foreground/40">·</span>
+              <span className="text-faint">·</span>
               <span>
                 sorted by {SORT_LABEL[data.focus.sort]}
                 {data.focus.reason && ` because ${data.focus.reason}`}
@@ -488,7 +489,7 @@ export function LiveProcesses() {
               )}
               {!data.ratesReady && (
                 <>
-                  <span className="text-muted-foreground/40">·</span>
+                  <span className="text-faint">·</span>
                   <span>rates arrive with the second sample</span>
                 </>
               )}
@@ -555,7 +556,7 @@ function ProcessRows({ rows, ratesReady, ...rest }: RowsProps & { ratesReady: bo
       {/* The outer columns take the gutter from their own cell padding, so
         the first column starts in the title's column. */}
       <div className="hidden min-w-0 xl:block">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead className="w-24">PID</TableHead>
@@ -829,14 +830,8 @@ function MemoryReading({
 
 /** A reading's bar inside a cell, shared by Live, PM2 and Services for the same scale. */
 export function MiniBar({ value, color }: { value: number; color: string }) {
-  return (
-    <span aria-hidden className="h-1 w-8 shrink-0 overflow-hidden rounded-full bg-meter-track">
-      <span
-        className="block h-full rounded-full transition-[width] duration-700 ease-out"
-        style={{ width: `${Math.max(0, Math.min(value, 100))}%`, background: color }}
-      />
-    </span>
-  )
+  // The shared meter at a cell's size; the figure beside it says the value.
+  return <Meter size="cell" decorative value={value} color={color} />
 }
 
 /** The process as the product it is; a name this cannot place keeps a glyph. */

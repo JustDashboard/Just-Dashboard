@@ -23,6 +23,7 @@ import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, hasProductLogo, unitProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
+import { MissingThing } from "@/components/missing-thing"
 import { Button } from "@/components/ui/button"
 import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import { dependency, samePackage, type PackageTab } from "@/components/packages/inventory"
@@ -424,35 +425,35 @@ function ViewSection({
 }) {
   return (
     <Panel plain>
-      <PanelHeader
-        title={title}
-        actions={
-          count !== undefined && (
-            <span className="numeric text-hint text-muted-foreground">{count}</span>
-          )
-        }
-      />
+      <PanelHeader title={title} count={count} />
       <PanelBody className="space-y-3">{children}</PanelBody>
     </Panel>
   )
 }
 
-/** A package that is not on the host has no files to read; the next step is to put it there. */
+/**
+ * A package that is not on the host has no files to read; the next step is
+ * to put it there. Said as every absent thing is (`MissingThing`), at the
+ * size of a section, with Install as its step.
+ */
 function NotInstalled({ what, onInstall }: { what: string; onInstall?: () => void }) {
   return (
-    <EmptyState
+    <MissingThing
       icon={Puzzle}
+      size="block"
       title="Not installed yet"
-      description={`Install it to see ${what}.`}
-      action={
+      reason="not-installed"
+      step={
         onInstall && (
-          <Button size="sm" variant="outline" onClick={onInstall}>
+          <Button size="sm" onClick={onInstall}>
             <Download className="size-4" />
             Install
           </Button>
         )
       }
-    />
+    >
+      Install it to see {what}.
+    </MissingThing>
   )
 }
 

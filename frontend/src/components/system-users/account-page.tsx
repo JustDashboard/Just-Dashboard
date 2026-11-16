@@ -3,18 +3,11 @@
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
-import {
-  ArrowLeft,
-  FolderOpen,
-  LockClosed,
-  LockOpen,
-  Logout,
-  Terminal,
-  Trash,
-} from "@/components/icons"
+import { FolderOpen, LockClosed, LockOpen, Logout, Terminal, Trash } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
-import { Page, PageContext } from "@/components/page"
+import { DetailPage, useDetailTab, useSiblingSteps, type Step } from "@/components/detail-page"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
 import { Address } from "@/components/security/marks"
 import { EmptyState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -26,20 +19,13 @@ import { RemoveAccountDialog } from "@/components/system-users/account-removal"
 import { RootPanel } from "@/components/system-users/account-root"
 import { AccountSettings } from "@/components/system-users/account-settings"
 import { SignInPanel } from "@/components/system-users/account-sign-in"
-import {
-  StepArrows,
-  useAddressTab,
-  ViewTabs,
-  type Step,
-  type View,
-} from "@/components/system-users/detail-shell"
 import { AccountMark, shellProduct } from "@/components/system-users/marks"
 import { ReadFailed } from "@/components/system-users/read-state"
 import { Button } from "@/components/ui/button"
+import { ViewTabList, type TabView } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { Workspace } from "@/components/workspace/workspace"
 import { usePoll } from "@/hooks/use-poll"
 import { ApiError, del, get, patch } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
@@ -77,14 +63,7 @@ const SCOPES: Record<Scope, string> = {
   disabled: "disabled",
 }
 
-const BACK = (
-  <Link
-    href="/system-users"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> System users
-  </Link>
-)
+const BACK = { href: "/system-users", label: "System users" }
 
 /**
  * One account, as a place of its own with the list beside it.
@@ -110,79 +89,83 @@ export function AccountPage() {
   const params = useParams<{ name: string }>()
   const name = decodeSegment(params.name)
   const router = useRouter()
-  const [tab, setTab] = useAddressTab(TABS)
+  const [tab, setTab] = useDetailTab(TABS, { remember: "system-users.account.tab" })
   const open = useCallback((next: string) => router.push(accountTabHref(next, tab)), [router, tab])
   const path = `/system-users/${encodeURIComponent(name)}`
   const account = usePoll((signal) => get<SystemUserDetail>(path, undefined, signal), 30000, [path])
 
   const rail = useRail()
-  const at = rail.users.findIndex((user) => user.username === name)
-  const adjacent = (direction: number) => {
-    const next = at >= 0 ? rail.users[at + direction] : rail.users[direction > 0 ? 0 : -1]
-    if (next) open(next.username)
-  }
-  const previous = { disabled: at <= 0, run: () => adjacent(-1) }
-  const next = {
-    disabled: rail.users.length === 0 || at >= rail.users.length - 1,
-    run: () => adjacent(1),
+  const steps = useSiblingSteps(
+    rail.users.map((user) => user.username),
+    name,
+    open,
+  )
+  const frame: Frame = {
+    steps,
+    refresh: account.refresh,
+    rail: (
+      <AccountRail
+        users={rail.users}
+        current={name}
+        currentUser={account.data}
+        loading={rail.loading}
+        error={rail.error}
+        onRetry={rail.refresh}
+        query={rail.query}
+        onQuery={rail.setQuery}
+        filtered={rail.filtered}
+        onClearFilters={rail.clearFilters}
+        caption={rail.caption}
+        onOpen={open}
+      />
+    ),
   }
 
+  // Keyed, so another account opens on its own state: no edit allowed on a
+  // system account carries over, and its settings are read when first opened.
   return (
-    <Workspace
+    <AccountMain
+      key={name}
+      frame={frame}
+      name={name}
+      path={path}
+      account={account}
+      onChanged={rail.refresh}
+      tab={tab}
+      setTab={setTab}
+    />
+  )
+}
+
+/** What every state of the page hands the shared frame. */
+type Frame = { steps: { previous: Step; next: Step }; refresh: () => void; rail: React.ReactNode }
+
+/** The account's detail frame: the way back, the walk and the rail (`DetailPage`). */
+function AccountFrame({
+  frame,
+  title,
+  identity,
+  children,
+}: {
+  frame: Frame
+  title: string
+  identity?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <DetailPage
       name="Account"
+      what="account"
       stateKey="system-users.account.page"
-      refresh={account.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous account",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next account",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
+      refresh={frame.refresh}
+      steps={frame.steps}
+      back={BACK}
+      title={title}
+      rail={frame.rail}
+      identity={identity}
     >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          <AccountRail
-            className="hidden w-72 shrink-0 xl:flex"
-            users={rail.users}
-            current={name}
-            currentUser={account.data}
-            loading={rail.loading}
-            query={rail.query}
-            onQuery={rail.setQuery}
-            filtered={rail.filtered}
-            onClearFilters={rail.clearFilters}
-            caption={rail.caption}
-            onOpen={open}
-          />
-          <AccountMain
-            key={name}
-            name={name}
-            path={path}
-            account={account}
-            onChanged={rail.refresh}
-            tab={tab}
-            setTab={setTab}
-            previous={previous}
-            next={next}
-          />
-        </div>
-      </Page>
-    </Workspace>
+      {children}
+    </DetailPage>
   )
 }
 
@@ -228,6 +211,7 @@ function useRail() {
   return {
     users,
     loading: list.loading,
+    error: list.data ? undefined : list.error,
     refresh: list.refresh,
     query,
     setQuery,
@@ -238,23 +222,21 @@ function useRail() {
 }
 
 function AccountMain({
+  frame,
   name,
   path,
   account,
   onChanged,
   tab,
   setTab,
-  previous,
-  next,
 }: {
+  frame: Frame
   name: string
   path: string
   account: ReturnType<typeof usePoll<SystemUserDetail>>
   onChanged: () => void
   tab: Tab
   setTab: (tab: string) => void
-  previous: Step
-  next: Step
 }) {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
@@ -276,14 +258,11 @@ function AccountMain({
     refreshAccount()
     onChanged()
   }, [refreshAccount, onChanged])
-  const arrows = <StepArrows noun="account" previous={previous} next={next} />
-
   if (!user) {
     if (error) {
       const missing = error instanceof ApiError && [400, 404].includes(error.status)
       return (
-        <div className="flex min-w-0 flex-1 flex-col gap-5">
-          <PageContext eyebrow={BACK} title="Account" actions={arrows} />
+        <AccountFrame frame={frame} title="Account">
           {missing ? (
             <EmptyState
               mark={<AccountMark user={{ username: name, system: false, uid: -1 }} size="lg" />}
@@ -301,21 +280,30 @@ function AccountMain({
           ) : (
             <ReadFailed error={error} onRetry={refreshAccount} />
           )}
-        </div>
+        </AccountFrame>
       )
     }
     return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name} actions={arrows} />
-        <HostIdentity
-          className="border-b-0 pb-0"
-          logo={<AccountMark user={{ username: name, system: false, uid: -1 }} size="lg" />}
-          title={<span className="font-mono">{name}</span>}
-          state={null}
-          facts={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
-        />
+      <AccountFrame
+        frame={frame}
+        title={name}
+        identity={
+          // The line's final shape while the account is read, its command's
+          // and menu's places held, so nothing under it moves when it lands.
+          <IdentityHeader
+            loading
+            className="border-b-0 pb-0"
+            logo={<AccountMark user={{ username: name, system: false, uid: -1 }} size="lg" />}
+            title={<span className="font-mono">{name}</span>}
+            facts={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
+            state
+            command
+            menu={false}
+          />
+        }
+      >
         <LoadingRows />
-      </div>
+      </AccountFrame>
     )
   }
 
@@ -390,7 +378,7 @@ function AccountMain({
   ]
 
   const state = signInSummary(user)
-  const views: View<Tab>[] = [
+  const views: TabView<Tab>[] = [
     { key: "overview", label: "Overview" },
     { key: "settings", label: "Settings" },
     { key: "history", label: "History" },
@@ -398,77 +386,85 @@ function AccountMain({
 
   return (
     <AccountContext.Provider value={{ user, path, query, readOnly, refresh }}>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-        <div className="flex min-w-0 shrink-0 flex-col gap-5">
-          <PageContext eyebrow={BACK} title={name} actions={arrows} />
-          <HostIdentity
-            className="animate-rise border-b-0 pb-0"
-            logo={<AccountMark user={user} size="lg" />}
-            title={
-              <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                <span className="font-mono">{user.username}</span>
-                {user.comment && user.comment !== user.username && (
-                  <span className="text-body font-normal text-muted-foreground">
-                    {user.comment}
-                  </span>
-                )}
-              </span>
-            }
-            state={<Status tone={state.tone} label={state.label} />}
-            facts={
-              <>
-                <span className="numeric">uid {user.uid}</span>
-                <FactDot />
-                <HostFact product={shellProduct(user.shell)}>
-                  <span className="font-mono">{user.shell}</span>
-                </HostFact>
-                <FactDot />
-                <span className="font-mono">{user.home}</span>
-                {disk && disk.bytes > 0 && <span className="numeric">{bytes(disk.bytes)}</span>}
-                <FactDot />
-                {user.lastLogin ? (
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <span className="numeric shrink-0">{relativeTime(user.lastLogin)}</span>
-                    {user.lastLoginFrom && <Address ip={user.lastLoginFrom} className="min-w-0" />}
-                  </span>
+      <AccountFrame
+        frame={frame}
+        title={name}
+        identity={
+          <>
+            <IdentityHeader
+              className="animate-rise border-b-0 pb-0"
+              logo={<AccountMark user={user} size="lg" />}
+              title={
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                  <span className="font-mono">{user.username}</span>
+                  {user.comment && user.comment !== user.username && (
+                    <span className="text-body font-normal text-muted-foreground">
+                      {user.comment}
+                    </span>
+                  )}
+                </span>
+              }
+              state={<Status tone={state.tone} label={state.label} />}
+              facts={
+                <>
+                  <Fact className="numeric">uid {user.uid}</Fact>
+                  <Fact product={shellProduct(user.shell)} mono>
+                    {user.shell}
+                  </Fact>
+                  <Fact mono>
+                    {user.home}
+                    {disk && disk.bytes > 0 && (
+                      <span className="numeric ml-2 font-sans">{bytes(disk.bytes)}</span>
+                    )}
+                  </Fact>
+                  {user.lastLogin ? (
+                    <Fact>
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        <span className="numeric shrink-0">{relativeTime(user.lastLogin)}</span>
+                        {user.lastLoginFrom && (
+                          <Address ip={user.lastLoginFrom} className="min-w-0" />
+                        )}
+                      </span>
+                    </Fact>
+                  ) : (
+                    <Fact>never signed in</Fact>
+                  )}
+                </>
+              }
+              command={
+                user.canLogin ? (
+                  <Button size="sm" onClick={terminal}>
+                    <Terminal className="size-4" />
+                    Terminal
+                  </Button>
                 ) : (
-                  <span>never signed in</span>
-                )}
-              </>
-            }
-            command={
-              user.canLogin ? (
-                <Button size="sm" onClick={terminal}>
-                  <Terminal className="size-4" />
-                  Terminal
-                </Button>
-              ) : (
-                <Button size="sm" onClick={files}>
-                  <FolderOpen className="size-4" />
-                  Files
-                </Button>
-              )
-            }
-            menu={
-              verbs.length > 0 ? <VerbMenu verbs={verbs} label={`More for ${name}`} /> : undefined
-            }
-          />
-          {isDaemon && !editing && (
-            <Notice title="This account belongs to the system">
-              <span className="flex flex-wrap items-center justify-between gap-2">
-                A package made it and expects it as it left it, so it is read-only here.
-                <Button size="xs" variant="outline" onClick={() => setEditing(true)}>
-                  Allow changes
-                </Button>
-              </span>
-            </Notice>
-          )}
-        </div>
+                  <Button size="sm" onClick={files}>
+                    <FolderOpen className="size-4" />
+                    Files
+                  </Button>
+                )
+              }
+              menu={
+                verbs.length > 0 ? <VerbMenu verbs={verbs} label={`More for ${name}`} /> : false
+              }
+            />
+            {isDaemon && !editing && (
+              <Notice title="This account belongs to the system">
+                <span className="flex flex-wrap items-center justify-between gap-2">
+                  A package made it and expects it as it left it, so it is read-only here.
+                  <Button size="xs" variant="outline" onClick={() => setEditing(true)}>
+                    Allow changes
+                  </Button>
+                </span>
+              </Notice>
+            )}
+          </>
+        }
+      >
+        <Tabs value={tab} onValueChange={setTab} className="gap-0">
+          <ViewTabList label={`Views of ${name}`} views={views} value={tab} sticky />
 
-        <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-          <ViewTabs label={`Views of ${name}`} views={views} shown={tab} />
-
-          <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+          <TabsContent value="overview" className="pt-6">
             <div className="flex min-w-0 flex-col gap-8 pb-6">
               <div className="grid min-w-0 gap-x-10 gap-y-8 2xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
                 <SignInPanel />
@@ -478,22 +474,17 @@ function AccountMain({
             </div>
           </TabsContent>
 
-          <TabsContent
-            value="settings"
-            forceMount
-            hidden={tab !== "settings"}
-            className="min-h-0 flex-1 pt-6 xl:overflow-y-auto"
-          >
+          <TabsContent value="settings" forceMount hidden={tab !== "settings"} className="pt-6">
             {settingsOpened && <AccountSettings />}
           </TabsContent>
 
-          <TabsContent value="history" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+          <TabsContent value="history" className="pt-6">
             {tab === "history" && <HistoryPanel />}
           </TabsContent>
         </Tabs>
         {removing && <RemoveAccountDialog onClose={() => setRemoving(false)} />}
         {dialog}
-      </div>
+      </AccountFrame>
     </AccountContext.Provider>
   )
 }

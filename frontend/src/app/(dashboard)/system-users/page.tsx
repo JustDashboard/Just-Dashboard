@@ -47,7 +47,6 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useMetrics } from "@/hooks/use-metrics"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
@@ -55,6 +54,7 @@ import { notify } from "@/lib/toast"
 import type { BulkResults, SystemUser } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Scope = "all" | "signin" | "root" | "disabled"
 
@@ -101,7 +101,7 @@ function SystemUsers() {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
   const { host } = useMetrics()
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   const [showSystem, setShowSystem] = useViewState("system-users.show-system", false)
   const [query, setQuery] = useSessionState("system-users.query", "")
   const [scope, setScope] = useSessionState<Scope>("system-users.scope", "all")
@@ -261,7 +261,7 @@ function SystemUsers() {
   ]
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Advanced" title="System users" />
 
       <HostIdentity
@@ -563,7 +563,7 @@ function RootReading({ user, none }: { user: SystemUser; none: string }) {
           {group}
         </span>
       ))}
-      {root.label === "None" && <span className="text-muted-foreground/60">{none}</span>}
+      {root.label === "None" && <span className="text-faint">{none}</span>}
     </span>
   )
 }
@@ -598,7 +598,7 @@ function AccountRow({
       {wide && user.lastLoginFrom && <Address ip={user.lastLoginFrom} className="min-w-0" />}
     </span>
   ) : (
-    <span className="text-muted-foreground/60">{wide ? "Never" : "Never signed in"}</span>
+    <span className="text-faint">{wide ? "Never" : "Never signed in"}</span>
   )
   const verbs: Verb[] = [
     ...(user.canLogin

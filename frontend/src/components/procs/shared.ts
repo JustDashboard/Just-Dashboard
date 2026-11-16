@@ -109,9 +109,14 @@ export function cores(percentOfOneCore: number): string {
   return "idle"
 }
 
-/** A process state as the one status vocabulary reads it. */
+/**
+ * A process state as the one status vocabulary reads it. Blocked (in disk
+ * wait) and zombie read amber, as their filter chips do: a process waiting on
+ * a disk or not yet reaped is something to look at, not a failure, and since
+ * "failed" became red it would have drawn them in the danger ink.
+ */
 export function processStateTone(state: ProcessRow["state"]): string {
-  if (state === "blocked" || state === "zombie") return "failed"
+  if (state === "blocked" || state === "zombie") return "paused"
   if (state === "sleeping") return "inactive"
   return state
 }

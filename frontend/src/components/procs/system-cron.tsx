@@ -35,6 +35,8 @@ import { RunAt } from "@/components/procs/timers"
  * the command that does the work, the schedule in words, who it runs as,
  * and when it runs next. The worked example is left out.
  *
+ * A row opens the line's own page (`schedule-page.tsx`).
+ *
  * A line that steps aside for systemd says so where its next run would be:
  * Debian ships certbot's, e2scrub's and others' cron lines beside timers for
  * the same work, and on a host running systemd the line's guard stops it.
@@ -84,10 +86,12 @@ export function SystemCronPanel({
           <Table className="table-fixed" containerClassName="w-auto group-data-[plain]/panel:-mx-4">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
-                <TableHead>Job</TableHead>
+                {/* The whole row on a phone: the file rows span four columns, and a
+                    fixed table gave the three hidden ones a share of the width. */}
+                <TableHead className="max-md:w-full">Job</TableHead>
                 <TableHead className="hidden w-[30%] lg:table-cell">Schedule</TableHead>
                 <TableHead className="hidden w-24 xl:table-cell">Runs as</TableHead>
-                <TableHead className="w-36">Next run</TableHead>
+                <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -174,10 +178,28 @@ function SystemLine({
     () => (quiet ? null : nextCronRun(job.schedule, new Date(), job.timeZone)),
     [job, quiet],
   )
+  const when = skipped ? (
+    <div title="The line tests for systemd and steps aside, because a timer does the same work">
+      <Status state="inactive" label="left to systemd" />
+      {instead && <p className="truncate pl-3.5 text-hint text-muted-foreground">{instead}</p>}
+    </div>
+  ) : job.disabled ? (
+    <Status state="inactive" label="commented out" />
+  ) : next ? (
+    <RunAt at={next.getTime()} zone={zone} />
+  ) : (
+    <span className="text-muted-foreground">
+      {job.schedule.toLowerCase() === "@reboot" ? "at boot" : "never"}
+    </span>
+  )
+  // Narrower than md the row is the cron jobs' shape: the name and the
+  // command, with when it runs under them. The next run's own column took a
+  // fixed 144px there and left the name a cell of no width.
   return (
     <TableRow className="group" onActivate={onOpen} data-system-line={job.line}>
       <TableCell className="whitespace-normal">
         <JobCell job={job} onOpen={onOpen} dim={quiet} />
+        <div className="mt-1.5 pl-10 text-xs md:hidden">{when}</div>
       </TableCell>
       <TableCell className="hidden whitespace-normal lg:table-cell">
         <ScheduleCell schedule={job.schedule} dim={quiet} />
@@ -185,24 +207,7 @@ function SystemLine({
       <TableCell className="hidden text-muted-foreground xl:table-cell">
         {job.user || "—"}
       </TableCell>
-      <TableCell className="whitespace-normal">
-        {skipped ? (
-          <div title="The line tests for systemd and steps aside, because a timer does the same work">
-            <Status state="inactive" label="left to systemd" />
-            {instead && (
-              <p className="truncate pl-3.5 text-hint text-muted-foreground">{instead}</p>
-            )}
-          </div>
-        ) : job.disabled ? (
-          <Status state="inactive" label="commented out" />
-        ) : next ? (
-          <RunAt at={next.getTime()} zone={zone} />
-        ) : (
-          <span className="text-muted-foreground">
-            {job.schedule.toLowerCase() === "@reboot" ? "at boot" : "never"}
-          </span>
-        )}
-      </TableCell>
+      <TableCell className="hidden whitespace-normal md:table-cell">{when}</TableCell>
     </TableRow>
   )
 }

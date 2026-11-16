@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { Copy, Stopwatch } from "@/components/icons"
+import { Copy } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { duration, relativeTime } from "@/lib/format"
@@ -22,21 +22,16 @@ import {
 import { cn } from "@/lib/utils"
 import type { SystemdTimer, SystemdUnit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import { useNow } from "@/hooks/use-now"
 import { IconAction } from "@/components/icon-action"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Well } from "@/components/panel"
-import { ProductLogo, unitProduct } from "@/components/product-logo"
-import { SidePanel } from "@/components/side-panel"
+import { unitProduct } from "@/components/product-logo"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
-import { VerbBar } from "@/components/verbs"
-import { TimerState, useTimerVerbs } from "@/components/procs/timers"
-import { useUnitControl } from "@/components/procs/unit-actions"
 import { unitRunsView } from "@/components/procs/unit-runs"
 import { KIND } from "@/components/procs/schedule-band"
 import {
@@ -47,8 +42,6 @@ import {
 } from "@/components/procs/schedule-sheet"
 
 const DAY = 24 * 3600_000
-
-type ConfirmFn = (request: ConfirmRequest) => void
 
 type UnitShow = { unit: SystemdUnit; properties: Record<string, string> }
 
@@ -72,96 +65,23 @@ function micro(props: Record<string, string> | undefined, key: string) {
 }
 
 /**
- * One timer, opened from its row or its lane on the band: when it fires next
- * and how the last run ended, as readings; what it fires on, in words, beside
- * the calendar it was written as; what it runs, coloured as a command; and
- * every run of that service, read from its journal.
+ * One timer's page parts, opened from its row or its lane on the band
+ * (`schedule-page.tsx`): when it fires next and how the last run ended, as
+ * readings; what it fires on, in words, beside the calendar it was written
+ * as; what it runs, coloured as a command (Overview); and every run of that
+ * service, read from its journal (Runs).
  *
- * It replaced a disclosure under the timer's row that held only the runs.
- * "Why does certbot run at 06:40 when its calendar says midnight and noon"
- * is the question a timer is opened with more often than any other, and its
- * answer — a random delay of up to twelve hours — was in no place on the page.
+ * It replaced a disclosure under the timer's row that held only the runs,
+ * and was a sheet until 0.9.0. "Why does certbot run at 06:40 when its
+ * calendar says midnight and noon" is the question a timer is opened with
+ * more often than any other, and its answer — a random delay of up to twelve
+ * hours — was in no place on the page.
  *
- * The timer comes from the page's poll, so the sheet's head and verbs follow
- * the list; the two units' own properties are read here, the service's more
+ * The timer comes from the page's poll, so the head and verbs follow the
+ * list; the two units' own properties are read here, the service's more
  * often, because "running now" is said from it.
  */
-export function TimerSheet({
-  timer,
-  unit,
-  confirm,
-  onOpenChange,
-  onChanged,
-  zone,
-}: {
-  zone?: string
-  timer: SystemdTimer | undefined
-  /** The unit asked for, which may not be in the list yet — or any more. */
-  unit: string | null
-  confirm: ConfirmFn
-  onOpenChange: (open: boolean) => void
-  onChanged: () => void
-}) {
-  const { pending, act } = useUnitControl(onChanged)
-  const busy = timer ? (pending[timer.unit] ?? pending[timer.activates]) : undefined
-  return (
-    <SidePanel
-      open={unit !== null}
-      onOpenChange={onOpenChange}
-      title={
-        <>
-          <ProductLogo id={unitProduct(unit ?? "")} size="sm" fallback={Stopwatch} />
-          <span className="min-w-0 truncate">{unit?.replace(/\.timer$/, "")}</span>
-        </>
-      }
-      description={timer ? `Runs ${timer.activates}` : "systemd timer"}
-      width="lg"
-      initialFocus="body"
-      actions={
-        timer && (
-          <TimerSheetActions
-            timer={timer}
-            busy={busy}
-            confirm={confirm}
-            act={act}
-            onChanged={onChanged}
-          />
-        )
-      }
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-y-auto"
-    >
-      {timer ? (
-        <TimerDetail key={timer.unit} timer={timer} zone={zone} />
-      ) : (
-        <LoadingRows rows={4} className="m-5" />
-      )}
-    </SidePanel>
-  )
-}
-
-function TimerSheetActions({
-  timer,
-  busy,
-  confirm,
-  act,
-  onChanged,
-}: {
-  timer: SystemdTimer
-  busy?: string
-  confirm: ConfirmFn
-  act: ReturnType<typeof useUnitControl>["act"]
-  onChanged: () => void
-}) {
-  const verbs = useTimerVerbs({ timer, confirm, act, onChanged })
-  return (
-    <>
-      <TimerState timer={timer} busy={busy} />
-      <VerbBar verbs={verbs} />
-    </>
-  )
-}
-
-function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
+export function TimerOverview({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
   const now = useNow(1000)
   const own = usePoll(
     (signal) => get<UnitShow>(`/systemd/${encodeURIComponent(timer.unit)}`, undefined, signal),
@@ -209,6 +129,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
   return (
     <div className="flex animate-rise flex-col pb-2">
       <ScheduleSummary
+        flush
         sentence={sentence ?? <span className="text-muted-foreground">Reading the timer…</span>}
         expression={triggers.length > 0 ? triggers.map((t) => t.spec).join(" · ") : undefined}
         facts={[zone && `${zone} time`]}
@@ -224,7 +145,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
 
       <StatGrid columns={3} dense className="border-t border-hairline">
         <StatTile
-          className="px-6"
+          className="px-0"
           label="Next run"
           value={
             next !== undefined && next > now ? (
@@ -242,7 +163,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
           }
         />
         <StatTile
-          className="px-6"
+          className="px-0"
           label="Last run"
           tone={failed ? "danger" : "default"}
           value={
@@ -265,7 +186,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
           }
         />
         <StatTile
-          className="px-6"
+          className="px-0"
           label="Took"
           value={
             took !== undefined ? (
@@ -284,7 +205,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
         />
       </StatGrid>
 
-      <SheetSection title="When it runs">
+      <SheetSection flush title="When it runs">
         <WhenItRuns
           times={runs.times}
           dense={runs.dense}
@@ -313,6 +234,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
 
       {timer.activates && (
         <SheetSection
+          flush
           title="Command"
           actions={
             command && (
@@ -339,7 +261,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
         </SheetSection>
       )}
 
-      <SheetSection title="Details">
+      <SheetSection flush title="Details">
         <DetailList className="gap-y-2.5">
           {(timer.description || run?.Description) && (
             <Detail label="What it is">{timer.description || run?.Description}</Detail>
@@ -374,12 +296,6 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
           )}
         </DetailList>
       </SheetSection>
-
-      {timer.activates && (
-        <SheetSection title="Runs">
-          <TimerRuns unit={timer.activates} />
-        </SheetSection>
-      )}
     </div>
   )
 }
@@ -389,7 +305,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
  * front, so a failed run is one press from the lines it wrote, and Live
  * beside it for a run started with "Run now".
  */
-function TimerRuns({ unit }: { unit: string }) {
+export function TimerRuns({ unit }: { unit: string }) {
   const sources = useMemo<ServiceLogSource[]>(
     () => [{ id: journalSource(unit), label: unit, kind: "journal", product: unitProduct(unit) }],
     [unit],
@@ -405,9 +321,8 @@ function TimerRuns({ unit }: { unit: string }) {
       view="runs"
       onViewChange={setReading}
       modes={["live", "search"]}
-      layout="sheet"
       className="[contain:inline-size]"
-      paneClassName={reading === "runs" ? "max-h-[26rem]" : "h-[26rem]"}
+      paneClassName={reading === "runs" ? "max-h-[36rem]" : "h-[min(70svh,36rem)]"}
     />
   )
 }

@@ -5,7 +5,6 @@ import { CloudUpload, Database, FolderOpen } from "@/components/icons"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { BackupJob, BackupResource, BackupResourceKind, Container } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ProductLogo } from "@/components/product-logo"
@@ -24,6 +23,7 @@ import {
   RESOURCE_KIND_ORDER,
   scheduleLabel,
 } from "@/components/backups/shared"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Line = { still: boolean; dashed?: boolean; tone: "default" | "success" | "warning" | "danger" }
 
@@ -81,7 +81,7 @@ export function ProtectionMap({
   onKind: (kind: BackupResourceKind) => void
   onAdd?: () => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const running = new Set(jobs.filter((job) => job.lastRun?.status === "running").map((j) => j.id))
@@ -213,7 +213,7 @@ function Picture({
           >
             {from}
           </div>
-          <div ref={hubRef} className="relative z-10 mt-10 flex">
+          <div ref={hubRef} className="relative z-raised mt-10 flex">
             <WireHost />
           </div>
           <div
@@ -318,7 +318,7 @@ function KindNode({
           aria-label={`Show ${name.toLowerCase()} in coverage`}
           className="rounded-lg focus-ring"
         >
-          <div ref={mark} className="relative z-10 flex">
+          <div ref={mark} className="relative z-raised flex">
             {drawn}
           </div>
         </button>
@@ -414,7 +414,7 @@ function DestinationNode({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {drawn}
         </div>
         <span className="sr-only">{`${destination.service}: ${destination.place} · ${writers}`}</span>
@@ -476,7 +476,7 @@ function OffsiteRing({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {drawn}
         </div>
       </div>
@@ -529,7 +529,7 @@ export function JobMap({
   resources: BackupResource[]
   containers: Container[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const sources = jobSources(job, resources, containers)
@@ -679,7 +679,7 @@ function SourceNode({
     return (
       <div className="min-w-0">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {source.mark}
         </div>
         <span className="sr-only">{`${source.eyebrow}: ${source.name}, ${source.detail}`}</span>
