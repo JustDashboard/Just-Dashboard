@@ -233,10 +233,15 @@ export function AssistantPage() {
       className={cn(chatting ? "gap-0 pt-0 pb-0 md:gap-0 md:pt-0 md:pb-0" : "pt-0 md:pt-0")}
     >
       <PageContext title="Assistant" />
+      {/* While chatting on a phone, the bar at the foot holds Settings with
+          the chat's own panes: two strips both saying Chat picked one thing. */}
       <nav
         aria-label="The assistant's views"
         data-slot="assistant-tabs"
-        className="flex shrink-0 items-end gap-1 border-b border-hairline pt-2 md:pt-3"
+        className={cn(
+          "flex shrink-0 items-end gap-1 border-b border-hairline pt-2 md:pt-3",
+          chatting && "max-lg:hidden",
+        )}
       >
         {can("service.control") && (
           <Link
@@ -337,6 +342,7 @@ function ServerChat({ settings }: { settings: ReturnType<typeof useAssistantSett
     <AgentWorkspace
       session={session}
       product={product}
+      onSettings={() => router.replace("/assistant?view=settings")}
       chat={
         <AgentChat
           key={session.key}
