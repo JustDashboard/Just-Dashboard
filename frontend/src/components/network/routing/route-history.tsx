@@ -133,7 +133,7 @@ function Change({ event }: { event: NetworkRouteEvent }) {
   return (
     <li
       data-slot="route-change"
-      className="grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 py-2.5 sm:grid-cols-[5.5rem_minmax(0,1fr)_auto]"
+      className="grid min-h-14 min-w-0 grid-cols-start-main items-center gap-x-3 gap-y-1.5 py-2.5 sm:grid-cols-[5.5rem_minmax(0,1fr)_auto]"
     >
       <Status tone={change.tone} label={change.label} />
       {/* On a phone the change and when share the first line, and what

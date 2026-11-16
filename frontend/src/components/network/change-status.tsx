@@ -35,15 +35,13 @@ export function NetworkChange({ change }: { change: NetworkChangeStatus }) {
             : "These are the host’s apply, save and recovery outcomes. Browser reconnect and application reachability have not been confirmed by this status."}
         </p>
         {Boolean(change.recoveryErrors?.length) && (
-          <div role="alert">
-            <Notice tone="danger" title="Recovery incomplete">
-              <ul className="list-inside list-disc space-y-1">
-                {change.recoveryErrors?.map((error, index) => (
-                  <li key={index}>{error}</li>
-                ))}
-              </ul>
-            </Notice>
-          </div>
+          <Notice tone="danger" title="Recovery incomplete" live="alert">
+            <ul className="list-inside list-disc space-y-1">
+              {change.recoveryErrors?.map((error, index) => (
+                <li key={index}>{error}</li>
+              ))}
+            </ul>
+          </Notice>
         )}
         <details className="text-hint text-muted-foreground">
           <summary className="cursor-pointer focus-ring">Change record</summary>

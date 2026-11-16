@@ -203,9 +203,9 @@ function Throughput({ devices }: { devices: NetworkLink[] }) {
   const tx = devices.reduce((n, d) => n + d.txRate, 0)
   return (
     <span className="numeric block font-mono text-micro">
-      <span className="text-[var(--chart-5)]">↓ {rate(rx)}</span>
-      <span className="mx-1.5 text-muted-foreground/50">·</span>
-      <span className="text-[var(--chart-2)]">↑ {rate(tx)}</span>
+      <span className="text-chart-5">↓ {rate(rx)}</span>
+      <span className="mx-1.5 text-faint">·</span>
+      <span className="text-chart-2">↑ {rate(tx)}</span>
     </span>
   )
 }

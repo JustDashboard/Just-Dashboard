@@ -38,7 +38,7 @@ function Request({ label, rule }: { label: string; rule: Record<string, unknown>
   return (
     <section aria-label={label} className="space-y-1.5">
       <p className="text-xs font-medium">{label}</p>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-hint">
+      <dl className="grid grid-cols-start-main gap-x-4 gap-y-1 text-hint">
         {Object.entries(rule).map(([key, value]) => (
           <div key={key} className="contents">
             <dt className="text-muted-foreground">{key}</dt>

@@ -355,10 +355,7 @@ test.describe("the rail", () => {
 
     await page.keyboard.press("Alt+ArrowDown")
     await expect(page).toHaveURL(/\/network\/interfaces\/wg0\?tab=addresses$/)
-    await expect(rail.getByRole("link", { name: /^wg0,/ })).toHaveAttribute(
-      "aria-current",
-      "page",
-    )
+    await expect(rail.getByRole("link", { name: /^wg0,/ })).toHaveAttribute("aria-current", "page")
     await page.getByRole("button", { name: "Previous device" }).click()
     await expect(page).toHaveURL(/\/network\/interfaces\/tailscale0\?tab=addresses$/)
     await rail.getByRole("link", { name: /^jd-lab,/ }).click()

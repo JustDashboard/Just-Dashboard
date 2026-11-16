@@ -21,7 +21,7 @@ export default function NetworkFirewallPage() {
   }, [handoff])
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <FirewallPanel
         status={firewall}
         loading={firewallLoading}

@@ -44,7 +44,7 @@ import {
   type NATRequest,
 } from "@/components/network/gateway/reading"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Every NAT entry as a lit card: the network and where it leaves over how,
@@ -70,7 +70,7 @@ export function NATList({
 }) {
   const { confirm, dialog } = useConfirm()
   const { can } = useAuth()
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const [busy, setBusy] = useState<number>()
   const label = (n: GatewayNAT) => `${n.source} out through ${n.interface}`
   const toggle = (n: GatewayNAT, enabled: boolean) => {

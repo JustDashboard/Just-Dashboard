@@ -89,7 +89,7 @@ function WayOut({ id }: { id: NetworkEgressIdentity }) {
             label={identityVerdict(id)}
             className="text-hint"
           />
-          <span aria-hidden className="text-muted-foreground/40">
+          <span aria-hidden className="text-faint">
             ·
           </span>
           {id.forwardingError ? (

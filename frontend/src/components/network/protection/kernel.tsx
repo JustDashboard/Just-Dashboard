@@ -325,7 +325,7 @@ function SettingRow({
       {edited && (
         <span
           aria-hidden
-          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-[var(--git-modified)]"
+          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
         />
       )}
       <div className="min-w-0 space-y-0.5">
