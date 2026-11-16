@@ -233,7 +233,7 @@ test("a landing page that is the list keeps the items it lists", () => {
   expect(lit(panelOf("/deploy"), "/deploy/new")).toEqual(["Projects"])
   expect(lit(panelOf("/deploy"), "/deploy/12/logs")).toEqual(["Projects"])
   expect(lit(panelOf("/deploy"), "/deploy/templates")).toEqual(["Templates"])
-  expect(lit(panelOf("/databases"), "/databases/3/query")).toEqual(["Control center"])
+  expect(lit(panelOf("/databases"), "/databases/3/query")).toEqual(["Databases"])
   expect(lit(panelOf("/databases"), "/databases/map")).toEqual(["Map"])
 })
 

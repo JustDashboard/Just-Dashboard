@@ -1,9 +1,9 @@
 "use client"
 
 import { useId, useState } from "react"
-import { Copy, Key, RefreshClockwise, Sparkles } from "@/components/icons"
+import { Key, Sparkles } from "@/components/icons"
 import { errorMessage, post } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
+import { generatePassword } from "@/lib/password"
 import type { DbConnection } from "@/lib/types"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import {
@@ -16,16 +16,13 @@ import {
   OptionRow,
 } from "@/components/form"
 import { Modal } from "@/components/modal"
+import { SecretField } from "@/components/secret-field"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { Engine } from "@/components/database/engine"
 import { instanceWhere } from "@/components/database/connect/inventory"
-import {
-  ACCOUNT_NAME,
-  CONNECTION_NAME,
-  generatePassword,
-} from "@/components/database/connect/rules"
+import { ACCOUNT_NAME, CONNECTION_NAME } from "@/components/database/connect/rules"
 import type {
   DbHostConnectRequest,
   DbHostGrantRequest,
@@ -263,40 +260,13 @@ export function FoundConnectDialog({
               </Field>
               {databaseField("account-database")}
             </FieldRow>
-            <Field
+            <SecretField
+              id={`${id}-account-password`}
               label="Its password"
-              htmlFor={`${id}-account-password`}
               hint="Kept sealed with the connection, where Connect can show it again."
-              trailing={
-                <>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => setAccountPassword(generatePassword())}
-                  >
-                    <RefreshClockwise />
-                    Generate
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => void copyText(accountPassword, "Password copied")}
-                  >
-                    <Copy />
-                    Copy
-                  </Button>
-                </>
-              }
-            >
-              <Input
-                id={`${id}-account-password`}
-                value={accountPassword}
-                onChange={(event) => setAccountPassword(event.target.value)}
-                className="font-mono"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </Field>
+              value={accountPassword}
+              onChange={setAccountPassword}
+            />
             <OptionList>
               <OptionRow
                 title="Make it an administrator of the whole server, so accounts, databases and extensions can be managed from here"

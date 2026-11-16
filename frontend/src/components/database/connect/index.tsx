@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, Linked, MagnifyingGlass, Play, type Icon } from "@/components/icons"
+import { Linked, MagnifyingGlass, Play, type Icon } from "@/components/icons"
 import { FlowHeader, FlowSteps } from "@/components/flow"
 import { Page } from "@/components/page"
 import { ProductLogos } from "@/components/product-logo"
@@ -46,14 +46,8 @@ const STEPS: Record<AddMode, { key: string; label: string }[]> = {
   ],
 }
 
-const Eyebrow = (
-  <Link
-    href={DATABASES_HREF}
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Databases
-  </Link>
-)
+/** The way back, to the list this page adds to. */
+const BACK = { href: DATABASES_HREF, label: "Databases" }
 
 /**
  * Add a database: start one in a container, connect one that already runs
@@ -82,8 +76,8 @@ export function AddDatabase() {
 
   if (!admin) {
     return (
-      <Page register="flow" className="animate-rise">
-        <FlowHeader eyebrow={Eyebrow} question="Where is the database?" />
+      <Page rise register="flow">
+        <FlowHeader back={BACK} question="Where is the database?" />
         <EmptyState
           mark={<ProductLogos ids={["postgres", "mysql", "redis"]} size="md" />}
           title="Adding a database needs an administrator"
@@ -99,9 +93,9 @@ export function AddDatabase() {
   }
 
   return (
-    <Page register="flow" fill="xl" className="animate-rise">
+    <Page rise register="flow" fill="xl">
       <FlowHeader
-        eyebrow={Eyebrow}
+        back={BACK}
         question="Where is the database?"
         steps={<FlowSteps steps={STEPS[mode]} current={step} />}
       />

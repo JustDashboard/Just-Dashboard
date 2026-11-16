@@ -3,7 +3,8 @@
 import Link from "next/link"
 import { LANES, hueFor } from "@/lib/hue"
 import { cn } from "@/lib/utils"
-import { HostFact, HostIdentity } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { HostIdentity } from "@/components/identity-header"
 import { Button } from "@/components/ui/button"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { EngineMark } from "@/components/database/kit/engine-mark"
@@ -44,19 +45,15 @@ import { supportFact } from "@/components/database/support"
  * database's contents waits: there is nothing behind it to open.
  */
 export function DatabaseHeader({ className }: { className?: string }) {
-  const { conn, summary, engine, status, readOnly, href } = useDatabase()
+  const { conn, summary, engine, status, readOnly } = useDatabase()
   const change = usePowerChange(conn.id)
-  const running = status.state === "running"
-  const data = engine.section("data")
   const where = runsAs(summary)
   const facts = connectionFacts(conn, engine, summary)
-  const verb = engine.kind === "keyvalue" ? "Browse" : "Open"
-  const openLabel = data ? `${verb} ${data.title.toLowerCase()}` : undefined
-  const open = data && (
-    <>
-      <data.icon />
-      {verb} {data.title.toLowerCase()}
-    </>
+  const eol = summary?.endOfLife
+  const support = eol && (
+    <Fact key="support" className={cn(eol.past && "text-warning")}>
+      {supportFact(eol)}
+    </Fact>
   )
 
   return (
@@ -88,7 +85,7 @@ export function DatabaseHeader({ className }: { className?: string }) {
           ) : (
             <DatabaseStatusMark status={status} />
           )}
-          {running && !change && Boolean(status.latencyMs) && (
+          {status.state === "running" && !change && Boolean(status.latencyMs) && (
             <span className="numeric text-hint text-muted-foreground">
               answers in {status.latencyMs} ms
             </span>
@@ -99,35 +96,30 @@ export function DatabaseHeader({ className }: { className?: string }) {
       }
       facts={
         <>
+          {/* A release past its end of life is the one fact here that asks
+              for something, so it leads the line, in the warning ink: on a
+              phone the line is one row and what does not fit is cut. */}
+          {eol?.past && support}
           {facts.map((fact) => [
-            <span
+            <Fact
               key={fact.key}
               title={fact.title}
-              className={cn(
-                "max-w-full min-w-0 truncate",
-                fact.mono && "font-mono",
-                fact.key === "engine" && "text-foreground",
-              )}
+              mono={fact.mono}
+              className={cn(fact.key === "engine" && "text-foreground")}
             >
               {fact.text}
-            </span>,
+            </Fact>,
             // Said of the version, beside it, as a fact: no colour, no
             // badge, nothing to press.
-            fact.key === "engine" && summary?.endOfLife && (
-              <span key="support" className="max-w-full min-w-0 truncate">
-                {supportFact(summary.endOfLife)}
-              </span>
-            ),
+            fact.key === "engine" && !eol?.past && support,
             fact.key === "engine" && where && (
-              <HostFact key="where" product={where.product}>
-                <span title={where.title} className={cn(where.mono && "font-mono")}>
-                  {where.text}
-                </span>
-              </HostFact>
+              <Fact key="where" product={where.product} mono={where.mono} title={where.title}>
+                {where.text}
+              </Fact>
             ),
           ])}
           {conn.user && (
-            <span className="max-w-full min-w-0 truncate">
+            <Fact key="user">
               as{" "}
               {/* An account's name keeps one colour wherever the section
                   prints it (§14): here, among the server's databases'
@@ -138,30 +130,53 @@ export function DatabaseHeader({ className }: { className?: string }) {
               >
                 {conn.user}
               </span>
-            </span>
+            </Fact>
           )}
         </>
       }
       command={
         <>
-          {running &&
-            data &&
-            (change ? (
-              <Button size="sm" disabled aria-label={openLabel}>
-                {open}
-              </Button>
-            ) : (
-              <Button size="sm" asChild>
-                <Link href={href("data")} aria-label={openLabel}>
-                  {open}
-                </Link>
-              </Button>
-            ))}
+          <OpenContents />
           <ConnectPopover />
         </>
       }
       menu={<DatabaseVerbs />}
     />
+  )
+}
+
+/**
+ * The header's one command: what the database holds, opened, in the engine's
+ * own word ("Open data", "Browse keys"). Drawn while the server runs, and held
+ * while a start or a stop is under way: there is nothing behind it to open.
+ * `compact` is the item pages' strip: an outline button, because the item's
+ * own line under it holds the page's one brand-faced command, and the glyph
+ * alone on a phone.
+ */
+export function OpenContents({ compact }: { compact?: boolean }) {
+  const { conn, engine, status, href } = useDatabase()
+  const change = usePowerChange(conn.id)
+  const data = engine.section("data")
+  if (status.state !== "running" || !data) return null
+  const verb = engine.kind === "keyvalue" ? "Browse" : "Open"
+  const label = `${verb} ${data.title.toLowerCase()}`
+  const face = (
+    <>
+      <data.icon />
+      <span className={cn(compact && "max-sm:sr-only")}>{label}</span>
+    </>
+  )
+  const variant = compact ? "outline" : "default"
+  return change ? (
+    <Button size="sm" variant={variant} disabled aria-label={label}>
+      {face}
+    </Button>
+  ) : (
+    <Button size="sm" variant={variant} asChild>
+      <Link href={href("data")} aria-label={label}>
+        {face}
+      </Link>
+    </Button>
   )
 }
 

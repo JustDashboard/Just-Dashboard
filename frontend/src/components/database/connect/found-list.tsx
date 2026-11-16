@@ -2,20 +2,20 @@
 
 import { useState, type ReactNode } from "react"
 import { Eye, EyeOff, Slash } from "@/components/icons"
-import { bytes, relativeTime } from "@/lib/format"
+import { bytes, plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
-import { Disclosure } from "@/components/form"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
+import { Disclosure, InfoTip } from "@/components/form"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
-import { DimActions, IconAction } from "@/components/icon-action"
 import { DockerMissing } from "@/components/docker/unreachable-state"
 import { MissingThing } from "@/components/missing-thing"
-import { EmptyNote } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbMenu } from "@/components/verbs"
 import { engineOf } from "@/components/database/engine"
 import {
   asSentence,
@@ -32,7 +32,6 @@ import {
   type WaitingServer,
 } from "@/components/database/connect/inventory"
 import type { Found } from "@/components/database/connect/use-found"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import type { DbInstance } from "@/components/database/fleet/types"
 import type { InventoryData } from "@/components/database/fleet/use-fleet"
 import { EngineMark } from "@/components/database/kit"
@@ -92,23 +91,25 @@ export function FoundList({
     if (inventory.error) {
       return (
         <div className="min-w-0 space-y-5">
-          <ReadFailed error={inventory.error} onRetry={inventory.refresh} every="30 seconds" />
+          <ErrorState
+            error={inventory.error}
+            onRetry={inventory.refresh}
+            retryable
+            every="30 seconds"
+          />
           {waiting && waiting.length > 0 && <Reported waiting={waiting} found={found} />}
         </div>
       )
     }
     return (
-      <div className="space-y-2" role="status" aria-label="Looking at this server">
-        {[0, 1, 2].map((row) => (
-          <Skeleton key={row} className="h-14 w-full rounded-xl" />
-        ))}
+      <div role="status" aria-label="Looking at this server">
+        <ChoiceListSkeleton rows={3} lines={2} />
       </div>
     )
   }
 
   const shelves = foundShelves(data)
   const silences = scanSilences(data.scans)
-  const notes = scanNotes(data.scans)
   const servers = [...shelves.servers].sort(
     (a, b) => Number(b.key === first) - Number(a.key === first),
   )
@@ -147,17 +148,6 @@ export function FoundList({
           )}
         </div>
       ))}
-
-      {(notes.length > 0 || inventory.scanning) && (
-        <div className="space-y-1 text-hint leading-relaxed text-muted-foreground">
-          {inventory.scanning && (
-            <TextShimmer>Scanning this server for database files…</TextShimmer>
-          )}
-          {notes.map((note) => (
-            <p key={note}>{asSentence(note)}</p>
-          ))}
-        </div>
-      )}
 
       {/* Said only of a reading that looked everywhere: with a collector
           silent, "everything is connected" is more than the page knows. */}
@@ -202,6 +192,37 @@ export function FoundList({
   )
 }
 
+/**
+ * What the scan says of itself, for the title line of the list it heads: that
+ * it is still looking, and what it left out ("2 directories are outside the
+ * file roots") behind an (i). They were sentences over the list, which came
+ * and went with the scan and moved every row under them.
+ */
+export function ScanNotes({
+  inventory,
+  scanning = true,
+}: {
+  inventory: InventoryData
+  /** Say that a scan is under way; off where a pending Scan again already says it. */
+  scanning?: boolean
+}) {
+  const notes = inventory.data ? scanNotes(inventory.data.scans) : []
+  return (
+    <>
+      {scanning && inventory.scanning && (
+        <TextShimmer className="text-hint">Scanning for files…</TextShimmer>
+      )}
+      {notes.length > 0 && (
+        <InfoTip label="What the scan left out">
+          {notes.map((note) => (
+            <p key={note}>{asSentence(note)}</p>
+          ))}
+        </InfoTip>
+      )}
+    </>
+  )
+}
+
 /** The groups of what is set aside, in the order the fold lists them. */
 const ASIDE = [
   {
@@ -212,7 +233,7 @@ const ASIDE = [
   {
     key: "backups",
     label: "Backups and copies",
-    fact: (n: number) => `${n} ${n === 1 ? "copy" : "copies"}`,
+    fact: (n: number) => plural(n, "copy", "copies"),
   },
   { key: "leftover", label: "No server", fact: (n: number) => `${n} without a server` },
   { key: "ignored", label: "Ignored", fact: (n: number) => `${n} ignored` },
@@ -372,19 +393,29 @@ function Reported({ waiting, found }: { waiting: WaitingServer[]; found: Found }
                   </span>
                 </>
               }
+              // Why it waits shares the second line with its address, as on
+              // every found row: under the row it made this one taller.
               description={
-                host ? <span className="font-mono">{`${host.host}:${host.port}`}</span> : undefined
+                <span className="flex min-w-0 items-baseline gap-1.5">
+                  {host && (
+                    <span className="max-w-[45%] shrink-0 truncate font-mono">{`${host.host}:${host.port}`}</span>
+                  )}
+                  {host && server.reason && <span aria-hidden>·</span>}
+                  {server.reason && (
+                    <span title={server.reason} className="min-w-0 flex-1 truncate">
+                      {server.reason}
+                    </span>
+                  )}
+                </span>
               }
               trailing={
-                host && <span className="text-xs font-medium whitespace-nowrap">Connect</span>
+                host && (
+                  <span className="text-xs font-medium whitespace-nowrap max-sm:hidden">
+                    Connect
+                  </span>
+                )
               }
-            >
-              {server.reason && (
-                <p className="pl-11 text-hint leading-relaxed text-muted-foreground">
-                  {server.reason}
-                </p>
-              )}
-            </ChoiceRow>
+            />
           )
         })}
       </ChoiceList>
@@ -415,8 +446,9 @@ function FoundRow({
   // answered the last time everything was tried, the password nothing here
   // states, or why it cannot be connected at all. One that only needs its
   // press has nothing to explain. It shares the second line with where the
-  // thing is, so every row is the same two lines; a failure just now is the
-  // exception, and is said in full under the row until it is tried again.
+  // thing is, so every row is the same two lines. A failure just now is the
+  // row's state, "Failed", with what the server said behind it: said in full
+  // under the row, it grew the row and moved the list under it.
   const wantsPassword = action.kind === "connect" && Boolean(refusal?.includes("connect it with"))
   // A MongoDB this kernel keeps from starting is said as that, not as the
   // dial it refuses.
@@ -450,6 +482,15 @@ function FoundRow({
       }
       description={
         <span className="flex min-w-0 items-baseline gap-1.5">
+          {/* On a phone the state has no column of its own: it leads the
+              second line, so a stopped server and a running one differ by
+              more than the verb. */}
+          {!file && !failure && !busy && (
+            <span className="flex shrink-0 items-baseline gap-1.5 sm:hidden">
+              <Status state={instance.state} label={instanceState(instance)} />
+              <span aria-hidden>·</span>
+            </span>
+          )}
           {instance.kind === "file" ? (
             <FolderOf path={where.text} className={why ? "max-w-[45%] shrink-0" : undefined} />
           ) : (
@@ -477,6 +518,8 @@ function FoundRow({
           )}
           {busy ? (
             <TextShimmer className="text-xs font-medium">{`${busy}…`}</TextShimmer>
+          ) : failure ? (
+            <Failed name={name} message={failure} />
           ) : file ? (
             <span className="numeric text-hint whitespace-nowrap text-muted-foreground max-sm:hidden">
               {/* A data directory is not measured: its size would read 0 B. */}
@@ -493,31 +536,70 @@ function FoundRow({
           )}
           {words.word && !busy && (
             // One width for every verb, so the readings beside them line up
-            // down the list instead of stepping with the word's length.
-            <span className="w-24 text-right text-xs font-medium whitespace-nowrap max-sm:w-auto">
+            // down the list instead of stepping with the word's length. On a
+            // phone the arrow is the verb: the row is the control, and the
+            // word took the room the name needed.
+            <span className="w-24 text-right text-xs font-medium whitespace-nowrap max-sm:hidden">
               {words.word}
             </span>
           )}
         </span>
       }
+      // Ignore is a word in the row's menu: as an eye on its own it was named
+      // only for a screen reader, and took the room of the name on a phone.
       actions={
         !instance.self && (
-          <DimActions>
-            <IconAction
-              label={instance.ignored ? `Stop ignoring ${name}` : `Ignore ${name}`}
-              disabled={Boolean(busy)}
-              onClick={() => void found.ignore(instance.key, !instance.ignored)}
-            >
-              {instance.ignored ? <Eye /> : <EyeOff />}
-            </IconAction>
-          </DimActions>
+          <VerbMenu
+            label={`Actions for ${name}`}
+            verbs={[
+              instance.ignored
+                ? {
+                    key: "unignore",
+                    label: "Stop ignoring",
+                    icon: Eye,
+                    disabled: Boolean(busy),
+                    run: () => void found.ignore(instance.key, false),
+                  }
+                : {
+                    key: "ignore",
+                    label: "Ignore",
+                    icon: EyeOff,
+                    disabled: Boolean(busy),
+                    run: () => void found.ignore(instance.key, true),
+                  },
+            ]}
+          />
         )
       }
-    >
-      {failure && (
-        <p className="pl-11 text-hint leading-relaxed break-words text-destructive">{failure}</p>
-      )}
-    </ChoiceRow>
+    />
+  )
+}
+
+/**
+ * A connect that failed just now, as the row's state: "Failed" in the danger
+ * ink where the state word stands, and what the server said in a popover off
+ * it. The row keeps its height; pressing the row tries again.
+ */
+function Failed({ name, message }: { name: string; message: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          size="xs"
+          variant="ghost"
+          aria-label={`Why ${name} did not connect`}
+          className="-mx-1.5"
+        >
+          <Status tone="danger" label="Failed" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 space-y-1.5">
+        <p className="text-body font-medium">{name} did not connect</p>
+        <p data-slot="found-failure" className="text-hint leading-relaxed break-words">
+          {message}
+        </p>
+      </PopoverContent>
+    </Popover>
   )
 }
 

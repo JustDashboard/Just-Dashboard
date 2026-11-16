@@ -13,7 +13,7 @@ import {
   shares,
   type BackupStanding,
 } from "@/components/database/fleet/band"
-import { sessionsWord } from "@/components/database/fleet/fleet-card"
+import { nounFor, sessionNouns } from "@/components/database/fleet/fleet"
 import { EngineGlyph } from "@/components/database/kit"
 
 /** How many databases a block names; the rest are counted at its strip's end. */
@@ -188,7 +188,7 @@ function SessionsBlock({
       }
       parts={read.top.map(({ entry, value }) => {
         const engine = engineOf(entry)
-        const word = sessionsWord(engine).toLowerCase()
+        const word = nounFor(value, sessionNouns(engine.kind))
         // The readers drawn as their products; a reader nothing names (another
         // machine, this server's processes) has no mark.
         const marks = (feeds.get(entry.id)?.products ?? []).filter(hasProductLogo)

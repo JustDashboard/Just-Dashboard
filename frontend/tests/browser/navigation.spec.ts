@@ -412,7 +412,7 @@ const ITEM_PAGES: [path: string, row: string][] = [
   ["/security/intrusion/jails/sshd", "Intrusion"],
   ["/network/dns/services/unbound", "DNS"],
   ["/proxy/sites/app.example.com", "Sites"],
-  ["/databases/3/access/app", "Control center"],
+  ["/databases/3/access/app", "Databases"],
 ]
 
 test("an item's page lights the row it was opened from, and only that row", async ({ page }) => {
