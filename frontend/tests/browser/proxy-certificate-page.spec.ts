@@ -229,7 +229,9 @@ for (const width of [1280, 390]) {
     expect(after?.y).toBe(before?.y)
     expect(after?.height).toBe(before?.height)
     // The verbs are the line's, not the back-link row's.
-    await expect(identity.getByRole("button", { name: "More actions for app.example.com" })).toBeVisible()
+    await expect(
+      identity.getByRole("button", { name: "More actions for app.example.com" }),
+    ).toBeVisible()
   })
 }
 
