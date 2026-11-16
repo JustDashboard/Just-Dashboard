@@ -20,7 +20,6 @@ import { plural } from "@/lib/format"
 import type { PortsFirewall, PortsMeta, SeenListener } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/hooks/use-now"
@@ -110,6 +109,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { saveText } from "@/lib/download"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** The firewall's verdicts are read at the list's own cadence. */
 const POLL_MS = 15_000
@@ -219,7 +219,7 @@ function PortsView() {
   const [hideEphemeral, setHideEphemeral] = useViewState(PORTS_VIEW_KEYS.hideEphemeral, false)
   const [onlyNew, setOnlyNew] = useSessionState(PORTS_VIEW_KEYS.onlyNew, false)
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
 
   // The section's own read of the list, which the overview and the rail
   // answer from too: the page asking again on a timer of its own was a
@@ -432,7 +432,7 @@ function PortsView() {
   })()
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {header}
 
       <Identity
@@ -840,7 +840,7 @@ function PortsView() {
           </span>
           {hidden > 0 && range && (
             <>
-              <span className="text-muted-foreground/40">·</span>
+              <span className="text-faint">·</span>
               <span className="numeric">
                 {hidden} on loopback ports {range.low}–{range.high} hidden
               </span>

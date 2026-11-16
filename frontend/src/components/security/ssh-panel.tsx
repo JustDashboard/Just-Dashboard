@@ -332,7 +332,7 @@ export function SSHPanel() {
           <span className="flex items-baseline gap-2">
             sshd
             <span className="numeric font-mono text-body font-normal text-muted-foreground">
-              port <span className="text-[var(--tag-pink)]">{data.ports.join(", ") || "22"}</span>
+              port <span className="text-tag-pink">{data.ports.join(", ") || "22"}</span>
             </span>
           </span>
         }
@@ -824,7 +824,7 @@ function SettingRow({
       {changed && (
         <span
           aria-hidden
-          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-[var(--git-modified)]"
+          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
         />
       )}
       <div className="min-w-0 space-y-0.5">

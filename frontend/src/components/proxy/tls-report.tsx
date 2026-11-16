@@ -339,7 +339,7 @@ function TLSReport() {
   const offeredSites = tlsSiteNames(sites.data)
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Proxy" title="TLS report" />
       <HostIdentity
         // The view strip under the line draws the rule: the line's own under

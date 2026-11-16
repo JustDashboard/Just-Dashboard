@@ -162,7 +162,7 @@ export function CertificatesPage() {
   }
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Proxy" title="Certificates" />
       <CertificatesIdentity />
       <CertificateRun />

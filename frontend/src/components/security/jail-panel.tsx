@@ -232,7 +232,7 @@ export function JailPolicySection({ policy }: { policy: PollState<JailPolicy> })
                 {finding.text}
               </Notice>
             ))}
-            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-2.5 text-body">
+            <dl className="grid grid-cols-start-main gap-x-6 gap-y-2.5 text-body">
               <dt className="text-muted-foreground">Rule</dt>
               <dd className="min-w-0 font-medium">{data.rule}.</dd>
               <dt className="text-muted-foreground">Reads</dt>
@@ -462,7 +462,7 @@ export function JailTuning({
             {data?.ignoreIp.map((ip) => (
               <Tag key={ip} mono>
                 {ip}
-                {ip === clientIp && <span className="text-muted-foreground/70">(you)</span>}
+                {ip === clientIp && <span className="text-faint">(you)</span>}
                 <button
                   type="button"
                   aria-label={`Stop allowlisting ${ip}`}

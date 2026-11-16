@@ -163,7 +163,7 @@ export function JailPage() {
   ]
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <div className="flex min-w-0 gap-6">
         <JailRail jails={jails} current={name} loading={status.loading && !status.data} />
         <div className="flex min-w-0 flex-1 flex-col gap-6 md:gap-8">

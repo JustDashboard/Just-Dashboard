@@ -333,7 +333,7 @@ export function PortChanges({
           </span>
           {history.truncated && (
             <>
-              <span className="text-muted-foreground/40">·</span>
+              <span className="text-faint">·</span>
               <span>
                 Only the newest {plural(history.events.length, "event")} of the{" "}
                 {WINDOW_WORDS[hours]} are listed

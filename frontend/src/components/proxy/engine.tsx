@@ -265,7 +265,7 @@ export function EngineIdentity({
           {status.ingressContainer && (
             <>
               <HostFact product="docker">
-                ingress <span className="font-mono text-[0.9em]">{status.ingressContainer}</span>
+                ingress <span className="code-inline">{status.ingressContainer}</span>
               </HostFact>
               <FactDot />
             </>

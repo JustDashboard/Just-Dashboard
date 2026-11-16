@@ -194,7 +194,7 @@ function ConfigurationPage() {
 
   if (!nginx) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         {header}
         {status.caddy ? (
           <OverviewEmpty

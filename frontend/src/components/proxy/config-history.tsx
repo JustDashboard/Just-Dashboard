@@ -439,7 +439,7 @@ function RestoreDialog({
         <RevisionDiff
           diff={diff}
           empty="The file on disk already holds this revision."
-          className="h-[45vh]"
+          className="h-[45svh]"
         />
         {refused && (
           <div className="space-y-2">

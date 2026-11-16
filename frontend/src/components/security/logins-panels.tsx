@@ -700,7 +700,7 @@ function RecordTable({ records, failed }: { records: LoginRecord[]; failed: bool
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
       <Table containerClassName="max-h-[30rem] max-sm:hidden">
-        <TableHeader className="sticky top-0 z-10 [&_tr]:border-b">
+        <TableHeader className="sticky top-0 z-raised [&_tr]:border-b">
           <TableRow>
             <TableHead>Account</TableHead>
             <TableHead>Terminal</TableHead>
