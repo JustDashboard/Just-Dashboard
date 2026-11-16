@@ -1804,7 +1804,7 @@ test.describe("keys", () => {
     await page.goto(`${KEYS}?key=user%3A2%3Aprofile`)
     // The fact is said inline, "Idle when opened 38m 3s": its label and value
     // are one FormFact.
-    const idle = pane(page).getByText("Idle when opened", { exact: true }).locator("..")
+    const idle = pane(page).getByText("idle when opened", { exact: true }).locator("..")
     await expect(idle).toContainText("38m")
     await pane(page).getByRole("button", { name: "Refresh", exact: true }).click()
     await expect(pane(page).getByRole("heading", { name: "user:2:profile" })).toBeVisible()

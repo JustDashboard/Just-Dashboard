@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Copy, Eye, Minus, Plus, Trash } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { duration, plural, timestamp } from "@/lib/format"
+import { duration, grouped, plural, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
@@ -12,7 +12,8 @@ import { Segments } from "@/components/segments"
 import { Disclosure, Field, FormFact, FormNote } from "@/components/form"
 import { IconAction, RowActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
-import { Detail, DetailList, Metric, MetricStrip } from "@/components/detail-list"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Fact, FactLine } from "@/components/fact-line"
 import { EmptyNote, EmptyState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { tabClasses } from "@/components/tabs"
@@ -649,20 +650,26 @@ function Groups({
           <LoadingRows rows={4} className="p-3" />
         ) : (
           <div className="space-y-5 p-3">
-            <MetricStrip>
-              <Metric label="Entries" value={stream.length.toLocaleString()} />
-              {stream.entriesAdded !== undefined && (
-                <Metric label="Ever added" value={stream.entriesAdded.toLocaleString()} />
-              )}
-              <Metric
-                label="First entry"
-                value={<span className="font-mono text-xs">{stream.firstId ?? "—"}</span>}
-              />
-              <Metric
-                label="Last entry"
-                value={<span className="font-mono text-xs">{stream.lastId ?? "—"}</span>}
-              />
-            </MetricStrip>
+            <p className="min-w-0 text-body text-muted-foreground">
+              <FactLine>
+                <Fact>
+                  <span className="numeric text-foreground">
+                    {plural(stream.length, "entry", "entries")}
+                  </span>
+                </Fact>
+                {stream.entriesAdded !== undefined && (
+                  <Fact>
+                    <span className="numeric text-foreground">{grouped(stream.entriesAdded)}</span>{" "}
+                    ever added
+                  </Fact>
+                )}
+                <Fact title="First and last entry">
+                  <span className="font-mono text-xs text-foreground">{stream.firstId ?? "—"}</span>{" "}
+                  to{" "}
+                  <span className="font-mono text-xs text-foreground">{stream.lastId ?? "—"}</span>
+                </Fact>
+              </FactLine>
+            </p>
             {stream.groups.length === 0 ? (
               <EmptyState
                 title="No consumer group reads this stream"
@@ -711,17 +718,31 @@ function Groups({
                         <VerbActions verbs={verbs} menuLabel={`Actions for group ${label}`} />
                       )}
                     </div>
-                    <MetricStrip>
-                      <Metric
-                        label="Read up to"
-                        value={<span className="font-mono text-xs">{group.lastDeliveredId}</span>}
-                      />
-                      <Metric label="Pending" value={group.pending.toLocaleString()} />
-                      {group.lag !== undefined && (
-                        <Metric label="Not yet read" value={group.lag.toLocaleString()} />
-                      )}
-                      <Metric label="Consumers" value={group.consumers.length.toLocaleString()} />
-                    </MetricStrip>
+                    <p className="min-w-0 text-body text-muted-foreground">
+                      <FactLine>
+                        <Fact>
+                          read up to{" "}
+                          <span className="font-mono text-xs text-foreground">
+                            {group.lastDeliveredId}
+                          </span>
+                        </Fact>
+                        <Fact>
+                          <span className="numeric text-foreground">{grouped(group.pending)}</span>{" "}
+                          pending
+                        </Fact>
+                        {group.lag !== undefined && (
+                          <Fact>
+                            <span className="numeric text-foreground">{grouped(group.lag)}</span>{" "}
+                            not yet read
+                          </Fact>
+                        )}
+                        <Fact>
+                          <span className="numeric text-foreground">
+                            {plural(group.consumers.length, "consumer")}
+                          </span>
+                        </Fact>
+                      </FactLine>
+                    </p>
                     {group.consumers.length > 0 && (
                       <Table>
                         <TableHeader>
