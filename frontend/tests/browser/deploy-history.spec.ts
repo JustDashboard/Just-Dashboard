@@ -96,11 +96,26 @@ for (const width of [390, 1280, 1720]) {
       .poll(() => scroller.evaluate((element) => element.scrollTop))
       .toBeCloseTo(scrollTop, 0)
 
-    const cancelled = history.getByRole("button", { name: /^Cancelled/ })
-    await cancelled.focus()
-    await cancelled.press("Enter")
-    await expect(cancelled).toHaveAttribute("aria-pressed", "true")
-    await expect(cancelled).toBeFocused()
+    // The fleet's rule: a state nothing is in gets no chip, and nothing here
+    // was cancelled.
+    await expect(history.getByRole("button", { name: /^Cancelled/ })).toHaveCount(0)
+
+    // A chip pressed from the keyboard keeps the focus.
+    const failed = history.getByRole("button", { name: /^Failed/ })
+    await failed.focus()
+    await failed.press("Enter")
+    await expect(failed).toHaveAttribute("aria-pressed", "true")
+    await expect(failed).toBeFocused()
+    await expect(history.getByRole("listitem")).toHaveCount(1)
+    await expect
+      .poll(() => scroller.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(scrollTop, 0)
+
+    // The chosen chip stays when an environment leaves nothing in it, and the
+    // list says nothing matches, with the way back.
+    await history.getByRole("combobox", { name: "Environment", exact: true }).click()
+    await page.getByRole("option", { name: "Environment 13", exact: true }).click()
+    await expect(failed).toHaveAttribute("aria-pressed", "true")
     await expect(history.getByText("No deployments match", { exact: true })).toBeVisible()
     await expect(history.getByRole("listitem")).toHaveCount(0)
     await expect
@@ -108,10 +123,6 @@ for (const width of [390, 1280, 1720]) {
       .toBeCloseTo(scrollTop, 0)
     await history.getByRole("button", { name: "Clear filters", exact: true }).click()
     await expect(all).toHaveAttribute("aria-pressed", "true")
-    await expect(history.getByRole("listitem")).toHaveCount(24)
-
-    await history.getByRole("combobox", { name: "Environment", exact: true }).click()
-    await page.getByRole("option", { name: "Environment 13", exact: true }).click()
     await expect(all).toHaveText(/All\s*1/)
     await expect(history.getByRole("listitem")).toHaveCount(1)
     await expect
