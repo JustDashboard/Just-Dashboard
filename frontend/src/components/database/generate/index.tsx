@@ -327,7 +327,7 @@ export function Generate() {
                     </span>
                     {/* "Prisma" over "prisma" says the name twice: the tag is for a
                         language other than the generator's own name. */}
-                    {entry.language?.toLowerCase() !== entry.label.toLowerCase() && (
+                    {!sameWord(entry.language, entry.label) && (
                       <Tag className="max-w-full">
                         <LanguageMark language={entry.language} />
                       </Tag>
@@ -410,9 +410,11 @@ export function Generate() {
               title={
                 <span className="flex min-w-0 items-center gap-2.5">
                   <span className="min-w-0 truncate">{target.label}</span>
-                  <Tag className="shrink-0">
-                    <LanguageMark language={target.language} />
-                  </Tag>
+                  {!sameWord(target.language, target.label) && (
+                    <Tag className="shrink-0">
+                      <LanguageMark language={target.language} />
+                    </Tag>
+                  )}
                   {/* What it writes, and that it only reads: it was a
                       paragraph in the files' place before anything was
                       written, where it stood between the reader and Generate. */}
@@ -889,4 +891,9 @@ function GenerateSilhouette() {
       </div>
     </div>
   )
+}
+
+/** Whether a generator's language is its own name ("Prisma" over "prisma"): then the tag says it twice. */
+function sameWord(language: string | undefined, label: string): boolean {
+  return language?.toLowerCase() === label.toLowerCase()
 }
