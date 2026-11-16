@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useSessionState } from "@/lib/view-state"
 import {
-  ArrowRight,
   CheckCircle,
   Crosshair,
   CrossCircle,
@@ -29,7 +28,7 @@ import { PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { InitialsMark } from "@/components/user-avatar"
 import { Modal } from "@/components/modal"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { SectionLink } from "@/components/section-link"
 import { ReadingLines } from "@/components/reading-line"
 import { Row, RowList } from "@/components/row-list"
 import { SaveBarProvider } from "@/components/settings/save-bar"
@@ -391,7 +390,7 @@ export function SSHPanel() {
           <Button size="sm" asChild>
             <Link href="/system-users">
               <Key aria-hidden />
-              <span className="max-sm:sr-only">Add a key</span>
+              Add a key
             </Link>
           </Button>
         }
@@ -408,21 +407,17 @@ export function SSHPanel() {
       {/* The four facts an attacker cares about (the port, passwords, root
           and who holds a key) as the doors a login can take, before the
           settings that open and shut them. Drawn as a path they are read as
-          one answer, and they follow the draft. */}
-      <Panel plain>
-        <PanelHeader title="Ways in" />
-        <PanelBody>
-          <SSHPicture
-            config={data}
-            value={draft}
-            traffic={{
-              accepted: figure("accepted"),
-              failed: figure("failed"),
-              attackers: figure("attackers"),
-            }}
-          />
-        </PanelBody>
-      </Panel>
+          one answer, and they follow the draft. The page opens straight on
+          it, as its siblings open on theirs: no section head over it. */}
+      <SSHPicture
+        config={data}
+        value={draft}
+        traffic={{
+          accepted: figure("accepted"),
+          failed: figure("failed"),
+          attackers: figure("attackers"),
+        }}
+      />
 
       {/* What the last day made of those doors, from the auth log: each a
           press away from the lines it counts. Drawn while the log is still
@@ -472,12 +467,18 @@ export function SSHPanel() {
             const settings = general.filter((s) => sshGroup(s.key) === group.title && visible(s))
             if (settings.length === 0) return null
             return (
+              // The page's section anatomy: the title on the left, the count,
+              // the state and the filter on the right, over the hairline.
               <SettingSection
                 key={group.title}
                 title={group.title}
-                state={<span className="numeric">{plural(settings.length, "directive")}</span>}
                 status={settingStatus({ dirty: settings.some(changed) })}
-                actions={group.title === firstGroup ? onlyEdited || undefined : undefined}
+                actions={
+                  <>
+                    <SectionCount>{plural(settings.length, "directive")}</SectionCount>
+                    {group.title === firstGroup ? onlyEdited || undefined : undefined}
+                  </>
+                }
               >
                 <div className="divide-y divide-hairline">{settings.map(row)}</div>
               </SettingSection>
@@ -507,20 +508,15 @@ export function SSHPanel() {
           )}
           <SettingSection
             title="Accounts with an authorized key"
-            state={
-              <span className="numeric">
-                {noKeys
-                  ? "Every login depends on a password"
-                  : `${plural(data.keyedAccounts.length, "account")} · ${plural(keys, "key")}`}
-              </span>
-            }
             actions={
-              <Link
-                href="/system-users"
-                className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                Users <ArrowRight className="size-3" />
-              </Link>
+              <>
+                <SectionCount>
+                  {noKeys
+                    ? "Every login depends on a password"
+                    : `${plural(data.keyedAccounts.length, "account")} · ${plural(keys, "key")}`}
+                </SectionCount>
+                <SectionLink href="/system-users">Users</SectionLink>
+              </>
             }
           >
             {noKeys ? (
@@ -903,5 +899,14 @@ function SettingRow({
         </p>
       </div>
     </div>
+  )
+}
+
+/** A section's count at its title line's far end, as `PanelHeader count` draws one. */
+function SectionCount({ children }: { children: React.ReactNode }) {
+  return (
+    <span data-slot="panel-count" className="numeric mr-1 text-hint text-muted-foreground">
+      {children}
+    </span>
   )
 }

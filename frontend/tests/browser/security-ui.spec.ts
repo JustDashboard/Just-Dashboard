@@ -755,7 +755,7 @@ test("a jail's page bans an address by hand and the tuning offers the caller's o
     .poll(() => mutations.find((m) => m.path === "/fail2ban/sshd/ban")?.body)
     .toEqual({ ip: "192.0.2.200" })
 
-  await page.getByRole("button", { name: "Actions for sshd" }).click()
+  await page.getByRole("button", { name: "More actions for sshd" }).click()
   await page.getByRole("menuitem", { name: "Tune" }).click()
   await page.getByRole("button", { name: "Never ban my address" }).click()
   await expect

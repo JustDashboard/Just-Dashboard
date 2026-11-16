@@ -580,25 +580,28 @@ test("a jail is a page of its own: its line, what it holds and its policy", asyn
   await expect(policy).toContainText("blocks nothing")
   await expect(policy).toContainText("restart loads 3")
 
-  // What it holds, each address with its two verbs on its line.
+  // What it holds, each address with its verbs behind the one ⋯ at its end.
   const banned = page
     .getByRole("list", { name: "Banned addresses" })
     .locator("[data-slot=line-row]")
   await expect(banned).toHaveCount(2)
-  await page.getByRole("button", { name: "Unban 203.0.113.9" }).click()
+  await expect(banned.getByRole("button", { name: /^Unban / })).toHaveCount(0)
+  await page.getByRole("button", { name: "Actions for 203.0.113.9" }).click()
+  await page.getByRole("menuitem", { name: "Unban 203.0.113.9" }).click()
   await expect
     .poll(() => mutations.find((m) => m.path === "/fail2ban/sshd/unban")?.body)
     .toEqual({ ip: "203.0.113.9" })
-  await page.getByRole("button", { name: "Never ban 198.51.100.4 again" }).click()
+  await page.getByRole("button", { name: "Actions for 198.51.100.4" }).click()
+  await page.getByRole("menuitem", { name: "Never ban 198.51.100.4 again" }).click()
   await expect
     .poll(() => mutations.find((m) => m.path === "/fail2ban/sshd/ignore")?.body)
     .toEqual({ ip: "198.51.100.4", add: true })
 
   // The rest of its verbs are behind the line's menu.
-  await page.getByRole("button", { name: "Actions for sshd" }).click()
+  await page.getByRole("button", { name: "More actions for sshd" }).click()
   await page.getByRole("menuitem", { name: "Release every ban" }).click()
   await expect.poll(() => mutations.some((m) => m.path === "/fail2ban/sshd/unban-all")).toBe(true)
-  await page.getByRole("button", { name: "Actions for sshd" }).click()
+  await page.getByRole("button", { name: "More actions for sshd" }).click()
   await page.getByRole("menuitem", { name: "Tune" }).click()
   const tuning = page.getByRole("dialog", { name: "Tune sshd" })
   await expect(tuning.getByRole("textbox", { name: "Failures" })).toHaveValue("5")
@@ -986,7 +989,8 @@ test("a reader without the admin capability cannot ban, release or read Suricata
   await expect(page.getByRole("button", { name: "Ban an address" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Unban / })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Never ban / })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Actions for sshd" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "More actions for sshd" })).toHaveCount(0)
 })
 
 test("an administrator who may not destroy is not offered a release", async ({ page }) => {
