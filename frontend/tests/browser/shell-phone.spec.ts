@@ -326,12 +326,22 @@ test("the shell's controls are named by the words they show", async ({ page }) =
 })
 
 test.describe("Pause animations", () => {
-  /** Animations that have not finished, by name: what is still moving. */
+  /**
+   * What is moving, by name: every running animation or transition that takes
+   * longer than a frame from start to end. A paused page still starts them (a
+   * hover's colour, a state's class) and each is over in a hundredth of a
+   * millisecond, so "running" alone would count whatever a sample happened to
+   * catch in that instant; what must be absent is anything with time in it.
+   */
   const moving = (page: Page) =>
     page.evaluate(() =>
       document
         .getAnimations()
-        .filter((animation) => animation.playState === "running")
+        .filter((animation) => {
+          if (animation.playState !== "running") return false
+          const whole = Number(animation.effect?.getComputedTiming().activeDuration ?? 0)
+          return whole > 16
+        })
         .map((animation) =>
           animation instanceof CSSAnimation ? animation.animationName : "transition",
         ),
