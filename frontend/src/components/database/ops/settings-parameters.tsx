@@ -14,7 +14,7 @@ import { GroupRule } from "@/components/choice-row"
 import { Disclosure, FormNote, InfoTip, OptionList, OptionRow, Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/search-input"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
@@ -28,7 +28,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineGlyph } from "@/components/database/kit"
 import { isDown } from "@/components/database/ops/performance-parts"
@@ -437,7 +436,7 @@ export function ParametersSection() {
           </FormNote>
         ) : !data ? (
           list.error ? (
-            <CouldNotRead what={`the ${noun}s`} error={list.error} onRetry={list.refresh} />
+            <ErrorState what={`the ${noun}s`} error={list.error} onRetry={list.refresh} />
           ) : (
             <LoadingRows rows={6} />
           )

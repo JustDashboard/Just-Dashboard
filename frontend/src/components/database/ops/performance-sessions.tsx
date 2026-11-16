@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { Cross, StopCircle } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes, duration } from "@/lib/format"
+import { bytes, duration, plural } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll, type PollState } from "@/hooks/use-poll"
@@ -47,15 +47,14 @@ import {
 import { sessionHref } from "@/components/database/ops/performance-address"
 import { endSession, readChQueries } from "@/components/database/ops/performance-api"
 import {
+  FIT_COLUMN,
   Named,
   NoFigure,
   NotAvailable,
-  SessionState,
-  Stale,
-  StatementLine,
-  ViewRead,
-  useAsk,
   RETURNS_FOCUS,
+  SessionState,
+  StatementLine,
+  useAsk,
 } from "@/components/database/ops/performance-parts"
 import { sessionsFilterKey, sessionsIdleKey } from "@/components/database/ops/performance-lists"
 import { ClientTile, StateFigure, Who } from "@/components/database/ops/performance-session-parts"
@@ -67,6 +66,7 @@ import type {
   DbSessionStatus,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /**
  * How wide the view has to be for the sessions to be a table. Measured on
@@ -162,7 +162,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
           </>
         }
       />
-      <ViewRead poll={activity} what="the sessions" skeleton={<LoadingPanel plain rows={6} />}>
+      <Read patience poll={activity} what="the sessions" skeleton={<LoadingPanel plain rows={6} />}>
         {(data) => {
           if (!data.supported) {
             return (
@@ -216,14 +216,14 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
                 )}
               </div>
 
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {data.sessions.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     The server listed no session to this account. It lists the sessions an account
                     may see, and showing every account&apos;s takes a grant.
                   </EmptyNote>
                 ) : listed.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     {filter.trim()
                       ? `No session matches ${filter.trim()}.`
                       : state
@@ -242,8 +242,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
                   onOpenChange={setIdleOpen}
                   summary={
                     <>
-                      {idle.length.toLocaleString()} idle{" "}
-                      {idle.length === 1 ? "session" : "sessions"}
+                      {plural(idle.length, "idle session")}
                     </>
                   }
                   facts={
@@ -251,7 +250,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
                   }
                 >
                   {idleOpen && (
-                    <div className="-mx-4">
+                    <div className={FIT_COLUMN}>
                       <SessionRows sessions={idle} {...rowProps} continued />
                     </div>
                   )}
@@ -260,7 +259,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
             </div>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }
@@ -391,7 +390,7 @@ function SessionRows({
         {sessions.map((session) => (
           // Three lines in every state: what a session waits on stands
           // beside its state, and one with no statement keeps the line.
-          <li key={session.pid} data-list-row="session" className="space-y-1.5 px-4 py-2.5">
+          <li key={session.pid} data-list-row="session" className="space-y-1.5 py-2.5">
             <div className="flex h-6 min-w-0 items-center justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                 <SessionState status={statusOf(session)} late={Boolean(concernOf(session))} />
@@ -415,7 +414,7 @@ function SessionRows({
                 <Who session={session} />
               </span>
               {session.query ? (
-                <StatementLine text={session.query} className="text-hint text-foreground/80" />
+                <StatementLine text={session.query} className="text-hint text-muted-foreground" />
               ) : (
                 <span className="text-hint text-muted-foreground">no statement</span>
               )}
@@ -569,7 +568,8 @@ function RunningQueries() {
     <Panel plain aria-label="Running queries" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
       {dialog}
       <PanelHeader title="Running queries" actions={<Stale poll={queries} />} />
-      <ViewRead
+      <Read
+        patience
         poll={queries}
         what="the running queries"
         skeleton={<LoadingPanel plain rows={4} />}
@@ -577,16 +577,16 @@ function RunningQueries() {
         {(data) => {
           const others = data.queries.filter((query) => !query.self)
           return (
-            <PanelBody flush className="animate-rise group-data-[plain]/panel:-mx-4">
+            <PanelBody flush className={cn("animate-rise", FIT_COLUMN)}>
               {others.length === 0 ? (
-                <EmptyNote className="px-4">
+                <EmptyNote>
                   Nothing is running but this page&apos;s own read of the list.
                 </EmptyNote>
               ) : width < TABLE_FROM ? (
                 // Drawn down where a table has no room: nothing is dropped.
                 <ul className="divide-y divide-hairline border-y border-hairline">
                   {others.map((query) => (
-                    <li key={query.id} className="space-y-1.5 px-4 py-2.5 text-xs">
+                    <li key={query.id} className="space-y-1.5 py-2.5 text-xs">
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <span className="flex min-w-0 items-center gap-2">
                           <Named name={query.user} className="font-medium" />
@@ -599,7 +599,10 @@ function RunningQueries() {
                           {stopper(query)}
                         </span>
                       </div>
-                      <StatementLine text={query.query} className="text-hint text-foreground/80" />
+                      <StatementLine
+                        text={query.query}
+                        className="text-hint text-muted-foreground"
+                      />
                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
                         {progress(query)}
                         <span className="numeric">
@@ -662,7 +665,7 @@ function RunningQueries() {
             </PanelBody>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

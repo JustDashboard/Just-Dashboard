@@ -1,7 +1,6 @@
 "use client"
 
 import { ActivityLines } from "@/components/database/home/activity-lines"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestStatements, FileFacts } from "@/components/database/home/busiest"
 import { CLICKHOUSE_VIEWS, SQL_VIEWS } from "@/components/database/home/charts"
 import { LargestTablesBlock, type LargestTables } from "@/components/database/home/largest"
@@ -18,10 +17,11 @@ import type { DbServerStats, DbTableStats } from "@/components/database/home/typ
 import { useSamples } from "@/components/database/home/use-samples"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { Layers } from "@/components/icons"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import type { DbOverview } from "@/lib/types"
 import { useMemo } from "react"
+import { capitalize } from "@/components/database/kit/figures"
 
 export function SqlHome() {
   const { id, engine, href } = useDatabase()
@@ -48,7 +48,7 @@ export function SqlHome() {
       bySchema(tables.tables, tables.sizesKnown).map((share) => ({
         key: share.schema,
         name: share.schema,
-        kind: capital(engine.nouns.container),
+        kind: capitalize(engine.nouns.container),
         detail: schemaDetail(share, tables.sizesKnown, engine.nouns.object),
         color: nameHue(share.schema),
         glyph: Layers,
@@ -66,11 +66,11 @@ export function SqlHome() {
         </Notice>
       )}
       {unread && (
-        <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
+        <ErrorState what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
       <HomePicture
         holdings={holdings}
-        holdingsWord={capital(engine.nouns.containers)}
+        holdingsWord={capitalize(engine.nouns.containers)}
         sessions={gauge(samples, "sessions")}
         size={answer?.databaseBytes ?? gauge(samples, "databaseBytes")}
         backups={engine.can("dump") ? backups : undefined}
@@ -162,5 +162,3 @@ function useLargestTables(): PollState<LargestTables> {
     [id, ranked],
   )
 }
-
-const capital = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)

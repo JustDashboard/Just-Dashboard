@@ -1,7 +1,6 @@
 "use client"
 
 import { ActivityLines } from "@/components/database/home/activity-lines"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { SlowOperations } from "@/components/database/home/busiest"
 import { MONGO_VIEWS } from "@/components/database/home/charts"
 import { LargestCollectionsBlock } from "@/components/database/home/largest"
@@ -10,7 +9,6 @@ import { read } from "@/components/database/home/read"
 import { ServerDatabases, ServerLines, useBackups } from "@/components/database/home/reference"
 import { nameHue } from "@/components/database/home/kinds"
 import { HomePicture, type Holding } from "@/components/database/home/picture"
-import { compact } from "@/components/database/home/readings"
 import { gauge, mongoSample } from "@/components/database/home/samples"
 import { ServerLog } from "@/components/database/home/server-log"
 import { StateRegion } from "@/components/database/home/state-region"
@@ -21,6 +19,8 @@ import { Layers } from "@/components/icons"
 import { usePoll } from "@/hooks/use-poll"
 import { bytes } from "@/lib/format"
 import { useMemo } from "react"
+import { ErrorState } from "@/components/state"
+import { counted } from "@/components/database/kit/figures"
 
 export function DocumentHome() {
   const { id, conn, engine, href } = useDatabase()
@@ -53,7 +53,7 @@ export function DocumentHome() {
           name: collection.name,
           kind: collection.type === "view" ? "View" : "Collection",
           detail: collection.statsKnown
-            ? `${bytes(collection.size)} · ${compact(collection.count)} ${collection.count === 1 ? "document" : "documents"}`
+            ? `${bytes(collection.size)} · ${counted(collection.count, "document")}`
             : undefined,
           color: nameHue(collection.name),
           glyph: Layers,
@@ -67,7 +67,7 @@ export function DocumentHome() {
     <>
       <StateRegion />
       {unread && (
-        <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
+        <ErrorState what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
       <HomePicture
         holdings={engine.can("collections") ? holdings : []}

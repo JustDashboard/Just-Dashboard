@@ -1,4 +1,3 @@
-import { duration } from "@/lib/format"
 import type { Series } from "@/components/metrics/metric-chart"
 import type { ChartUnit, ChartView } from "@/components/database/home/charts"
 import { TRANSACTIONS, type Sample, type Source } from "@/components/database/home/samples"
@@ -345,24 +344,8 @@ export function quietChart(chart: ChartView, samples: readonly Sample[]): boolea
   })
 }
 
-/** Milliseconds at the precision a reader compares them at. */
-export function millis(value: number): string {
-  if (value >= 60_000) return duration(value / 1000)
-  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)} s`
-  if (value >= 10) return `${Math.round(value)} ms`
-  // Something that ran took some time: under a hundredth is said as that,
-  // never as a round nought.
-  if (value > 0 && value < 0.005) return "<0.01 ms"
-  return `${value.toFixed(value >= 1 ? 1 : 2)} ms`
-}
-
-/** A share of the whole as a percentage: whole numbers from ten up, a decimal under it, never "0%" for something that ran. */
-export function shareWords(share: number): string {
-  const value = share * 100
-  if (value <= 0) return "0%"
-  if (value < 0.1) return "<0.1%"
-  return `${value.toFixed(value >= 10 ? 0 : 1)}%`
-}
+/** The database pages' one `millis` and `shareWords` (`kit/figures`). */
+export { millis, shareWords } from "@/components/database/kit/figures"
 
 const SORTS: { id: DbStatementSort; label: string }[] = [
   { id: "total", label: "Total time" },

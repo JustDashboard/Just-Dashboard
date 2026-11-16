@@ -1,4 +1,5 @@
 import { bytes, duration } from "@/lib/format"
+import { capitalize } from "@/components/database/kit/figures"
 
 /**
  * A server's parameters, as one list a page can search, group and edit —
@@ -111,10 +112,6 @@ export type Parameter = {
 
 const OTHER = "Other"
 
-function titled(word: string): string {
-  return word ? word[0].toUpperCase() + word.slice(1) : word
-}
-
 /** A SQL engine's rows. Its category "A / B" is a heading and what is under it. */
 export function fromSettings(settings: readonly DbSetting[]): Parameter[] {
   return settings.map((setting) => {
@@ -123,7 +120,7 @@ export function fromSettings(settings: readonly DbSetting[]): Parameter[] {
       name: setting.name,
       value: setting.value,
       unit: setting.unit,
-      group: group ? titled(group) : OTHER,
+      group: group ? capitalize(group) : OTHER,
       subgroup: rest.length > 0 ? rest.join(" / ") : undefined,
       description: setting.description,
       type: setting.type,
@@ -152,7 +149,7 @@ export function fromRedisConfig(config: RedisConfig): Parameter[] {
     group.params.map((param) => ({
       name: param.name,
       value: param.value,
-      group: titled(group.name),
+      group: capitalize(group.name),
       restart: false,
       pending: false,
       changed: false,

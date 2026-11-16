@@ -1,17 +1,12 @@
 "use client"
 
-import { useMemo } from "react"
-import { useRouter } from "next/navigation"
-import { usePoll } from "@/hooks/use-poll"
-import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
+import { RankList, RankSkeleton } from "@/components/rank-list"
 import { Panel, PanelHeader } from "@/components/panel"
-import { CouldNotRead, NotUpdating } from "@/components/database/home/blocks"
-import { statementVerb } from "@/components/database/home/kinds"
-import { compact } from "@/components/database/home/readings"
-import { statementHref } from "@/components/database/ops/performance-address"
-import { readStatements } from "@/components/database/ops/performance-api"
-import { millis, shareWords, statementKeys } from "@/components/database/ops/performance-figures"
-import { oneLine } from "@/components/database/ops/queries"
+import { EmptyNote } from "@/components/state"
+import { millis } from "@/components/database/kit/figures"
+import { Read, Stale } from "@/components/database/kit/read"
+import { useTopStatements } from "@/components/database/kit/top-statements"
+import { NotAvailable } from "@/components/database/ops/performance-parts"
 
 /** How many statements the list holds. */
 const TOP = 15
@@ -50,89 +45,39 @@ export function StatementsPanel({
    */
   onQuery?: (sql: string) => void
 }) {
-  const router = useRouter()
-  const statements = usePoll(
-    (signal) => readStatements(id, { sort: "total", limit: TOP }, signal),
-    30_000,
-    [id],
-  )
-  const data = statements.data
-  const items = useMemo<RankItem[]>(() => {
-    const list = data?.statements ?? []
-    // A row's key is its place in the address: one digest listed twice is
-    // two statements, and one with no digest still has a page.
-    const keys = statementKeys(list)
-    return list.map((statement, index) => {
-      const line = oneLine(statement.query)
-      const verb = statementVerb(line)
-      const share = shareWords(statement.share)
-      // Reads that miss the cache are the part of a statement that is
-      // trouble: said in amber beside its calls, where the bar used to carry it.
-      const missed =
-        statement.hitRatio >= 0 && statement.hitRatio < 0.9 ? 1 - statement.hitRatio : 0
-      return {
-        key: keys[index] || `no-id:${index}`,
-        label: verb ? (
-          <>
-            <span style={{ color: verb.color }}>{verb.word}</span>
-            {verb.rest}
-          </>
-        ) : (
-          line
-        ),
-        title: `${line.slice(0, 60)} — ${share} of runtime. Open the statement`,
-        value: share,
-        hint: (
-          <>
-            {`${compact(statement.calls)} ${statement.calls === 1 ? "call" : "calls"} · ${millis(statement.meanMs)} each`}
-            {missed > 0 && (
-              <span className="text-warning">
-                {" "}
-                · {shareWords(missed)} of reads missed the cache
-              </span>
-            )}
-          </>
-        ),
-        onClick: () => router.push(statementHref(id, keys[index])),
-      }
-    })
-  }, [data, id, router])
-
+  const { items, state } = useTopStatements(id, { limit: TOP })
+  const data = state.data
   return (
     <Panel plain aria-label={title}>
       <PanelHeader
         title={title}
-        actions={
-          <>
-            {data && statements.error && <NotUpdating error={statements.error} />}
-            {data?.supported && (
-              <span className="numeric text-hint text-muted-foreground">
-                {millis(data.totalMs)} of statement time counted
-              </span>
-            )}
-          </>
-        }
+        count={data?.supported ? `${millis(data.totalMs)} of statement time counted` : undefined}
+        actions={<Stale poll={state} />}
       />
       <div className="pt-3">
-        {!data ? (
-          statements.error ? (
-            <CouldNotRead
-              what="the statement statistics"
-              error={statements.error}
-              onRetry={statements.refresh}
-            />
-          ) : (
-            <RankSkeleton rows={8} />
-          )
-        ) : !data.supported ? (
-          <p className="text-body leading-relaxed wrap-anywhere text-muted-foreground">
-            {data.enable?.note ?? data.reason ?? "This engine keeps no per-statement statistics."}
-          </p>
-        ) : (
-          <div className="animate-rise">
-            <RankList items={items} emptyLabel="Nothing has been counted yet." />
-          </div>
-        )}
+        <Read
+          poll={state}
+          what="the statement statistics"
+          skeleton={<RankSkeleton rows={8} />}
+          rise
+        >
+          {(answer) =>
+            !answer.supported ? (
+              <NotAvailable
+                title="No statement statistics"
+                reason={
+                  answer.enable?.note ??
+                  answer.reason ??
+                  "This engine keeps no per-statement statistics."
+                }
+              />
+            ) : items.length === 0 ? (
+              <EmptyNote>Nothing has been counted yet. The list fills as statements run.</EmptyNote>
+            ) : (
+              <RankList items={items} />
+            )
+          }
+        </Read>
       </div>
     </Panel>
   )

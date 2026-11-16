@@ -6,6 +6,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { useViewState } from "@/lib/view-state"
 import { useMemo, useState } from "react"
+import { plural } from "@/lib/format"
 
 export const SAMPLE_EVERY_MS = 30_000
 export const HISTORY_RANGES = [
@@ -38,7 +39,7 @@ function longestWithin(retentionHours: number) {
 /** The days the recorder keeps its readings, as the footnotes say it. */
 export function keptFor(retentionHours: number) {
   const days = Math.round(retentionHours / 24)
-  return `${days} ${days === 1 ? "day" : "days"}`
+  return `${plural(days, "day")}`
 }
 
 /** Read history independently of the live snapshot so an offline server

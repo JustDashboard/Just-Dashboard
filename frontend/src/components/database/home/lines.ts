@@ -71,6 +71,9 @@ export function lineReading(view: ChartView, samples: readonly Sample[]): LineRe
     words,
     rest: rest || undefined,
     values,
-    max: view.unit === "percent" ? 100 : undefined,
+    // The bar's scale is the view's ceiling where it has one — the most
+    // sessions or connections the server takes — as it is a hundred for a
+    // percentage, so a line near its limit reads as near it.
+    max: view.unit === "percent" ? 100 : ceiling && ceiling > 0 ? ceiling : undefined,
   }
 }

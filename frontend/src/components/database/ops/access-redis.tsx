@@ -1,13 +1,7 @@
 "use client"
 
 import { useConfirm } from "@/components/confirm-dialog"
-import { generatePassword } from "@/components/database/connect/rules"
-import {
-  CardsSkeleton,
-  CouldNotRead,
-  NotUpdating,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { generatePassword } from "@/lib/password"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { useAccessFilterFrom } from "@/components/database/ops/access-filter"
@@ -36,11 +30,11 @@ import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field, FormFact, FormNote } from "@/components/form"
 import { Trash, UserPlus } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -49,6 +43,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { errorMessage, put } from "@/lib/api"
 import { useId, useMemo, useState } from "react"
+import { Stale } from "@/components/database/kit/read"
 
 /**
  * A key–value server's ACL users: who may connect, and the rule each is held
@@ -127,10 +122,10 @@ export function RedisAccess() {
           title="Users"
           actions={
             <>
-              {staleOf(acl) && <NotUpdating error={staleOf(acl)!} />}
+              <Stale poll={acl} />
               {readOnly && <ProtectedTag />}
               {mayEdit && data?.supported && (
-                <Button size="sm" onClick={() => setCreating(true)}>
+                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
                   <UserPlus />
                   New user
                 </Button>
@@ -160,9 +155,9 @@ export function RedisAccess() {
         <PanelBody>
           {!data ? (
             acl.error ? (
-              <CouldNotRead what="the users" error={acl.error} onRetry={acl.refresh} />
+              <ErrorState what="the users" error={acl.error} onRetry={acl.refresh} />
             ) : (
-              <CardsSkeleton count={3} />
+              <ChoiceListSkeleton rows={3} lines={2} />
             )
           ) : !data.supported ? (
             <Notice title={`${engine.label} keeps no users here`}>

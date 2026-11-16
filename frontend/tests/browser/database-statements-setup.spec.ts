@@ -449,7 +449,7 @@ test("the database's home offers the same setup in its busiest-statements block"
   const ops = await mockSetup(page, server.answers)
   await visit(page, "/databases/1")
   const busiest = region(page, "Busiest statements")
-  await expect(busiest).toContainText("This server is not counting its statements.")
+  await expect(busiest).toContainText("This server is not counting its statements")
   await busiest.getByRole("button", { name: "Turn on statement statistics" }).click()
   const dialog = setup(page)
   await dialog.getByRole("button", { name: "Add pg_stat_statements" }).click()
