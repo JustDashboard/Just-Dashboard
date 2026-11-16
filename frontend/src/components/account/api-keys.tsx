@@ -332,8 +332,13 @@ function KeysIdentity({
       <HostIdentity
         fallback={Key}
         title="API keys"
-        state={<Status tone="unknown" label={<TextShimmer>reading</TextShimmer>} />}
-        facts={<Fact>keys that call this dashboard without a browser</Fact>}
+        // Reading is said among the facts, not as a state: the loaded line
+        // has no state, and on a phone a state is a row of its own.
+        facts={
+          <Fact>
+            <TextShimmer>reading</TextShimmer>
+          </Fact>
+        }
         command={command}
       />
     )
@@ -361,6 +366,9 @@ function KeysIdentity({
             <Fact>
               <Status
                 tone="warning"
+                // On the line's top, as a product fact's glyph is: on its
+                // baseline the dot's box grew the line a pixel.
+                className="align-top"
                 label={`${expiring.length} expiring ${days === 0 ? "today" : `in ${plural(days, "day")}`}`}
               />
             </Fact>

@@ -413,8 +413,8 @@ test("users are cards drawn by their faces, under the line that counts them", as
 
   // The picker on a card says what each role is, not only its word.
   await page.getByRole("combobox", { name: "Role of Deploy bot" }).click()
-  await expect(page.getByRole("option", { name: /limited/ })).toContainText("as good as root")
-  await expect(page.getByRole("option", { name: /readonly/ })).toContainText(
+  await expect(page.getByRole("option", { name: /^Limited/ })).toContainText("as good as root")
+  await expect(page.getByRole("option", { name: /^Read-only/ })).toContainText(
     "saved secrets included",
   )
   await page.keyboard.press("Escape")

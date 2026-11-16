@@ -615,7 +615,9 @@ test("the settings are one column, a switch is one line, and nothing explains it
         return { x: Math.round(box.x), y: box.y, bottom: box.bottom, width: Math.round(box.width) }
       }),
     )
-    expect(sections).toHaveLength(7)
+    // The last restart is the column's first section now, on the same edge as the rest (PGW-25).
+    expect(sections).toHaveLength(8)
+    await expect(column.locator("[data-slot=setting]").first()).toContainText("Last restart")
     for (const [index, section] of sections.entries()) {
       expect(section.x).toBe(sections[0].x)
       expect(section.width).toBe(sections[0].width)
@@ -624,7 +626,13 @@ test("the settings are one column, a switch is one line, and nothing explains it
     expect(sections[0].width).toBeLessThanOrEqual(768)
 
     // No sentence under a field or a switch: the reasons are behind each name's ⓘ.
-    await expect(column.locator("p.text-hint")).toHaveCount(0)
+    // The restart's record keeps its line of when and by whom: that is a fact, not an explanation.
+    await expect(
+      column
+        .locator("[data-slot=setting]")
+        .filter({ hasNotText: "Last restart" })
+        .locator("p.text-hint"),
+    ).toHaveCount(0)
     const rows = column.locator("[data-slot=switch-row]")
     await expect(rows).toHaveCount(4)
     const heights = await rows.evaluateAll((nodes) =>
