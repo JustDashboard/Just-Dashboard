@@ -2207,7 +2207,7 @@ test.describe("performance", () => {
     await page.getByRole("button", { name: "Time per call" }).click()
     await expect.poll(names).toEqual(["KEYS", "SET", "GET"])
 
-    await page.getByRole("button", { name: "Persistence & replication" }).click()
+    await page.getByRole("tab", { name: "Persistence & replication" }).click()
     await expect(page.getByText("after 1h if 1 key changed")).toBeVisible()
     await page.getByRole("button", { name: "Save now" }).click()
     await expect.poll(() => redis.asked("/redis/save").at(-1)?.body).toEqual({ mode: "bgsave" })

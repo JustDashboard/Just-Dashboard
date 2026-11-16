@@ -18,10 +18,10 @@ import { worthRetrying } from "@/components/database/redis/read-error"
 import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 import { Notice } from "@/components/state"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabs } from "@/components/tabs"
+import { TabsContent } from "@/components/ui/tabs"
 import { usePoll } from "@/hooks/use-poll"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 
 /** How often the counters are read: one INFO each time. */
 const EVERY_MS = 3000
@@ -74,16 +74,6 @@ export function RedisPerformance() {
   const asked = param("view")
   const view: View = views.some((entry) => entry.id === asked) ? (asked as View) : "overview"
 
-  // On a phone the strip is wider than the page and scrolls sideways: the
-  // view on screen is kept in sight in it, so the strip says where the
-  // reader is and not only where they could go.
-  const strip = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    strip.current
-      ?.querySelector('[aria-pressed="true"]')
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" })
-  }, [view])
-
   if (stats.error && samples.length === 0) {
     return (
       <SectionError
@@ -100,60 +90,51 @@ export function RedisPerformance() {
     <SectionFrame section="performance">
       {server.data?.notice && <Notice title="About this server">{server.data.notice}</Notice>}
 
-      <div className="min-w-0 space-y-6">
-        {/* A strip of pressed buttons, not a landmark: these are six readings
-            of one page, and the rail is where the product navigates. The
-            line under it is where a failed reading is said, so the page
-            does not move when one fails. */}
-        <div className="relative">
-          <div
-            ref={strip}
-            role="group"
-            aria-label="Performance views"
-            className="flex gap-1 overflow-x-auto border-b border-hairline"
-          >
-            {views.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                aria-pressed={view === entry.id}
-                onClick={() => select({ view: entry.id === "overview" ? null : entry.id })}
-                className={tabClasses(view === entry.id, "h-10")}
+      <div className="min-w-0">
+        {/* The views of one page, as tabs: the strip scrolls the chosen one
+            into sight on a phone. A failed reading is said in the gap under
+            the strip, so the page does not move when one fails. */}
+        <ViewTabs
+          label="Performance views"
+          views={views.map((entry) => ({
+            key: entry.id,
+            label: entry.label,
+            count: entry.id === "clients" ? clients : undefined,
+          }))}
+          value={view}
+          onValueChange={(next) => select({ view: next === "overview" ? null : next })}
+          hideWhenSingle
+          rootClassName="gap-6"
+        >
+          <TabsContent value={view} className="relative min-w-0">
+            {stats.error && (
+              <p
+                role="status"
+                className="absolute inset-x-0 bottom-full mb-1.5 truncate text-hint text-warning"
               >
-                {entry.label}
-                {entry.id === "clients" && clients !== undefined && (
-                  <ChipCount>{clients.toLocaleString()}</ChipCount>
-                )}
-              </button>
-            ))}
-          </div>
-          {stats.error && (
-            <p
-              role="status"
-              className="absolute inset-x-0 top-full truncate pt-1 text-hint text-warning"
-            >
-              The last reading failed, so the figures are a few seconds old: {stats.error.message}
-            </p>
-          )}
-        </div>
-        {view === "overview" ? (
-          <OverviewView
-            redis={redis}
-            rows={rows}
-            everyMs={EVERY_MS}
-            recorded={(recorded.data?.length ?? 0) > 0}
-          />
-        ) : view === "memory" ? (
-          <MemoryView redis={redis} />
-        ) : view === "slowlog" ? (
-          <SlowlogView redis={redis} />
-        ) : view === "clients" ? (
-          <ClientsView redis={redis} />
-        ) : view === "commands" ? (
-          <CommandsView redis={redis} />
-        ) : (
-          <PersistenceView redis={redis} />
-        )}
+                The last reading failed, so the figures are a few seconds old: {stats.error.message}
+              </p>
+            )}
+            {view === "overview" ? (
+              <OverviewView
+                redis={redis}
+                rows={rows}
+                everyMs={EVERY_MS}
+                recorded={(recorded.data?.length ?? 0) > 0}
+              />
+            ) : view === "memory" ? (
+              <MemoryView redis={redis} />
+            ) : view === "slowlog" ? (
+              <SlowlogView redis={redis} />
+            ) : view === "clients" ? (
+              <ClientsView redis={redis} />
+            ) : view === "commands" ? (
+              <CommandsView redis={redis} />
+            ) : (
+              <PersistenceView redis={redis} />
+            )}
+          </TabsContent>
+        </ViewTabs>
       </div>
     </SectionFrame>
   )

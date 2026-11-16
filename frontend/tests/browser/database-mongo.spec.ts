@@ -2439,15 +2439,15 @@ test.describe("performance", () => {
     await expect(page.locator("[data-slot=mongo-busiest]")).toHaveCount(0)
     // What such a server does report is still there.
     await expect(page.getByText("Databases on this server")).toBeVisible()
-    await expect(page.getByRole("group", { name: "Performance views" })).toBeHidden()
+    await expect(page.getByRole("tablist", { name: "Performance views" })).toBeHidden()
   })
 
   test("the replica set is a view only where the server is a member of one", async ({ page }) => {
     await mockMongo(page)
     await page.goto(PERFORMANCE)
-    const strip = page.getByRole("group", { name: "Performance views" })
-    await expect(strip.getByRole("button", { name: "Operations", exact: true })).toBeVisible()
-    await expect(strip.getByRole("button", { name: "Replica set" })).toHaveCount(0)
+    const strip = page.getByRole("tablist", { name: "Performance views" })
+    await expect(strip.getByRole("tab", { name: "Operations", exact: true })).toBeVisible()
+    await expect(strip.getByRole("tab", { name: "Replica set" })).toHaveCount(0)
     await page.unrouteAll({ behavior: "ignoreErrors" })
 
     await mockMongo(page, { topology: "replicaset" })
