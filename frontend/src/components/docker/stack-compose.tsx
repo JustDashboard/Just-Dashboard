@@ -27,7 +27,8 @@ import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { ContentConflict } from "@/components/files/content-conflict"
-import { ComposeDiff, DiffCount, ServiceLabel } from "@/components/docker/stack-diff"
+import { ComposeDiff, ServiceLabel } from "@/components/docker/stack-diff"
+import { DiffCount } from "@/components/diff-count"
 import { bucketTone, type ServiceReading } from "@/components/docker/stack-service-readings"
 import {
   composeOutline,
