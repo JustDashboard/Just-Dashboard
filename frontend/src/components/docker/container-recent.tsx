@@ -124,7 +124,7 @@ function RecentRow({
           <span className="numeric" title={timestamp(at)}>
             {loop ? `${clock(loop.since)}–${clock(loop.until)}` : clock(event.time)}
           </span>
-          <span className="text-muted-foreground/40">·</span>
+          <span className="text-faint">·</span>
           <span className="truncate">{relativeTime(at)}</span>
         </p>
       </div>

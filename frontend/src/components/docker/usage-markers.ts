@@ -1,6 +1,6 @@
 import { dedupeEvents, foldRestarts } from "@/lib/docker-events"
 import type { DockerEvent, MetricEvent } from "@/lib/types"
-import { crashed } from "@/components/docker/container"
+import { crashed } from "@/components/docker/words"
 
 /**
  * What happened to one container, as the marks its Usage charts carry: the

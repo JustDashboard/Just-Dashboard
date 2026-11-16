@@ -5,7 +5,6 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
 import {
-  ArrowLeft,
   ArrowUpRight,
   ChevronDown,
   ChevronUp,
@@ -79,15 +78,6 @@ type Tab = (typeof TABS)[number]
 
 /** How often the list is read, for the rail and for who is on the network now. */
 const POLL = 10_000
-
-const BACK = (
-  <Link
-    href="/docker/networks"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Networks
-  </Link>
-)
 
 /**
  * One network, as a place of its own.
@@ -354,7 +344,7 @@ function NetworkMain({
 
   const header = (
     <PageContext
-      eyebrow={BACK}
+      back={{ href: "/docker/networks", label: "Networks" }}
       title={network?.name ?? "Network"}
       actions={
         <span className="flex items-center">

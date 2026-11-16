@@ -42,9 +42,17 @@ test("the page opens on the engine, what it holds and what the registries say", 
   await registry.getByRole("button", { name: /pinned by digest/ }).hover()
   await expect(answer).toContainText("Pinned by digest")
   await expect(answer).toContainText("1")
-  // Each answer's mark in the strip is its dot and its count, in the band's order.
+  // Each answer's mark in the strip is its dot, its count and, where the band
+  // has the room, its word (PGH-20), in the band's order.
   const marks = registry.locator("[data-slot=reading-strip] button")
-  await expect(marks).toHaveText(["2", "4", "1", "1", "1", "3"])
+  await expect(marks).toHaveText([
+    "2 update",
+    "4 current",
+    "1 pinned",
+    "1 built here",
+    "1 unchecked",
+    "3 unused",
+  ])
   for (const mark of await marks.all()) {
     await expect(mark.locator("span.rounded-full")).toHaveCount(1)
   }

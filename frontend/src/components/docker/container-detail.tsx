@@ -1,10 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, Layers, Pencil } from "@/components/icons"
+import { ChevronDown, ChevronUp, Layers, Pencil } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, ApiError } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
@@ -22,9 +20,10 @@ import { ContainerInspectTab } from "@/components/docker/container-inspect-tab"
 import { ContainerShellTab } from "@/components/docker/container-shell-tab"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { containerEventsView } from "@/components/docker/container-events"
-import { Hint, Term } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"
-import { containerVerdict, exitWords, restartWords } from "@/components/docker/container"
+import { containerVerdict, restartWords, type Verdict } from "@/components/docker/container"
+import { exitWords } from "@/components/docker/words"
 import { ContainerIdentity } from "@/components/docker/container-identity"
 import { ContainerRail, useContainerRail } from "@/components/docker/container-rail"
 import { ContainerReadings, useContainerFrames } from "@/components/docker/container-readings"
@@ -40,14 +39,13 @@ import { Page, PageContext } from "@/components/page"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Panel, PanelHeader, Well } from "@/components/panel"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabList } from "@/components/tabs"
 import { IconAction } from "@/components/icon-action"
-import { VerbMenu } from "@/components/verbs"
+import type { Verb } from "@/components/verbs"
+import { IdentityVerbs } from "@/components/identity-header"
+import { usePrompt } from "@/components/prompt-dialog"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 
 /**
@@ -184,15 +182,6 @@ export function ContainerPage() {
 
 type Step = { disabled: boolean; run: () => void }
 
-const BACK = (
-  <Link
-    href="/docker/containers"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Containers
-  </Link>
-)
-
 function ContainerDetailPanel({
   containerId,
   focusTab,
@@ -312,45 +301,39 @@ function ContainerDetailPanel({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
       <div className="flex min-w-0 shrink-0 flex-col gap-5">
+        {/* The back line holds the way back, the walk and the help; the
+            verbs are the identity line's, one command and the rest behind
+            ⋯, as on every detail page (PGH-02). */}
         <PageContext
-          eyebrow={BACK}
+          back={{ href: "/docker/containers", label: "Containers" }}
           title={detail?.name ?? "Container"}
           actions={
             detail && (
-              <>
-                {/* Every verb the container has, the lifecycle as words and
-                    the rest behind one menu — the page used to draw only the
-                    first three, so pausing or removing the container it was
-                    about meant going back to the list. */}
-                <ContainerVerbs
-                  detail={detail}
-                  confirm={confirm}
-                  onOpenTab={setTab}
-                  onChanged={changed}
-                />
-                {/* The walk belongs beside the shortcuts that drive it. On a
-                    phone the pair wrapped onto a line of its own under the
-                    verbs, two bare chevrons with nothing to say what they
-                    walked; there the way to another container is the back
-                    arrow above and the list it leads to. */}
-                <span className="flex items-center max-sm:hidden">
-                  <IconAction
-                    label="Previous container"
-                    disabled={previous.disabled}
-                    onClick={previous.run}
-                  >
-                    <ChevronUp />
-                  </IconAction>
-                  <IconAction label="Next container" disabled={next.disabled} onClick={next.run}>
-                    <ChevronDown />
-                  </IconAction>
-                  <WorkspaceHelp />
-                </span>
-              </>
+              <span className="flex items-center max-sm:hidden">
+                <IconAction
+                  label="Previous container"
+                  disabled={previous.disabled}
+                  onClick={previous.run}
+                >
+                  <ChevronUp />
+                </IconAction>
+                <IconAction label="Next container" disabled={next.disabled} onClick={next.run}>
+                  <ChevronDown />
+                </IconAction>
+                <WorkspaceHelp />
+              </span>
             )
           }
         />
-        {detail && verdict && <ContainerIdentity detail={detail} verdict={verdict} />}
+        {detail && verdict && (
+          <ContainerHead
+            detail={detail}
+            verdict={verdict}
+            confirm={confirm}
+            onOpenTab={setTab}
+            onChanged={changed}
+          />
+        )}
       </div>
 
       {error && <ErrorState error={error} />}
@@ -358,24 +341,7 @@ function ContainerDetailPanel({
 
       {detail && verdict && (
         <Tabs value={tab} onValueChange={(next) => setTab(next)} className="min-h-0 flex-1 gap-0">
-          {/* The underlined strip every switcher between views of one thing
-              wears (`tabClasses`), with the two views that hold a list
-              counting it. */}
-          <TabsPrimitive.List
-            aria-label={`Views of ${detail.name}`}
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            {views.map((view) => (
-              <TabsPrimitive.Trigger
-                key={view.key}
-                value={view.key}
-                className={tabClasses(tab === view.key, "h-10")}
-              >
-                {view.label}
-                {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
+          <ViewTabList label={`Views of ${detail.name}`} views={views} value={tab} />
 
           <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto pt-6">
             {/*
@@ -480,23 +446,29 @@ function HowItRuns({ detail }: { detail: ContainerDetail }) {
         )}
         <div className="grid min-w-0 gap-x-8 gap-y-1.5 sm:grid-cols-2">
           <DetailList className="content-start">
-            <Detail label={<Term name="image">Image</Term>} className="font-mono break-all">
+            <Detail
+              label={<Definition name="image">Image</Definition>}
+              className="font-mono break-all"
+            >
               {detail.image}
             </Detail>
             <Detail label="Working dir" className="font-mono break-all">
               {detail.workingDir || "/"}
             </Detail>
-            <Detail label={<Term name="containerUser">User</Term>} className="font-mono">
+            <Detail
+              label={<Definition name="containerUser">User</Definition>}
+              className="font-mono"
+            >
               {detail.user || "the image's own"}
             </Detail>
-            <Detail label={<Term name="networkMode">Network mode</Term>}>
+            <Detail label={<Definition name="networkMode">Network mode</Definition>}>
               {detail.networkMode === "host" ? (
                 <span className="text-warning">host — the server&rsquo;s own network</span>
               ) : (
                 detail.networkMode
               )}
             </Detail>
-            <Detail label={<Term name="privileged">Privileged</Term>}>
+            <Detail label={<Definition name="privileged">Privileged</Definition>}>
               {detail.privileged ? (
                 <span className="text-destructive">yes — full host access</span>
               ) : (
@@ -518,7 +490,7 @@ function HowItRuns({ detail }: { detail: ContainerDetail }) {
             <Detail label="Created" className="numeric">
               {timestamp(detail.createdAt)}
             </Detail>
-            <Detail label={<Term name="restart">Restart policy</Term>}>
+            <Detail label={<Definition name="restart">Restart policy</Definition>}>
               <span title={detail.restartPolicy || "no"}>{restartWords(detail.restartPolicy)}</span>
             </Detail>
             {/* A restart count is a number until it is a symptom: anything
@@ -530,7 +502,7 @@ function HowItRuns({ detail }: { detail: ContainerDetail }) {
             >
               {detail.restartCount}
             </Detail>
-            <Detail label={<Term name="exitCode">Last exit</Term>}>
+            <Detail label={<Definition name="exitCode">Last exit</Definition>}>
               {running ? (
                 <span className="text-muted-foreground">still running</span>
               ) : (
@@ -644,150 +616,101 @@ function ContainerLogs({
  * about — which it then handles by going back to the list — meant leaving it
  * first. Logs and the shell are views of this page, so they stay tabs.
  */
-function ContainerVerbs({
+/**
+ * The line the container's page opens on, with its verbs: the first of its
+ * lifecycle as the one command (Restart, Start, Resume) and every other verb
+ * behind ⋯ — Stop, the way to the stack that owns it, Rename, Pause, Remove.
+ * Four equal buttons on the back line used to wrap above the name on a phone.
+ *
+ * Rename asks for the name in a dialog. On a compose container the dialog
+ * says first that the next deploy puts the old name back, which an Advanced
+ * button used to gate.
+ */
+function ContainerHead({
   detail,
+  verdict,
   confirm,
   onOpenTab,
   onChanged,
 }: {
   detail: ContainerDetail
+  verdict: Verdict
   confirm: ConfirmFn
   onOpenTab: (tab: string) => void
   onChanged: () => void
 }) {
   const { can } = useAuth()
+  const router = useRouter()
   const { pending, act } = useContainerControl(onChanged)
-  const verbs = useContainerVerbs({
+  const { prompt, dialog } = usePrompt()
+  const lifecycle = useContainerVerbs({
     container: detail,
     confirm,
     act,
     onOpenTab,
     onChanged,
   })
-  const busy = pending[detail.id]
-  const inline = verbs.filter((verb) => verb.inline)
-  const rest = verbs.filter((verb) => !verb.inline && verb.key !== "logs" && verb.key !== "shell")
-  const composeManaged = Boolean(detail.composeStack)
-
-  return (
-    <span className="flex flex-wrap items-center gap-1.5">
-      {inline.map((verb) => (
-        <Button
-          key={verb.key}
-          size="sm"
-          variant="outline"
-          disabled={Boolean(busy)}
-          pending={busy === verb.progressive}
-          onClick={verb.run}
-        >
-          <verb.icon className="size-3.5" />
-          {verb.label}
-        </Button>
-      ))}
-      {/*
-        Compose owns this container, so anything that changes its
-        configuration is undone by the next deploy — silently, and days later,
-        which is the worst way to find out. Rename moves behind a statement of
-        what will happen, and the way to the stack that owns it comes first.
-      */}
-      {composeManaged ? (
-        <>
-          <Button size="sm" variant="outline" asChild>
-            <Link href={`/docker/stacks/${encodeURIComponent(detail.composeStack ?? "")}`}>
-              <Layers className="size-3.5" />
-              Open stack
-            </Link>
-          </Button>
-          {can("service.control") && <ComposeDriftMenu detail={detail} onChanged={onChanged} />}
-        </>
-      ) : (
-        can("service.control") && <RenameButton detail={detail} onRenamed={onChanged} />
-      )}
-      {rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${detail.name}`} />}
-    </span>
-  )
-}
-
-/**
- * The configuration changes that compose will undo, behind a statement saying
- * so.
- *
- * Not hidden and not disabled: an operator who genuinely wants to rename a
- * compose container — to get it out of the project, say — should be able to.
- * What they should not be able to do is press it without being told that the
- * next deploy puts it back, because the failure is silent and arrives days
- * later.
- */
-function ComposeDriftMenu({
-  detail,
-  onChanged,
-}: {
-  detail: ContainerDetail
-  onChanged: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  if (!open) {
-    return (
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-        Advanced
-      </Button>
-    )
+  const busy = Boolean(pending[detail.id])
+  const stack = detail.composeStack
+  // The logs and the shell are views of this page, in its strip.
+  const verbs: Verb[] = lifecycle
+    .filter((verb) => verb.key !== "logs" && verb.key !== "shell")
+    .map((verb) => ({ ...verb, disabled: verb.progressive ? busy : undefined }))
+  if (stack) {
+    // After the lifecycle, before the rest: the stack is where its settings live.
+    const at = verbs.findIndex((verb) => !verb.inline)
+    verbs.splice(at < 0 ? verbs.length : at, 0, {
+      key: "stack",
+      label: "Open stack",
+      icon: Layers,
+      href: `/docker/stacks/${encodeURIComponent(stack)}`,
+      internal: true,
+      run: () => router.push(`/docker/stacks/${encodeURIComponent(stack)}`),
+    })
   }
-  return (
-    <span className="flex flex-wrap items-center gap-1.5">
-      <Hint className="basis-full text-warning">
-        This container is managed by <b>{detail.composeStack}</b>. Changes made here are replaced
-        the next time the stack is deployed — edit the compose file instead if you want them to
-        last.
-      </Hint>
-      <RenameButton detail={detail} onRenamed={onChanged} />
-    </span>
-  )
-}
-
-function RenameButton({ detail, onRenamed }: { detail: ContainerDetail; onRenamed: () => void }) {
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(detail.name)
-
-  const save = async () => {
-    try {
-      await post(`/docker/containers/${detail.id}/rename`, { name })
-      notify.success(`Renamed to ${name}`)
-      setEditing(false)
-      onRenamed()
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : String(err)
-      notify.error("Could not rename it", message)
-    }
+  if (can("service.control")) {
+    const at = verbs.findIndex((v) => v.key === "copy-id")
+    verbs.splice(at < 0 ? verbs.length : at, 0, {
+      key: "rename",
+      label: "Rename…",
+      icon: Pencil,
+      run: () =>
+        prompt({
+          title: "Rename container",
+          label: "Name",
+          initial: detail.name,
+          verb: "Rename",
+          mono: true,
+          hint: stack ? (
+            <span className="text-warning">
+              Compose manages this container as part of <b>{stack}</b>, and the next deploy puts the
+              old name back. Edit the compose file to keep a new one.
+            </span>
+          ) : undefined,
+          validate: (name) =>
+            !name.trim()
+              ? "A container needs a name."
+              : name === detail.name
+                ? "That is its name now."
+                : undefined,
+          onSubmit: async (name) => {
+            await post(`/docker/containers/${detail.id}/rename`, { name })
+            notify.success(`Renamed to ${name}`)
+            onChanged()
+          },
+          refusal: "Could not rename it",
+        }),
+    })
   }
 
-  if (!editing) {
-    return (
-      <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-        <Pencil className="size-3.5" />
-        Rename
-      </Button>
-    )
-  }
   return (
-    <span className="flex items-center gap-1.5">
-      <Input
-        autoFocus
-        value={name}
-        spellCheck={false}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") save()
-          if (e.key === "Escape") setEditing(false)
-        }}
-        className="h-8 w-40 font-mono text-xs"
+    <>
+      <ContainerIdentity
+        detail={detail}
+        verdict={verdict}
+        {...IdentityVerbs({ verbs, name: detail.name })}
       />
-      <Button size="xs" onClick={save} disabled={!name.trim() || name === detail.name}>
-        Save
-      </Button>
-      <Button size="xs" variant="ghost" onClick={() => setEditing(false)}>
-        Cancel
-      </Button>
-    </span>
+      {dialog}
+    </>
   )
 }

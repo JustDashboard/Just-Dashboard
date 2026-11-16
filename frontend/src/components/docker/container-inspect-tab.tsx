@@ -372,7 +372,7 @@ function Entry({
               <span className="text-muted-foreground"> … </span>
               <span className={CODE.punct}>{list ? "]" : "}"}</span>
               {comma}
-              <span className="ml-2 font-sans text-hint text-muted-foreground/70">
+              <span className="ml-2 font-sans text-hint text-faint">
                 {size} {list ? (size === 1 ? "item" : "items") : size === 1 ? "key" : "keys"}
               </span>
             </>

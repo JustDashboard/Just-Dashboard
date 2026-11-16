@@ -106,9 +106,13 @@ test("Recent's way to every event opens the logs on Events", async ({ page }) =>
 test("every verb is on the container's own page", async ({ page }) => {
   await mockContainerPage(page)
   await page.goto(`/docker/containers/${N8N}?tab=overview`)
+  // One command on the identity line, the rest behind its ⋯ (PGH-02).
   await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "More actions for automations-n8n-1" }).click()
+  await expect(page.getByRole("menuitem", { name: "Stop" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Open stack" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Rename…" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Pause" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Copy container id" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Remove" })).toBeVisible()
@@ -250,9 +254,7 @@ test("the containers stand beside the page, and Alt+↓ walks them with the view
   const current = rail.getByRole("link", { name: "automations-n8n-1", exact: true })
   await expect(current).toHaveAttribute("aria-current", "page")
   await expect(current).toContainText("automations")
-  await expect(rail.getByRole("link", { name: "automations-runner-1" })).toContainText(
-    "restarting",
-  )
+  await expect(rail.getByRole("link", { name: "automations-runner-1" })).toContainText("restarting")
   await expect(rail.getByText("6 containers · failing first")).toBeVisible()
 
   // A running row with readings and a restarting one without are one height.

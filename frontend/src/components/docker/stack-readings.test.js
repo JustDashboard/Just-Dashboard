@@ -193,10 +193,11 @@ describe("stackChanges", () => {
       event(5, "die", { level: "error", exitCode: "1" }),
       event(6, "die", { exitCode: "0" }),
     ])
+    // In the words the stack's own services use (docker/words.ts).
     expect(changes.map((c) => [c.verb, c.tone])).toEqual([
-      ["exited", "stopped"],
+      ["exited cleanly", "stopped"],
       ["exited 1", "danger"],
-      ["unhealthy", "danger"],
+      ["failing its check", "danger"],
       ["started", "running"],
     ])
   })

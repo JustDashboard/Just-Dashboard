@@ -68,7 +68,8 @@ test("the section's title leads to the table of every container", async ({ page 
 
   const section = page.getByRole("region", { name: "What the engine holds" })
   await expect(section.getByRole("heading")).toContainText("Containers")
-  await expect(section.getByRole("heading")).toContainText("12")
+  // The count stands at the head's end, outside the heading's name.
+  await expect(section.locator("[data-slot=panel-count]")).toHaveText("12")
   await section.getByRole("link", { name: "All containers" }).click()
   await expect(page).toHaveURL(/\/docker\/containers$/, NAVIGATION)
   await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(12)
@@ -419,8 +420,9 @@ test("networks and volumes that cannot be read leave the rest of the picture sta
   await expect(drawn(page)).toBeVisible()
 
   await expect(node(page, "stack:shop")).toBeVisible()
+  // Not read, not "none": a dashed node level with the hub says so (PGH-25).
   await expect(page.getByRole("region", { name: "Networks and volumes" })).toContainText(
-    "No networks or volumes to read",
+    "Networks and volumes not read",
   )
 })
 

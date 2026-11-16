@@ -5,9 +5,9 @@ import {
   containerBucket,
   exitCodeOf,
   exitedWhen,
-  exitWords,
   type ContainerBucket,
 } from "@/components/docker/containers"
+import { exitWords } from "@/components/docker/words"
 import { networkHref } from "@/components/docker/networks"
 
 /**

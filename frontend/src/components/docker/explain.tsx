@@ -1,9 +1,7 @@
 "use client"
 
-import { Question } from "@/components/icons"
-import { cn } from "@/lib/utils"
-import { Label } from "@/components/ui/label"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Explain } from "@/components/explain"
+import { FormNote } from "@/components/form"
 
 /**
  * The teaching layer.
@@ -16,104 +14,56 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
  * things are in the place the choice is made, not in documentation somewhere
  * else.
  *
- * The rule these components enforce is that the explanation is *quiet*: a
- * short line under the field for the thing you need to know to answer, and a
- * hover card for the paragraph behind it. A form that shouts every caveat at
- * once is as unusable as one that explains nothing, and this is the shape that
- * lets an expert skim past what a newcomer stops to read.
+ * The rule is that the explanation is *quiet*: a `FormNote` under the field
+ * for the thing you need to know to answer, and a `Definition` for the
+ * paragraph behind it. A form that shouts every caveat at once is as unusable
+ * as one that explains nothing, and this is the shape that lets an expert skim
+ * past what a newcomer stops to read. The glossary below and `Definition` are
+ * the only parts Docker keeps of its own; the field, the note and the
+ * toggletip are the dashboard's (`form.tsx`, `explain.tsx`).
  */
-
-/** One short line under a control: what to type, or what happens if you do not. */
-export function Hint({ className, ...props }: React.ComponentProps<"p">) {
-  return (
-    <p className={cn("text-hint leading-relaxed text-muted-foreground", className)} {...props} />
-  )
-}
 
 /**
- * A term with its definition one hover away.
+ * A Docker term with its definition one step away, on the shared `Explain`
+ * toggletip: a resting mouse or the keyboard opens it, and a press or a tap
+ * pins it, so it reads on a phone too (the hover card it used to be ignored a
+ * finger).
  *
- * Rendered as a dotted underline rather than a question-mark icon so it can sit
- * inside a sentence — "put it on a [network]" reads as prose, where an icon
- * after every noun reads as clutter.
+ * With words it is the dotted term inside a sentence — "put it on a
+ * [network]" reads as prose, where an icon after every noun reads as clutter.
+ * Without, it is a `?` after a heading that has no sentence to hold it.
  */
-export function Term({ name, children }: { name: string; children?: React.ReactNode }) {
-  const entry = GLOSSARY[name]
-  return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className="cursor-help underline decoration-dotted underline-offset-4 hover:text-foreground"
-        >
-          {children ?? name}
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 text-xs leading-relaxed">
-        <p className="mb-1 text-body font-medium">{entry?.title ?? name}</p>
-        <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
-      </HoverCardContent>
-    </HoverCard>
-  )
-}
-
-/** The same definition behind an icon, for a panel header where there is no sentence to put it in. */
-export function ExplainIcon({ name, className }: { name: string; className?: string }) {
-  const entry = GLOSSARY[name]
-  return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          aria-label={`What is ${entry?.title ?? name}?`}
-          className={cn("text-muted-foreground transition-colors hover:text-foreground", className)}
-        >
-          <Question className="size-3.5" />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 text-xs leading-relaxed">
-        <p className="mb-1 text-body font-medium">{entry?.title ?? name}</p>
-        <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
-      </HoverCardContent>
-    </HoverCard>
-  )
-}
-
-/**
- * A labelled control with its explanation attached.
- *
- * `hint` is the line that answers "what do I put here"; `term` adds the hover
- * definition to the label for the field whose *name* is the unfamiliar part.
- */
-export function Field({
-  label,
-  hint,
-  term,
-  htmlFor,
-  required,
+export function Definition({
+  name,
   className,
   children,
 }: {
-  label: React.ReactNode
-  hint?: React.ReactNode
-  term?: string
-  htmlFor?: string
-  required?: boolean
+  /** The glossary's key. */
+  name: string
   className?: string
-  children: React.ReactNode
+  /** The words in the sentence; none draws the `?`. */
+  children?: React.ReactNode
 }) {
+  const found = GLOSSARY[name]
+  const entry = { title: found?.title ?? name, body: found?.body ?? "No description available." }
+  if (children === undefined)
+    return (
+      <Explain
+        glyph="question"
+        label={`What is ${entry.title}?`}
+        entry={entry}
+        className={className}
+      />
+    )
   return (
-    <div className={cn("min-w-0 space-y-1.5", className)}>
-      <Label htmlFor={htmlFor} className="flex items-center gap-1.5 text-xs">
-        {label}
-        {required && <span className="text-destructive">*</span>}
-        {term && <ExplainIcon name={term} />}
-      </Label>
+    <Explain face="term" label={`What is ${entry.title}?`} entry={entry} className={className}>
       {children}
-      {hint && <Hint>{hint}</Hint>}
-    </div>
+    </Explain>
   )
 }
+
+/** @deprecated use `FormNote` from `@/components/form`; the class was its copy. */
+export const Hint = FormNote
 
 /**
  * The definitions, in one place.

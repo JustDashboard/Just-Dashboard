@@ -55,7 +55,7 @@ const KIND: Record<
     text: "text-warning",
     icon: RefreshClockwise,
   },
-  create: { word: "Create", color: "var(--chart-2)", text: "text-[var(--chart-2)]", icon: Plus },
+  create: { word: "Create", color: "var(--chart-2)", text: "text-chart-2", icon: Plus },
   start: { word: "Start", color: "var(--success)", text: "text-success", icon: Play },
   unchanged: {
     word: "Unchanged",
@@ -214,17 +214,12 @@ export function StackPreview({
         </ul>
       </section>
 
-      <Panel aria-label="Services">
-        <PanelHeader
-          title={
-            <>
-              Services
-              <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                {services.length}
-              </span>
-            </>
-          }
-        />
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+        aria-label="Services"
+      >
+        <PanelHeader title="Services" count={services.length} />
         <PanelBody flush>
           {wide ? (
             <Table className="table-fixed">

@@ -18,6 +18,7 @@ import type { DirEntry, NetStats, SensorReading, Snapshot } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import type { Tone } from "@/components/tone"
 import { BarReading } from "@/components/bar-reading"
+import { SplitBar as SharedSplitBar } from "@/components/rank-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Meter, utilisationTone } from "@/components/meter"
 import { EmptyState } from "@/components/state"
@@ -468,9 +469,6 @@ export function InterfacesPanel({
   // the real devices by default, everything one press away.
   const interfaces =
     scope === "all" ? snapshot.net : snapshot.net.filter((n) => !VIRTUAL.includes(n.kind))
-  // Each row's share of the busiest interface's traffic, so the uplink is
-  // findable as the long bar rather than by comparing figures down a column.
-  const busiest = Math.max(1, ...interfaces.map((n) => n.recvRate + n.sendRate))
 
   return (
     <Panel plain>
@@ -509,7 +507,7 @@ export function InterfacesPanel({
           // inside a frame of its own — the one box on a page of readings.
           <ul aria-label="Interfaces" className="grid min-w-0 gap-x-10 gap-y-5 lg:grid-cols-2">
             {interfaces.map((iface) => (
-              <Interface key={iface.interface} iface={iface} busiest={busiest} colors={colors} />
+              <Interface key={iface.interface} iface={iface} colors={colors} />
             ))}
           </ul>
         )}
@@ -520,18 +518,13 @@ export function InterfacesPanel({
 
 /**
  * One interface in the order Filesystems draws a disk: which one and what it
- * is carrying, the bar, then where it answers and what it has lost. The two
- * rates are keyed by the bar's colours, as a chart's head keys its figures.
+ * is carrying in words, then where it answers and what it has lost. The two
+ * rates are keyed by the chart's colours, as a chart's head keys its figures.
+ * It had a bar scaled to the busiest interface, which grew from row to row
+ * down a list; a list says its readings in words (HST-22), and a table cell
+ * is where `TrafficBar` stays.
  */
-function Interface({
-  iface,
-  busiest,
-  colors,
-}: {
-  iface: NetStats
-  busiest: number
-  colors: { in: string; out: string }
-}) {
+function Interface({ iface, colors }: { iface: NetStats; colors: { in: string; out: string } }) {
   const errors = iface.errIn + iface.errOut
   const drops = iface.dropIn + iface.dropOut
   return (
@@ -566,7 +559,6 @@ function Interface({
             </span>
           </span>
         </div>
-        <TrafficBar iface={iface} busiest={busiest} colors={colors} />
         <div className="numeric flex min-w-0 justify-between gap-3 text-hint text-muted-foreground">
           <span className="truncate font-mono" title={iface.addrs.join(", ")}>
             {iface.addrs.join(", ") || "no address"}
@@ -590,9 +582,9 @@ function Interface({
 
 /**
  * In and out as one bar against the busiest interface, in the network chart's
- * two colours: the uplink is the long bar, and which way its traffic runs is
- * the split of it. A container's interfaces are drawn the same way on its
- * Usage tab, so it takes only the two rates.
+ * two colours, for a table cell: the uplink is the long bar, and which way its
+ * traffic runs is the split of it. A container's Usage table draws it. It is
+ * the shared `SplitBar` scaled to `total`; a list says its rates in words.
  */
 export function TrafficBar({
   iface,
@@ -604,7 +596,7 @@ export function TrafficBar({
   colors: { in: string; out: string }
 }) {
   return (
-    <SplitBar
+    <ScaledPair
       label={`${rate(iface.recvRate)} in, ${rate(iface.sendRate)} out`}
       busiest={busiest}
       parts={[
@@ -615,8 +607,12 @@ export function TrafficBar({
   )
 }
 
-/** Two sides of one quantity as one bar, against the largest of the bars beside it. */
-export function SplitBar({
+/**
+ * Two sides of one quantity as one bar, against the largest of the bars
+ * beside it, for a table cell. It is the shared `SplitBar` (`rank-list.tsx`)
+ * with `total`; it had the same name and drew its own copy.
+ */
+export function ScaledPair({
   label,
   busiest,
   parts,
@@ -626,18 +622,20 @@ export function SplitBar({
   parts: { value: number; color: string }[]
 }) {
   return (
-    <div
-      role="img"
-      aria-label={label}
-      className="flex h-1.5 w-full min-w-16 overflow-hidden rounded-full bg-meter-track"
-    >
-      {parts.map((part, index) => (
-        <span
-          key={index}
-          className="h-full transition-[width] duration-700 ease-out"
-          style={{ width: `${(part.value / busiest) * 100}%`, background: part.color }}
-        />
-      ))}
-    </div>
+    <SharedSplitBar
+      label={label}
+      total={busiest}
+      size="sm"
+      gap={false}
+      className="min-w-16"
+      parts={parts.map((part, index) => ({
+        key: String(index),
+        count: part.value,
+        color: part.color,
+      }))}
+    />
   )
 }
+
+/** @deprecated use `ScaledPair`, or `SplitBar` from `rank-list` with `total`; the name was rank-list's. */
+export const SplitBar = ScaledPair
