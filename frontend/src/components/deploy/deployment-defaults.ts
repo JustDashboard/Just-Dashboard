@@ -1161,6 +1161,17 @@ export function withPreviousConnectionShape(link: string, previousTarget?: strin
 }
 
 /**
+ * How a database link is written into a variable: a typed reference as the
+ * reference the release resolves, an address as the value it is. Written as
+ * a value, `${{database.5}}` was stored as those characters, and the
+ * application received them for its database URL with no network to the
+ * database.
+ */
+export function databaseLinkWrite(link: string): { reference: string } | { value: string } {
+  return /^\$\{\{database\.[^{}]+\}\}$/.test(link) ? { reference: link } : { value: link }
+}
+
+/**
  * A Railpack configuration file the backend takes (`validateRailpackSettings`): a .json
  * file inside the root directory, never above it nor among the dashboard's own files.
  */

@@ -1037,7 +1037,9 @@ fails the start instead of dropping it. That is why a push is never a pass: pref
 command, a release task or the package's own start script pushes, with the command that commits
 migrations instead (`prisma migrate dev`, `drizzle-kit generate`). When a push does refuse, the failed
 readiness gate names it — `runtime_schema_push_refused`, from Prisma's `--accept-data-loss` message or Drizzle's
-rename and data-loss prompts — rather than a bare timeout. The tool must be installed by the lockfile; the
+rename and data-loss prompts — rather than a bare timeout. `drizzle-kit migrate` prints its spinner and
+exits 1 without the database's error whatever stopped it; the gate names that `runtime_migration_silent`
+and points at the linked database, the usual cause. The tool must be installed by the lockfile; the
 runtime stage copies the build's `node_modules`, so a devDependency is available to the start command.
 
 ## Static sites and site generators
