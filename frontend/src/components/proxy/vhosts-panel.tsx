@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { ArrowRight, CloudUpload, Download, Globe, Plus, Warning } from "@/components/icons"
@@ -32,6 +31,8 @@ import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
+import { useShortcuts } from "@/hooks/use-shortcuts"
+import { TextLink } from "@/components/inline-link"
 import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import { IdentityHeader } from "@/components/identity-header"
@@ -499,6 +500,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     res: VHostLinkResult | SiteDeleteResult,
     keepsCard: boolean,
   ): ReloadOutcome | undefined => {
+    // eslint-disable-next-line react-hooks/purity -- a verb's handler reads the clock when nginx answers, never during render; the compiler cannot see that through the hooks it is handed to
     const at = Date.now()
     const outcome = reloadOutcome(res, unitNow.current)
     setReloads((r) => hear(r, at, outcome))
@@ -973,6 +975,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     let outcome: ReloadOutcome | undefined
     try {
       const res = await post<SitesBulkResult>("/proxy/sites/bulk", { action, names })
+      // eslint-disable-next-line react-hooks/purity -- a verb's handler reads the clock when nginx answers, never during render; the compiler cannot see that through the hooks it is handed to
       const at = Date.now()
       outcome = reloadOutcome(res, unitNow.current)
       setReloads((r) => hear(r, at, outcome))
@@ -1062,39 +1065,41 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     }
   }
 
-  // The keys: / searches, n starts a site, j and k move through the list,
-  // and Enter opens the page of the site they are on. Never while typing, and never
-  // under a sheet, a dialog or a menu, which have keys of their own.
-  const onKey = useRef<(e: KeyboardEvent) => void>(undefined)
-  useEffect(() => {
-    onKey.current = (e) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
-      const target = e.target instanceof HTMLElement ? e.target : null
-      if (target?.closest("input, textarea, select, [contenteditable='true']")) return
-      if (form.open || rawSite || document.querySelector("[role='dialog'], [role='menu']")) return
-      if (e.key === "/") {
-        e.preventDefault()
-        searchRef.current?.focus()
-      } else if (e.key === "n" && admin && hasNginx) {
-        e.preventDefault()
-        openNew()
-      } else if (e.key === "j" || e.key === "k") {
-        e.preventDefault()
-        setCursor(stepSelection(visible.map(siteKey), cursor, e.key === "j" ? 1 : -1))
-      } else if (e.key === "Enter" && cursor && (!target || target === document.body)) {
+  // The keys: n starts a site, and Enter opens the page of the site the
+  // cursor is on. `/` is the section's (the proxy layout's), which finds this
+  // page's search by `data-page-search`. Never while typing, and never under
+  // a sheet, a dialog or a menu, which have keys of their own.
+  const keysFree = !form.open && !rawSite
+  useShortcuts(
+    {
+      n: admin && hasNginx && (() => openNew()),
+      Enter: (event) => {
         const site = visible.find((v) => siteKey(v) === cursor)
-        if (site) {
-          e.preventDefault()
-          router.push(sitePath(site.name))
-        }
-      }
+        if (!site || (event.target && event.target !== document.body)) return false
+        router.push(sitePath(site.name))
+      },
+    },
+    { enabled: keysFree },
+  )
+  // j and k walk the list while focus is in it: letters that answer only
+  // there are the list's own, so they work with single-key shortcuts off.
+  const listRef = useRef<HTMLDivElement>(null)
+  const walk = (event: KeyboardEvent, delta: 1 | -1) => {
+    // The list is found from the key's own target, which is inside it.
+    const list = (event.target as Element).closest("[data-site-list]")
+    const href = (event.target as Element).closest("a[href]")?.getAttribute("href")
+    const focused = visible.find((v) => sitePath(v.name) === href)
+    const next = stepSelection(visible.map(siteKey), focused ? siteKey(focused) : cursor, delta)
+    setCursor(next)
+    const site = visible.find((v) => siteKey(v) === next)
+    if (site) {
+      list?.querySelector<HTMLElement>(`a[href="${CSS.escape(sitePath(site.name))}"]`)?.focus()
     }
-  })
-  useEffect(() => {
-    const listener = (e: KeyboardEvent) => onKey.current?.(e)
-    window.addEventListener("keydown", listener)
-    return () => window.removeEventListener("keydown", listener)
-  }, [])
+  }
+  useShortcuts(
+    { j: (event) => walk(event, 1), k: (event) => walk(event, -1) },
+    { scope: listRef, enabled: keysFree },
+  )
 
   // A save that reloaded waits a moment for nginx to load it; one that did
   // not is read at once, and waiting for a load nobody asked for kept its
@@ -1309,9 +1314,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           </p>
           {admin && run.from === "unit" && (
             <p>
-              <Link href="/proxy" className="underline underline-offset-2">
-                Start it from the Overview
-              </Link>
+              <TextLink href="/proxy">Start it from the Overview</TextLink>
             </p>
           )}
         </Notice>
@@ -1465,35 +1468,37 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                 {filter.trim() && chip !== "all" ? " under this chip." : "."}
               </EmptyNote>
             ) : (
-              groups.map((group) => (
-                <div key={group.key} className="flex min-w-0 flex-col gap-2">
-                  {group.label && <GroupRule label={group.label} count={group.sites.length} />}
-                  <ChoiceList aria-label={group.label || "Sites"}>
-                    {group.sites.map((vhost, index) => (
-                      <SiteRow
-                        key={siteKey(vhost)}
-                        index={index}
-                        vhost={vhost}
-                        {...stateOf(vhost.name)}
-                        stopped={engineStopped(vhost)}
-                        unloaded={isUnloaded(vhost)}
-                        notLive={notLive(vhost)}
-                        ambiguous={shared.has(vhost.name)}
-                        cert={siteCert(vhost, certPoll.data)}
-                        health={siteUpstreams(vhost, upstreamPoll.data)}
-                        app={appOf(vhost)}
-                        hour={siteTraffic(vhost, trafficPoll.data)}
-                        arrived={arrived.has(siteKey(vhost))}
-                        selectable={allChosen.includes(vhost)}
-                        selected={selected.includes(vhost.name)}
-                        onSelectedChange={(on) => toggleSelected(vhost, on)}
-                        cursor={cursor === siteKey(vhost)}
-                        {...handlers}
-                      />
-                    ))}
-                  </ChoiceList>
-                </div>
-              ))
+              <div ref={listRef} data-site-list className="contents">
+                {groups.map((group) => (
+                  <div key={group.key} className="flex min-w-0 flex-col gap-2">
+                    {group.label && <GroupRule label={group.label} count={group.sites.length} />}
+                    <ChoiceList aria-label={group.label || "Sites"}>
+                      {group.sites.map((vhost, index) => (
+                        <SiteRow
+                          key={siteKey(vhost)}
+                          index={index}
+                          vhost={vhost}
+                          {...stateOf(vhost.name)}
+                          stopped={engineStopped(vhost)}
+                          unloaded={isUnloaded(vhost)}
+                          notLive={notLive(vhost)}
+                          ambiguous={shared.has(vhost.name)}
+                          cert={siteCert(vhost, certPoll.data)}
+                          health={siteUpstreams(vhost, upstreamPoll.data)}
+                          app={appOf(vhost)}
+                          hour={siteTraffic(vhost, trafficPoll.data)}
+                          arrived={arrived.has(siteKey(vhost))}
+                          selectable={allChosen.includes(vhost)}
+                          selected={selected.includes(vhost.name)}
+                          onSelectedChange={(on) => toggleSelected(vhost, on)}
+                          cursor={cursor === siteKey(vhost)}
+                          {...handlers}
+                        />
+                      ))}
+                    </ChoiceList>
+                  </div>
+                ))}
+              </div>
             )}
           </PanelBody>
         </Panel>
