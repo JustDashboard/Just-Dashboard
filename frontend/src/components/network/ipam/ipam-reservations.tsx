@@ -207,7 +207,11 @@ export function IPAMCoverageTable({
       <PanelHeader
         title="Coverage"
         count={
-          loading ? undefined : gaps === 0 ? "every source read" : `${gaps} ${gaps === 1 ? "gap" : "gaps"}`
+          loading
+            ? undefined
+            : gaps === 0
+              ? "every source read"
+              : `${gaps} ${gaps === 1 ? "gap" : "gaps"}`
         }
         actions={
           limitations.length > 0 && (

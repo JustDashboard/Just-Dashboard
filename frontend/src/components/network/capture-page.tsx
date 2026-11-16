@@ -451,8 +451,8 @@ function RelatedRun({ id, capture }: { id: string; capture: CaptureRun }) {
         title="Related saved run"
         actions={
           <InfoTip label="What connects them">
-            The reference and the start times connect the two. They do not show the same flow or
-            the cause of an incident.
+            The reference and the start times connect the two. They do not show the same flow or the
+            cause of an incident.
           </InfoTip>
         }
       />

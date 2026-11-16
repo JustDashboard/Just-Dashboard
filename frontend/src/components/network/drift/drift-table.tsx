@@ -106,10 +106,7 @@ export function DriftTable({
   })
   return (
     <Panel aria-label="Comparisons">
-      <PanelHeader
-        title="Comparisons"
-        count={rows.length}
-      >
+      <PanelHeader title="Comparisons" count={rows.length}>
         <ChipStrip aria-label="State" className="mr-auto">
           <FilterChip {...chip("all")}>
             All <ChipCount>{rows.length}</ChipCount>

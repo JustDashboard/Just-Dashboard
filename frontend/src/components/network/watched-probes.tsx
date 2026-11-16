@@ -78,7 +78,7 @@ export function WatchedProbes({
         {watched.error && !watched.data ? (
           <ErrorState error={watched.error} onRetry={watched.refresh} />
         ) : probes.length === 0 ? (
-(empty ?? <EmptyNote>No probe is watched.</EmptyNote>)
+          (empty ?? <EmptyNote>No probe is watched.</EmptyNote>)
         ) : (
           <ul className="divide-y divide-hairline">
             {probes.map((row) => {

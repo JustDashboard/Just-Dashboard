@@ -208,11 +208,7 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
   // The shortcuts' `?` stands where a detail page keeps it, on the row above
   // the line, not beside the page's command; a phone has no keyboard for it.
   const header = (
-    <PageContext
-      title="Firewall"
-      actions={<WorkspaceHelp compact />}
-      className="max-sm:hidden"
-    />
+    <PageContext title="Firewall" actions={<WorkspaceHelp compact />} className="max-sm:hidden" />
   )
   const refreshVerb: Verb = {
     key: "refresh",
@@ -1104,54 +1100,51 @@ function FirewallDefaults({
         }}
       >
         <Panel plain>
-          <PanelHeader
-            title="Defaults"
-            actions={settingStatus({ dirty: staged.length > 0 })}
-          />
+          <PanelHeader title="Defaults" actions={settingStatus({ dirty: staged.length > 0 })} />
           <PanelBody>
-      <div className="divide-y divide-hairline">
-        {rows.map((row) => {
-          const value = draft[row.key] ?? row.current
-          const edited = row.editable && value !== row.current
-          return (
-            <div
-              key={row.key}
-              data-slot="firewall-default"
-              data-edited={edited || undefined}
-              className="relative flex min-h-12 min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2"
-            >
-              {/* A staged change is marked down the row's edge in git's
+            <div className="divide-y divide-hairline">
+              {rows.map((row) => {
+                const value = draft[row.key] ?? row.current
+                const edited = row.editable && value !== row.current
+                return (
+                  <div
+                    key={row.key}
+                    data-slot="firewall-default"
+                    data-edited={edited || undefined}
+                    className="relative flex min-h-12 min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2"
+                  >
+                    {/* A staged change is marked down the row's edge in git's
                   modified hue, the colour of a change not applied yet. */}
-              {edited && (
-                <span
-                  aria-hidden
-                  className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
-                />
-              )}
-              <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                {row.label}
-                <InfoTip label={`About the ${row.label.toLowerCase()} default`}>
-                  {row.why}
-                </InfoTip>
-              </span>
-              {row.editable ? (
-                <Segments
-                  id={row.key === "logging" ? LOGGING_CONTROL : undefined}
-                  label={row.name}
-                  value={value}
-                  options={row.options.map((option) => ({ value: option, label: option }))}
-                  onChange={(next) => setDraft((held) => ({ ...held, [row.key]: next }))}
-                  disabled={busy}
-                />
-              ) : (
-                <span className="text-body font-medium" data-testid={`default-${row.key}`}>
-                  {row.word}
-                </span>
-              )}
+                    {edited && (
+                      <span
+                        aria-hidden
+                        className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
+                      />
+                    )}
+                    <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                      {row.label}
+                      <InfoTip label={`About the ${row.label.toLowerCase()} default`}>
+                        {row.why}
+                      </InfoTip>
+                    </span>
+                    {row.editable ? (
+                      <Segments
+                        id={row.key === "logging" ? LOGGING_CONTROL : undefined}
+                        label={row.name}
+                        value={value}
+                        options={row.options.map((option) => ({ value: option, label: option }))}
+                        onChange={(next) => setDraft((held) => ({ ...held, [row.key]: next }))}
+                        disabled={busy}
+                      />
+                    ) : (
+                      <span className="text-body font-medium" data-testid={`default-${row.key}`}>
+                        {row.word}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-          )
-        })}
-      </div>
           </PanelBody>
         </Panel>
       </form>
@@ -1193,7 +1186,12 @@ function FirewallMissing({ reason, onInstalled }: { reason?: string; onInstalled
       </InstallHandoff>
     )
   return (
-    <MissingThing size="block" reason="not-installed" thing="netfilter" title="No firewall on this host">
+    <MissingThing
+      size="block"
+      reason="not-installed"
+      thing="netfilter"
+      title="No firewall on this host"
+    >
       {description}
     </MissingThing>
   )

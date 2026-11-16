@@ -198,9 +198,11 @@ export function PathTool({
                 className="w-24 font-mono"
               />
             </Field>
-            {/* The verbs stand before everything optional, so a field that
-                arrives with a report (the DNS answers) never moves them. */}
-            <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
+            {/* The verbs follow the last field, as on every tool's form (Ping's
+                follow its target), and stand before everything optional, so a
+                field that arrives with a report (the DNS answers) never moves
+                them. */}
+            <div className="flex flex-wrap items-center gap-3">
               <Button onClick={() => void submit()} pending={busy} disabled={!request || busy}>
                 <Play />
                 Run
