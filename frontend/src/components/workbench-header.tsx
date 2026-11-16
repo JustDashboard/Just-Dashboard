@@ -88,7 +88,11 @@ export function WorkbenchHeader({
           </div>
           <div className="min-w-0 @4xl:flex-1" data-slot="workbench-name">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 @lg:flex-nowrap">
-              <div className="flex min-w-0 items-center gap-2 text-body font-semibold">{name}</div>
+              {/* The whole line where the state goes under it: a field sized to its
+                  text measured its width against a box sized to the field. */}
+              <div className="flex min-w-0 items-center gap-2 text-body font-semibold @max-lg:flex-1">
+                {name}
+              </div>
               {state && (
                 <div
                   data-slot="workbench-state"
