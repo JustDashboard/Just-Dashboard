@@ -104,7 +104,7 @@ export default function AccountLinkPage() {
           )
         }
         state={<LinkState status={status} />}
-        facts={<Facts status={status} />}
+        facts={linkFacts(status)}
         command={
           link ? (
             <LinkActions
@@ -181,7 +181,7 @@ function SiteTile() {
 }
 
 /** What the link is, after its state: the state itself is said once, beside the name. */
-function Facts({ status }: { status: AccountLinkStatus }) {
+function linkFacts(status: AccountLinkStatus) {
   if (!status.enabled) return <Fact>turned off by JD_ACCOUNT_LINK</Fact>
   const link = status.state === "linked" ? status.link : undefined
   if (link) {
