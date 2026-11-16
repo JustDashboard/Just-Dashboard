@@ -278,7 +278,7 @@ function SortHead({
         type="button"
         onClick={onSort}
         className={cn(
-          "-mx-1 inline-flex items-center gap-1 rounded-sm px-1 focus-ring transition-colors hover:text-foreground",
+          "inline-flex items-center gap-1 rounded-sm focus-ring transition-colors hover:text-foreground",
           right && "flex-row-reverse",
           active && "text-foreground",
         )}
