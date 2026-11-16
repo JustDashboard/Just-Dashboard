@@ -14,6 +14,10 @@
 // the check arrived (0.9.0, WP-40), by name, and the check fails on a miss that is not listed and
 // on a listed name that is no longer a miss, so the list only shrinks. WP-41 writes the missing
 // rows and fixes the stale names, and empties it. The token page has no baseline.
+//
+// Its "inFlight" lists are the misses that the other packages of the same wave make or mend
+// (0.9.0, wave 3). Those packages land one by one, in any order, so such a name may be a miss or
+// not: the check accepts it either way. WP-41 empties these lists too.
 
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
@@ -143,12 +147,14 @@ function removedIn(markdown) {
   )
 }
 
-// The ratchet: what is missed now against what was missed when the baseline was written.
-function ratchet(misses, baseline) {
+// The ratchet: what is missed now against what was missed when the baseline was written. A name
+// in `inFlight` is neither added nor fixed: it waits on a package of the same wave.
+function ratchet(misses, baseline, inFlight = []) {
   const now = new Set(misses)
   const before = new Set(baseline)
+  const waiting = new Set(inFlight)
   return {
-    added: [...now].filter((name) => !before.has(name)).sort(),
+    added: [...now].filter((name) => !before.has(name) && !waiting.has(name)).sort(),
     fixed: [...before].filter((name) => !now.has(name)).sort(),
   }
 }
@@ -191,7 +197,7 @@ const baseline = JSON.parse(read(BASELINE))
 // Fails on a miss the baseline does not list, and on a listed name that is no longer a miss.
 // `detail` says where a new miss is.
 function expectRatchet(misses, list, what, detail = (name) => name) {
-  const { added, fixed } = ratchet(misses, baseline[list])
+  const { added, fixed } = ratchet(misses, baseline[list], baseline.inFlight?.[list])
   if (added.length > 0) {
     throw new Error(
       `New: ${what}. Fix the docs, or, only where another package owns the page, add the name ` +
@@ -316,5 +322,6 @@ describe("the checks themselves", () => {
   test("let the baseline only shrink", () => {
     expect(ratchet(["A", "B"], ["B", "C"])).toEqual({ added: ["A"], fixed: ["C"] })
     expect(ratchet([], [])).toEqual({ added: [], fixed: [] })
+    expect(ratchet(["A", "W"], ["B"], ["W", "V"])).toEqual({ added: ["A"], fixed: ["B"] })
   })
 })
