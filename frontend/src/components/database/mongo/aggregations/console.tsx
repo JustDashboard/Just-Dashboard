@@ -26,7 +26,13 @@ import { classifyCommand, mongoCommands, runCommand } from "@/components/databas
 import { parseDocument } from "@/components/database/mongo/bson"
 import { BsonTree } from "@/components/database/mongo/bson-tree"
 import { CodeField } from "@/components/database/mongo/code-field"
-import { effectColor } from "@/components/database/mongo/kinds"
+import {
+  COMMAND_CLASS,
+  CommandClassTag,
+  TRANSCRIPT_KEPT,
+  commandMs,
+  type CommandClass,
+} from "@/components/database/query/command-class"
 import { DatabaseMark } from "@/components/database/mongo/rail"
 import { shapeProblem } from "@/components/database/mongo/shell"
 import type {
@@ -40,19 +46,12 @@ import { ReadError } from "@/components/database/redis/read-error"
 
 const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
-/** How many commands the transcript keeps. */
-const KEPT = 40
-
-/**
- * What a command does, as the server classes it, in the hue the section
- * gives a statement of that effect wherever statements are listed. A command
- * that is never run has no effect, and no hue.
- */
-const CLASS: Record<MongoCommandClass, { word: string; color: string | undefined }> = {
-  read: { word: "reads", color: effectColor("read") },
-  write: { word: "writes", color: effectColor("change") },
-  destructive: { word: "removes or stops", color: effectColor("remove") },
-  blocked: { word: "never run", color: undefined },
+/** MongoDB's classes of a command, in the one console vocabulary. */
+const CLASS: Record<MongoCommandClass, CommandClass> = {
+  read: "read",
+  write: "write",
+  destructive: "removes",
+  blocked: "refused",
 }
 
 const NEEDS: Record<MongoCapability, string> = {
@@ -181,12 +180,14 @@ export function ConsoleView({
             more: answer.reply.more,
             durationMs: answer.reply.durationMs,
           },
-        ].slice(-KEPT),
+        ].slice(-TRANSCRIPT_KEPT),
       )
       // The prompt is cleared of the command that ran, not of one typed while it ran.
       setText((now) => (now === sent ? "" : now))
     } catch (err) {
-      setLog((held) => [...held, { ...asked, verdict, error: errorMessage(err) }].slice(-KEPT))
+      setLog((held) =>
+        [...held, { ...asked, verdict, error: errorMessage(err) }].slice(-TRANSCRIPT_KEPT),
+      )
     } finally {
       setBusy(false)
       requestAnimationFrame(() => end.current?.scrollIntoView({ block: "nearest" }))
@@ -370,8 +371,8 @@ export function ConsoleView({
               {verdict && !shape && (
                 <span className="flex shrink-0 items-center gap-1.5">
                   <span className="font-mono text-xs text-foreground">{verdict.command}</span>{" "}
-                  <span style={{ color: CLASS[verdict.class].color }}>
-                    {CLASS[verdict.class].word}
+                  <span style={{ color: COMMAND_CLASS[CLASS[verdict.class]].color }}>
+                    {COMMAND_CLASS[CLASS[verdict.class]].word}
                   </span>{" "}
                   {verdict.target && <span className="font-mono">{verdict.target} </span>}
                   {verdict.admin && <span>(an administrator&rsquo;s command) </span>}
@@ -430,9 +431,9 @@ export function ConsoleView({
                     </span>
                     <span
                       className="shrink-0 text-hint"
-                      style={{ color: CLASS[entry.class].color }}
+                      style={{ color: COMMAND_CLASS[CLASS[entry.class]].color }}
                     >
-                      {CLASS[entry.class].word}
+                      {COMMAND_CLASS[CLASS[entry.class]].word}
                       {entry.admin ? " · admin" : ""}
                     </span>
                   </button>
@@ -469,16 +470,21 @@ function TranscriptEntry({ entry, onAgain }: { entry: Entry; onAgain: () => void
           {entry.verdict && word ? (
             <>
               {entry.command.slice(0, entry.command.indexOf(word))}
-              <span style={{ color: CLASS[entry.verdict.class].color }}>{word}</span>
+              <span style={{ color: COMMAND_CLASS[CLASS[entry.verdict.class]].color }}>{word}</span>
               {entry.command.slice(entry.command.indexOf(word) + word.length)}
             </>
           ) : (
             entry.command
           )}
         </code>
+        {entry.verdict && (
+          <span className="flex shrink-0 items-center gap-2 font-sans text-hint">
+            <CommandClassTag value={CLASS[entry.verdict.class]} />
+          </span>
+        )}
         {entry.durationMs !== undefined && (
           <span className="numeric shrink-0 text-hint text-muted-foreground">
-            {entry.durationMs.toLocaleString("en-US")} ms
+            {commandMs(entry.durationMs)}
           </span>
         )}
         <Button size="xs" variant="ghost" className="shrink-0" onClick={onAgain}>

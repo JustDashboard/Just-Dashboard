@@ -1,7 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchResponse, get } from "@/lib/api"
+import { fetchResponse } from "@/lib/api"
+import {
+  exportBlob,
+  exportProgress,
+  saveExport,
+  settledExport,
+  streamExport,
+} from "@/lib/stream-export"
 import { notify } from "@/lib/toast"
 import type { DbExportFormat } from "@/lib/types"
 import {
@@ -11,23 +18,6 @@ import {
   exportEnd,
   exportReport,
 } from "@/components/database/data/export"
-import type { DbExportState } from "@/components/database/data/types"
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-/** The server's record of how an export went, once it has stopped running. */
-async function settled(id: number, exportId: string): Promise<DbExportState | null> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      const state = await get<DbExportState>(`/databases/${id}/export/status`, { exportId })
-      if (state.status !== "running") return state
-    } catch {
-      return null
-    }
-    await sleep(500)
-  }
-  return null
-}
 
 /**
  * A statement's whole result as a file, written by the server.
@@ -64,30 +54,17 @@ export function useResultExport(id: number) {
           signal: controller.signal,
           body: JSON.stringify({ sql, format, limit, exportId }),
         })
-        if (!response.body) throw new Error("The export response has no body")
-        let cut = false
-        let blob = new Blob([])
-        try {
-          blob = await response.blob()
-        } catch (err) {
-          if (controller.signal.aborted) throw err
-          // The server ends a failed export by breaking the connection.
-          cut = true
-        }
+        const read = await streamExport(response, {
+          signal: controller.signal,
+          progress: exportProgress("the result", toast),
+        })
+        const blob = exportBlob(read.parts, response)
         const tail = await blob.slice(Math.max(0, blob.size - MARK_TAIL)).text()
-        const read = exportEnd(await settled(id, exportId), format, tail)
-        const ended = cut ? { ...read, status: "failed" as const } : read
+        // A broken connection is a failed export whatever else is known.
+        const end = exportEnd(await settledExport(id, exportId), format, tail)
+        const ended = read.cut ? { ...end, status: "failed" as const } : end
         const report = exportReport(ended, "the result", limit)
-        if (ended.status !== "failed") {
-          const disposition = response.headers.get("Content-Disposition") ?? ""
-          const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `query.${format}`
-          const url = URL.createObjectURL(blob)
-          const link = document.createElement("a")
-          link.href = url
-          link.download = filename
-          link.click()
-          URL.revokeObjectURL(url)
-        }
+        if (ended.status !== "failed") saveExport(blob, response, `query.${format}`)
         notify.dismiss(toast)
         if (report.tone === "success") notify.success(report.title)
         else if (report.tone === "danger") {

@@ -1708,7 +1708,7 @@ export function DataGrid({
                 Arrow keys and Tab move between cells. Shift with Space ticks the row. Escape, then
                 Tab, leaves the grid.
               </p>
-              <div role="rowgroup" className="sticky top-0 z-20" {...headerHandlers}>
+              <div role="rowgroup" className="sticky top-0 z-sticky" {...headerHandlers}>
                 <GridHeader
                   template={template}
                   pinned={pinnedCols}

@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   ChevronDoubleDown,
-  ChevronLeft,
-  ChevronRight,
   CloudUpload,
   Copy,
   Download,
@@ -19,28 +17,22 @@ import {
   Trash,
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
-import { bytes, grouped } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { FormFact, FormFacts } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { PaneFooter } from "@/components/panel"
 import { EmptyState } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useGridLayout } from "@/components/database/grid"
+import { PageControls } from "@/components/database/data/foot"
+import { readableDuration } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
 import {
   cloneDocument,
@@ -73,7 +65,7 @@ import {
   useListed,
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
-import { Stopped, useElapsed, useStoppable } from "@/components/database/mongo/in-flight"
+import { Stopped, useSecondsRunning, useStoppable } from "@/components/database/mongo/in-flight"
 import {
   CollectionKindTag,
   CollectionMark,
@@ -238,7 +230,7 @@ function Documents({
     0,
     [id, identity],
   )
-  const seconds = useElapsed(poll.loading)
+  const seconds = useSecondsRunning(poll.loading)
   // The page on screen is kept under the one being read, so turning a page
   // sweeps over the old documents instead of collapsing to a skeleton.
   const [kept, setKept] = useState<MongoFindResult>()
@@ -532,7 +524,7 @@ function Documents({
     <>
       {result && (
         <span className="numeric text-hint whitespace-nowrap text-muted-foreground max-lg:hidden">
-          {result.durationMs.toLocaleString("en-US")} ms
+          {readableDuration(`${result.durationMs}ms`)}
         </span>
       )}
       {result?.truncated && (
@@ -549,46 +541,17 @@ function Documents({
       >
         {words}
       </span>
-      <Select
-        value={String(pageSize)}
-        onValueChange={(next) => {
-          setSize(Number(next))
+      <PageControls
+        pageSize={pageSize}
+        sizes={PAGE_SIZES}
+        sizeLabel="Documents a page"
+        onPageSize={(next) => {
+          setSize(next)
           select({ page: null })
         }}
-      >
-        <SelectTrigger
-          size="sm"
-          aria-label="Documents a page"
-          className="h-7 gap-1 px-2 text-xs data-[size=sm]:h-7 sm:data-[size=sm]:h-7"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent position="popper" align="end">
-          {PAGE_SIZES.map((option) => (
-            <SelectItem key={option} value={String(option)} className="text-xs">
-              {option} a page
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <div className="flex items-center">
-        <IconAction
-          label="Previous page"
-          className="size-7"
-          disabled={window_.page === 0}
-          onClick={() => turn(window_.page - 1)}
-        >
-          <ChevronLeft />
-        </IconAction>
-        <IconAction
-          label="Next page"
-          className="size-7"
-          disabled={!hasNext}
-          onClick={() => turn(window_.page + 1)}
-        >
-          <ChevronRight />
-        </IconAction>
-      </div>
+        onPrevious={window_.page === 0 ? undefined : () => turn(window_.page - 1)}
+        onNext={hasNext ? () => turn(window_.page + 1) : undefined}
+      />
     </>
   )
 
@@ -614,7 +577,7 @@ function Documents({
             {info.type === "view"
               ? `on ${info.viewOn}`
               : info.statsKnown
-                ? `${grouped(info.count)} ${info.count === 1 ? "document" : "documents"} · ${bytes(info.size)}`
+                ? `${plural(info.count, "document")} · ${bytes(info.size)}`
                 : ""}
           </span>
         )}
@@ -720,7 +683,7 @@ function Documents({
             data-slot="mongo-unsent"
             className="ml-auto flex min-h-9 min-w-0 flex-wrap items-center gap-x-1.5"
           >
-            <p className="text-hint text-(--git-modified)">
+            <p className="text-hint text-git-modified">
               Unsent edits on{" "}
               {stagedIds.length === 1 ? "one document" : `${stagedIds.length} documents`}
               {elsewhere.length > 0 &&
@@ -772,7 +735,7 @@ function Documents({
         {poll.loading && result && (
           <div
             aria-hidden
-            className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden bg-meter-track"
+            className="absolute inset-x-0 top-0 z-raised h-0.5 overflow-hidden bg-meter-track"
           >
             <div className="h-full w-1/3 animate-sweep bg-brand" />
           </div>

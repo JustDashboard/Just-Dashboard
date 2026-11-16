@@ -26,10 +26,10 @@ import {
   renameKey,
   replaceNode,
   scalarLiteral,
+  nodeSize,
   scalarText,
-  sizeOf,
   type JsonNode,
-} from "@/components/database/data/json-doc"
+} from "@/components/database/kit/json-doc"
 
 /** How many entries of one object or array are drawn before the rest are asked for. */
 const PAGE = 100
@@ -248,12 +248,12 @@ function Node({
               ) : (
                 <span className="min-w-0 truncate">{name}</span>
               )}
-              <span className="shrink-0 text-muted-foreground/50">:</span>
+              <span className="shrink-0 text-faint">:</span>
             </span>
           ))}
         {container ? (
-          <span className="shrink-0 whitespace-nowrap text-muted-foreground/70">
-            {node.kind === "array" ? "[ ]" : "{ }"} {sizeOf(node)}
+          <span className="shrink-0 whitespace-nowrap text-faint">
+            {node.kind === "array" ? "[ ]" : "{ }"} {nodeSize(node)}
           </span>
         ) : editing ? (
           <ScalarInput

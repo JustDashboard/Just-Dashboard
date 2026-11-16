@@ -7,7 +7,6 @@ import { ChevronDown, CloudDownload, Code, Sparkles, Table, Warning } from "@/co
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard } from "@/components/choice-card"
 import { Segments } from "@/components/segments"
@@ -58,6 +57,7 @@ import {
 import { SeedPanel } from "@/components/database/generate/seed"
 import { TablePicker } from "@/components/database/generate/table-picker"
 import { downloadArchive } from "@/components/database/generate/zip"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Schema = { name: string; system?: boolean; tables: number }
 type Head = { defaultSchema: string; schemas: Schema[] }
@@ -138,7 +138,7 @@ export function Generate() {
   const seeding = storedTarget === SEED && engine.can("seed")
 
   // Beside the files where there is room for both; folded to the chosen one where there is not.
-  const beside = useMediaQuery("(min-width: 1280px)")
+  const beside = useBreakpoint("xl")
   const [browsing, setBrowsing] = useState(false)
 
   /* ---------------------------------------------------------------- scope */
@@ -240,6 +240,9 @@ export function Generate() {
     generation.data ??
     (generation.error || kept?.result.target !== target?.id ? undefined : kept?.result)
   const writing = generation.loading || (armed && wanted !== asked.key && !reason && !problem)
+  // Before anything is written the output's empty state holds the one Generate;
+  // the head's appears once there is something to write again.
+  const untouched = !shown && !writing && !generation.error && !(!beside && browsing)
 
   const generate = () => {
     if (!wanted) return
@@ -322,9 +325,13 @@ export function Generate() {
                     >
                       {entry.label}
                     </span>
-                    <Tag className="max-w-full">
-                      <LanguageMark language={entry.language} />
-                    </Tag>
+                    {/* "Prisma" over "prisma" says the name twice: the tag is for a
+                        language other than the generator's own name. */}
+                    {!sameWord(entry.language, entry.label) && (
+                      <Tag className="max-w-full">
+                        <LanguageMark language={entry.language} />
+                      </Tag>
+                    )}
                   </span>
                 </ChoiceCard>
               )
@@ -403,9 +410,11 @@ export function Generate() {
               title={
                 <span className="flex min-w-0 items-center gap-2.5">
                   <span className="min-w-0 truncate">{target.label}</span>
-                  <Tag className="shrink-0">
-                    <LanguageMark language={target.language} />
-                  </Tag>
+                  {!sameWord(target.language, target.label) && (
+                    <Tag className="shrink-0">
+                      <LanguageMark language={target.language} />
+                    </Tag>
+                  )}
                   {/* What it writes, and that it only reads: it was a
                       paragraph in the files' place before anything was
                       written, where it stood between the reader and Generate. */}
@@ -419,7 +428,7 @@ export function Generate() {
               actions={
                 <>
                   {browseButton}
-                  {!reason && (
+                  {!reason && !untouched && (
                     <Button
                       size="sm"
                       onClick={generate}
@@ -882,4 +891,9 @@ function GenerateSilhouette() {
       </div>
     </div>
   )
+}
+
+/** Whether a generator's language is its own name ("Prisma" over "prisma"): then the tag says it twice. */
+function sameWord(language: string | undefined, label: string): boolean {
+  return language?.toLowerCase() === label.toLowerCase()
 }

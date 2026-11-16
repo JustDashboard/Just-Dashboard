@@ -4,15 +4,14 @@ import { useEffect, useId, useState } from "react"
 import Link from "next/link"
 import { Clock, Eye, EyeOff, Plus, RefreshClockwise, Trash } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
-import { bytes, duration, relativeTime } from "@/lib/format"
+import { bytes, duration, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Meter } from "@/components/meter"
-import { Modal } from "@/components/modal"
+import { DialogSubject, Modal } from "@/components/modal"
 import { EmptyNote, EmptyState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
@@ -33,6 +32,7 @@ import { dropIndex, hideIndex, mongoIndexes, setIndexExpiry } from "@/components
 import { CreateIndexDialog } from "@/components/database/mongo/schema/index-dialog"
 import type { MongoIndex } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
+import { ShareCell } from "@/components/database/ops/performance-words"
 import { ReadError } from "@/components/database/redis/read-error"
 
 const KEY_MARK: Record<string, string> = { asc: "↑", desc: "↓" }
@@ -44,7 +44,7 @@ function IndexKeys({ index }: { index: MongoIndex }) {
       {index.keys.map((key) => (
         <span key={`${key.field}:${key.type}`} className="font-mono text-hint whitespace-nowrap">
           <span className="text-muted-foreground">{key.field}</span>{" "}
-          <span className="text-(--tag-cyan)">{KEY_MARK[key.type] ?? key.type}</span>
+          <span className="text-tag-cyan">{KEY_MARK[key.type] ?? key.type}</span>
         </span>
       ))}
     </span>
@@ -70,7 +70,7 @@ function IndexProperties({ index, quiet }: { index: MongoIndex; quiet?: boolean 
       {index.hidden && <Status tone="warning" label="Hidden from the planner" />}
       {index.building && <Status tone="notice" label="Building" />}
       {tags.length === 0 && !index.hidden && !index.building && !quiet && (
-        <span className="text-muted-foreground/60">—</span>
+        <span className="text-faint">—</span>
       )}
     </span>
   )
@@ -84,7 +84,7 @@ function usageWords(index: MongoIndex): { figure: string; since: string } | null
   if (!index.usage) return null
   const ago = relativeTime(index.usage.since)
   return {
-    figure: `${index.usage.ops.toLocaleString("en-US")} ${index.usage.ops === 1 ? "use" : "uses"}`,
+    figure: plural(index.usage.ops, "use"),
     since: ago === "just now" ? "in the last moments" : `in the last ${ago.replace(/ ago$/, "")}`,
   }
 }
@@ -134,7 +134,8 @@ export function IndexesView({
   const indexes = poll.data?.indexes
   const total = indexes?.reduce((sum, index) => sum + Math.max(index.size, 0), 0) ?? 0
   // The most any index here has been used: what each one's bar is drawn against.
-  const busiest = Math.max(...(indexes ?? []).map((index) => index.usage?.ops ?? 0), 1)
+  // Every use of this collection's indexes: each index's share of them is its column.
+  const uses = (indexes ?? []).reduce((sum, index) => sum + (index.usage?.ops ?? 0), 0)
 
   // After a drop the row has gone, and its control with it: the list takes the
   // keyboard. It is handed over when the confirmation ends, and again once the
@@ -255,9 +256,7 @@ export function IndexesView({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-3 py-1">
         <p className="numeric min-w-0 flex-1 text-hint text-muted-foreground">
-          {indexes
-            ? `${indexes.length.toLocaleString("en-US")} ${indexes.length === 1 ? "index" : "indexes"} · ${bytes(total)} on disk`
-            : ""}
+          {indexes ? `${plural(indexes.length, "index", "indexes")} · ${bytes(total)} on disk` : ""}
         </p>
         <IconAction label="Read the indexes again" className="size-7" onClick={poll.refresh}>
           <RefreshClockwise />
@@ -303,6 +302,7 @@ export function IndexesView({
                     <TableHead>Type</TableHead>
                     <TableHead className="text-right">Size</TableHead>
                     <TableHead>Used</TableHead>
+                    <TableHead className="w-14 px-2 text-right">Share</TableHead>
                     <TableHead>Properties</TableHead>
                     <TableHead className="w-0">
                       <span className="sr-only">Actions</span>
@@ -332,24 +332,19 @@ export function IndexesView({
                         </TableCell>
                         <TableCell className="whitespace-nowrap">
                           {usage ? (
-                            <div className="w-36 space-y-1">
-                              <p className="flex items-baseline gap-1.5">
-                                <span className="numeric">{usage.figure}</span>
-                                <span className="truncate text-hint text-muted-foreground">
-                                  {usage.since}
-                                </span>
-                              </p>
-                              {/* Against the busiest index here: which ones carry the reads is seen at a glance. */}
-                              <Meter
-                                size="thin"
-                                value={((index.usage?.ops ?? 0) / busiest) * 100}
-                                label={`How much ${index.name} is used beside the busiest index`}
-                              />
-                            </div>
+                            <p className="flex w-44 items-baseline gap-1.5">
+                              <span className="numeric">{usage.figure}</span>
+                              <span className="truncate text-hint text-muted-foreground">
+                                {usage.since}
+                              </span>
+                            </p>
                           ) : (
-                            <span className="text-muted-foreground/60">—</span>
+                            <span className="text-faint">—</span>
                           )}
                         </TableCell>
+                        {/* What the bar under the figure said by its length: this index's
+                            part of the collection's reads through an index. */}
+                        <ShareCell part={index.usage ? index.usage.ops : -1} whole={uses} />
                         <TableCell>
                           <IndexProperties index={index} />
                         </TableCell>
@@ -525,20 +520,21 @@ function ExpiryDialog({
       }
     >
       <div className="space-y-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{index.name}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={index.name}
+          mono
+          facts={
+            <>
               <FormFact label="Collection" mono>
                 {database}.{collection}
               </FormFact>
               <FormFact label="On" mono>
                 {field}
               </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
         <Field
           label="Delete a document after"
           htmlFor="mongo-index-expiry"
