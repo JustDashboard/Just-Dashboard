@@ -57,7 +57,7 @@ import { meterTunnel } from "@/lib/remote-desktop-stats"
 import { notify } from "@/lib/toast"
 import { useViewState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
-import { ComputerMark, HueKey, reachTone } from "@/components/remote-desktop/marks"
+import { ComputerMark, reachTone } from "@/components/remote-desktop/marks"
 import { draftOf, inputOf } from "@/components/remote-desktop/computer-form"
 import { useRemoteDesktop } from "@/components/remote-desktop/use-remote-desktop"
 import { PinCard, StreamPane, useStream } from "@/components/remote-desktop/stream"
@@ -147,7 +147,7 @@ export function RemoteSession({
   /** What the shell shows of a session kept connected while another page is up. */
   onState: (state: HeldState) => void
 }) {
-  const { data, error, hueOf, refresh } = useRemoteDesktop(visible ? 15_000 : 0)
+  const { data, error, refresh } = useRemoteDesktop(visible ? 15_000 : 0)
   const computer = data?.computers.find((candidate) => candidate.id === id)
   const workspace = useRef<HTMLDivElement>(null)
   const viewport = useRef<HTMLDivElement>(null)
@@ -620,7 +620,6 @@ export function RemoteSession({
             <Rail
               computers={data.computers}
               current={id}
-              hueOf={hueOf}
               className={cn(paneShown(shown === "computers"), !rail && "lg:hidden")}
             />
           )}
@@ -901,12 +900,10 @@ export function RemoteSession({
 function Rail({
   computers,
   current,
-  hueOf,
   className,
 }: {
   computers: RdComputerView[]
   current: string
-  hueOf: (computer: RdComputerView) => string
   className?: string
 }) {
   return (
@@ -945,7 +942,6 @@ function Rail({
                   active && "bg-accent font-medium hover:bg-accent",
                 )}
               >
-                <HueKey color={hueOf(computer)} />
                 <StatusDot
                   tone={reachTone(reach)}
                   live={reach.kind === "live"}

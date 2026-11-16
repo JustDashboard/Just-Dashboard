@@ -17,7 +17,7 @@ import {
   type RdOverview,
 } from "@/lib/remote-desktop"
 import { cn } from "@/lib/utils"
-import { ComputerMark, HueKey } from "@/components/remote-desktop/marks"
+import { ComputerMark } from "@/components/remote-desktop/marks"
 
 const noSubscribe = () => () => {}
 
@@ -39,11 +39,9 @@ const noSubscribe = () => () => {}
  */
 export function ComputerPicture({
   overview,
-  hueOf,
   hostname,
 }: {
   overview: RdOverview
-  hueOf: (computer: RdComputerView) => string
   hostname?: string
 }) {
   const container = useRef<HTMLDivElement>(null)
@@ -165,7 +163,6 @@ export function ComputerPicture({
                 >
                   <ComputerNode
                     computer={computer}
-                    hue={hueOf(computer)}
                     nodeRef={refs.get(computer.id)}
                   />
                 </li>
@@ -203,11 +200,9 @@ export function ComputerPicture({
 
 function ComputerNode({
   computer,
-  hue,
   nodeRef,
 }: {
   computer: RdComputerView
-  hue: string
   nodeRef?: RefObject<HTMLSpanElement | null>
 }) {
   const reach = reachability(computer)
@@ -227,15 +222,12 @@ function ComputerNode({
         </span>
       }
       title={
-        <span className="flex min-w-0 items-center gap-2">
-          <HueKey color={hue} />
-          <Link
-            href={sessionHref(computer.id)}
-            className="min-w-0 truncate rounded-sm focus-ring hover:underline"
-          >
-            {computer.name}
-          </Link>
-        </span>
+        <Link
+          href={sessionHref(computer.id)}
+          className="min-w-0 truncate rounded-sm focus-ring hover:underline"
+        >
+          {computer.name}
+        </Link>
       }
       hint={
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">

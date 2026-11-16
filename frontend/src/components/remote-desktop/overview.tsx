@@ -66,7 +66,7 @@ const NEW_HREF = `${REMOTE_DESKTOP_HREF}/new`
  * install, with its output under it.
  */
 export function RemoteDesktopOverview() {
-  const { data, error, refresh, hueOf } = useRemoteDesktop()
+  const { data, error, refresh } = useRemoteDesktop()
   const { host } = useMetrics()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<RdComputer | null>(null)
@@ -185,7 +185,7 @@ export function RemoteDesktopOverview() {
 
       {data.computers.length > 0 ? (
         <>
-          <ComputerPicture overview={data} hueOf={hueOf} hostname={host?.hostname} />
+          <ComputerPicture overview={data} hostname={host?.hostname} />
           <Panel plain>
             <PanelHeader
               title="Computers"
