@@ -29,7 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { ROLE_HUE, ROLE_MARK, ROLE_SUMMARY } from "@/components/account/capabilities"
+import { ROLE_SUMMARY } from "@/components/account/capabilities"
+import { ROLE_HUE, ROLE_MARK, ROLE_NAME } from "@/components/account/role"
 import {
   ROLES,
   inUserScope,
@@ -71,14 +72,14 @@ function RolePicker({
   const Mark = ROLE_MARK[value]
   return (
     <Select value={value} onValueChange={(v) => onChange(v as Role)}>
-      <SelectTrigger size="sm" className="w-32 text-xs" aria-label={label}>
+      <SelectTrigger size="sm" className="w-36 text-xs" aria-label={label}>
         <Mark aria-hidden className="size-3.5" style={{ color: ROLE_HUE[value] }} />
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="w-72">
         {ROLES.map((r) => (
           <SelectItem key={r} value={r} hint={ROLE_SUMMARY[r]}>
-            {r}
+            {ROLE_NAME[r]}
           </SelectItem>
         ))}
       </SelectContent>
@@ -555,7 +556,7 @@ function EditUserDialog({
           <div className="min-w-0">
             <p className="truncate text-body font-medium">{displayNameOf(user)}</p>
             <p className="truncate text-hint text-muted-foreground">
-              @{user.username} · {user.role}
+              @{user.username} · {ROLE_NAME[user.role]}
             </p>
           </div>
         </div>

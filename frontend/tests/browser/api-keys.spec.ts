@@ -672,6 +672,34 @@ test("the keys page stands where it will while the keys are read, and says so wh
   expect(Math.round((await line.boundingBox())!.height)).toBe(Math.round(waiting!.height))
 })
 
+test("on a phone the keys line is as tall while the keys are read as once they land", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockKeys(page)
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/tokens/", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await held
+    return route.fallback()
+  })
+  await page.goto("/account/keys")
+  const line = page.locator("[data-slot=host-identity]")
+  await expect(line).toContainText("reading")
+  await risen(page)
+  const waiting = (await line.boundingBox())!
+  // The loading line holds the command's place with the command itself, held still.
+  await expect(line.getByRole("button", { name: "New key" })).toBeDisabled()
+  release()
+  await expect(rows(page)).toHaveCount(4)
+  await risen(page)
+  await expect(line.getByRole("button", { name: "New key" })).toBeEnabled()
+  const loaded = (await line.boundingBox())!
+  expect(loaded.y).toBe(waiting.y)
+  expect(Math.round(loaded.height)).toBe(Math.round(waiting.height))
+})
+
 test("with no key at all the line says so and the one New key is the empty state's", async ({
   page,
 }) => {
