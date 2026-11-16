@@ -463,6 +463,93 @@ test("a mouse drags the canvas by open ground, inside a system's frame as well a
   expect(after.y - start.y).toBeCloseTo(-40, 0)
 })
 
+test("the arrows slide the canvas that has the keyboard, and move a chosen box as a drag does", async ({
+  page,
+}) => {
+  // WCAG 2.5.7: what a drag does, a key does too. The gestures are unchanged.
+  const mock = await open(page, "/map?system=system:stack:monitoring")
+  await still(page)
+  const flow = page.locator("[data-slot=server-map] .react-flow")
+  // To the pixel: the canvas opens at a fraction.
+  const seen = async () => {
+    const v = await view(page)
+    return { x: Math.round(v.x), y: Math.round(v.y), zoom: v.zoom }
+  }
+
+  // Arrows pressed elsewhere on the page are not the canvas's.
+  const start = await seen()
+  await page
+    .getByRole("button", { name: /Search/ })
+    .first()
+    .focus()
+  await page.keyboard.press("ArrowRight")
+  expect(await seen()).toEqual(start)
+
+  // The canvas is a stop of its own; with nothing chosen an arrow slides it a
+  // step the way it points, and Shift a longer one.
+  await flow.focus()
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(seen).toEqual({ ...start, x: start.x - 48 })
+  await page.keyboard.press("Shift+ArrowDown")
+  await expect.poll(seen).toEqual({ ...start, x: start.x - 48, y: start.y - 240 })
+  await page.keyboard.press("Shift+ArrowUp")
+  await page.keyboard.press("ArrowLeft")
+  await expect.poll(seen).toEqual(start)
+  // Where the reader left the canvas is kept, as a slide by the pointer is.
+  await expect.poll(() => (mock.saved.layout as { viewport?: unknown })?.viewport).toBeTruthy()
+
+  // A chosen box moves by a step on the canvas, and is kept as a drag keeps it.
+  const id = "system:stack:monitoring/volume:prom-data"
+  const anchor = "system:stack:monitoring/container:c-prom"
+  const offset = async () => {
+    const [a, b] = [await at(page, id), await at(page, anchor)]
+    const z = (await view(page)).zoom
+    return { x: Math.round((a.x - b.x) / z), y: Math.round((a.y - b.y) / z) }
+  }
+  await node(page, id).click()
+  await expect(inspector(page).getByRole("heading", { name: "prom-data" })).toBeVisible()
+  const before = await offset()
+  const camera = await seen()
+  await page.keyboard.press("ArrowDown")
+  await page.keyboard.press("Shift+ArrowRight")
+  await expect.poll(offset).toEqual({ x: before.x + 40, y: before.y + 8 })
+  // The box moved, not the camera.
+  expect((await seen()).x).toBe(camera.x)
+  await expect
+    .poll(() => Object.keys((mock.saved.layout as { positions: object }).positions))
+    .toEqual([id])
+
+  // Let go, and the keyboard stays on the canvas, whose arrows slide it again.
+  await page.keyboard.press("Escape")
+  await expect(flow).toBeFocused()
+  await page.keyboard.press("ArrowUp")
+  await expect.poll(async () => (await seen()).y).toBe(camera.y + 48)
+  expect(await offset()).toEqual({ x: before.x + 40, y: before.y + 8 })
+})
+
+test("a system's frame the keyboard is on moves with the arrows, everything in it with it", async ({
+  page,
+}) => {
+  const mock = await open(page, "/map?system=system:stack:monitoring")
+  await still(page)
+  const s = "system:stack:monitoring"
+  const was = await at(page, `frame:${s}`)
+  const camera = await view(page)
+  // Reached by Tab from the canvas, as a keyboard reaches it.
+  await page.locator("[data-slot=server-map] .react-flow").focus()
+  await page.keyboard.press("Tab")
+  await frame(page, s).focus()
+  await expect(frame(page, s)).toBeFocused()
+  await page.keyboard.press("Shift+ArrowRight")
+  await expect
+    .poll(async () => Math.round(((await at(page, `frame:${s}`)).x - was.x) / camera.zoom))
+    .toBe(40)
+  expect(await view(page)).toEqual(camera)
+  await expect
+    .poll(() => Object.keys((mock.saved.layout as { frames?: object } | null)?.frames ?? {}))
+    .toEqual([s])
+})
+
 test("a system is carried by its head, everything in it with it, and stays where it was put", async ({
   page,
 }) => {

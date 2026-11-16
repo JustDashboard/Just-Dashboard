@@ -90,7 +90,12 @@ export function panned(
   if (fence) {
     const { bounds, size, margin = PAN_STEP.step } = fence
     const z = view.zoom
-    x = clampAxis(view.x, x, margin - (bounds.x + bounds.width) * z, size.width - margin - bounds.x * z)
+    x = clampAxis(
+      view.x,
+      x,
+      margin - (bounds.x + bounds.width) * z,
+      size.width - margin - bounds.x * z,
+    )
     y = clampAxis(
       view.y,
       y,
@@ -113,7 +118,10 @@ export function moved(
   at: Point,
   direction: Direction,
   shift: boolean,
-  options: { grid?: number; bounds?: { minX: number; minY: number; maxX: number; maxY: number } } = {},
+  options: {
+    grid?: number
+    bounds?: { minX: number; minY: number; maxX: number; maxY: number }
+  } = {},
 ): Point {
   const { grid, bounds } = options
   let step = stepOf(MOVE_STEP, shift)

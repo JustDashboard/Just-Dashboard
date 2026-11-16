@@ -44,7 +44,10 @@ describe("sliding the picture", () => {
   })
 
   // A 400 by 200 picture at the canvas's origin, drawn at zoom 1 on an 800 by 600 canvas.
-  const fence = { bounds: { x: 0, y: 0, width: 400, height: 200 }, size: { width: 800, height: 600 } }
+  const fence = {
+    bounds: { x: 0, y: 0, width: 400, height: 200 },
+    size: { width: 800, height: 600 },
+  }
 
   test("a held arrow stops with a margin of the picture still on the screen", () => {
     let at = { x: 0, y: 0, zoom: 1 }

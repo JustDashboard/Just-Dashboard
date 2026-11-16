@@ -751,6 +751,11 @@ export function MapCanvas({
       if (chosen || kinds) e.preventDefault()
       setChosen(null)
       setKinds(null)
+      // React Flow lets go of a box by blurring it, which sent the keyboard
+      // to the page: it stays on the canvas, where the arrows still slide.
+      if (target.closest(".react-flow__node")) {
+        canvasRef.current?.querySelector<HTMLElement>(".react-flow")?.focus({ preventScroll: true })
+      }
     }
   }
 

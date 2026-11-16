@@ -2012,6 +2012,67 @@ test("the diagram moves as the server's map does: two fingers slide it, a pinch 
   await expect.poll(async () => (await diagramView(page)).zoom).toBeLessThan(1)
 })
 
+test("the arrows slide the diagram that has the keyboard, and move a chosen table as a drag does", async ({
+  page,
+}) => {
+  // WCAG 2.5.7: what a drag does, a key does too.
+  const { sent } = await mockSchema(page, { graphs: GRAPHS })
+  await page.goto("/databases/1/diagram?schema=public")
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  await diagramStill(page)
+  const start = await diagramView(page)
+  const slid = async () => {
+    const now = await diagramView(page)
+    return { x: Math.round(now.x - start.x), y: Math.round(now.y - start.y) }
+  }
+
+  // In the search field an arrow moves the caret, never the canvas.
+  const find = page.getByRole("textbox", { name: "Find a table or column" })
+  await find.fill("ord")
+  await page.keyboard.press("ArrowLeft")
+  await page.keyboard.press("Shift+ArrowLeft")
+  expect(await slid()).toEqual({ x: 0, y: 0 })
+  await find.fill("")
+
+  // The canvas is a stop of its own: with nothing chosen it slides a step the
+  // way the arrow points, and Shift a longer one.
+  await page.locator(".react-flow").focus()
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(slid).toEqual({ x: -48, y: 0 })
+  await page.keyboard.press("Shift+ArrowUp")
+  await expect.poll(slid).toEqual({ x: -48, y: 240 })
+
+  // A chosen table moves by a step on the canvas and is kept as a drag keeps it.
+  const id = "public.customers"
+  const place = () =>
+    tableNode(page, id).evaluate((el) => {
+      const m = new DOMMatrix(getComputedStyle(el).transform)
+      return { x: Math.round(m.e), y: Math.round(m.f) }
+    })
+  await tableNode(page, id).click({ position: { x: 24, y: 12 } })
+  const before = await place()
+  const camera = await diagramView(page)
+  await page.keyboard.press("ArrowDown")
+  await page.keyboard.press("Shift+ArrowRight")
+  await expect.poll(place).toEqual({ x: before.x + 40, y: before.y + 8 })
+  expect((await diagramView(page)).x).toBe(camera.x)
+  await expect
+    .poll(() => {
+      const put = sent.layouts.filter((l) => l.method === "PUT").at(-1)?.body as
+        { positions?: Record<string, { x: number; y: number }> } | undefined
+      const at = put?.positions?.[id]
+      return at && { x: Math.round(at.x), y: Math.round(at.y) }
+    })
+    .toEqual({ x: before.x + 40, y: before.y + 8 })
+
+  // Let go, and the keyboard stays on the canvas, whose arrows slide it again.
+  await page.keyboard.press("Escape")
+  await expect(page.locator(".react-flow")).toBeFocused()
+  await page.keyboard.press("ArrowDown")
+  await expect.poll(async () => Math.round((await diagramView(page)).y - camera.y)).toBe(-48)
+  expect(await place()).toEqual({ x: before.x + 40, y: before.y + 8 })
+})
+
 test("on a phone the inspector takes none of the canvas until it is asked for", async ({
   page,
 }) => {
