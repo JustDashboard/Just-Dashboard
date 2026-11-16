@@ -7,7 +7,6 @@ import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { plural, relativeTime } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Modal } from "@/components/modal"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -24,6 +23,7 @@ import { WireMark } from "@/components/wire/wire"
 import { ReleaseRevision } from "@/components/deploy/release-comparison-sheet"
 import { runCommit, runTitle, runTriggerLine } from "@/components/deploy/vocabulary"
 import { DATA_COPY_HOURS, NOT_POINTED } from "@/components/deploy/data-rollback-model"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Roll back the live release to a retained one.
@@ -78,7 +78,7 @@ export function RollbackDialog({
 }) {
   const router = useRouter()
   const { can } = useAuth()
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const copyId = useId()
   const eligible = releases.filter(
     (release) => release.state === "retained" && release.id !== liveRelease?.id,
@@ -213,7 +213,7 @@ export function RollbackDialog({
                         <ReleaseRevision revision={candidate.sourceRevision} />
                         <AuthorMark name={commit?.author} />
                         {commit?.subject && (
-                          <span className="min-w-0 truncate text-foreground/80">
+                          <span className="min-w-0 truncate text-muted-foreground">
                             {commit.subject}
                           </span>
                         )}
@@ -268,9 +268,7 @@ export function RollbackDialog({
                   {domains.map((hostname) => (
                     <li key={hostname} className="flex min-w-0 items-center gap-2">
                       <Globe aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="truncate font-mono text-xs text-foreground/85">
-                        {hostname}
-                      </span>
+                      <span className="truncate font-mono text-xs text-foreground">{hostname}</span>
                     </li>
                   ))}
                 </ul>
@@ -403,7 +401,7 @@ function SwapPicture({
               {domains ? plural(domains, "hostname") : "private service"}
             </p>
           </div>
-          <span ref={from} className="relative z-10 flex">
+          <span ref={from} className="relative z-raised flex">
             <WireMark tone="logo" size="md">
               <Globe />
             </WireMark>
@@ -428,7 +426,7 @@ function Node({
   lit?: boolean
 }) {
   return (
-    <span ref={markRef} className="relative z-10 flex">
+    <span ref={markRef} className="relative z-raised flex">
       <WireMark tone={lit ? "brand" : "neutral"} size="sm" shape="square">
         <span className="numeric text-xs font-semibold">#{number}</span>
       </WireMark>

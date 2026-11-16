@@ -131,7 +131,7 @@ export function RunFailure({
               </p>
             )}
             {run.terminalReason && (
-              <p className="pt-0.5 text-body leading-relaxed text-foreground/90">
+              <p className="pt-0.5 text-body leading-relaxed text-foreground">
                 {run.terminalReason}
               </p>
             )}
@@ -257,7 +257,7 @@ export function RunReady({
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-sm font-mono text-foreground/85 focus-ring hover:text-foreground hover:underline"
+                  className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-sm font-mono text-foreground focus-ring hover:text-foreground hover:underline"
                 >
                   {url.startsWith("https:") ? (
                     <LockClosed aria-hidden className="size-3.5 shrink-0 text-success" />

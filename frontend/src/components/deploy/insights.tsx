@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
-import { dayAt, relativeTime, weekdayAt } from "@/lib/format"
+import { dayAt, plural, relativeTime, weekdayAt } from "@/lib/format"
 import { latencyWords } from "@/lib/latency-words"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
@@ -67,14 +67,18 @@ function dayLabel(date: string) {
   return dayAt(new Date(`${date}T00:00:00`))
 }
 
-/** "Wed, Oct 28": the weekday is what a day's releases are usually remembered by. */
-function dayHeading(date: string) {
+/**
+ * "Wed, Oct 28": a chart day's own reading, where the weekday is what a day's
+ * releases are usually remembered by. Not a feed's group heading, which is
+ * lib's `dayHeading`.
+ */
+function chartDay(date: string) {
   return weekdayAt(new Date(`${date}T00:00:00`))
 }
 
 /** The charts' grid, and a chart's place while its days are read: its head, its bars and its axis. */
 const CHARTS = "grid min-w-0 gap-x-10"
-const CHART_WAITING = "h-[10.375rem] w-full rounded-lg"
+const CHART_WAITING = "h-[10.875rem] w-full rounded-lg"
 
 type Day = DeploymentInsights["daily"][number]
 type DayLine = { text: string; fill?: string }
@@ -90,7 +94,7 @@ function durationLines(day: Day): DayLine[] {
   if (!day.medianDurationSeconds) return [{ text: "No successful release" }]
   return [
     {
-      text: `${seconds(day.medianDurationSeconds)}, median of ${day.succeeded} successful release${day.succeeded === 1 ? "" : "s"}`,
+      text: `${seconds(day.medianDurationSeconds)}, median of ${plural(day.succeeded, "successful release")}`,
       fill: "bg-chart-2",
     },
   ]
@@ -179,18 +183,18 @@ function DayBars({
               >
                 {children(day)}
                 <span className="sr-only">
-                  {`${dayHeading(day.date)}: ${reading.map((line) => line.text).join(", ")}`}
+                  {`${chartDay(day.date)}: ${reading.map((line) => line.text).join(", ")}`}
                 </span>
               </li>
             </TooltipTrigger>
             {/* No entrance: moving along the days swaps the reading many times
                 a second, and each one sliding in reads as flicker. */}
             <TooltipContent side="top" sideOffset={6} className="animate-none!">
-              <p className="font-medium">{dayHeading(day.date)}</p>
+              <p className="font-medium">{chartDay(day.date)}</p>
               {reading.map((line) => (
                 <p key={line.text} className="numeric flex items-center gap-1.5">
                   {line.fill && (
-                    <span aria-hidden className={cn("size-2 shrink-0 rounded-[2px]", line.fill)} />
+                    <span aria-hidden className={cn("size-2 shrink-0 rounded-xs", line.fill)} />
                   )}
                   {line.text}
                 </p>
@@ -274,19 +278,22 @@ export function Insights({
   )
   // One cause has nothing to be compared with, so it is a line and no list.
   const OnlyFailure = onFailureClick ? "button" : "p"
-  const failureColumns = history ? "grid gap-x-10 sm:grid-cols-2 xl:grid-cols-3" : undefined
 
   const failures = data && data.topFailures.length > 0 && (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h3 className="text-title font-medium">Why releases failed</h3>
-        <span className="text-hint text-muted-foreground">
-          {data.failed} failed release{data.failed === 1 ? "" : "s"}
-          {data.lastFailureAt && ` · last ${relativeTime(data.lastFailureAt)}`}
-        </span>
-      </div>
+      <PanelHeader
+        plain
+        level={3}
+        title="Why releases failed"
+        count={
+          <>
+            {plural(data.failed, "failed release")}
+            {data.lastFailureAt && ` · last ${relativeTime(data.lastFailureAt)}`}
+          </>
+        }
+      />
       {data.topFailures.length === 1 ? (
-        <div className={cn("-ml-2", failureColumns)}>
+        <div className="-ml-2">
           <OnlyFailure
             type={onFailureClick ? "button" : undefined}
             onClick={onFailureClick && (() => onFailureClick(data.topFailures[0].code))}
@@ -304,11 +311,10 @@ export function Insights({
           </OnlyFailure>
         </div>
       ) : (
-        // Figures in columns, not bars of different lengths: the count and
-        // its share of every failed release, which is a real whole whichever
-        // columns the causes land in.
+        // Figures in one column, not bars of different lengths: the count
+        // and its share of every failed release, ranked, beside the days
+        // whose red they explain on both pages.
         <RankList
-          className={failureColumns}
           items={data.topFailures.map((failure) => ({
             key: failure.code,
             label: causeTitle(failure.code),
@@ -334,18 +340,22 @@ export function Insights({
     >
       {/* With no release time to draw beside it, the releases take the row
           rather than leave the second column standing empty. */}
-      <div className={cn("min-w-0 space-y-2", history && !timed && "lg:col-span-2")}>
-        <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h3 className="text-title font-medium">Releases per day</h3>
-          <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
-            {(Object.keys(FILL) as Outcome[]).map((outcome) => (
-              <span key={outcome} className="inline-flex items-center gap-1.5">
-                <span aria-hidden className={cn("size-2 rounded-[2px]", FILL[outcome])} />
-                {outcome}
-              </span>
-            ))}
-          </p>
-        </div>
+      <div className={cn("min-w-0 space-y-2", history && !timed && !failures && "lg:col-span-2")}>
+        <PanelHeader
+          plain
+          level={3}
+          title="Releases per day"
+          actions={
+            <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
+              {(Object.keys(FILL) as Outcome[]).map((outcome) => (
+                <span key={outcome} className="inline-flex items-center gap-1.5">
+                  <span aria-hidden className={cn("size-2 rounded-xs", FILL[outcome])} />
+                  {outcome}
+                </span>
+              ))}
+            </p>
+          }
+        />
         <DayBars
           // Keyed by the window so a new range arrives rather than
           // the old bars stretching into it.
@@ -390,15 +400,21 @@ export function Insights({
 
       {/* A window nothing succeeded in has no release time, and a row of
           empty days would draw one as zero (§10): the facts say why. */}
+      {failures && <div className="min-w-0">{failures}</div>}
+
       {history && timed && (
-        <div className="min-w-0 space-y-2">
-          <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h3 className="text-title font-medium">Release time per day</h3>
-            <p className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
-              <span aria-hidden className="w-3 border-t border-dashed border-muted-foreground" />
-              median {seconds(data.medianDurationSeconds)}
-            </p>
-          </div>
+        <div className={cn("min-w-0 space-y-2", failures && "lg:col-span-2")}>
+          <PanelHeader
+            plain
+            level={3}
+            title="Release time per day"
+            actions={
+              <p className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
+                <span aria-hidden className="w-3 border-t border-dashed border-muted-foreground" />
+                median {seconds(data.medianDurationSeconds)}
+              </p>
+            }
+          />
           {/* The same days at the same height as the releases beside it,
                   which a line through the days that shipped was not: it
                   joined four releases a week apart into one slope with no
@@ -443,7 +459,6 @@ export function Insights({
           {axis}
         </div>
       )}
-      {failures && <div className={cn("min-w-0", history && "lg:col-span-2")}>{failures}</div>}
     </div>
   )
 
@@ -513,13 +528,12 @@ export function Insights({
                   <WireMark tone="logo" size="md">
                     {hasProductLogo(mark) ? <ProductGlyph id={mark} /> : <Rocket aria-hidden />}
                   </WireMark>
-                  <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-                    <StatusDot
-                      tone={
-                        data.failureStreak > 0 ? "danger" : data.failed > 0 ? "warning" : "running"
-                      }
-                    />
-                  </span>
+                  <StatusDot
+                    tone={
+                      data.failureStreak > 0 ? "danger" : data.failed > 0 ? "warning" : "running"
+                    }
+                    corner="md"
+                  />
                 </span>
               }
               title={lead.title}

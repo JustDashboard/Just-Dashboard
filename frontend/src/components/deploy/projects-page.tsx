@@ -7,7 +7,6 @@ import {
   Archive,
   Bell,
   Box,
-  ChevronDown,
   CloudUpload,
   Cross,
   Database,
@@ -26,7 +25,6 @@ import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import type {
@@ -39,10 +37,11 @@ import type {
 } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { IconAction } from "@/components/icon-action"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput, SearchInputSkeleton } from "@/components/search-input"
+import { StatusWords } from "@/components/status-dot"
 import { Toolbar } from "@/components/toolbar"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyphs, ProductLogo, ProductLogos } from "@/components/product-logo"
@@ -74,6 +73,7 @@ import {
   sortFleet,
   type FleetFilter,
 } from "@/components/deploy/fleet"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The fleet: every project, what it is, and what is happening to it now.
@@ -113,13 +113,7 @@ export function FleetSkeleton({ layout = "grid" }: { layout?: "grid" | "list" })
           ))}
         </ul>
       ) : (
-        <ChoiceList aria-hidden>
-          {[0, 1, 2].map((index) => (
-            <li key={index}>
-              <Skeleton className="h-14 rounded-xl" />
-            </li>
-          ))}
-        </ChoiceList>
+        <ChoiceListSkeleton rows={3} lines={2} />
       )}
     </>
   )
@@ -142,9 +136,9 @@ function Fleet() {
   // flight keeps its stage and clock beside its name from `sm`; its release
   // path, and a project's readings, join the line only from `lg`, where the
   // sidebar leaves the name room to be read.
-  const roomy = useMediaQuery("(min-width: 640px)")
-  const lined = useMediaQuery("(min-width: 1024px)")
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const roomy = useBreakpoint("sm")
+  const lined = useBreakpoint("lg")
+  const wide = useBreakpoint("xl")
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
     5000,
@@ -254,6 +248,8 @@ function Fleet() {
     {
       key: "archived",
       label: "Archived",
+      // The count annotates the item at its end, where a shortcut would sit.
+      shortcut: archivedCount > 0 ? String(archivedCount) : undefined,
       icon: Archive,
       run: () => router.push("/deploy?view=archived"),
     },
@@ -291,6 +287,27 @@ function Fleet() {
     </div>
   )
 
+  // One verb and a ⋯. Notifications and Credentials are the sidebar's, which
+  // shows them beside this page from md; on a phone, where the sidebar is a
+  // drawer away, the menu carries them too. Archived is only here. On a phone
+  // the verb is one word, so the search keeps the room it needs on its line.
+  const actions = (
+    <div className="flex shrink-0 items-center gap-2">
+      {admin && (
+        <Button size="sm" asChild>
+          <Link href="/deploy/new" aria-label={roomy ? undefined : "New project"}>
+            <Plus className="size-3.5" />
+            {roomy ? "New project" : "New"}
+          </Link>
+        </Button>
+      )}
+      <VerbMenu
+        label="More deployment pages"
+        verbs={roomy ? pages.filter((verb) => verb.key === "archived") : pages}
+      />
+    </div>
+  )
+
   return (
     <Page>
       <PageContext title="Deployments" />
@@ -321,11 +338,11 @@ function Fleet() {
 
           {deployments.length > 0 && (
             <div className="flex min-w-0 flex-col gap-4">
-              {/* Below xl the search and the layout share the first line and
-                  the chips take the whole of the second, scrolling on a phone
-                  to the screen's edge, where a chip cut in half says there
-                  is more; beside a fixed search they were squeezed into a
-                  column at 768 and cut off under the toggles at 390. */}
+              {/* From xl it is one line: search, chips, layout, the verb.
+                  Below xl the search, the layout and the verb share the first
+                  line and the chips take the whole of the second, scrolling
+                  on a phone to the screen's edge, where a chip cut in half
+                  says there is more. */}
               <Toolbar className="justify-between gap-x-4">
                 <div className="flex w-full min-w-0 items-center gap-2 xl:w-auto">
                   <SearchInput
@@ -348,6 +365,7 @@ function Fleet() {
                     }
                   />
                   {!wide && layoutControls}
+                  {!wide && actions}
                 </div>
                 {/* A state nothing is in gets no chip — a filter that can only
                     return nothing is furniture — unless it is the one chosen,
@@ -374,50 +392,7 @@ function Fleet() {
                   )}
                 </ChipStrip>
                 {wide && layoutControls}
-                <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto">
-                  {roomy ? (
-                    <>
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link href="/deploy/notifications">Notifications</Link>
-                      </Button>
-                      {admin && (
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link href="/deploy/credentials">Credentials</Link>
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="sm" asChild>
-                        {/* The count annotates the link without changing its name. */}
-                        <Link href="/deploy?view=archived" aria-label="Archived">
-                          Archived
-                          {archivedCount > 0 && (
-                            <span aria-hidden className="numeric text-micro text-muted-foreground">
-                              {archivedCount}
-                            </span>
-                          )}
-                        </Link>
-                      </Button>
-                    </>
-                  ) : (
-                    <VerbMenu
-                      align="start"
-                      verbs={pages}
-                      trigger={
-                        <Button variant="outline" size="sm">
-                          Pages
-                          <ChevronDown className="size-3.5" />
-                        </Button>
-                      }
-                    />
-                  )}
-                  {admin && (
-                    <Button size="sm" asChild>
-                      <Link href="/deploy/new">
-                        <Plus className="size-3.5" />
-                        New project
-                      </Link>
-                    </Button>
-                  )}
-                </div>
+                {wide && actions}
               </Toolbar>
 
               {filtered.length === 0 ? (
@@ -533,9 +508,7 @@ function InProgressPanel({
       {/* The live region announces the count, not the list: the list's own
           elapsed-time column re-renders every second, and a screen reader
           tied to that read every row back once a second. */}
-      <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {plural(work.length, "deployment")} in progress
-      </span>
+      <StatusWords>{plural(work.length, "deployment")} in progress</StatusWords>
       <PanelBody flush className="pt-3">
         <ChoiceList>
           {work.map((item) => {
@@ -560,7 +533,7 @@ function InProgressPanel({
                 <RunActorMark run={run} remote={summary?.sourceRemote} size="xs" />
                 <span className="shrink-0">{runTriggerLine(run)}</span>
                 {commit?.subject && (
-                  <span className="min-w-0 truncate text-foreground/80">· {commit.subject}</span>
+                  <span className="min-w-0 truncate text-muted-foreground">· {commit.subject}</span>
                 )}
               </>
             )

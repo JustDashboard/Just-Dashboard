@@ -3,9 +3,9 @@
 import { relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DeploymentEngineRun, DeploymentRelease, DeploymentSummary } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceRow } from "@/components/choice-row"
 import { FactDot } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Status } from "@/components/status-dot"
 import { ProductGlyph, imageProduct } from "@/components/product-logo"
 import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
@@ -29,6 +29,7 @@ import {
   shortRevision,
 } from "@/components/deploy/vocabulary"
 import { useNow } from "@/hooks/use-now"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type RunSource = Pick<
   DeploymentSummary,
@@ -88,7 +89,7 @@ export function RunRow({
   /** The release this run made is the live one. */
   live?: boolean
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const active = isActiveRun(run.state)
   const now = useNow(1000, active)
   const subject = runSubject(run)
@@ -159,18 +160,26 @@ export function RunRow({
       actions={actions}
     >
       {wide ? undefined : (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-hint text-muted-foreground">
-          {state}
-          {failure && <span className="text-destructive">{failure}</span>}
-          <FactDot />
-          <span title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
-            {duration}
-          </span>
-          <FactDot />
-          <span className="numeric">{when}</span>
-          {stage}
-          {tags}
-        </div>
+        <FactLine className="text-hint text-muted-foreground">
+          <Fact>
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
+              {state}
+              {failure && <span className="text-destructive">{failure}</span>}
+            </span>
+          </Fact>
+          <Fact>
+            <span title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
+              {duration}
+            </span>
+          </Fact>
+          <Fact>
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
+              <span className="numeric">{when}</span>
+              {stage}
+              {tags}
+            </span>
+          </Fact>
+        </FactLine>
       )}
     </ChoiceRow>
   )

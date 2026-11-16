@@ -13,7 +13,7 @@ import {
   ShieldOff,
 } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
-import { calendarDate, dayAt, relativeTime } from "@/lib/format"
+import { dayHeading, relativeTime } from "@/lib/format"
 import { previewURL, promotionOrigin } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -32,10 +32,11 @@ import type {
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { ChoiceList, GroupRule } from "@/components/choice-row"
-import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { LoadingPanel, LoadingRows } from "@/components/loading"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount, ChipStrip } from "@/components/chips"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
+import { ProjectEmpty } from "@/components/deploy/project-empty"
+import { cn } from "@/lib/utils"
 import { Tag } from "@/components/tag"
 import { Status } from "@/components/status-dot"
 import { VerbActions } from "@/components/verbs"
@@ -75,7 +76,6 @@ import { useReleaseWatch } from "@/components/deploy/release-watch"
 import { watchOpen } from "@/components/deploy/rollback-watch-model"
 import { PromoteDialog } from "@/components/deploy/promote-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
-import { ProjectMark } from "@/components/project-mark"
 import { RunRow } from "@/components/deploy/run-row"
 import { RunStrip } from "@/components/deploy/run-marks"
 import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run-verbs"
@@ -114,18 +114,6 @@ function matchesFilter(run: DeploymentEngineRun, filter: StatusFilter) {
   return run.state === "cancelled" || run.state === "superseded"
 }
 
-/** "Today", "Yesterday", "Sep 2" — the day a run was asked for, as a rule over its group. */
-function dayLabel(iso: string, now: number) {
-  const day = new Date(iso)
-  const today = new Date(now)
-  const start = (date: Date) =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  const days = Math.round((start(today) - start(day)) / 86_400_000)
-  if (days === 0) return "Today"
-  if (days === 1) return "Yesterday"
-  return day.getFullYear() === today.getFullYear() ? dayAt(day) : calendarDate(day.toISOString())
-}
-
 /**
  * The runs still going, then the rest under the day each was asked for.
  */
@@ -135,7 +123,7 @@ function groupRuns(runs: DeploymentEngineRun[], now: number) {
   if (active.length > 0) groups.push({ label: "In progress", runs: active })
   for (const run of runs) {
     if (isActiveRun(run.state)) continue
-    const label = dayLabel(run.requestedAt, now)
+    const label = dayHeading(run.requestedAt, now)
     const last = groups.at(-1)
     if (last && last.label === label) last.runs.push(run)
     else groups.push({ label, runs: [run] })
@@ -591,25 +579,28 @@ export function ProjectDeployments() {
               </>
             }
           />
-          <PanelToolbar className="py-0">
-            <ChipStrip
-              role="group"
-              aria-label="Deployment status"
-              className="gap-0 max-sm:my-0 max-sm:py-0"
-            >
-              {STATUS_FILTERS.map((entry) => (
-                <button
-                  key={entry.key}
-                  type="button"
-                  aria-pressed={filter === entry.key}
-                  aria-controls="deployment-history-results"
-                  className={tabClasses(filter === entry.key, "h-11 sm:h-10")}
-                  onClick={() => changeFilter(entry.key)}
-                >
-                  {entry.label}
-                  <ChipCount className="min-w-[2ch] text-hint">{counts[entry.key]}</ChipCount>
-                </button>
-              ))}
+          {/* The fleet's rule: a state nothing is in gets no chip, unless it
+              is the one chosen, and a Failed with runs in it is red. */}
+          <PanelToolbar>
+            <ChipStrip role="group" aria-label="Deployment status">
+              {STATUS_FILTERS.map((entry) =>
+                entry.key === "all" || counts[entry.key] > 0 || filter === entry.key ? (
+                  <FilterChip
+                    key={entry.key}
+                    selected={filter === entry.key}
+                    aria-controls="deployment-history-results"
+                    onClick={() => changeFilter(entry.key)}
+                    className={cn(
+                      counts[entry.key] > 0 &&
+                        entry.key === "failed" &&
+                        "text-destructive hover:text-destructive",
+                    )}
+                  >
+                    {entry.label}
+                    <ChipCount>{counts[entry.key]}</ChipCount>
+                  </FilterChip>
+                ) : null,
+              )}
             </ChipStrip>
           </PanelToolbar>
           <div
@@ -621,23 +612,19 @@ export function ProjectDeployments() {
               {project.runsLoading && runs.length === 0 ? (
                 <LoadingPanel rows={5} plain />
               ) : project.runs.length === 0 ? (
-                <EmptyState
-                  mark={<ProjectMark deployment={deployment} size="md" />}
+                <ProjectEmpty
                   title="No deployments yet"
-                  description="The first deployment will appear here as soon as its request is accepted."
-                  className="border-0 py-6"
+                  reason="The first deployment will appear here as soon as its request is accepted."
                 />
               ) : runs.length === 0 ? (
-                <EmptyState
+                <ProjectEmpty
                   title="No deployments match"
-                  description="Try another status, or clear the filters to see everything."
-                  action={
-                    <Button size="sm" variant="outline" onClick={() => changeFilter("all")}>
-                      Clear filters
-                    </Button>
-                  }
-                  className="border-0 py-6"
-                />
+                  reason="Try another status, or clear the filters to see everything."
+                >
+                  <Button size="sm" variant="outline" onClick={() => changeFilter("all")}>
+                    Clear filters
+                  </Button>
+                </ProjectEmpty>
               ) : (
                 <div className="space-y-5">
                   {groups.map((group) => (

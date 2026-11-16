@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Sparkles } from "@/components/icons"
+import { RotateCounterClockwise, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
 import {
   previewServices,
@@ -11,7 +11,6 @@ import {
   unavailableReason,
 } from "@/lib/pull-requests"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentPreview,
@@ -23,6 +22,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
+import { VerbMenu, type VerbSpec } from "@/components/verbs"
 import { ChoiceList } from "@/components/choice-row"
 import { buildMethodProduct, imageProduct } from "@/components/product-logo"
 import { PullRequestRow } from "@/components/git/pull-request-row"
@@ -55,6 +55,7 @@ import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
 import { SleepPanel, useSleep } from "@/components/deploy/sleep-panel"
 import { Vulnerabilities } from "@/components/deploy/vulnerabilities"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The project's front page, in the order a visitor asks: is something
@@ -199,6 +200,29 @@ export function ProjectOverview() {
         }}
       />,
     ])
+  const productionVerbs: VerbSpec[] = [
+    ...(rollbackEligible && can("destructive")
+      ? [
+          {
+            key: "rollback",
+            label: "Roll back",
+            icon: RotateCounterClockwise,
+            run: () => setRollbackOpen(true),
+          },
+        ]
+      : []),
+    ...(canDiagnose
+      ? [
+          {
+            key: "diagnose",
+            label: "Diagnose",
+            icon: Sparkles,
+            href: `/deploy/${project.projectId}/assistant?ask=diagnose`,
+            internal: true,
+          },
+        ]
+      : []),
+  ]
   blocks.push([
     "production",
     <Panel key="production" plain>
@@ -213,18 +237,10 @@ export function ProjectOverview() {
                 </Link>
               </Button>
             )}
-            {rollbackEligible && can("destructive") && (
-              <Button variant="outline" size="sm" onClick={() => setRollbackOpen(true)}>
-                Roll back
-              </Button>
-            )}
-            {canDiagnose && (
-              <Button asChild variant="outline" size="sm">
-                <Link href={`/deploy/${project.projectId}/assistant?ask=diagnose`}>
-                  <Sparkles />
-                  Diagnose
-                </Link>
-              </Button>
+            {/* One verb on the title line; the rest in its ⋯, so on a phone
+                the head stays the title and one button. */}
+            {productionVerbs.length > 0 && (
+              <VerbMenu verbs={productionVerbs} label={`${deployment.environmentName} actions`} />
             )}
           </>
         }
@@ -357,14 +373,7 @@ export function ProjectOverview() {
       <Panel plain>
         <PanelHeader
           title="Recent deployments"
-          actions={
-            <Link
-              href={`/deploy/${project.projectId}/deployments`}
-              className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-            >
-              View all <ArrowRight className="size-3" />
-            </Link>
-          }
+          link={{ href: `/deploy/${project.projectId}/deployments`, label: "View all" }}
         />
         <PanelBody>
           {recent.length ? (
@@ -395,15 +404,13 @@ export function ProjectOverview() {
         <Panel plain>
           <PanelHeader
             title="Pull requests"
-            actions={
-              info.checkoutPath && (
-                <Link
-                  href={`/git?${new URLSearchParams({ repo: info.checkoutPath })}`}
-                  className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                >
-                  Git page <ArrowRight className="size-3" />
-                </Link>
-              )
+            link={
+              info.checkoutPath
+                ? {
+                    href: `/git?${new URLSearchParams({ repo: info.checkoutPath })}`,
+                    label: "Git page",
+                  }
+                : undefined
             }
           />
           <PanelBody>
@@ -463,7 +470,7 @@ export function ProjectOverview() {
         runs={project.runs}
         domains={domainHostnames}
       />
-      <Confetti ref={celebrate} className="pointer-events-none fixed inset-0 z-50 size-full" />
+      <Confetti ref={celebrate} className="pointer-events-none fixed inset-0 z-overlay size-full" />
       {pulls.dialogs}
     </div>
   )
@@ -503,7 +510,7 @@ function PullRequestList({
   // compete for the width until the title has none. The compact row keeps
   // the title and the preview's state and drops the branches, which the
   // dialog that tests the pull request names anyway.
-  const roomy = useMediaQuery("(min-width: 640px)")
+  const roomy = useBreakpoint("sm")
   return (
     <div className="space-y-3">
       {!info.available && (

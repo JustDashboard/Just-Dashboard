@@ -5,7 +5,7 @@ import { plural } from "@/lib/format"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Tag } from "@/components/tag"
 import { GroupRule } from "@/components/choice-row"
-import { ShellWords } from "@/components/deploy/run-evidence"
+import { ShellWords } from "@/components/code"
 import { railpackProviderLabel } from "@/components/deploy/vocabulary"
 import {
   railpackImages,
