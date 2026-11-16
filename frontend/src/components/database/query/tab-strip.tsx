@@ -169,7 +169,7 @@ export function TabStrip({
                 {running.has(tab.id) && <Spinner className="size-3 shrink-0" />}
                 <span className="min-w-0 truncate">{tab.title}</span>
                 {isChanged(tab) && (
-                  <span className="shrink-0 font-mono text-hint text-(--git-modified)">
+                  <span className="shrink-0 font-mono text-hint text-git-modified">
                     ~<span className="sr-only"> changed since it was saved</span>
                   </span>
                 )}
@@ -214,10 +214,9 @@ export function TabStrip({
                   type="button"
                   aria-label={`Close ${tab.title}`}
                   tabIndex={selected ? 0 : -1}
-                  className={cn(
-                    "mr-1 flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground focus-ring transition-colors hover:bg-control-hover hover:text-foreground max-sm:size-8",
-                    !selected && "opacity-60",
-                  )}
+                  // 24px, the least a target may be (WCAG 2.5.8), in the muted
+                  // ink at rest: faded to 60% it was a 20px mark half seen.
+                  className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground focus-ring transition-colors hover:bg-control-hover hover:text-foreground max-sm:size-8"
                   onClick={() => close(tab.id)}
                 >
                   <Cross className="size-3" />

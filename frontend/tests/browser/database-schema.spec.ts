@@ -810,14 +810,14 @@ test("a catalogue that cannot be read offers Retry, and a later failure keeps wh
   // last reading, not the one just asked for.
   down.down = true
   await rail.getByRole("button", { name: "Read the schema again" }).click()
-  await expect(rail.getByText("Not read again")).toBeVisible()
+  await expect(rail.locator("[data-slot=stale]")).toContainText("Not updating")
   await expect(page.getByText("The schema could not be read again")).toBeVisible()
   await expect(
     rail.getByRole("region", { name: "Tables" }).getByRole("link", { name: /^orders/ }),
   ).toBeVisible()
   down.down = false
   await rail.getByRole("button", { name: "Try again" }).click()
-  await expect(rail.getByText("Not read again")).toBeHidden()
+  await expect(rail.locator("[data-slot=stale]")).toHaveCount(0)
 })
 
 test("a table that cannot be read again says so over what it read before", async ({ page }) => {
@@ -829,7 +829,8 @@ test("a table that cannot be read again says so over what it read before", async
   // The read that follows a change is the same read: a failure there used to
   // leave the old structure on screen without a word.
   await page.getByRole("button", { name: "Read the schema again" }).click()
-  await expect(page.getByText("What is shown is the last reading of orders.")).toBeVisible()
+  const stale = page.locator("[data-slot=stale]").filter({ hasText: "last reading of orders" })
+  await expect(stale).toContainText("Not updating")
   await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
   down.down = false
   await page
@@ -837,7 +838,7 @@ test("a table that cannot be read again says so over what it read before", async
     .filter({ hasText: "last reading of orders" })
     .getByRole("button", { name: "Try again" })
     .click()
-  await expect(page.getByText("What is shown is the last reading of orders.")).toBeHidden()
+  await expect(stale).toHaveCount(0)
 })
 
 test("reading the schema again reads the open table again with it", async ({ page }) => {

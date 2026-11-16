@@ -43,13 +43,12 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { plural } from "@/lib/format"
+import { grouped, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useFullscreen } from "@/hooks/use-fullscreen"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -59,7 +58,8 @@ import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/search-input"
 import { PaneHeader } from "@/components/panel"
 import { PaneBar } from "@/components/phone-panes"
-import { EmptyState } from "@/components/state"
+import { Stale } from "@/components/stale"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -77,8 +77,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useCatalog } from "@/components/database/data/use-table"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { EngineMark } from "@/components/database/kit"
+import { ContainerPicker } from "@/components/database/kit/container-picker"
 import { tableParams } from "@/components/database/schema/address"
 import { useFocusReturn } from "@/components/database/schema/focus"
 import { selectStatement } from "@/components/database/schema/select"
@@ -87,7 +87,6 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { HeadVerbs, WorkbenchFrame, useHeadMenu } from "@/components/database/workbench/chrome"
 import {
   CanvasHolds,
-  DiagramSchemaPicker,
   FIT,
   FIT_PADDING,
   Legend,
@@ -102,9 +101,9 @@ import {
   type DiagramColor,
   type DiagramDocument,
 } from "@/components/database/diagram/document"
+import { saveText } from "@/lib/download"
 import {
   downloadPng,
-  downloadText,
   renderSvg,
   toDbml,
   toJson,
@@ -128,6 +127,7 @@ import {
   type DbGraphTable,
   type DbSchemaGraph,
 } from "@/components/database/diagram/types"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const nodeTypes = { table: TableNode }
 const edgeTypes = { relation: RelationEdge }
@@ -218,7 +218,22 @@ export function ErDiagram() {
   }, [graph, doc, update])
 
   const picker = engine.can("schemas") ? (
-    <DiagramSchemaPicker schemas={catalog.data?.schemas} current={schema} />
+    <ContainerPicker
+      items={catalog.data?.schemas.map((entry) => ({
+        name: entry.name,
+        system: entry.system,
+        figure: entry.tables >= 0 ? grouped(entry.tables) : undefined,
+      }))}
+      current={schema}
+      noun={engine.nouns.container}
+      nouns={engine.nouns.containers}
+      hrefOf={(name) => href("diagram", { schema: name, limit: null, every: null })}
+      every={{
+        label: `Every ${engine.nouns.container}`,
+        href: href("diagram", { every: "1", limit: null }),
+      }}
+      fill={false}
+    />
   ) : null
   const ready = graph && doc && !doc.legacy && graph.tables.length > 0
   const canCreate =
@@ -252,6 +267,7 @@ export function ErDiagram() {
                 reset={memory.reset}
                 picker={picker}
                 refresh={read.refresh}
+                stale={read.error}
                 full={screen.full}
                 onFullscreen={screen.toggle}
               />
@@ -261,7 +277,7 @@ export function ErDiagram() {
               <PaneHeader className="h-10">{picker}</PaneHeader>
               {read.error && !graph ? (
                 <div className="p-4">
-                  <ReadFailed error={read.error} onRetry={read.refresh} />
+                  <ErrorState retryable error={read.error} onRetry={read.refresh} />
                 </div>
               ) : !graph || !doc || doc.legacy ? (
                 <>
@@ -355,6 +371,7 @@ function Canvas({
   reset,
   picker,
   refresh,
+  stale,
   full,
   onFullscreen,
 }: {
@@ -367,6 +384,8 @@ function Canvas({
   reset: () => Promise<void>
   picker: React.ReactNode
   refresh: () => void
+  /** The read after the one drawn failed: the picture is the last reading. */
+  stale?: Error
   full: boolean
   onFullscreen: () => void
 }) {
@@ -387,7 +406,7 @@ function Canvas({
   // reader who wants it beside the canvas all the time pins it. On a narrow
   // window it would take the lower half of a canvas that has none to spare:
   // there it opens only when asked for, and is closed on every arrival.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const [pinned, setPinned] = useViewState("databases.diagram.inspector", false)
   const [askedFor, setAskedFor] = useState(false)
   const [closedOn, setClosedOn] = useState<string | null>(null)
@@ -806,10 +825,10 @@ function Canvas({
       "-",
     )
     try {
-      if (kind === "mermaid") downloadText(`${base}.mmd`, toMermaid(graph, hidden), "text/plain")
+      if (kind === "mermaid") saveText(`${base}.mmd`, toMermaid(graph, hidden), "text/plain")
       else if (kind === "dbml")
-        downloadText(`${base}.dbml`, toDbml(graph, hidden, doc.notes), "text/plain")
-      else if (kind === "json") downloadText(`${base}.json`, toJson(graph, doc), "application/json")
+        saveText(`${base}.dbml`, toDbml(graph, hidden, doc.notes), "text/plain")
+      else if (kind === "json") saveText(`${base}.json`, toJson(graph, doc), "application/json")
       else {
         const svg = renderSvg({
           graph,
@@ -820,7 +839,7 @@ function Canvas({
           notes: doc.notes,
           title: `${conn.name}${graph.schema ? ` · ${graph.schema}` : ""}`,
         })
-        if (kind === "svg") downloadText(`${base}.svg`, svg, "image/svg+xml")
+        if (kind === "svg") saveText(`${base}.svg`, svg, "image/svg+xml")
         else await downloadPng(`${base}.png`, svg)
       }
     } catch (err) {
@@ -926,6 +945,7 @@ function Canvas({
         />
         <span className="flex-1" />
 
+        <Stale error={stale} />
         <Saved status={status} updatedAt={updatedAt} arranged={isArranged(doc)} />
 
         {hiddenHere.length > 0 && (

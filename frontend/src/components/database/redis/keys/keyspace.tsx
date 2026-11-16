@@ -1,19 +1,21 @@
 "use client"
 
+import { PanelHeader } from "@/components/panel"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { EngineMark } from "@/components/database/kit"
+import { ObjectHead } from "@/components/database/workbench/chrome"
 import { bytesId, bytesLabel } from "@/components/database/redis/bytes"
 import { TypeComposition, type TypeShare } from "@/components/database/redis/composition"
 import { scanProgress, type TreeLevel } from "@/components/database/redis/keys/scan"
 import { kindLabel } from "@/components/database/redis/kinds"
-import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisTreeFolder } from "@/components/database/redis/types"
 import type { Paged } from "@/components/database/redis/use-paged"
 import type { Redis } from "@/components/database/redis/use-redis"
-import { EmptyState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { grouped } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
 import Link from "next/link"
 
@@ -36,14 +38,11 @@ const RANKED = 12
 export function Keyspace({
   redis,
   walk,
-  leading,
   onNamespace,
 }: {
   redis: Redis
   /** The rail's walk of the top level, narrowed as the rail is. */
   walk: Paged<TreeLevel>
-  /** The control that brings the rail back, when it is hidden. */
-  leading?: React.ReactNode
   /** List one namespace's keys in the rail. */
   onNamespace: (pattern: string) => void
 }) {
@@ -56,25 +55,25 @@ export function Keyspace({
   const total = level?.total ?? space?.keys
   const own = server.data !== undefined && server.data.db === db
 
+  // The same band as an open key's head, on the header ground: the pane
+  // without one stood 8px taller, on no ground, beside the rail's 40px head.
   const head = (
-    <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-hairline px-3 py-2">
-      {leading}
-      <h2 className="font-mono text-sm leading-6 font-medium">
-        {db === undefined ? "Database" : `db${db}`}
-      </h2>
-      {own && <Tag>connects here</Tag>}
-      <span className="min-w-0 flex-1" />
-      {engine.can("memoryAnalysis") && (
-        <Button size="xs" variant="ghost" asChild>
-          <Link href={href("performance", { view: "memory" })}>Analyse its memory</Link>
-        </Button>
-      )}
-    </div>
+    <ObjectHead
+      name={db === undefined ? "Database" : `db${db}`}
+      kind={own ? <Tag>connects here</Tag> : undefined}
+      verbs={
+        engine.can("memoryAnalysis") && (
+          <Button size="xs" variant="ghost" asChild>
+            <Link href={href("performance", { view: "memory" })}>Analyse its memory</Link>
+          </Button>
+        )
+      }
+    />
   )
 
   const shares: TypeShare[] = Object.entries(level?.types ?? {})
     .sort((a, b) => b[1] - a[1])
-    .map(([name, count]) => ({ type: name, weight: count, figure: count.toLocaleString() }))
+    .map(([name, count]) => ({ type: name, weight: count, figure: grouped(count) }))
   const folders = level?.folders ?? []
   // A namespace's share is of the keys the walk found, which is what the
   // "By type" strip above it is a picture of.
@@ -91,21 +90,24 @@ export function Keyspace({
   const databases: RankItem[] = spaces.map((entry) => ({
     key: String(entry.db),
     label: `db${entry.db}`,
-    value: entry.keys.toLocaleString(),
+    value: grouped(entry.keys),
     share: everywhere > 0 ? entry.keys / everywhere : undefined,
     hint:
       entry.db === db
         ? "on screen"
         : entry.expires > 0
-          ? `${entry.expires.toLocaleString()} set to expire`
+          ? `${grouped(entry.expires)} set to expire`
           : "none set to expire",
     ...(entry.db === db ? {} : { title: `Open db${entry.db}`, onClick: () => setDb(entry.db) }),
   }))
   const elsewhere = databases.length > 0 && (
-    <section aria-labelledby="redis-keyspace-databases" className="space-y-2">
-      <Heading id="redis-keyspace-databases" title="Databases on this server">
-        {`${everywhere.toLocaleString()} keys in ${databases.length}`}
-      </Heading>
+    <section aria-label="Databases on this server" className="space-y-2">
+      <PanelHeader
+        plain
+        level={3}
+        title="Databases on this server"
+        count={`${grouped(everywhere)} keys in ${databases.length}`}
+      />
       <RankList items={databases} />
     </section>
   )
@@ -160,7 +162,7 @@ export function Keyspace({
       <div className="@container min-h-0 flex-1 overflow-auto">
         <div className="animate-rise space-y-7 px-5 pt-1 pb-6">
           {walk.error && !level ? (
-            <ReadError error={walk.error} onRetry={walk.reload} />
+            <ErrorState retryable error={walk.error} onRetry={walk.reload} />
           ) : !level ? (
             <div className="space-y-7" aria-hidden>
               <div className="space-y-3">
@@ -175,26 +177,31 @@ export function Keyspace({
             </div>
           ) : (
             <>
-              <section aria-labelledby="redis-keyspace-types" className="space-y-3">
-                <Heading id="redis-keyspace-types" title="By type">
-                  {scanProgress({
+              <section aria-label="By type" className="space-y-3">
+                <PanelHeader
+                  plain
+                  level={3}
+                  title="By type"
+                  count={scanProgress({
                     found: level.count,
                     scanned: level.scanned,
                     total: level.total,
                     complete: walk.done,
                     filtered: narrowed,
                   })}
-                  {!walk.done && (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      pending={walk.loadingMore}
-                      onClick={walk.more}
-                    >
-                      Scan more
-                    </Button>
-                  )}
-                </Heading>
+                  actions={
+                    !walk.done && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        pending={walk.loadingMore}
+                        onClick={walk.more}
+                      >
+                        Scan more
+                      </Button>
+                    )
+                  }
+                />
                 {shares.length === 0 ? (
                   <p className="text-hint text-muted-foreground">
                     No key matches {pattern || "*"}
@@ -215,11 +222,16 @@ export function Keyspace({
 
               <div className="grid items-start gap-x-10 gap-y-7 @3xl:grid-cols-2 [&>*]:min-w-0">
                 {ranked.length > 0 && (
-                  <section aria-labelledby="redis-keyspace-namespaces" className="space-y-2">
-                    <Heading id="redis-keyspace-namespaces" title="Largest namespaces">
-                      {folders.length + level.foldersOmitted > ranked.length &&
-                        `${(folders.length + level.foldersOmitted - ranked.length).toLocaleString()} smaller ones are in the tree`}
-                    </Heading>
+                  <section aria-label="Largest namespaces" className="space-y-2">
+                    <PanelHeader
+                      plain
+                      level={3}
+                      title="Largest namespaces"
+                      count={
+                        folders.length + level.foldersOmitted > ranked.length &&
+                        `${grouped(folders.length + level.foldersOmitted - ranked.length)} smaller ones are in the tree`
+                      }
+                    />
                     <RankList items={ranked} />
                   </section>
                 )}
@@ -229,28 +241,6 @@ export function Keyspace({
           )}
         </div>
       </div>
-    </div>
-  )
-}
-
-/** A block's name on the pane, with what qualifies it at the far end of the line. */
-function Heading({
-  id,
-  title,
-  children,
-}: {
-  id: string
-  title: string
-  children?: React.ReactNode
-}) {
-  return (
-    <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline pb-2">
-      <h3 id={id} className="text-body font-medium">
-        {title}
-      </h3>
-      <span className="numeric ml-auto flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-        {children}
-      </span>
     </div>
   )
 }
@@ -265,13 +255,13 @@ function namespaceRow(folder: RedisTreeFolder, found: number): RankItem {
     key: bytesId(folder.prefix),
     label: name || "(empty)",
     swatch: hueFor(name.toLowerCase(), LANES),
-    value: folder.count.toLocaleString(),
+    value: grouped(folder.count),
     share: found > 0 ? folder.count / found : undefined,
     // Of one type, the type is the whole reading; of several, how many of each.
     hint:
       mix.length > 1
         ? mix
-            .map(([type, count]) => `${kindLabel(type).toLowerCase()} ${count.toLocaleString()}`)
+            .map(([type, count]) => `${kindLabel(type).toLowerCase()} ${grouped(count)}`)
             .join(" · ")
         : mix.length === 1
           ? kindLabel(mix[0][0]).toLowerCase()

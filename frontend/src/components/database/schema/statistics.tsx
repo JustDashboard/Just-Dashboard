@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef } from "react"
-import { useNow } from "@/hooks/use-now"
+import { useElapsed } from "@/hooks/use-elapsed"
 import { ChevronDown } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { bytes, grouped, relativeTime, timestamp } from "@/lib/format"
@@ -10,8 +10,10 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { FormFact, Statement } from "@/components/form"
-import { Well } from "@/components/panel"
-import { EmptyNote } from "@/components/state"
+import { PanelHeader, Well } from "@/components/panel"
+import { Sweep } from "@/components/loading"
+import { SplitBar } from "@/components/rank-list"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
@@ -31,7 +33,6 @@ import {
 } from "@/components/ui/table"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { readableDuration } from "@/components/database/data/view"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { qualified } from "@/components/database/schema/changes"
@@ -148,7 +149,7 @@ export function TableStatistics({
       <div className="space-y-6 p-4">
         {engine.can("tableStats") &&
           (stats.error && !stats.data ? (
-            <ReadFailed error={stats.error} onRetry={stats.refresh} />
+            <ErrorState retryable error={stats.error} onRetry={stats.refresh} />
           ) : !stats.data ? (
             <FiguresSkeleton />
           ) : !stats.data.supported ? (
@@ -169,9 +170,14 @@ export function TableStatistics({
 
         {engine.can("indexStats") && (
           <section aria-label="Index use" className="min-w-0">
-            <h3 className="border-b border-hairline pb-2 text-title font-medium">Index use</h3>
+            <PanelHeader plain level={3} title="Index use" />
             {indexes.error && !indexes.data ? (
-              <ReadFailed error={indexes.error} onRetry={indexes.refresh} className="pt-3" />
+              <ErrorState
+                retryable
+                error={indexes.error}
+                onRetry={indexes.refresh}
+                className="pt-3"
+              />
             ) : !indexes.data ? (
               <FiguresSkeleton />
             ) : !indexes.data.supported ? (
@@ -328,7 +334,12 @@ function FiguresSkeleton() {
   )
 }
 
-/** One bar divided by what it is made of, with what each part is under it. */
+/**
+ * One bar divided by what it is made of, with what each part is under it:
+ * the shared `SplitBar` with its legend, under the bar's own reading. It was
+ * drawn here by hand with no join between the parts, so a table's bytes
+ * looked one way on Schema and another on Performance.
+ */
 export function Composition({
   label,
   total,
@@ -340,8 +351,7 @@ export function Composition({
   parts: { key: string; label: string; value: number; figure: string; color: string }[]
 }) {
   const shown = parts.filter((part) => part.value > 0)
-  const sum = shown.reduce((all, part) => all + part.value, 0)
-  if (sum === 0) return null
+  if (shown.length === 0) return null
   return (
     <div className="min-w-0 space-y-2">
       <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -349,32 +359,18 @@ export function Composition({
         {total && <p className="text-hint text-muted-foreground">{total}</p>}
       </div>
       {/* A chart, so it takes the series colours: no part of a table is a state. */}
-      <div
-        role="img"
-        aria-label={shown.map((part) => `${part.label} ${part.figure}`).join(", ")}
-        className="flex h-2 w-full overflow-hidden rounded-full bg-meter-track"
-      >
-        {shown.map((part) => (
-          <span
-            key={part.key}
-            className="h-full"
-            style={{ width: `${(part.value / sum) * 100}%`, backgroundColor: part.color }}
-          />
-        ))}
-      </div>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1">
-        {shown.map((part) => (
-          <li key={part.key} className="flex min-w-0 items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-1.5 shrink-0 rounded-full"
-              style={{ backgroundColor: part.color }}
-            />
-            <span className="truncate text-hint text-muted-foreground">{part.label}</span>
-            <span className="numeric text-hint">{part.figure}</span>
-          </li>
-        ))}
-      </ul>
+      <SplitBar
+        legend="static"
+        label={shown.map((part) => `${part.label} ${part.figure}`).join(", ")}
+        className="text-hint"
+        parts={shown.map((part) => ({
+          key: part.key,
+          count: part.value,
+          color: part.color,
+          label: part.label,
+          figure: part.figure,
+        }))}
+      />
     </div>
   )
 }
@@ -560,9 +556,9 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
 
   return (
     <section aria-label="Maintenance" className="min-w-0 space-y-3">
-      <h3 className="border-b border-hairline pb-2 text-title font-medium">Maintenance</h3>
+      <PanelHeader plain level={3} title="Maintenance" />
       {list.error && !list.data ? (
-        <ReadFailed error={list.error} onRetry={list.refresh} />
+        <ErrorState retryable error={list.error} onRetry={list.refresh} />
       ) : !list.data ? (
         <Skeleton className="h-7 w-72 max-w-full" />
       ) : (
@@ -577,7 +573,6 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
                   key={action.id}
                   size="xs"
                   variant="outline"
-                  className="max-sm:h-8"
                   title={action.description}
                   disabled={run !== undefined}
                   pending={going}
@@ -594,7 +589,6 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
                   <Button
                     size="xs"
                     variant="outline"
-                    className="max-sm:h-8"
                     title={action.description}
                     disabled={run !== undefined}
                   >
@@ -657,7 +651,7 @@ export function MaintenanceBand({ schema, table }: { schema: string; table: stri
   const { id } = useDatabase()
   const key = maintenanceKey(id, schema, table)
   const { run } = useMaintenance(key)
-  const now = useNow(1000, run !== undefined)
+  const running = useElapsed(run?.startedAt ?? null, 1000)
   if (!run) return null
   return (
     <div
@@ -666,26 +660,17 @@ export function MaintenanceBand({ schema, table }: { schema: string; table: stri
       className="relative flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-4 py-1.5"
     >
       <TextShimmer className="text-body">{`${run.label} is running on ${table}`}</TextShimmer>
-      <span className="numeric text-hint text-muted-foreground">
-        {elapsed(Math.max(now, run.startedAt) - run.startedAt)}
-      </span>
+      <span className="numeric text-hint text-muted-foreground">{elapsed(running)}</span>
       <span className="min-w-0 truncate text-hint text-muted-foreground max-md:hidden">
         {run.action.blocking
           ? "The table is locked until it is done."
           : "It goes on while you read elsewhere."}
       </span>
-      <Button
-        size="xs"
-        variant="outline"
-        className="ml-auto max-sm:h-8"
-        onClick={() => stopMaintenance(key)}
-      >
+      <Button size="xs" variant="outline" className="ml-auto" onClick={() => stopMaintenance(key)}>
         Stop
       </Button>
       {/* Working, and it cannot say how far. */}
-      <span aria-hidden className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
-        <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep bg-brand" />
-      </span>
+      <Sweep track={false} className="absolute inset-x-0 bottom-0 h-px" />
     </div>
   )
 }

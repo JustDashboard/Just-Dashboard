@@ -15,7 +15,7 @@ import type {
   DbGraphTable,
   DbSchemaGraph,
 } from "@/components/database/diagram/types"
-import { saveBlob, saveText } from "@/lib/download"
+import { saveBlob } from "@/lib/download"
 
 /**
  * The diagram, taken away.
@@ -325,11 +325,6 @@ export function toJson(graph: DbSchemaGraph, doc: DiagramDocument): string {
 
 /** @deprecated use `saveBlob` from lib/download. */
 export const downloadBlob = saveBlob
-
-/** @deprecated use `saveText` from lib/download (the same order: name, text, type). */
-export function downloadText(name: string, text: string, type: string) {
-  saveText(name, text, type)
-}
 
 /**
  * The SVG rasterised through an `<img>` and a canvas, at twice the size so
