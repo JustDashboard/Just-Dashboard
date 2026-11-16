@@ -190,9 +190,12 @@ session_required`
 
 Settings → Connect: linking this server to a site account. The sidebar names what the page does
 rather than the site's domain, under the `Link` glyph (it wore Version's cloud). An identity line
-first — the site as its name, a link to it, who the server is linked to, at which scope and when and
-by whom (or its own key fingerprint while it is not), and at its far end the link's state with, once
-linked, Sync now and Unlink. Under it the link drawn as what it is (`connect-picture.tsx`, the
+first, laid out as the Hub's — the site's J on a 40px tile, the site as its name and a link to it,
+the link's state beside the name (said once, not again among the facts), who the server is linked
+to, at which scope and when and by whom (or its own key fingerprint while it is not), and once
+linked Sync now and Unlink at its far end. The two Activity sections share their marks
+(`account-link/marks.tsx`: `commandMark`, `COMMAND_STATUS`, `ACTIVITY_ROW`); the keys, the policy
+and the shared fields are `DetailList`s. Under it the link drawn as what it is (`connect-picture.tsx`, the
 deploy overview's wiring turned to face out): System (the distribution's logo), Readings, Containers
 (Docker) and Backups wired into this server and out to the site's J with the account under it, each
 kind's line saying what the last heartbeat read (*Ubuntu 24.04*, *CPU 23% · memory 61%*, *12
@@ -346,7 +349,9 @@ field is for behind its ⓘ); and what the role can do as a ladder (`role-ladder
 limited, administrator, each rung's bar lit in its hue up to the account's role, each listing the
 powers it adds as a glyph on the rung's tint, a name and the products it reaches (Docker, systemd
 and PM2 for Start and stop), powers past the role dimmed, and the sentence each rung and power had
-as its name's tooltip. Security: what a sign-in passes as
+as its name's tooltip. Security: an identity line as its siblings open on (a shield, the second
+factor as its state, then *required on this install* while it is off and required, the passkeys and
+the sessions as facts), then what a sign-in passes as
 a picture (`sign-in-path.tsx`: the account, its password, the second factor and the server with the
 sessions' browsers; without a second factor the factor is a dashed ring; an optional factor has an
 amber bypass from password to server (dashed wires carry the amber on a phone), while a required
@@ -407,8 +412,10 @@ Enrollment required or Password only according to policy, Never signed in and Di
 and sign-in inline, policy-aware factor status and 2FA reset guidance and ordinary confirmation for
 deletion in the card's menu; a new account's role is picked from cards
 
-**Implementation:** `components/account/` (`access.ts` and its test; `marks.tsx`, the session, key
-and account marks the pictures share; `user-avatar.tsx` is also the rail's picture and holds
+**Implementation:** `components/account/` (`access.ts` and its test; `role.tsx`, a role's name, mark
+and hue and `RoleTag`, the one way a role is shown — the picker, a key's card, the profile's header
+and the ladder all say *Read-only*, *Limited*, *Administrator*, and the key stays in the API and the
+address; `marks.tsx`, the session, key and account marks the pictures share; `user-avatar.tsx` is also the rail's picture and holds
 `InitialsMark`, the face of anyone drawn from a bare name, and `AvatarRun`; `totp-secret.tsx` is
 also the sign-in page's enrolment; `role-choice.tsx`), `components/client-mark.tsx` (a session's
 client drawn as itself, shared with a deployment's requests), `lib/clients.ts`, `lib/password.ts`,
@@ -425,8 +432,8 @@ people behind them as faces with the automated changes, and the sign-ins with wh
 from; `?` and a `⋯` menu at its end holding Export as CSV and Refresh. Under it the day as one
 strip, an hour to a stretch in the colour of how its changes went (green, amber where some were
 refused, red where all were, the track where nothing changed), with the busiest sections on the
-line under it and the pointed hour in their place (`components/audit/day-strip.tsx`, the model in
-the unit-tested `day.ts`). Both are read from their own `since` query, on the hour, so a filter
+line under it and the pointed hour in their place, said on the 24-hour clock (`minuteAt`) as every
+other time is (`components/audit/day-strip.tsx`, the model in the unit-tested `day.ts`). Both are read from their own `since` query, on the hour, so a filter
 does not narrow them, and both stand at their final height while the day is read. Then the
 filtered, paginated trail as a framed table shelved by day, one line to a row at every width: the
 time, the actor as a face (a key in the corner for an API key, with the key named — "· key
@@ -434,7 +441,8 @@ ci-deploy", its id in the tooltip — when the row recorded it; "· by the assis
 assistant; "· through Just Hub as <hub user>" for a session a hub sign-in ticket opened, the
 session's id in the tooltip, which is the `sessionId` of the `hub.signin` row that opened it; the
 webhook's and the dashboard's own marks for machines) with its address as the network it is on, the
-action with the mark of the section it touched, the target with any detail after it, and the
+action with the mark of the section it touched and its namespace in a lane hue that is never green
+(a refused change must not read as one that went through), the target with any detail after it, and the
 outcome's code in its family's colour. The action is the row's button and the keyboard's place on
 it: it opens the entry whole in a popover (`entry-detail.tsx`), with the method and path in the
 request log's hues, the key's record or the session's id, and whatever a one-line cell cut short.
@@ -504,7 +512,10 @@ in [`../backend/git-backups-users.md`](../../backend/git-backups-users.md#git-wo
 
 Every log source in one place: a source rail (`source-rail.tsx`) beside one pane with Live, History
 and Insights (`log-workspace.tsx`), the same readings and views a service's own page reads through
-`service-logs.tsx`. The whole journal's identity line carries the systemd logo, how many units
+`service-logs.tsx`. Over a container's or a stack's logs a lens's readings are reading lines
+(`readings="lines"`, `logs/lens-reading-line.tsx`, the lines Security draws the same readings as),
+not a row of tiles; a database's and a scheduled job's put them on the lens row's chips. In
+Insights a breakdown of one or two values is a ranked line each, not a framed table. The whole journal's identity line carries the systemd logo, how many units
 write to it, its size on disk and its oldest line (`GET /logs/source?source=journal:`, asked once
 the journal is the source on screen; the two facts keep their room while they are asked). A kind
 of source that is absent is one line in the rail with the thing's mark and the page that says
@@ -722,7 +733,8 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   window with nothing in it.
   The shared toolbar offers **Codex** and **Claude** (each drawn as its maker's mark — OpenAI's and
   Claude's — with the name as its accessible label and the exact command in its tooltip), **Split
-  terminal**, Terminal actions and fullscreen.
+  terminal** (two panes in a window, `terminal/split-glyph.tsx`, with a tooltip: the bar's `+`
+  stays New window and New session), Terminal actions and fullscreen.
   Search, snippets and terminal behaviour buttons are absent from the terminal page; search remains
   available through its shortcut. Terminal actions apply to the focused pane (copy, export, working
   folder, shortcuts and clear). Docker consoles keep their own emulator controls; deployment console
