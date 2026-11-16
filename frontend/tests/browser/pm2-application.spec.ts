@@ -587,7 +587,7 @@ test("every state the pages can be in is one they were drawn for", async ({ page
   await mockPM2(page, { inventory: () => ({ available: false, processes: null }) })
   for (const path of ["/processes/pm2", "/processes/pm2/api"]) {
     await page.goto(path)
-    const state = page.locator("[data-slot='empty-state']")
+    const state = page.locator("[data-slot='missing-thing']")
     await expect(state).toContainText("PM2 is not installed")
     await expect(state.locator("img[src='/logos/pm2.svg']")).toBeVisible()
     await expect(state).toContainText("npm install -g pm2")
@@ -599,7 +599,7 @@ test("every state the pages can be in is one they were drawn for", async ({ page
   // Installed, and no account's daemon is running: not "PM2 is running".
   await mockPM2(page, { inventory: () => ({ available: true, daemons: [], processes: [] }) })
   await page.goto("/processes/pm2")
-  const idle = page.locator("[data-slot='empty-state']")
+  const idle = page.locator("[data-slot='missing-thing']")
   await expect(idle).toContainText("No PM2 daemon is running")
   await expect(idle).toContainText("pm2 start app.js")
   await expect(idle.locator("img[src='/logos/pm2.svg']")).toBeVisible()

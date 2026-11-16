@@ -483,13 +483,13 @@ test("a server without PM2 names the command and opens the terminal it is typed 
     routes: { "/pm2/": (route) => json(route, { available: false, processes: null }) },
   })
   await page.goto("/processes/pm2")
-  await expect(state(page)).toContainText("PM2 is not installed")
-  await expect(state(page)).toContainText("npm install -g pm2")
-  await expect(state(page).getByRole("link", { name: "Open a terminal" })).toHaveAttribute(
+  await expect(missing(page)).toContainText("PM2 is not installed")
+  await expect(missing(page)).toContainText("npm install -g pm2")
+  await expect(missing(page).getByRole("link", { name: "Open a terminal" })).toHaveAttribute(
     "href",
     "/terminal",
   )
-  await expectHeld(page, 390)
+  await expectHeld(page, 390, missing(page))
 })
 
 test("an account without the terminal is not sent to one", async ({ page }) => {
@@ -498,6 +498,6 @@ test("an account without the terminal is not sent to one", async ({ page }) => {
     routes: { "/pm2/": (route) => json(route, { available: false, processes: null }) },
   })
   await page.goto("/processes/pm2")
-  await expect(state(page)).toContainText("PM2 is not installed")
-  await expect(state(page).getByRole("link", { name: "Open a terminal" })).toHaveCount(0)
+  await expect(missing(page)).toContainText("PM2 is not installed")
+  await expect(missing(page).getByRole("link", { name: "Open a terminal" })).toHaveCount(0)
 })

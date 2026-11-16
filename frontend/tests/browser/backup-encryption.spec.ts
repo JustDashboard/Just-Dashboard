@@ -249,7 +249,11 @@ test("the job form encrypts what leaves the server unless the operator says not 
   expect((await created).postDataJSON()).toMatchObject({ targetKind: "b2", encrypt: false })
 
   await page.goto("/backups/2")
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const edit = page.getByRole("dialog", { name: "Edit Databases nightly" })
   await expect(
     edit.getByRole("switch", { name: "Encrypt archives with this server's backup key" }),
@@ -398,7 +402,11 @@ test("encrypted backups, for the pull request @shots", async ({ page }) => {
   })
   await shot("sealed-run-1440.png")
 
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const edit = page.getByRole("dialog", { name: "Edit Databases nightly" })
   const option = edit.getByRole("switch", {
     name: "Encrypt archives with this server's backup key",

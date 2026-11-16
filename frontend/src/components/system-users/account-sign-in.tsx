@@ -13,8 +13,8 @@ import {
   Users,
 } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SecretField } from "@/components/database/ops/access-parts"
-import { generatePassword } from "@/components/database/connect/rules"
+import { SecretField } from "@/components/secret-field"
+import { generatePassword } from "@/lib/password"
 import { Field, FieldRow, FormNote, OptionRow } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"

@@ -38,7 +38,7 @@ const PER_PACKAGE = ["/var/log/dpkg.log", "/var/log/dnf.rpm.log"]
 export function PackageLogView({
   product,
   about,
-  paneClassName = "h-[min(75vh,40rem)] min-h-80",
+  paneClassName = "h-workbench min-h-80",
 }: {
   product?: string
   about?: string
