@@ -1,10 +1,9 @@
 "use client"
 
-import { useRef, type RefObject } from "react"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
-import { WireHost, WireNode } from "@/components/wire/wire"
+import { WireHost } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { ShieldCheck } from "@/components/icons"
 import {
   DRIFT_DOMAINS,
@@ -15,27 +14,21 @@ import {
   type DriftRow,
 } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
-import { DriftBlocks, ShortDigest } from "@/components/network/drift/marks"
-import { useBreakpoint } from "@/lib/breakpoints"
-
-type Line = {
-  dashed?: boolean
-  tone: "default" | "success" | "warning" | "danger"
-}
+import { ShortDigest } from "@/components/network/drift/marks"
 
 /**
- * The colour a domain's wire takes from the worst thing in it: red where
+ * The line a domain's wire takes from the worst thing in it: red where
  * another owner holds a name this dashboard owns, amber where something
- * differs or is gone, green where every comparison matches, plain where one
- * could not be made, and dashed where there is nothing to compare.
+ * differs or is gone, plain where every comparison matches or one could not
+ * be made, and dashed where there is nothing to compare. It runs while an
+ * inspection is in flight, because that is when something travels down it.
  */
-function domainLine(rows: DriftRow[]): Line {
+export function domainLine(rows: DriftRow[], inspecting = false): WireLine {
   const worst = driftWorst(rows.filter((row) => row.status !== "not_required"))
-  if (!worst) return { dashed: true, tone: "default" }
-  if (worst === "conflict") return { tone: "danger" }
-  if (worst === "drift" || worst === "missing") return { tone: "warning" }
-  if (worst === "matching") return { tone: "success" }
-  return { tone: "default" }
+  if (!worst) return { state: "idle" }
+  if (worst === "conflict") return { state: "danger", moving: inspecting }
+  if (worst === "drift" || worst === "missing") return { state: "warning", moving: inspecting }
+  return { state: "up", moving: inspecting }
 }
 
 function domainWords(rows: DriftRow[]) {
@@ -58,21 +51,6 @@ function domainWords(rows: DriftRow[]) {
   )
 }
 
-/** The same reading in the few words a quarter of a phone's width holds. */
-function shortWords(rows: DriftRow[]) {
-  const compared = rows.filter((row) => row.status !== "not_required")
-  if (compared.length === 0) return "nothing to compare"
-  const counts = driftCounts(compared)
-  if (counts.differences)
-    return (
-      <span className={counts.conflicts ? "text-destructive" : "text-warning"}>
-        {counts.differences} {counts.differences === 1 ? "differs" : "differ"}
-      </span>
-    )
-  if (counts.unknown) return `${counts.unknown} incomplete`
-  return "all match"
-}
-
 /** The products a domain's comparisons belong to, most-drawn first and each once. */
 function domainProducts(rows: DriftRow[]) {
   const counts = new Map<string, number>()
@@ -84,19 +62,17 @@ function domainProducts(rows: DriftRow[]) {
 
 /**
  * Where the saved configuration is written: the dashboard's own `spec.json`
- * wired out to the files rendered from it, the kernel objects it creates, the
- * boot unit that restores them and the blocklist sets it loads — each drawn
- * as the product that reads it (netfilter's flame for the nftables files and
- * chains, systemd's brackets for the units, Linux for the kernel's own
- * devices, routes and settings, a list as its publisher).
+ * as the hub, wired out to the files rendered from it, the kernel objects it
+ * creates, the boot unit that restores them and the blocklist sets it loads —
+ * each drawn as the product that reads it (netfilter's flame for the nftables
+ * files and chains, systemd's brackets for the units, Linux for the kernel's
+ * own devices, routes and settings, a list as its publisher).
  *
- * The wires are the readings the four grey tiles were, said per domain (see
- * `domainLine`), and every comparison is a block in the domain's strip in the
- * colour of its status, so a page with one changed file shows which domain it
- * is in before a word is read. A pulse runs down every wire while an
- * inspection is in flight, and once more as each one lands, because that is
- * when something has travelled down them (§11). Pressing a domain narrows the
- * comparisons below to it.
+ * It is a `WireFlow`, as every other Network picture is, with nothing on the
+ * start side: it had its own grid, a beam per node and a phone layout chosen
+ * in script after mount. The wires are the readings the four grey tiles were,
+ * said per domain (`domainLine`); pressing a domain narrows the comparisons
+ * below to it.
  */
 export function DriftPicture({
   report,
@@ -111,178 +87,91 @@ export function DriftPicture({
   selected?: DriftDomain
   onDomain: (domain: DriftDomain) => void
 }) {
-  const wide = useBreakpoint("lg")
-  const container = useRef<HTMLDivElement>(null)
-  const hub = useRef<HTMLDivElement>(null)
   const saved = rows.filter((row) => row.domain === "saved")
   const spec = saved.find((row) => row.kind === "spec")
-  const targets = DRIFT_DOMAINS.filter((d) => d.domain !== "saved").filter(
-    (d) => d.domain !== "blocklists" || rows.some((row) => row.domain === "blocklists"),
-  )
-
-  const nodes = targets.map(({ domain, label }) => (
-    <DomainNode
-      key={domain}
-      domain={domain}
-      label={label}
-      rows={rows.filter((row) => row.domain === domain)}
-      compact={!wide}
-      selected={selected === domain}
-      containerRef={container}
-      hubRef={hub}
-      inspecting={inspecting}
-      arrival={report.checkedAt}
-      onPress={() => onDomain(domain)}
-    />
-  ))
-
-  const hint = (
-    <span className="inline-flex flex-wrap items-center justify-center gap-x-1.5 lg:justify-start">
-      {inspecting ? (
-        <TextShimmer>Inspecting the host</TextShimmer>
-      ) : (
-        <>
-          <ShortDigest value={report.savedGeneration} />
-          {report.change && <span>· journal {report.change.phase.replaceAll("_", " ")}</span>}
-        </>
-      )}
-    </span>
-  )
-  const title = (
-    <button
-      type="button"
-      onClick={() => onDomain("saved")}
-      aria-pressed={selected === "saved"}
-      className={cn(
-        "rounded-sm focus-ring hover:text-brand",
-        selected === "saved" && "text-brand",
-        spec && spec.status !== "matching" && "text-warning",
-      )}
-    >
-      spec.json
-    </button>
-  )
+  const nodes: WireFlowNode[] = driftTargets(rows).map(({ domain, label }) => {
+    const own = rows.filter((row) => row.domain === domain)
+    const products = domainProducts(own)
+    return {
+      id: domain,
+      mark:
+        products.length > 1 ? (
+          <ProductLogos ids={products} size="md" />
+        ) : (
+          <ProductLogo id={products[0]} fallback={ShieldCheck} />
+        ),
+      title: <span className={cn(selected === domain && "text-brand")}>{label}</span>,
+      name: label,
+      label: `Show ${label.toLowerCase()} in the comparisons`,
+      hint: domainWords(own),
+      onPress: () => onDomain(domain),
+      line: domainLine(own, inspecting),
+    }
+  })
 
   return (
-    <div ref={container} className="relative min-w-0">
-      {wide ? (
-        <div className="relative grid min-h-72 grid-cols-[auto_minmax(5rem,0.5fr)_minmax(0,1.6fr)] items-center py-4">
-          <WireNode
-            nodeRef={hub}
-            mark={<WireHost />}
-            eyebrow="Saved"
-            title={title}
-            hint={hint}
-            align="start"
-            className="lg:flex-col lg:items-start lg:gap-3"
-          />
-          <div aria-hidden />
-          <div role="group" aria-label="Where it is written" className="flex flex-col gap-4">
-            {nodes}
-          </div>
-        </div>
-      ) : (
-        <div className="relative flex flex-col items-center py-2 text-center">
-          <p className="eyebrow">Saved</p>
-          <p className="text-body leading-snug font-medium">{title}</p>
-          <p className="text-hint leading-snug text-muted-foreground">{hint}</p>
-          <div ref={hub} className="relative z-raised mt-4 flex">
-            <WireHost />
-          </div>
-          <div
-            role="group"
-            aria-label="Where it is written"
-            className="mt-10 grid w-full grid-cols-4 gap-x-2"
+    <WireFlow
+      start={{ title: "Saved", nodes: [] }}
+      hub={{
+        mark: <WireHost />,
+        eyebrow: "Saved",
+        title: (
+          <button
+            type="button"
+            onClick={() => onDomain("saved")}
+            aria-pressed={selected === "saved"}
+            className={cn(
+              "rounded-sm focus-ring hover:text-brand",
+              selected === "saved" && "text-brand",
+              spec && spec.status !== "matching" && "text-warning",
+            )}
           >
-            {nodes}
-          </div>
-        </div>
-      )}
-    </div>
+            spec.json
+          </button>
+        ),
+        hint: (
+          <span className="inline-flex flex-wrap items-center justify-center gap-x-1.5">
+            {inspecting ? (
+              <TextShimmer>Inspecting the host</TextShimmer>
+            ) : (
+              <>
+                <ShortDigest value={report.savedGeneration} />
+                {report.change && <span>· journal {report.change.phase.replaceAll("_", " ")}</span>}
+              </>
+            )}
+          </span>
+        ),
+      }}
+      end={{ title: "Where it is written", nodes, heading: "narrow" }}
+    />
   )
 }
 
-function DomainNode({
-  domain,
-  label,
-  rows,
-  compact,
-  selected,
-  containerRef,
-  hubRef,
-  inspecting,
-  arrival,
-  onPress,
-}: {
-  domain: DriftDomain
-  label: string
-  rows: DriftRow[]
-  compact: boolean
-  selected: boolean
-  containerRef: RefObject<HTMLDivElement | null>
-  hubRef: RefObject<HTMLDivElement | null>
-  inspecting: boolean
-  arrival: string
-  onPress: () => void
-}) {
-  const mark = useRef<HTMLDivElement>(null)
-  const line = domainLine(rows)
-  const products = domainProducts(rows)
-  const drawn =
-    products.length > 1 ? (
-      <ProductLogos ids={compact ? products.slice(0, 1) : products} size="md" />
-    ) : (
-      <ProductLogo id={products[0]} fallback={ShieldCheck} />
-    )
-  const beam = (
-    <AnimatedBeam
-      // A new inspection re-keys the wire, which sends its one pulse again.
-      key={inspecting ? "inspecting" : arrival}
-      containerRef={containerRef}
-      fromRef={hubRef}
-      toRef={mark}
-      shape={compact ? "arc" : "s"}
-      once={!inspecting}
-      dashed={line.dashed}
-      tone={line.tone}
-      duration={inspecting ? 1.6 : 2.2}
-      repeatDelay={0.2}
+/** The picture before the first inspection lands, at the shape it will have. */
+export function DriftPictureWaiting() {
+  return (
+    <WireFlow
+      loading
+      start={{ title: "Saved", nodes: [] }}
+      hub={{
+        mark: <WireHost />,
+        eyebrow: "Saved",
+        loadingLines: { title: "spec.json" },
+      }}
+      end={{
+        title: "Where it is written",
+        nodes: [],
+        heading: "narrow",
+        loadingRows: 3,
+        loadingLines: { eyebrow: false },
+      }}
     />
   )
-  const name = (
-    <button
-      type="button"
-      onClick={onPress}
-      aria-pressed={selected}
-      aria-label={`Show ${label.toLowerCase()} in the comparisons`}
-      className={cn("rounded-sm text-left focus-ring hover:text-brand", selected && "text-brand")}
-    >
-      {label}
-    </button>
-  )
-  if (compact)
-    return (
-      <div className="flex min-w-0 flex-col items-center gap-2">
-        {beam}
-        <div ref={mark} className="relative z-raised flex">
-          {drawn}
-        </div>
-        <div className="min-w-0 text-center">
-          <div className="text-hint leading-snug font-medium">{name}</div>
-          <div className="text-micro leading-snug text-muted-foreground">{shortWords(rows)}</div>
-        </div>
-      </div>
-    )
-  return (
-    <div className="min-w-0" data-domain={domain}>
-      {beam}
-      <WireNode
-        nodeRef={mark}
-        mark={drawn}
-        title={name}
-        hint={domainWords(rows)}
-        aside={<DriftBlocks rows={rows} className="xl:max-w-56 xl:justify-end" />}
-      />
-    </div>
+}
+
+/** The domains the saved configuration is written to; blocklists only where there are some. */
+function driftTargets(rows: DriftRow[]) {
+  return DRIFT_DOMAINS.filter((d) => d.domain !== "saved").filter(
+    (d) => d.domain !== "blocklists" || rows.some((row) => row.domain === "blocklists"),
   )
 }

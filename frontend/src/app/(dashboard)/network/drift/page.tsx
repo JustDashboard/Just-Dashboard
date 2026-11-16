@@ -18,7 +18,8 @@ import { duration, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useNow } from "@/hooks/use-now"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { LogoGlyph } from "@/components/logo"
 import { Page, PageContext } from "@/components/page"
 import { Status, StatusDot } from "@/components/status-dot"
@@ -27,9 +28,8 @@ import { LoadingPanel } from "@/components/loading"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { RefreshClockwise } from "@/components/icons"
-import { DriftPicture } from "@/components/network/drift/drift-picture"
+import { DriftPicture, DriftPictureWaiting } from "@/components/network/drift/drift-picture"
 import { DriftRhythm, useDriftHistory } from "@/components/network/drift/drift-rhythm"
 import { DriftTable, type DriftScope } from "@/components/network/drift/drift-table"
 import { DriftBoot } from "@/components/network/drift/drift-boot"
@@ -53,12 +53,12 @@ const POLL = 30_000
  *   owner holds one, and narrows the table to them; the table's chips count
  *   what differs, what is incomplete and what matches;
  * - the repair proposals are the plan's own count, on its review button;
- * - the picture (`network/drift/drift-picture.tsx`) wires `spec.json` to
- *   every place it is written, each as the product that reads it, every
- *   comparison a block in its status's colour, a pulse down the wires as
- *   each inspection lands;
- * - and beside it the inspections since the page opened, a beat each, with
- *   what moved between them (`drift-rhythm.tsx`).
+ * - the picture (`network/drift/drift-picture.tsx`), full width, wires
+ *   `spec.json` to every place it is written, each as the product that reads
+ *   it, its wire in the colour of the worst thing there, running while an
+ *   inspection is in flight;
+ * - and under it the inspections since the page opened, a beat each, with
+ *   what moved between them (`drift-rhythm.tsx`), beside the identities.
  *
  * Under them, one framed table of every comparison worst first, the boot
  * unit as one line with its state (its activation's commands open from the
@@ -69,14 +69,18 @@ const POLL = 30_000
  * Inspect again as its command. It stands before the first inspection lands,
  * saying one is in flight.
  */
+// The row under the picture: the strip and the identities side by side wide.
+const SIDE = "grid min-w-0 gap-x-10 gap-y-8 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
+
 export default function NetworkDriftPage() {
   const read = usePoll<DriftReport>((signal) => get("/network/drift", undefined, signal), POLL)
   if (!read.data)
     return (
       <Page rise>
         <PageContext title="Network drift" />
-        <HostIdentity
+        <IdentityHeader
           label="About the managed network"
+          loading={!read.error}
           logo={<ManagedMark />}
           title="Managed network"
           state={
@@ -88,13 +92,7 @@ export default function NetworkDriftPage() {
               </span>
             )
           }
-          facts={
-            read.error ? (
-              <span>The inspection could not be read.</span>
-            ) : (
-              <Skeleton className="my-0.5 h-3 w-64 max-w-full" />
-            )
-          }
+          facts={read.error ? <Fact>The inspection could not be read.</Fact> : undefined}
           command={
             <Button size="sm" disabled={!read.error} onClick={read.refresh}>
               <RefreshClockwise className={cn("size-3.5", !read.error && "animate-spin")} />
@@ -105,7 +103,15 @@ export default function NetworkDriftPage() {
         {read.error ? (
           <ErrorState error={read.error} onRetry={read.refresh} />
         ) : (
-          <LoadingPanel plain />
+          // The page's own shape while the first inspection is in flight:
+          // the picture, the strip it will beat on, and the comparisons.
+          <>
+            <DriftPictureWaiting />
+            <div className={SIDE}>
+              <DriftRhythm history={[]} inspecting />
+            </div>
+            <LoadingPanel plain />
+          </>
         )}
       </Page>
     )
@@ -180,7 +186,7 @@ function Drift({ read, data }: { read: PollState<DriftReport>; data: DriftReport
   return (
     <Page rise>
       <PageContext title="Network drift" />
-      <HostIdentity
+      <IdentityHeader
         label="About the managed network"
         logo={<ManagedMark />}
         title="Managed network"
@@ -207,30 +213,21 @@ function Drift({ read, data }: { read: PollState<DriftReport>; data: DriftReport
         }
         facts={
           <>
-            <span className="numeric">
+            {/* What needs a look leads, so a phone's one line keeps it. */}
+            {!data.consistent && <Fact className="text-warning">changed during inspection</Fact>}
+            <Fact className="numeric">
               inspected{" "}
               <time dateTime={data.checkedAt} title={new Date(data.checkedAt).toLocaleString()}>
                 {now - checked < 5_000 ? "just now" : `${duration((now - checked) / 1000)} ago`}
               </time>
-            </span>
-            <FactDot />
-            <span className="numeric">{plural(rows.length, "comparison")}</span>
-            <FactDot />
-            <span className="inline-flex items-center gap-1.5">
-              spec <ShortDigest value={data.savedGeneration} />
-            </span>
-            {data.change && (
-              <>
-                <FactDot />
-                <span>journal {data.change.phase.replaceAll("_", " ")}</span>
-              </>
-            )}
-            {!data.consistent && (
-              <>
-                <FactDot />
-                <span className="text-warning">changed during inspection</span>
-              </>
-            )}
+            </Fact>
+            <Fact className="numeric">{plural(rows.length, "comparison")}</Fact>
+            <Fact>
+              <span className="inline-flex items-center gap-1.5">
+                spec <ShortDigest value={data.savedGeneration} />
+              </span>
+            </Fact>
+            {data.change && <Fact>journal {data.change.phase.replaceAll("_", " ")}</Fact>}
           </>
         }
       />
@@ -246,21 +243,21 @@ function Drift({ read, data }: { read: PollState<DriftReport>; data: DriftReport
         </Notice>
       )}
 
-      <div className="grid min-w-0 gap-x-10 gap-y-8 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
-        <DriftPicture
-          report={data}
-          rows={rows}
-          inspecting={inspecting}
-          selected={domain}
-          onDomain={(next) => {
-            setScope("all")
-            setDomain(domain === next ? undefined : next)
-          }}
-        />
-        <div className="min-w-0 space-y-8">
-          <DriftRhythm history={history} nextAt={nextAt} inspecting={inspecting} />
-          <DriftIdentities report={data} />
-        </div>
+      {/* The picture first and full width, as on every Network section page;
+          the beat strip and the identities share the row under it. */}
+      <DriftPicture
+        report={data}
+        rows={rows}
+        inspecting={inspecting}
+        selected={domain}
+        onDomain={(next) => {
+          setScope("all")
+          setDomain(domain === next ? undefined : next)
+        }}
+      />
+      <div className={SIDE}>
+        <DriftRhythm history={history} nextAt={nextAt} inspecting={inspecting} />
+        <DriftIdentities report={data} />
       </div>
 
       <DriftTable

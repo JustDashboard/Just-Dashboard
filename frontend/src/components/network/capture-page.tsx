@@ -47,7 +47,8 @@ import {
   useCaptureLinks,
 } from "./captures"
 import { CapturePicture } from "./capture-picture"
-import { StateTile, interfaceMark, toolGlyph } from "./diagnostic-marks"
+import { interfaceMark, toolGlyph } from "./diagnostic-marks"
+import { StateMark } from "@/components/product-logo"
 import { ItemRail } from "./item-rail"
 import { NetworkReadWarning } from "./read-warning"
 import { runHref } from "./saved-runs"
@@ -159,7 +160,7 @@ export function CapturePage() {
               href: captureHref(run.id, tab),
               label: run.name,
               mark: (
-                <StateTile
+                <StateMark
                   {...interfaceMark(run.request.interface, links)}
                   tone={captureReading(run).tone}
                   size="sm"
@@ -339,7 +340,7 @@ function CaptureIdentity({
       <IdentityHeader
         label={`About ${run.name}`}
         logo={
-          <StateTile
+          <StateMark
             {...interfaceMark(run.request.interface, links)}
             tone={reading.tone}
             size="lg"
@@ -467,7 +468,7 @@ function RelatedRun({ id, capture }: { id: string; capture: CaptureRun }) {
             <ChoiceList>
               <ChoiceRow
                 leading={
-                  <StateTile
+                  <StateMark
                     glyph={toolGlyph({
                       kind: diagnostic.kind,
                       request: diagnostic.request ?? { tool: "" },

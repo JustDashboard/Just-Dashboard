@@ -98,7 +98,7 @@ function Stage({
 }) {
   return (
     <div className="min-w-0 shrink-0 space-y-0.5">
-      <p className="text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase">
+      <p className="caps">
         {label}
       </p>
       <ShortDigest value={generation || undefined} against={against} />

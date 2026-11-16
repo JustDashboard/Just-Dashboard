@@ -37,7 +37,8 @@ import {
   type RunScope,
 } from "@/lib/network/runs-view"
 import { useSessionState } from "@/lib/view-state"
-import { PhoneState, StateTile, toolGlyph } from "./diagnostic-marks"
+import { PhoneState, toolGlyph } from "./diagnostic-marks"
+import { StateMark } from "@/components/product-logo"
 import { NetworkReadWarning } from "./read-warning"
 import { useRunActions } from "./run-actions"
 import { RetentionDialog, retentionWords } from "./run-retention"
@@ -309,7 +310,7 @@ function RunRow({ run, onChanged }: { run: DiagnosticRun; onChanged: () => void 
   return (
     <ChoiceRow
       workspaceItem={{ id: run.id, name: run.name }}
-      leading={<StateTile glyph={toolGlyph(run)} tone={reading.tone} />}
+      leading={<StateMark glyph={toolGlyph(run)} tone={reading.tone} />}
       title={run.name}
       verb={`Open ${run.name}`}
       href={runHref(run.id)}

@@ -5,10 +5,10 @@ import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { SearchInput } from "@/components/search-input"
 import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
-import { EmptyState } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { Tag } from "@/components/tag"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
-import { Cross, Filter } from "@/components/icons"
-import { Button } from "@/components/ui/button"
+import { Cross } from "@/components/icons"
 import {
   Table,
   TableBody,
@@ -18,7 +18,6 @@ import {
   TableRow,
   stickyTableHeader,
 } from "@/components/ui/table"
-import { hueFor, LANES } from "@/lib/hue"
 import {
   DRIFT_DOMAINS,
   driftCounts,
@@ -184,25 +183,18 @@ export function DriftTable({
       </PanelToolbar>
       <PanelBody flush>
         {visible.length === 0 ? (
-          <EmptyState
-            icon={Filter}
-            title="No comparisons match"
-            description="Clear the search, or pick a different state or domain."
-            className="my-4"
-            action={
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  onScope("all")
-                  onDomain(undefined)
-                  onQuery("")
-                }}
-              >
-                Clear filters
-              </Button>
-            }
-          />
+          <EmptyNote
+            action={{
+              label: "Clear filters",
+              onClick: () => {
+                onScope("all")
+                onDomain(undefined)
+                onQuery("")
+              },
+            }}
+          >
+            No comparisons match.
+          </EmptyNote>
         ) : wide ? (
           <Table className="table-fixed" containerClassName="max-h-rail">
             <TableHeader className={stickyTableHeader}>
@@ -274,13 +266,12 @@ function Compared({ row }: { row: DriftRow }) {
   )
 }
 
-/** A kind in its lane hue, so the routes, devices and files down a column read apart. */
+/**
+ * A kind as a plain tag. It took a chart lane's hue, and the pink it gave
+ * `file` was the pink the page uses for an address prefix.
+ */
 function KindWord({ kind }: { kind: string }) {
-  return (
-    <span className="text-hint font-medium" style={{ color: hueFor(kind, LANES) }}>
-      {driftKindLabel(kind)}
-    </span>
-  )
+  return <Tag>{driftKindLabel(kind)}</Tag>
 }
 
 /** What was expected beside what was found, for the facts both sides name. */

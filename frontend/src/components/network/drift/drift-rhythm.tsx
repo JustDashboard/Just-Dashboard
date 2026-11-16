@@ -55,8 +55,9 @@ const WINDOW = 15 * 60_000
  *
  * Under the strip is what moved: each comparison whose state at one
  * inspection is not what it was at the one before, newest first. A host that
- * has not drifted says how many inspections it has stood through; nothing is
- * invented to fill the space.
+ * has not drifted shows the strip alone, with the count in the head; nothing
+ * is written to fill the space. With no inspection yet (the page before its
+ * first read) it is the same strip, empty, so the section waits in its shape.
  */
 export function DriftRhythm({
   history,
@@ -75,17 +76,17 @@ export function DriftRhythm({
     <Panel plain aria-label="Since this page opened">
       <PanelHeader
         title="Since this page opened"
-        actions={
-          <span className="numeric text-hint text-muted-foreground">
-            {plural(history.length, "inspection")}
-          </span>
-        }
+        count={history.length > 0 ? plural(history.length, "inspection") : undefined}
       />
       <PanelBody className="space-y-5">
         <div>
           <div
             role="img"
-            aria-label={`${plural(history.length, "inspection")}; the latest found ${beatWords(history[history.length - 1])}`}
+            aria-label={
+              history.length > 0
+                ? `${plural(history.length, "inspection")}; the latest found ${beatWords(history[history.length - 1])}`
+                : "No inspection yet"
+            }
             className="relative h-10 overflow-hidden rounded-md bg-meter-track/40"
           >
             {[1, 2].map((third) => (
@@ -118,7 +119,7 @@ export function DriftRhythm({
             </span>
           </div>
         </div>
-        {moves.length > 0 ? (
+        {moves.length > 0 && (
           <ul aria-label="What moved" className="space-y-2.5">
             {moves.slice(0, 6).map((move) => (
               <MoveRow key={`${move.at}:${move.id}`} move={move} />
@@ -129,12 +130,6 @@ export function DriftRhythm({
               </li>
             )}
           </ul>
-        ) : (
-          <p className="text-body text-muted-foreground">
-            {history.length === 1
-              ? "Each inspection lands here as a beat. Anything that changes between two of them is listed under it."
-              : `${plural(history.length, "inspection")}, and nothing has moved between them.`}
-          </p>
         )}
       </PanelBody>
     </Panel>

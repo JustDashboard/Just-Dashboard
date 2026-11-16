@@ -486,6 +486,7 @@ test("a reader is shown the firewall's defaults in words and no control it canno
   await expect(defaults.getByTestId("default-logging")).toHaveText("low")
   await expect(defaults.getByRole("radiogroup")).toHaveCount(0)
   await expect(page.getByRole("switch", { name: "Firewall enabled" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Disable" })).toHaveCount(0)
   for (const control of ["Add rule", "Edit rule", "Delete rule", "Rule history"])
     await expect(page.getByRole("button", { name: control, exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "Firewall actions" }).click()

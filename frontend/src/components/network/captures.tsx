@@ -57,7 +57,8 @@ import {
 import type { NetworkLink } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { CaptureCreate } from "./capture-create"
-import { PhoneState, StateTile, interfaceMark } from "./diagnostic-marks"
+import { PhoneState, interfaceMark } from "./diagnostic-marks"
+import { StateMark } from "@/components/product-logo"
 import { NetworkReadWarning } from "./read-warning"
 
 /** The list's search, shared with the rail on a capture's page. */
@@ -315,7 +316,7 @@ function CaptureRow({
   return (
     <ChoiceRow
       workspaceItem={{ id: run.id, name: run.name }}
-      leading={<StateTile {...interfaceMark(run.request.interface, links)} tone={reading.tone} />}
+      leading={<StateMark {...interfaceMark(run.request.interface, links)} tone={reading.tone} />}
       title={run.name}
       verb={`Open ${run.name}`}
       href={captureHref(run.id)}
@@ -402,7 +403,7 @@ export function useCaptureActions(
             confirm({
               title: "Delete packet capture",
               subject: {
-                mark: <StateTile glyph={NetworkDevice} tone={captureReading(run).tone} size="sm" />,
+                mark: <StateMark glyph={NetworkDevice} tone={captureReading(run).tone} size="sm" />,
                 name: run.name,
                 facts: <span className="font-mono">{captureLine(run)}</span>,
               },

@@ -29,7 +29,8 @@ import {
 } from "@/lib/network/diagnostics"
 import { neighbours, runRequestLine, runTool } from "@/lib/network/runs-view"
 import { useViewState } from "@/lib/view-state"
-import { StateTile, toolGlyph } from "./diagnostic-marks"
+import { toolGlyph } from "./diagnostic-marks"
+import { StateMark } from "@/components/product-logo"
 import { ItemRail } from "./item-rail"
 import { NetworkReadWarning } from "./read-warning"
 import { useRunActions } from "./run-actions"
@@ -143,7 +144,7 @@ export function RunPage() {
               href: runHref(run.id, tab),
               label: run.name,
               mark: (
-                <StateTile glyph={toolGlyph(run)} tone={diagnosticReading(run).tone} size="sm" />
+                <StateMark glyph={toolGlyph(run)} tone={diagnosticReading(run).tone} size="sm" />
               ),
               title: run.name,
               line: `${runTool(run)} · ${runRequestLine(run)}`,
@@ -321,7 +322,7 @@ function RunView({
         {header}
         <IdentityHeader
           label={`About ${run.name}`}
-          logo={<StateTile glyph={toolGlyph(run)} tone={reading.tone} size="lg" />}
+          logo={<StateMark glyph={toolGlyph(run)} tone={reading.tone} size="lg" />}
           title={<span className="truncate">{run.name}</span>}
           state={<Status label={reading.label} tone={reading.tone} className="text-body" />}
           facts={
