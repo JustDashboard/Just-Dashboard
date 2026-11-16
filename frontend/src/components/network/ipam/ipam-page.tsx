@@ -176,7 +176,15 @@ export function AddressPlanningPage() {
             </Button>
           ) : undefined
         }
-        menu={admin && data ? <VerbMenu verbs={menu} label="More planning actions" /> : undefined}
+        menu={
+          admin && data ? (
+            <VerbMenu verbs={menu} label="More planning actions" />
+          ) : admin && loading ? (
+            // The verbs' place while the plan is read, so on a phone the
+            // line holds the row they land on.
+            false
+          ) : undefined
+        }
       />
       {!admin ? (
         <EmptyState

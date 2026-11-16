@@ -435,6 +435,8 @@ function NetworkMain({
                 &nbsp;
               </span>
             }
+            // The verbs' place, so on a phone the line holds the row they land on.
+            menu={false}
             facts={<span aria-hidden>&nbsp;</span>}
           />
         )}

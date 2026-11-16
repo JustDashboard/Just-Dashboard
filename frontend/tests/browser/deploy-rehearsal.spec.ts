@@ -185,7 +185,10 @@ test("a failing rehearsal says the release stopped before production", async ({ 
   await expect(
     verdict.getByText("migrate failed against a copy of orders-db", { exact: true }),
   ).toBeVisible()
-  await expect(verdict.getByText("Exit 1", { exact: true })).toHaveClass(/text-destructive/)
+  // The tone is set on the fact, which holds the words and the dot before them.
+  await expect(
+    verdict.locator("[data-slot=fact]").filter({ has: page.getByText("Exit 1", { exact: true }) }),
+  ).toHaveClass(/text-destructive/)
   await expect(verdict.getByText("No table locked", { exact: true })).toBeVisible()
   await expect(report.getByText("exit 1", { exact: true })).toHaveCount(1)
   await expect(report.getByRole("list", { name: "Release tasks against the copy" })).toContainText(

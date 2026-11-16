@@ -2084,7 +2084,7 @@ test("what a schema and a table amount to is one line of words, not a strip of f
 
   await page.goto(`${ITEMS}&view=structure`)
   await expect(line).toHaveText(
-    "~250 rows·3.2 MB·2.3 MB data·992.0 KB indexes·4 columns·owned by app",
+    "~250 rows · 3.2 MB · 2.3 MB data · 992.0 KB indexes · 4 columns · owned by app",
   )
 })
 

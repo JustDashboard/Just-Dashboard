@@ -184,12 +184,17 @@ for (const width of [1280, 390]) {
       const tall = lines.map((line) => line.height)
       expect(Math.max(...tall) - Math.min(...tall)).toBeLessThanOrEqual(1)
       expect(lines.every((line) => line.inside)).toBe(true)
-      // The command stands beside the address, never over it.
+      // The command stands beside the address on its row, never over it: on
+      // a phone too, where it is drawn as its icon at the row's far end.
       const name = await identity.getByText("198.51.100.23", { exact: true }).boundingBox()
       const command = await page
         .getByRole("button", { name: "Block at the firewall" })
         .boundingBox()
       expect(name!.x + name!.width).toBeLessThanOrEqual(command!.x)
+      if (width === 390)
+        expect(
+          Math.abs(command!.y + command!.height / 2 - (name!.y + name!.height / 2)),
+        ).toBeLessThanOrEqual(1)
     })
 
     test(`an address's line opens in the same place before its reads land, at ${width}`, async ({
@@ -559,10 +564,13 @@ test("an IPv6 address has a page, and narrow columns keep both of its ends", asy
   const identity = page.locator("[data-slot=host-identity]").first()
   await expect(identity).toContainText(v6)
   await expect.poll(() => asked).toContain(`/api/v1/connections/${encodeURIComponent(v6)}`)
-  // The whole address, broken over two lines rather than run under the command.
-  const name = await identity.getByText(v6, { exact: true }).boundingBox()
+  // On a phone the header is one row: an address longer than the row is the
+  // last thing to give way, and ends before the command rather than run under it.
+  // The name's box, which clips the address, not the address's own run of text.
+  const name = await identity.locator("p", { hasText: v6 }).boundingBox()
   const command = await page.getByRole("button", { name: "Block at the firewall" }).boundingBox()
   expect(name!.x + name!.width).toBeLessThanOrEqual(command!.x)
+  expect(Math.abs(command!.y + command!.height / 2 - (name!.y + name!.height / 2))).toBeLessThan(12)
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
