@@ -13,8 +13,11 @@ import { usePathname } from "next/navigation"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
+import { KEYCAP, ShortcutList, SingleKeySwitch } from "@/components/keycaps"
+import { useSingleKeyShortcuts } from "@/hooks/use-shortcuts"
+import { isTypingTarget } from "@/lib/keys"
 import { useWorkspaceCommands, type WorkspaceCommand } from "./commands"
-import { nameIndex, nextIndex, overlayOpen, typing } from "./keys"
+import { nameIndex, nextIndex, overlayOpen } from "./keys"
 
 type Place = { item: string | null; field?: number; scroll: number[] }
 const subscribe = () => () => {}
@@ -28,20 +31,37 @@ export function useWorkspaceFocus() {
   return useContext(Help)?.restore
 }
 
-export function WorkspaceHelp({ compact = false }: { compact?: boolean }) {
+/**
+ * The way to the page's shortcuts: a `?` cap, the key that opens them, at the
+ * end of the back line (`PageContext actions`). One shape everywhere — it was
+ * "Containers shortcuts" in words on three pages and `?` on the rest — and
+ * not on a touch screen, where a list of keys is a list of nothing to press.
+ */
+export function WorkspaceHelp(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept so the callers that pass it still type-check
+  _props: {
+    /** @deprecated It is always the `?` cap now; the prop is ignored. */
+    compact?: boolean
+  },
+) {
   const help = useContext(Help)
   return help ? (
     <Button
-      // The compact one is a single glyph and as square as an icon's button:
-      // 23px wide as text, its 24px press box reached past the end of the
-      // identity line it closes and gave the page half a pixel to scroll.
-      size={compact ? "icon-xs" : "xs"}
+      // A single cap is as square as an icon's button: 23px wide as text, its
+      // 24px press box reached past the end of the identity line it closes
+      // and gave the page half a pixel to scroll. In a caller's plain wrapper
+      // the cap's small mono text is the button's baseline, which sat it
+      // 1.5px low on the line; `align-middle` centres the box instead.
+      size="icon-xs"
       variant="ghost"
       aria-label={`${help.name} shortcuts`}
       title={`${help.name} shortcuts`}
       onClick={help.show}
+      className="align-middle pointer-coarse:hidden"
     >
-      {compact ? <kbd>?</kbd> : `${help.name} shortcuts`}
+      <kbd aria-hidden className={KEYCAP}>
+        ?
+      </kbd>
     </Button>
   ) : null
 }
@@ -81,6 +101,7 @@ export function Workspace({
   const [place, remember] = memory ? memoryPlace : sessionPlace
   const { register } = useWorkspaceCommands()
   const prefix = useRef({ text: "", time: 0 })
+  const [singleKeys] = useSingleKeyShortcuts()
   const items = () =>
     Array.from(root.current?.querySelectorAll<HTMLElement>(itemSelector) ?? []).filter(visible)
   const focus = (item: HTMLElement) => {
@@ -121,7 +142,8 @@ export function Workspace({
       else target.blur()
       return
     }
-    if (typing(target) && !target?.matches("input[type='checkbox'][data-workspace-item]")) return
+    if (isTypingTarget(target) && !target?.matches("input[type='checkbox'][data-workspace-item]"))
+      return
     const chord = `${event.ctrlKey ? "Ctrl+" : ""}${event.metaKey ? "Meta+" : ""}${event.altKey ? "Alt+" : ""}${event.shiftKey ? "Shift+" : ""}${event.key}`
     const command = commands.find((command) => command.chord === chord && !command.disabled)
     if (command) {
@@ -137,7 +159,7 @@ export function Workspace({
     ) {
       event.preventDefault()
       refresh()
-    } else if (!mod && !event.altKey && event.key === "?") {
+    } else if (!mod && !event.altKey && event.key === "?" && singleKeys) {
       event.preventDefault()
       setHelp(true)
     } else if (!mod && !event.altKey && event.key === "Escape" && escape?.()) {
@@ -147,7 +169,10 @@ export function Workspace({
       const current = target?.closest<HTMLElement>(itemSelector)
       const at = list.findIndex((item) => item === current)
       let next = nextIndex(list.length, at, event.key)
-      if (next < 0 && event.key.length === 1 && /[\p{L}\p{N}]/u.test(event.key)) {
+      // A name's first letters are single-key shortcuts too: with those off
+      // they answer only while focus is on a row, as a list box's do.
+      const typeAhead = singleKeys || at >= 0
+      if (next < 0 && typeAhead && event.key.length === 1 && /[\p{L}\p{N}]/u.test(event.key)) {
         const now = Date.now()
         const before = now - prefix.current.time < 700 ? prefix.current.text : ""
         const text = before === event.key ? event.key : before + event.key
@@ -363,31 +388,30 @@ export function Workspace({
           onOpenChange={setHelp}
           title={`${name} shortcuts`}
           description={`Keyboard commands for ${name}.`}
+          initialFocus="body"
+          footer={<SingleKeySwitch />}
         >
-          <dl className="divide-y divide-hairline text-body">
-            {[
-              ...(search ? [["Find", "Ctrl/⌘+F"]] : []),
-              ...(refresh ? [["Refresh data", "F5 · Ctrl/⌘+R"]] : []),
-              ...(rows
-                ? [
-                    ["Move between items", "↑ / ↓ · Home / End"],
-                    ["Jump to a name", "Type its first letters"],
-                    ...(openItems ? [["Open item", "Enter"]] : []),
-                  ]
-                : []),
-              ...commands
-                .filter((command) => command.keys)
-                .map((command) => [command.label, command.keys]),
-              ["Show shortcuts", "?"],
-            ].map(([label, keys]) => (
-              <div key={label} className="flex flex-wrap justify-between gap-2 py-2">
-                <dt>{label}</dt>
-                <dd className="text-muted-foreground">
-                  <kbd>{keys}</kbd>
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <ShortcutList
+            groups={[
+              {
+                items: [
+                  ...(search ? [{ does: "Find", keys: "Ctrl/⌘+F" }] : []),
+                  ...(refresh ? [{ does: "Refresh data", keys: "F5 · Ctrl/⌘+R" }] : []),
+                  ...(rows
+                    ? [
+                        { does: "Move between items", keys: "↑ / ↓ · Home / End" },
+                        { does: "Jump to a name", keys: "Type its first letters" },
+                        ...(openItems ? [{ does: "Open item", keys: "Enter" }] : []),
+                      ]
+                    : []),
+                  ...commands.flatMap((command) =>
+                    command.keys ? [{ does: command.label, keys: command.keys }] : [],
+                  ),
+                  { does: "Show shortcuts", keys: "?" },
+                ],
+              },
+            ]}
+          />
         </Modal>
       </div>
     </Help.Provider>

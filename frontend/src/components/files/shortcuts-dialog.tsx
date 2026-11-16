@@ -1,46 +1,48 @@
 "use client"
 
 import { Modal } from "@/components/modal"
+import { ShortcutList, type ShortcutGroup } from "@/components/keycaps"
 
-const groups = [
-  [
-    "Move around",
-    [
-      ["Back / Forward", "Alt+← / Alt+→ · ⌘[ / ⌘]"],
-      ["Parent folder", "Backspace · Alt+↑"],
-      ["Type a path", "Ctrl/⌘+L"],
-      ["Move between items", "Arrow keys · Home / End"],
-      ["Jump to a name", "Type its first letters"],
-      ["Open", "Enter"],
-      ["Quick look", "Space"],
+/** Written once for both keyboards: `Keycaps` draws Ctrl or ⌘ for the reader's. */
+const groups: ShortcutGroup[] = [
+  {
+    title: "Move around",
+    items: [
+      { does: "Back / Forward", keys: "Alt+← / Alt+→ · ⌘+[ / ⌘+]" },
+      { does: "Parent folder", keys: "Backspace · Alt+↑" },
+      { does: "Type a path", keys: "Ctrl/⌘+L" },
+      { does: "Move between items", keys: "↑ / ↓ / ← / → · Home / End" },
+      { does: "Jump to a name", keys: "Type its first letters" },
+      { does: "Open", keys: "Enter" },
+      { does: "Quick look", keys: "Space" },
     ],
-  ],
-  [
-    "Find and arrange",
-    [
-      ["Find a file", "Ctrl/⌘+F · Ctrl/⌘+P"],
-      ["Search inside files", "Ctrl/⌘+Shift+F"],
-      ["Refresh this folder", "F5 · Ctrl/⌘+R"],
-      ["Show hidden files", "Ctrl/⌘+Shift+."],
-      ["Extend selection", "Shift+Arrow · Shift+click"],
-      ["Toggle item selection", "Ctrl/⌘+Space"],
-      ["Select all", "Ctrl/⌘+A"],
+  },
+  {
+    title: "Find and arrange",
+    items: [
+      { does: "Find a file", keys: "Ctrl/⌘+F · Ctrl/⌘+P" },
+      { does: "Search inside files", keys: "Ctrl/⌘+Shift+F" },
+      { does: "Refresh this folder", keys: "F5 · Ctrl/⌘+R" },
+      { does: "Show hidden files", keys: "Ctrl/⌘+Shift+." },
+      { does: "Extend selection", keys: "Shift+↑ / Shift+↓ · Shift+click" },
+      { does: "Toggle item selection", keys: "Ctrl/⌘+Space" },
+      { does: "Select all", keys: "Ctrl/⌘+A" },
     ],
-  ],
-  [
-    "Work with files",
-    [
-      ["Copy / Cut / Paste", "Ctrl/⌘+C / X / V"],
-      ["Paste files or text from your computer", "Ctrl/⌘+V"],
-      ["New folder", "Ctrl/⌘+Shift+N"],
-      ["Rename", "F2"],
-      ["Delete with confirmation", "Delete"],
-      ["Item menu", "Shift+F10"],
-      ["Clear selection, then cancel clipboard", "Escape"],
-      ["Show these shortcuts", "?"],
+  },
+  {
+    title: "Work with files",
+    items: [
+      { does: "Copy / Cut / Paste", keys: "Ctrl/⌘+C / X / V" },
+      { does: "Paste files or text from your computer", keys: "Ctrl/⌘+V" },
+      { does: "New folder", keys: "Ctrl/⌘+Shift+N" },
+      { does: "Rename", keys: "F2" },
+      { does: "Delete with confirmation", keys: "Delete" },
+      { does: "Item menu", keys: "Shift+F10" },
+      { does: "Clear selection, then cancel clipboard", keys: "Escape" },
+      { does: "Show these shortcuts", keys: "?" },
     ],
-  ],
-] as const
+  },
+]
 
 export function FilesShortcuts(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
@@ -51,26 +53,7 @@ export function FilesShortcuts(props: { open: boolean; onOpenChange: (open: bool
       size="lg"
       initialFocus="body"
     >
-      <div className="space-y-5">
-        {groups.map(([title, shortcuts]) => (
-          <section key={title}>
-            <h3 className="mb-2 text-body font-medium">{title}</h3>
-            <dl className="divide-y divide-hairline">
-              {shortcuts.map(([label, keys]) => (
-                <div
-                  key={label}
-                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-1.5 text-hint"
-                >
-                  <dt>{label}</dt>
-                  <dd className="text-muted-foreground">
-                    <kbd>{keys}</kbd>
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        ))}
-      </div>
+      <ShortcutList groups={groups} />
     </Modal>
   )
 }

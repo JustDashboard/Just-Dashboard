@@ -301,9 +301,10 @@ function ContainerDetailPanel({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
       <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        {/* The back line holds the way back, the walk and the help; the
-            verbs are the identity line's, one command and the rest behind
-            ⋯, as on every detail page (PGH-02). */}
+        {/* The back line holds the way back, the walk and the help (the `?`
+            cap, which a touch screen does not draw); the verbs are the
+            identity line's, one command and the rest behind ⋯, as on every
+            detail page (PGH-02). */}
         <PageContext
           back={{ href: "/docker/containers", label: "Containers" }}
           title={detail?.name ?? "Container"}
@@ -593,7 +594,7 @@ function ContainerLogs({
         // Kept for the tab, per container: the Environment tab and back is
         // not a reason to lose the question on screen.
         storageKey={`docker.container.${detail.id}.logs`}
-        readings
+        readings="lines"
         views={views}
         view={view}
         className="min-h-0 flex-1"
