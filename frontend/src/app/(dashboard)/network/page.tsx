@@ -699,7 +699,6 @@ function TrafficChart({ links, live }: { links: NetworkLink[]; live: LiveTraffic
                   ))}
                 </span>
               ))}
-            <span>Select a stretch of the chart to see what carried it.</span>
           </p>
         )
       }

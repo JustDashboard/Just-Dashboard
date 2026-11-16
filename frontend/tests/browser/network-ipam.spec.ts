@@ -138,13 +138,19 @@ test("preview retains private owner and unknown provider evidence", async ({ pag
   await expect(page.getByTestId("ipam-preview")).toContainText("wireguard · wg0")
   const coverage = page.getByRole("region", { name: "Coverage" })
   await expect(coverage).toContainText("1 gap")
-  await expect(coverage.getByRole("row").filter({ hasText: "provider" })).toContainText("unknown")
+  // A source is a line, not a framed table's row; what the plan cannot vouch for is the head's tip.
+  await expect(coverage.getByRole("listitem").filter({ hasText: "provider" })).toContainText(
+    "unknown",
+  )
   await expect(
     coverage.getByText("Provider allocations are not authoritative from this host"),
   ).toBeVisible()
-  await expect(
-    page.getByText("Reservations are planning evidence; native ownership remains unchanged."),
-  ).toBeVisible()
+  await expect(coverage.getByRole("table")).toHaveCount(0)
+  await coverage.getByRole("button", { name: "What the plan cannot vouch for" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText(
+    "Reservations are planning evidence; native ownership remains unchanged.",
+  )
+  await page.keyboard.press("Escape")
   await page.getByRole("button", { name: "Dismiss preview" }).click()
   await expect(page.getByTestId("ipam-preview")).toHaveCount(0)
 })
@@ -159,9 +165,7 @@ test("read account does not request private inventory or enable planner mutation
     return json(route, fixture)
   })
   await page.goto("/network/ipam")
-  await expect(
-    page.getByText(/Shared pools and private native-owner inventories require/),
-  ).toBeVisible()
+  await expect(page.getByText("Address planning needs an administrator")).toBeVisible()
   // No control it cannot use; the one way on is the calculator a read account has.
   await expect(page.locator('[data-slot="page"]').getByRole("button")).toHaveCount(0)
   await expect(page.getByLabel("Prefix to preview")).toHaveCount(0)

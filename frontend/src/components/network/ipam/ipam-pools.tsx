@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu } from "@/components/verbs"
 import { plural } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import type { IPAMPool, IPAMView } from "@/lib/network/ipam"
 import { exact, ownerProduct, poolBand, poolOwners } from "@/components/network/ipam/reading"
 
@@ -65,6 +66,11 @@ export function IPAMPools({
     <Panel plain aria-label="Pools">
       <PanelHeader
         title="Pools"
+        count={
+          pools.length > 0
+            ? `${active}${pools.length > active ? ` · ${pools.length - active} retired` : ""}`
+            : undefined
+        }
         actions={
           <span className="flex items-center gap-3">
             <InfoTip label="How the blocks are counted">
@@ -72,12 +78,6 @@ export function IPAMPools({
               Free blocks are free within readable evidence; coverage gaps can hide additional
               allocations.
             </InfoTip>
-            {pools.length > 0 && (
-              <span className="numeric text-hint text-muted-foreground">
-                {active}
-                {pools.length > active && ` · ${pools.length - active} retired`}
-              </span>
-            )}
             {canCreate && (loading || pools.length > 0) && (
               <Button size="sm" variant="outline" onClick={onCreate}>
                 <Plus className="size-3.5" />
@@ -90,10 +90,8 @@ export function IPAMPools({
       <PanelBody className="space-y-5">
         {children}
         {loading ? (
-          <div aria-hidden className="grid gap-4 lg:grid-cols-2">
-            {[0, 1].map((i) => (
-              <Skeleton key={i} className="h-[180px] rounded-xl" />
-            ))}
+          <div aria-hidden className="grid gap-4">
+            <Skeleton className="h-[180px] rounded-xl" />
           </div>
         ) : pools.length === 0 ? (
           <EmptyState
@@ -110,7 +108,12 @@ export function IPAMPools({
             }
           />
         ) : (
-          <ul aria-label="Address pools" className="grid gap-4 lg:grid-cols-2">
+          <ul
+            aria-label="Address pools"
+            // A grid only from two pools up: one pool at half width left the
+            // other half empty.
+            className={cn("grid gap-4", pools.length > 1 && "lg:grid-cols-2")}
+          >
             {pools.map((pool) => (
               <li key={pool.id} className="min-w-0 rounded-xl border px-4 pt-3 pb-2">
                 <PoolBand
