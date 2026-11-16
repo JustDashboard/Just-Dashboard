@@ -41,8 +41,8 @@ text with an opacity.** `text-muted-foreground/60` measured 3.4:1 and `/40` 2.1:
 about two hundred call sites. Those spellings (`/70` and fainter) now draw the faint ink through one
 rule in `globals.css`, which leaves an `svg` its fade (a glyph needs 3:1 where it carries meaning) and
 stays at one class's weight so a `hover:` colour still wins; new code writes `text-faint`, and the old
-spellings are to be renamed, not copied. A count beside a tab's or a chip's label (`ChipCount`) is the
-label's own ink at 80%, 5.2:1 unselected. `design-system.spec.ts` measures all of these in the browser,
+spellings are to be renamed, not copied. A count beside a tab's or a chip's label (`ChipCount`) is
+`--faint` at rest and the label's own ink inside a chosen chip, tab or segment (`--count-ink`). `design-system.spec.ts` measures all of these in the browser,
 painted onto a canvas and read back, against each ground.
 
 Colours live on `:root` in `app/globals.css`. That is the only place a colour is named. One page

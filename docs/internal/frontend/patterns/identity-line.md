@@ -65,10 +65,9 @@ That was always the honest mark, because its colour is a reading rather than a d
 
 **A wayfinding mark may carry its own colour, and only a wayfinding mark.** A repository list is
 scanned rather than read, and after the name the language is what decides which of forty rows is the
-one — so `LanguageMark` draws the language's logo in front of its word. In `text-muted-foreground`
-that glyph was the same grey as the forty words around it: a mark doing the half of its job that
-costs pixels and none of the half that saves a read, because a column of twenty identical grey
-glyphs is a texture and the reader goes back to reading the words. The hue is not this product's to
+one — so `LanguageMark` draws the language's own logo (`ProductGlyph`) in front of its word, the
+mark a repository's tile already carries. The `--language-*` tokens remain, for the language bar
+and the files page. Their hue is not this product's to
 choose — it is GitHub Linguist's, the colour the same repository carries on the site the list was
 fetched from, which is the argument §3 makes for `--brand` applied to somebody else's mark. The
 lightness *is* ours, and it is one rule rather than twenty judgements: every `--language-*` in
@@ -90,7 +89,8 @@ on (§3), and twenty hues in a row of four would be saying nothing.
 ### Any page can open as a project does
 
 **Any page can open as a project does.** The project's header was markup in `ProjectShell` and the
-other pages' line was `HostIdentity`; since 0.8.7 the header is `HostIdentity` too. Given a `state`, a
+other pages' line was `HostIdentity`; since 0.8.7 the header is the same component, and since 0.9.0 its
+name is `IdentityHeader` (`components/identity-header.tsx`). Given a `state`, a
 `command` or a `menu` it takes the project's layout: a 40px tile beside two rows, the title with its
 state after it, the facts under them, the command and its `⋯` at the far end across both, 16px above the
 hairline. On a phone it is one row and one line of facts: a 32px tile, the title, and the command as

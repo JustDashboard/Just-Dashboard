@@ -85,9 +85,9 @@ the line. A row that must hold one line passes `nowrap`.
 - `Detail({ label, mono?, icon?, after?, className, children })`: `icon` is a glyph before the label,
   and `after` sits at the value's end (a copy button, a link) while the value truncates before it.
 
-The local lists that were this with another label width (`FactRows`, the runtime's `Facts`, the
-map inspector's `Facts`, the file preview's `Fact`, `ReadingList`) move onto it in their page
-passes.
+The local lists that were this with another label width (the database home's fact rows, the map
+inspector's and the file preview's facts, the log lens's reading list) are on it now: a ruled list
+is `DetailList ruled`.
 
 ## Accessibility
 

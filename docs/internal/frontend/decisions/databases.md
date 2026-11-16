@@ -117,7 +117,8 @@ it leaves and the page's own gutters. Three kinds of page keep a line of their o
 rule is where each is named: **a workbench that heads itself** (Data, Query, Schema, the Diagram)
 carries the database's line as its frame's head and the shell draws nothing over it; **the page of
 one item two levels down** (a statement, a table or a session under Performance, an account under
-Access) opens on that item's identity line and keeps the one-line strip above it, so the page is
+Access) opens on that item's identity line and keeps the one-line strip above it (a smaller copy of
+the header in its order: state beside the name, the Open command, Connect and the menu), so the page is
 not about two things; and nothing else. Until 0.8.7 only Home had the header and every other page
 the strip. Where the line itself is under 42rem wide (a tablet beside the rail, a phone) the
 command, Connect and the menu stand in a row of their own under the facts (`HostIdentity foot`), so

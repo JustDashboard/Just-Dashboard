@@ -67,7 +67,7 @@ items carry — and draws each the way the product draws it elsewhere: a toolcha
 platform or an image beside its product's mark, a digest cut to twelve characters with a copy, a
 commit as the Git page draws one, a list of images as rows of their products with size and platform,
 a list of health checks as rows of their outcomes. What is text — a Dockerfile, a command line, a
-record nested past two levels — is a `CodeBlock`: the `Well`'s ground with a strip naming it, its
+record nested past two levels — is a `CodeBlock` (`components/code.tsx`): the `Well`'s ground with a strip naming it, its
 length and a copy, and its tokens in the `--tag-*` hues the log console's tokens sit on (keys blue,
 strings green, numbers pink, literals and a Dockerfile's instructions violet, paths and flags cyan,
 digests slate, punctuation and comments stepped back). None of the status hues: a string is not a
@@ -83,7 +83,7 @@ segment of the spine, each part of the plan the step decides on the tile of the 
 forge, the framework, the runtime, Let's Encrypt for a name served over HTTPS, a glyph for a health
 check, the limits, the storage, the environment and the server's check), what it currently says
 under its name, a build or start command, a check's request, the paths kept between releases or the
-variables still owed as code in the same hues (`ShellWords`, the inline form of the run page's
+variables still owed as code in the same hues (`ShellWords` in `components/code.tsx`, the inline form of the run page's
 `CommandBlock`), and a part that wants a look before Deploy marked in its tile's corner. Every row
 opens the fields that decide it. Review opens on what the server said about the plan the way the
 run page opens on how a run ended, and draws what the release does to this server — a mount, a

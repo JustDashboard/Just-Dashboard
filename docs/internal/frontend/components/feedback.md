@@ -5,9 +5,10 @@ and the consoles that show its lines.
 
 **Members:** `notify` (`lib/toast.ts`) and `Toaster` (`ui/sonner.tsx`), `OperationProgress`
 (`operation-progress.tsx`), `RunPhases`, `phaseStates` (`run-phases.tsx`), `RunTranscript`
-(`run-transcript.tsx`), `TranscriptRow`, `useTranscriptDrip` (`transcript-line.tsx`), `JobConsole`,
-`useJobConsole`, `RecentJobs` (`job-console.tsx`, moving to `ConsoleView`, WP-32), and the copy tick
-`useCopy` ([Values](values.md)).
+(`run-transcript.tsx`), `TranscriptRow`, `useTranscriptDrip`, `jobLineToTranscript`, `streamKind`
+(`transcript-line.tsx`), `ConsoleView` (`console-view.tsx`), `JobConsole`, `useJobConsole`,
+`RecentJobs` (`job-console.tsx`), `EmbeddedLog` and `LogSection` (`components/logs/`), and the copy
+tick `useCopy` ([Values](values.md)).
 
 ## Which one
 
@@ -17,8 +18,9 @@ and the consoles that show its lines.
 | A copy worked, where a toast would cover what was copied | `useCopy`'s inline tick | a toast |
 | A dialog's action is in flight | `OperationProgress` in the `Modal`'s footer | a spinner box in the body |
 | A run is passing through stages | `RunPhases` | a spinner and a sentence |
-| A run's or a job's lines | `RunTranscript` (a restart, an upgrade), `JobConsole` (a job that outlives the page) | a `<pre>` of the tail |
-| A wait with no count | `Sweep` ([States](states.md), WP-12) | a percentage the interface invented |
+| A run's or a job's lines | `RunTranscript` (a restart, an upgrade), `JobConsole` (a job that outlives the page), `ConsoleView` for a new console | a `<pre>` of the tail, a `Pane` of `<div>`s |
+| A service's log at a page's foot | `EmbeddedLog` in a `LogSection` | a console inside a scrolling page on a phone |
+| A wait with no count | `Sweep` ([States](states.md)) | a percentage the interface invented |
 
 ## notify and the Toaster
 
@@ -32,6 +34,10 @@ by its icon alone (no flooded green or red card).
 **Props.** `notify.success(title, options)`, `info`, `warning`, `error(title, cause, options)`,
 `loading` (with an `id` the later `success` or `error` replaces), `dismiss(id)`; `notify.raw` reaches
 the rest of sonner.
+
+**How long.** A failure stays until it is dismissed; raised again with the same title and reason
+it replaces its copy. Success, info and warning leave on the toaster's own timer (4 seconds). A
+caller that knows better passes `duration`.
 
 **Accessibility.** Toasts are announced politely; a failure the reader must act on is a `Notice` or
 an `ErrorState` on the page, not only a toast.
@@ -66,7 +72,8 @@ same in `RunTranscript` and a deployment's `BuildConsole`.
 **States.** Whole, not the tail: when the polled end says it was trimmed, the console reads the
 whole file once and extends it from then on. While the run is live and the reader is at the end,
 `useTranscriptDrip` lets a burst of lines out a few a frame so the page does not jump, each rising
-once (§11); with reduced or paused motion they are simply there.
+once (§11); with reduced or paused motion they are simply there. `TranscriptRow gutter` takes
+`gutterCh` of the last number, so the number column is as wide as the run needs.
 
 **Accessibility.** The lines are an `ol` of `li`, so a screen reader can count and step through
 them.
@@ -78,8 +85,25 @@ upgrade): it attaches to a job by id and resumes from the last line it saw, so a
 costs nothing and a console opened late shows everything from the beginning. `RecentJobs` lists the
 ones that ran recently, so a job started before lunch can be read after it.
 
-**Status.** WP-32 merges it and the Docker run console into one `ConsoleView` (title, state, lines,
-cancel, dismiss) whose lines are `TranscriptRow`s; until then a new caller uses `JobConsole`.
+**ConsoleView** (`components/console-view.tsx`) is the one console: `ConsoleView({ title, label?,
+state: "running" | "ok" | "failed" | "cancelled", detail?, note?, lines: { key, line, prefix? }[],
+dropped?, error?, empty?, onCancel?, onDismiss?, rise?, className? })`, each `line` a transcript
+line. The header is the title, the state as a `Status` word spoken when it changes, and Stop or
+Dismiss. The well is one `max-h-80` `role="log"` region that follows the newest line, and its
+lines are `TranscriptRow`s. `JobConsole` maps job lines with `jobLineToTranscript` (status becomes
+a `note` heading, stderr a washed `warning`, the number is the job's `seq`). Docker's `RunConsole`
+maps compose lines with `streamKind` and puts the service before each line. A running job carries
+the Tag "Keeps running if you leave"; the recent list beside it is the way back. A new console
+uses `ConsoleView`, not a `Pane` of `<div>`s.
+
+## EmbeddedLog
+
+**Purpose.** A service's log at a page's foot (`components/logs/embedded-log.tsx`), under a
+`LogSection` (the title, the hairline and the held skeleton). From `sm` it is the log read in
+place through `service-logs.tsx`, at one of three heights (`LOG_PANE_SIZE`: section, sheet,
+fill). On a phone it is a card per source that opens the Logs page on it (`logsPageHref`, with
+`sourceSummary` as its line), because a console inside a scrolling page is the stacked box D12
+rules out.
 
 ## The phone
 

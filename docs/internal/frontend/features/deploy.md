@@ -88,7 +88,8 @@ use it, or why this dashboard cannot deploy it; and each service it runs with it
 one marked. A card's own verbs are *Deploy* (into the picker with it chosen, not offered for a
 template that cannot be deployed), *Export as JSON* and *Remove template* (whose confirmation says
 those deployments keep running from their own copy); the head counts them (*3 templates · 1 in
-use*) and carries *Import…* for an exported file and *Add from Compose file*, a sheet whose *Check*
+use*) and carries *Add from Compose file*, and *Import a template file* in the ⋯ beside it; Add
+from Compose file is a sheet whose *Check*
 shows what the template will ask before it is added (`template-preview.tsx`) and says the
 catalogue's refusal under the form; empty, it offers the three ways as cards, each with a product's
 mark. Settings → General carries *Save as template…* on a deployment that runs published

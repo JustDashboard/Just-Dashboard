@@ -115,7 +115,8 @@ the same person now keeps one colour in the rail, the list and their own profile
 describes a thing the same way; a project's header is the fifth, and a deployment's run page
 opens on that same header saying what the run is (`run-header.tsx`) — it had its own identity line,
 a 48px tile and the duration as a 24px figure, until the operator asked for the project's compact
-one. A game server's three pages add one line under that header (`GameIdentity`) with what only
+one. A game server's Players and Console pages add one line under that header (`GameIdentity`; its
+Server settings keeps to the settings column and leaves it off) with what only
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
 
@@ -267,9 +268,9 @@ on a 1x screen and left as drawn.
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
 near enough on any other page, and wrong on the one screen where the reader identifies the thing *by*
-the drawing. `components/git/glyphs.tsx` takes seven from Material Design Icons, which is already a
-dependency for the language marks (`language-icon.tsx`) — the six git marks and the ringed dot a
-forge prints in front of an open issue. Nothing else is imported from MDI there: a glyph that exists
+the drawing. `components/git/glyphs.tsx` takes seven from Material Design Icons — the six git marks
+and the ringed dot a forge prints in front of an open issue — and is the only file that imports
+that set. Nothing else is imported from MDI there: a glyph that exists
 in both sets stays Heroicons, or the git pages grow a second icon weight. `AuthorMark` in `git/marks.tsx` is the coloured-wayfinding rule again — a column
 of commits where mine and the bot's are two hues is scanned, one where they are the same grey is read
 — drawn as the account face without a picture (`InitialsMark`): the initial on a wash of the `LANES`
@@ -307,7 +308,7 @@ the path gives way to the forge slug (it stays on the title's tooltip), the sync
 words below 32rem, and the account is its avatar alone below 36rem (`compact="fit"`).
 
 **Text a person wrote on a forge is drawn as the Markdown it is.** A pull request's description and
-each comment on it are rendered by `git/markdown.tsx` from the tree `lib/markdown.ts` reads, on this
+each comment on it are rendered by `components/markdown.tsx` from the tree `lib/markdown.ts` reads, on this
 product's type ladder rather than GitHub's, with a `#123` and an `@mention` linking to the forge. It is
 drawn with elements, never `innerHTML`; raw HTML is dropped where it is layout and shown as text
 otherwise, and an image becomes a link to itself, because the page's `img-src` is its own origin.

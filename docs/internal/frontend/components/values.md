@@ -90,6 +90,24 @@ that.
 front and no ellipsis, as `docker images` prints an image id. A value that is not a digest (a tag, a
 release name) is cut to the same width. `shortSha(sha, length = 7)` is for commits.
 
+## Code
+
+`components/code.tsx` is how code is drawn. `CodeBlock({ title, mark?, copy, lines?, children })` is
+the recessed well with its caption, line count and copy. `CodeLines({ lines, render?, wrap? })`
+numbers lines in the faint ink with a gutter as wide as the last number (`gutterCh`). `CODE` is the
+one palette: the `--tag-*` rung the log console's tokens sit on and none of the status hues, since
+a string is not a success. `DOCKERFILE_HUE` maps a Dockerfile's pieces onto it
+(`dockerfileLines(source)` for a whole file, `tokenDockerfile(line)` for one line,
+`DockerfilePieces` to draw them). `Digest({ value, label })` is a digest as twelve hex characters
+with its copy. `ShellWords` and `JsonCode` colour a command and a record. `deploy/run-evidence`
+re-exports `CODE`, `CodeBlock`, `JsonCode` and `ShellWords` as deprecated names for its older
+callers.
+
+A diff is `DiffView` (`components/diff-view.tsx`), text a person wrote on a forge is `Markdown`
+(`components/markdown.tsx`), a file or folder is `FileIcon` (`components/file-icon.tsx`), and a
+path or address that must wrap is `MonoValue` (`components/wire/mono-value.tsx`), which breaks at
+its separators and never inside a word.
+
 ## Certificates
 
 Every certificate word and tone is built on `certState` in `lib/certificates.ts`, which is the one

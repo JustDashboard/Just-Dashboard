@@ -76,8 +76,8 @@ says so.
 underneath it — legible only because a tinted icon square was sitting in front of it doing the
 separating. With the square gone (§14) the title has to be the thing that reads as a heading, and two
 pixels is the whole of what that takes: `text-title` is a step the ladder already had, so the visible
-ranks run a flow question (24, `text-2xl`) or a reading (24) → section (16, `text-base`) → surface
-(15) → body (13) with nothing invented in between. The reading page title went from 20 to 24 in
+ranks run a flow question (24, `text-2xl`) or a reading (24) → section and surface (15,
+`text-title` 600, a section with a hairline) → body (13) with nothing invented in between. The reading page title went from 20 to 24 in
 0.6.7, then left the visual layout when the rail became the visible page location. A `StatTile`'s
 figure stays at 24 because a headline number is what a reader finds without reading.
 
@@ -114,7 +114,7 @@ Discard was pressed.
 
 **An option has one text column.** `MenuItemText` draws an option's name and any useful metadata
 beneath it, never at the far end of a second column. `SelectItem` uses this for its `hint`, outside
-`ItemText`, so metadata is excluded from the option's accessible name and the value copied into the
+Radix's item text, so metadata is excluded from the option's accessible name and the value copied into the
 closed trigger. `CredentialSelect` keeps the host's glyph beside the name and the host and kind
 below it. File locations, terminal snippets, database switchers, saved queries and export menus use
 the same text component. Keyboard shortcut hints retain their end alignment. A one-word property
@@ -140,10 +140,11 @@ wrapping toolbar's first line to itself: a call site's `flex-1` had squeezed the
 95px beside its chips. The same pass sized the rest of a phone for a finger. A dialog's or a sheet's
 close button is 40px below `sm` and 32px from it, and answers the pointer with a wash rather than an
 opacity step; it was a bare 16px glyph, the smallest thing to hit on a surface whose fields are
-44px. A `MetricStrip` is two columns on a phone rather than a wrapping row, because wrapped, the
-first metric of each new line kept the rule that belonged beside its neighbour on the line above.
-And `HostIdentity` sets its tile and title on one row with the facts the full width beneath them,
-where they had run down a narrow column beside the tile. These are primitives, so every page that
+44px. A run of figures with their names (`FormFacts`, which the deprecated `MetricStrip` draws
+as now) is two columns on a phone rather than a wrapping row, because wrapped, the first figure of
+each new line kept the rule that belonged beside its neighbour on the line above. And
+`IdentityHeader` sets its tile and title on one row with one line of facts beneath them, where
+they had run down a narrow column beside the tile. These are primitives, so every page that
 draws them — Docker, Security, Audit, the account pages and the rest — changed with the deployment
 section, not only `/deploy`.
 
@@ -163,9 +164,9 @@ name, one rung down and one degree worse. The head went to 14 first and 14 was n
 "Publish on a public hostname" two lines apart at one size with a weight step between them and
 nothing else. At 15 the four steps are visible and every one of them is a rung the ladder already
 had. A `Disclosure` takes the section's rank, because a fold is a section (§7). A page section's
-head is the exception upward: it names a part of the page rather than of a dialog, so it is a
-`Section`'s 16, and its state is 12 so that it reads between the head and the 11px hints in the
-fields under it (§7).
+head names a part of the page rather than of a dialog: it is the same 15/600 head, with no rule
+of its own because `FormSections` draws the one between sections; its state (the deprecated
+`hint`) is 12 (§7).
 
 A **table header** is `text-hint`, medium weight, muted — not the eyebrow's small caps. At 10px
 tracked-out caps a nine-column header was the loudest line in the table, above rows it exists only to

@@ -73,7 +73,7 @@ Each is a best-practice change that touches a decision above. The operator answe
 | Id | Best practice asked for | Answer | Where it lives |
 | --- | --- | --- | --- |
 | T1 | Raise 10px and 11px text on touch screens | **Adopted.** On `pointer: coarse` only, `text-hint` is 12px and `text-micro` 11px. Desktop is unchanged. | [`foundations/type.md`](foundations/type.md) |
-| T2 | A way to pause endless live motion (WCAG 2.2.2) | **Adopted.** `data-motion="paused"` on `<html>` pauses every animation, as `prefers-reduced-motion` does. The control lives in the shell (WP-31). | [`foundations/motion.md`](foundations/motion.md) |
+| T2 | A way to pause endless live motion (WCAG 2.2.2) | **Adopted.** `data-motion="paused"` on `<html>` pauses every animation, as `prefers-reduced-motion` does. The control is Pause animations in the account menu, kept per browser. | [`foundations/motion.md`](foundations/motion.md) |
 | T3 | 3:1 edges on controls (WCAG 1.4.11) | **Adopted.** Inputs, selects, checkboxes and switches draw a 3:1 edge in the control-edge colour. Other borders are unchanged. | [`foundations/colour.md`](foundations/colour.md) |
 | T4 | Sortable tables for compare-and-sort lists | **Not adopted.** Things you open are cards. Ports becomes a `ChoiceList` with sort in its toolbar. | D5, D7 |
 | T5 | Expandable rows | **Not adopted.** List rows never grow. | the decision above |

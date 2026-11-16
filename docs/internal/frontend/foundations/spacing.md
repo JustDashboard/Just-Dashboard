@@ -16,7 +16,7 @@ outside its role's column is noise: fold it into the nearest role when the page 
 | Row | height | 44 (`py-3` with a 20 line) | `Row`, `ChoiceRow` | `components/row-list.tsx`, `components/choice-row.tsx` |
 | Row | internal gap | 12 | `gap-3` | `components/row-list.tsx` |
 | Row | bleed in a plain panel | 12 | `ROW_BLEED` | `components/row-list.tsx` |
-| Table | bleed in a plain panel | the surface gutter | `TABLE_BLEED` (coming, beside `ROW_BLEED`), not `-mx-4`, `-mx-3` or `-mx-2` by hand | `components/row-list.tsx` |
+| Table | bleed in a plain panel | the surface gutter | `TABLE_BLEED` (`group-data-[plain]/panel:-mx-4`, beside `ROW_BLEED`), not `-mx-4`, `-mx-3` or `-mx-2` by hand | `components/row-list.tsx` |
 | Inline | glyph to word | 6 | `gap-1.5` | everywhere |
 | Inline | word to word in a facts line | 4 | `gap-1` | `FactsLine` |
 | Inline | stacked lines (a title over its hint) | 2 | `gap-0.5`, `space-y-0.5` | everywhere |

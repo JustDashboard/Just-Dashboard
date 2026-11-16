@@ -39,7 +39,8 @@ redesigned now starts from them:
   and not in force; the same bar serves a setting on a reading page and a column beside a rail (§7).
 - **A thing that is not there has one screen**, `components/missing-thing.tsx`
   ([`../components/states.md`](../components/states.md#a-thing-that-is-not-there-has-one-screen)).
-  The proxy's `EngineSetup` is that screen's first copy; a new page takes `MissingThing`.
+  The proxy's `EngineSetup` is that screen (`MissingThing size="page"` with the install as its
+  step, the certbot option and the job console); a new page takes `MissingThing`.
 - **On a phone a page of several panels is one pane at a time** over a bar at the foot
   (`components/phone-panes.tsx`; the pages on it are listed in `patterns/keyboard-and-place.md`).
 - **A Remote Desktop session is the one workbench that keeps full bleed** (§16's table).

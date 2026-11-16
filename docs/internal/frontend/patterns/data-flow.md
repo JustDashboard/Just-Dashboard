@@ -490,7 +490,8 @@ are dated evidence, not proof of current attachment ownership.
   nobody. Colours live on `:root` in `globals.css`. `lib/themes.ts` is now one function —
   `themeBootstrapScript()`, inlined in `<head>` with the request's CSP nonce — which puts `.dark` on the
   root element before first paint so the generated shadcn primitives' `dark:` variants resolve, sets
-  `color-scheme`, and clears the stored light/dark preference from anyone upgrading. the theme hook,
+  `color-scheme`, puts `data-motion="paused"` on the root for a browser that paused the product's
+  animations, and clears the stored light/dark preference from anyone upgrading. the theme hook,
   the top bar's toggle, the palette's theme commands and `/appearance` are all gone; `<html>` keeps
   `suppressHydrationWarning` because the class is still applied by script.
 

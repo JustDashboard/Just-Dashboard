@@ -12,8 +12,8 @@ domains), and a certificate is a page of its own, `/proxy/certificates/<name>` w
 two share a name (`certificate-page.tsx`, its rail and picture; the shared console, forms and verbs
 in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
-a sheet, and a test per channel (the parts that do not know the proxy's kinds are
-`components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's line says what
+a sheet, and a test per channel (the parts that do not know the proxy's kinds are the alerts kit,
+`components/alerts/kit.tsx`, `kinds.ts` and `alert-parts.tsx`, shared with `/metrics/alerts`); the overview's line says what
 fires and leads there, and its menu has Alerts. Ports (`/proxy/ports`) opens on its counts, a picture of which
 networks reach which listening programs and the list of sockets; each listening port has its own page
 (`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
@@ -40,7 +40,7 @@ the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
 
 Configuration (`/proxy/config`) opens on nginx's directory as an identity line with Test config, the
 include picture over the files by folder, and for administrators What nginx loads, Settings (one
-column, one save bar, a reload switch), Lint and History as `?tab=` views; a file's revisions and
+column, one save bar, a reload switch; Unknown hosts, the catch-all, is one of its sections), Lint and History as `?tab=` views; a file's revisions and
 restore are the config editor's History view (`?view=history`, the old `?history=` link lands
 there). Tunnel (`/proxy/tunnel`) opens on the tunnel's identity line with Check now, the picture of
 hostname → Cloudflare's edge → connector → this server, and the hostnames as one-line cards; not
@@ -48,9 +48,11 @@ connected, the dashed picture, a choice of token or API and one form (administra
 
 Sites (`/proxy/sites`, 0.8.7) lists every site as a one-line row (`SiteRow` in `vhosts-panel.tsx`):
 what it fronts with its engine in the tile's corner, its name over where its requests go, then its
-hour, ports, TLS, certificate and state in aligned columns, every verb in its menu. New site is the
-line's command, Import and Export all are behind its menu, and under the list Unknown hosts,
-Password files (`auth-files-panel.tsx`), Access lists (`access-lists-panel.tsx`), the URL resolver
+hour in words (`HourWords`: requests an hour and the 5xx share), ports, TLS, certificate and state
+in aligned columns, every verb in its menu. New site is the line's command, Import and Export all
+are behind its menu, and under the list a line saying what an unknown host gets
+(`UnknownHostsFact`, leading to Configuration → Settings, where the catch-all is a section saved
+by the page's bar), then Password files (`auth-files-panel.tsx`), Access lists (`access-lists-panel.tsx`), the URL resolver
 and Deleted & backups (`site-backups.tsx`) are titled sections of one-line rows; a password file's
 logins and an access list's addresses, sites and include line are in the sheet its row opens. A
 site's page (`/proxy/sites/<name>`, `site-page.tsx`, with the list as a rail from `xl`,
@@ -129,8 +131,8 @@ the server: picking "Redis" fills in 6379 *and* raises the warning at the moment
 report afterwards; the `ufw` line it would run is in the footer. `ssh-panel.tsx` stages every change and
 applies them together, and its dialog says to keep the session open and check a second terminal — the one
 piece of advice no error message can give afterwards. `site-form.tsx` shows the server-rendered nginx as
-the form's last part (same renderer that writes the file, so the form is not a black box), with `DNSCheck`
-under the domain field because "the name does not point here yet" causes most certificate failures and
+the form's last part (same renderer that writes the file, so the form is not a black box), with the DNS checks
+(`DomainChecks`) under the domain field because "the name does not point here yet" causes most certificate failures and
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
@@ -180,7 +182,7 @@ strip were removed in 0.7.5.
   an address, Tune and Release every ban as its verbs. The tuning form is a dialog: it shows the
   subject, groups the three policy numbers, and offers the browser's address for the allowlist; draft
   values use fail2ban's lowercase parameter names while the saved configuration uses camel case.
-  CrowdSec and Suricata each open on their install where they are missing (`network/install.tsx`):
+  CrowdSec and Suricata each open on their install where they are missing (`components/install-handoff.tsx`):
   CrowdSec's decisions with release and a ban form that refuses the reader's own address, its alerts
   and bouncers (`crowdsec-panel.tsx`); Suricata's mode, rules and alerts by severity, read from
   `eve.json` through the log roots (`suricata-panel.tsx`). Both ban forms say which engine already

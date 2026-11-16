@@ -69,6 +69,14 @@ Fields, select triggers, checkboxes and the switch track draw the control edge (
 the row. The utility comes before the position utilities in the stylesheet, so a caller's
 `absolute` still places the control.
 
+An ancestor that cuts what leaves its box (`truncate`, `line-clamp`, an overflow) cuts the press
+box too: cut the words inside the control (`<span className="truncate">`), not on it, or make the
+control the line's own height. Inside a scroller, or at the edge of one, a press box must not
+reach past the scroller's content: it makes the scroller scroll. Keep it to the control sideways
+(`after:inset-x-0`) or entirely (`after:inset-0`), and size the control instead. Terminal's tab
+strip does both: 32px arrows in their own slots, and a close button that is the tab's full height.
+`tests/browser/touch-targets-pages.spec.ts` checks both rules on six pages.
+
 ## Named layout values
 
 `grid-cols-main-end` (`minmax(0,1fr) auto`), `grid-cols-start-main`, `grid-cols-start-main-end`,
@@ -85,7 +93,8 @@ column percentages stay arbitrary: they are layout.
 | An item's details are a page, not a stack of sheets. | D9 |
 | Lists become cards; nothing is cut off; a table is not scrolled sideways for its main reading. | convention |
 | A field keeps 16px text on a touch screen (iOS zooms on less), whatever class its caller passes. | spec `touch-targets.spec.ts` (*a field asked for text-xs is still 16px and 44 tall*) |
-| A pressable target is at least 24px, and 44px on touch. | spec `touch-targets.spec.ts` (`Button` sizes and `Switch`); coming: the rest (WP-38) |
+| A pressable target is at least 24px, and 44px on touch. | spec `touch-targets.spec.ts` (`Button` sizes and `Switch`), `touch-targets-pages.spec.ts` (six pages), `shell-phone.spec.ts` (*the strip's controls and the drawer's rows are a finger tall*) |
+| A log at a page's foot is a card per source into the Logs page, never a console inside the page. | `EmbeddedLog` (`components/logs/embedded-log.tsx`); unit `embedded-log.test.js` |
 | On touch, `text-hint` is 12px and `text-micro` 11px (T1). | `globals.css` (`@media (pointer: coarse)` on the type tokens) |
 | Hover reveals are for real pointers only; on touch the controls are drawn. | spec `design-system.spec.ts` (*row actions … are visible without a pointer*) |
 | The page clears the home indicator and the notch (`viewportFit: cover`, safe-area utilities). | `app/layout.tsx` (`viewportFit: cover`, `themeColor`, `interactiveWidget`); `pt-safe` … `mb-safe` |

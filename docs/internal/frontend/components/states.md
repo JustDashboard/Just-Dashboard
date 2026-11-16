@@ -10,10 +10,11 @@ Empty, absent, failed, stale, notice and loading: each one designed, and each at
 `LoadingRows`, `LoadingPanel`, `Hold`, `Sweep` (`components/loading.tsx`); `Bone`;
 `MissingPage` and `StandaloneState` for a whole route.
 
-**Deprecated, kept until the page passes move their callers:** `CouldNotRead` and `NotUpdating`
-(`database/home/blocks.tsx`), `ReadFailed` (`database/fleet/read-failed.tsx`), `ReadError`
-(`database/redis/read-error.tsx`), `NetworkReadWarning` (`network/read-warning.tsx`). Each is now
-one call of the member named in its `@deprecated` line.
+**Deprecated, kept while they have callers:** `ReadFailed` (`database/fleet/read-failed.tsx`,
+called only from `database/schema/` and `database/diagram/` now), `ReadError`
+(`database/redis/read-error.tsx`), `NetworkReadWarning` (`network/read-warning.tsx`). Each is
+one call of the member named in its `@deprecated` line. The database home's own two copies are
+gone: its blocks use `ErrorState` and `Stale`.
 
 ## Which one
 

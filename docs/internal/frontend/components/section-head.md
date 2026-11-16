@@ -90,8 +90,11 @@ target under a mouse and 44px under a finger, without growing the head.
 
 Use `PanelHeader`'s `link` where the link ends a head. Use `SectionLink` alone only where the head
 is not a `PanelHeader` (a picture's lane, a band). Never type the arrow link by hand. About thirty
-hand copies, some without the focus ring, are why this exists. The wave-2 passes move
-`BlockLink` (databases), `HeadLink` (proxy) and the inline copies onto it.
+hand copies, some without the focus ring, are why this exists; the databases' and the proxy's own
+head links were two of them and are gone.
+
+It is `TextLink`'s onward face (`components/inline-link.tsx`). A link inside a sentence is
+`TextLink`'s inline face, underlined at rest; never `hover:underline` alone.
 
 ## States
 

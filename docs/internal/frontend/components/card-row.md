@@ -84,9 +84,9 @@ Overview's workspace card still carry the shell by hand and move in their page p
 - **Loading.** `ChoiceListSkeleton({ rows, mark = "sm", lines = 1, aside = true })` draws ghost
   cards at `CHOICE_ROW_BOX` inside the same edge: a mark's place (`sm` 32px, `md` 40px, `false`
   none), a bone where the name goes, a second under it with `lines={2}`, and a trailing bone
-  hidden on a phone. Every piece keeps `data-slot="skeleton"`. `rows={0}` draws nothing. It replaces
-  `LoadingRows` forced into a card with `[&>*]:h-14`, `GhostRows`, `CardRowsSkeleton` and
-  `CardsSkeleton`, which the page passes move to it.
+  hidden on a phone. Every piece keeps `data-slot="skeleton"`. `rows={0}` draws nothing. It replaced
+  `LoadingRows` forced into a card with `[&>*]:h-14`; the Network area's `GhostRows` and
+  `CardRowsSkeleton` are the hand copies still to move onto it.
 - **Empty.** `EmptyState` with the products the list is for as its `mark`.
 - **Disabled, busy.** Above.
 - **Never grows.** A failure, a sample, a detail goes in the trailing state with a popover, or a
