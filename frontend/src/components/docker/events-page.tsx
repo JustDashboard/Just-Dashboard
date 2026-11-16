@@ -410,7 +410,9 @@ export function EventsPage() {
             >
               <PanelHeader
                 title="Containers"
-                count={rows.length}
+                // In words, as the Events head under it counts: a bare figure
+                // before the key read as part of it, "8 ● Failed".
+                count={plural(rows.length, "container")}
                 actions={<OutcomeKey className="max-md:hidden" />}
               />
               <PanelBody flush>
