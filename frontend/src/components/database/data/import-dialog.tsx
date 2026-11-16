@@ -1,9 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { CloudUpload } from "@/components/icons"
 import { postForm } from "@/lib/api"
-import { bytes, grouped } from "@/lib/format"
+import { grouped } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DbImportFormat } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -42,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import { FileDrop } from "@/components/database/data/file-drop"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
@@ -151,7 +151,6 @@ export function ImportDialog({
   const { id, engine } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const picker = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [settings, setSettings] = useState<Settings>(START)
   // Source column → table column, as the reader left it. Empty until they touch
@@ -477,53 +476,14 @@ export function ImportDialog({
             <ImportResult report={done} />
           ) : (
             <>
-              <input
-                ref={picker}
-                type="file"
-                hidden
+              <FileDrop
+                file={file}
                 accept=".csv,.tsv,.tab,.txt,.json,.ndjson,.jsonl,text/csv,application/json"
-                onChange={(event) => {
-                  const next = event.currentTarget.files?.[0] ?? null
-                  event.currentTarget.value = ""
-                  if (next) take(next)
-                }}
+                formats={formats.map((format) => FORMAT_LABEL[format]).join(" · ")}
+                onFile={take}
+                disabled={run.pending}
+                meta={report && <Tag>{FORMAT_LABEL[report.format]}</Tag>}
               />
-              {!file ? (
-                <button
-                  type="button"
-                  className="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-10 text-center focus-ring transition-colors hover:bg-row-hover"
-                  onClick={() => picker.current?.click()}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault()
-                    const dropped = event.dataTransfer.files[0]
-                    if (dropped) take(dropped)
-                  }}
-                >
-                  <CloudUpload className="size-5 text-muted-foreground" />
-                  <span className="text-body font-medium">Choose a file, or drop one here</span>
-                  <span className="text-hint text-muted-foreground">
-                    {formats.map((format) => FORMAT_LABEL[format]).join(" · ")}
-                  </span>
-                </button>
-              ) : (
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="min-w-0 truncate font-mono text-body">{file.name}</span>
-                  <span className="numeric shrink-0 text-hint text-muted-foreground">
-                    {bytes(file.size)}
-                  </span>
-                  {report && <Tag>{FORMAT_LABEL[report.format]}</Tag>}
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="ml-auto"
-                    disabled={run.pending}
-                    onClick={() => picker.current?.click()}
-                  >
-                    Choose another
-                  </Button>
-                </div>
-              )}
 
               {file && !detail && (
                 <Field

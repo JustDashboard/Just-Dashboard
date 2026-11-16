@@ -11,7 +11,7 @@ import { DialogSubject, Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { FileDrop } from "@/components/database/data/file-drop"
 import { EngineMark } from "@/components/database/kit"
 import { importFile, type MongoTarget } from "@/components/database/mongo/api"
 import { draftLabel, isEmptyDraft, type QueryDraft } from "@/components/database/mongo/query"
@@ -446,30 +446,19 @@ export function ImportDialog({
           <ImportOutcome report={report} />
         ) : (
           <>
-            <Field
-              label="File"
-              htmlFor="mongo-import-file"
-              hint="NDJSON or JSON keeps every type (Extended JSON). CSV and TSV fields become strings."
-            >
-              <Input
-                id="mongo-import-file"
-                type="file"
-                accept=".json,.ndjson,.jsonl,.csv,.tsv,.tab,application/json,text/csv"
-                disabled={busy !== null}
-                onChange={(event) => {
-                  const chosen = event.target.files?.[0] ?? null
-                  setFile(chosen)
-                  if (!chosen) {
-                    setPreview(null)
-                    return
-                  }
-                  const guessed = formatOf(chosen.name)
-                  const as = formats.includes(guessed) ? guessed : (formats[0] ?? "ndjson")
-                  setFormat(as)
-                  void look(chosen, as)
-                }}
-              />
-            </Field>
+            <FileDrop
+              file={file}
+              accept=".json,.ndjson,.jsonl,.csv,.tsv,.tab,application/json,text/csv"
+              formats="NDJSON or JSON keeps every type (Extended JSON). CSV and TSV fields become strings."
+              disabled={busy !== null}
+              onFile={(chosen) => {
+                setFile(chosen)
+                const guessed = formatOf(chosen.name)
+                const as = formats.includes(guessed) ? guessed : (formats[0] ?? "ndjson")
+                setFormat(as)
+                void look(chosen, as)
+              }}
+            />
 
             {file && (
               <Field label="Read it as">
