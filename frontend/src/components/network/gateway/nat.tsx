@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { flowOf } from "@/components/network/gateway/evidence"
 import {
   EntryEvidence,
