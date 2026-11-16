@@ -222,7 +222,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `utilisationTone` | [Readings](readings.md) | `components/meter.tsx` | The thresholds that colour a utilisation figure and its bar alike. | keep |
 | `Meter` | [Readings](readings.md) | `components/meter.tsx` | A bar for a figure between 0 and 100, with a threshold mark; `color`, `size="cell"` and `decorative`. | keep |
 | `RankList`, `RankSkeleton`, `RankItem` (type), `SplitPart` (type) | [Readings](readings.md) | `components/rank-list.tsx` | A ranked list read in columns (a name, a figure, its share), and its rows waiting. | keep |
-| `percent` | [Readings](readings.md) | `components/rank-list.tsx` | A share in whole percent that never calls a sliver nothing. | keep |
+| `percent` | [Readings](readings.md) | `components/rank-list.tsx` | A share in whole percent; `RankList` says its shares with `sharePercent`. | deprecated (use `sharePercent` from `lib/format.ts`, WP-14) |
 | `SplitBar`, `splitWidths` | [Readings](readings.md) | `components/rank-list.tsx` | One whole as one strip of coloured parts, with an optional legend that names or narrows. | keep |
 | `ReadingLine`, `ReadingLines` | [Readings](readings.md) | `components/reading-line.tsx` | One reading as a sentence on a mark with its last hour at the end; two columns from `xl`. | keep |
 | `ReadingMark` | [Readings](readings.md) | `components/reading-line.tsx` | A reading's glyph on its measure's hue, or on the tone of what is wrong with it. | new |
