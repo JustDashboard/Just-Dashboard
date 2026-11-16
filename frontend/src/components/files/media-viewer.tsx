@@ -302,7 +302,7 @@ function OtherStage({ entry }: { entry: FileEntry }) {
         <p className="shrink-0 text-hint text-muted-foreground">
           {preview.truncated
             ? `First ${preview.lines} lines of ${bytes(preview.size)}. Open it in the editor for the rest.`
-            : plural(preview.lines, "line")}
+            : plural(preview.lines ?? 0, "line")}
         </p>
       </div>
     )

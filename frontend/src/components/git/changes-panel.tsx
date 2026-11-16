@@ -129,7 +129,11 @@ export function ChangesPanel({
       subject: {
         mark: (
           <FileIcon
-            entry={{ name: file.path.split("/").pop() ?? file.path, isDir: false }}
+            entry={{
+              name: file.path.split("/").pop() ?? file.path,
+              isDir: false,
+              isSymlink: false,
+            }}
             className="size-6"
           />
         ),
