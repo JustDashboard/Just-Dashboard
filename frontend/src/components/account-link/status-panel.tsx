@@ -14,7 +14,7 @@ import {
   MarkTile,
   commandMark,
 } from "@/components/account-link/marks"
-import { Reading, ReadingList } from "@/components/account-link/reading"
+import { Detail, DetailList } from "@/components/detail-list"
 import { ScopeCards } from "@/components/account-link/scope-cards"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Section } from "@/components/section"
@@ -24,9 +24,6 @@ import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 
 type Link = NonNullable<AccountLinkStatus["link"]>
-
-
-
 
 /**
  * What the link has been doing: the heartbeat this server sends, and the last thing the site
@@ -169,21 +166,21 @@ export function Keys({
 }) {
   return (
     <Section title="Keys" className={className}>
-      <ReadingList>
+      <DetailList ruled labelWidth="fixed" size="body">
         {fingerprint && (
-          <Reading label="This server" mono>
+          <Detail label="This server" mono className="break-words">
             {fingerprint}
-          </Reading>
+          </Detail>
         )}
         {siteKeys.map((key) => (
-          <Reading key={key.kid} label={keyLabel} mono>
+          <Detail key={key.kid} label={keyLabel} mono className="break-words">
             {key.fingerprint}
             <span className="block text-hint text-muted-foreground">
               {key.notAfter ? `${key.kid} · valid until ${calendarDate(key.notAfter)}` : key.kid}
             </span>
-          </Reading>
+          </Detail>
         ))}
-      </ReadingList>
+      </DetailList>
     </Section>
   )
 }

@@ -13,7 +13,7 @@ import {
 import { relativeTime, timestamp } from "@/lib/format"
 import type { AccountLinkScope } from "@/lib/types"
 import { MarkTile, type Mark } from "@/components/account-link/marks"
-import { Reading, ReadingList } from "@/components/account-link/reading"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Section } from "@/components/section"
 import { platformProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
@@ -153,17 +153,14 @@ function Group({ group, mark }: { group: SharedGroup; mark: Mark }) {
           {group.label}
         </h3>
       </div>
-      <ReadingList>
+      <DetailList ruled labelWidth="fixed" size="body">
         {group.rows.map((row, i) => (
-          <Reading
-            key={`${row.label}-${i}`}
-            label={row.label}
-            after={row.records && <Records records={row.records} />}
-          >
+          <Detail key={`${row.label}-${i}`} label={row.label} className="break-words">
             {row.time ? timestamp(row.time) : row.value}
-          </Reading>
+            {row.records && <Records records={row.records} />}
+          </Detail>
         ))}
-      </ReadingList>
+      </DetailList>
     </section>
   )
 }
