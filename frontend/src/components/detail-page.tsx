@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { ChevronDown, ChevronUp } from "@/components/icons"
 import { useViewState } from "@/lib/view-state"
 import { IconAction } from "@/components/icon-action"
-import { BackLink as PageBackLink, Page, PageContext } from "@/components/page"
+import { BackLink as PageBackLink, Page, PageContext, type Back } from "@/components/page"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import type { WorkspaceCommand } from "@/components/workspace/commands"
 
@@ -22,6 +22,11 @@ import type { WorkspaceCommand } from "@/components/workspace/commands"
  * that scrolls under a head that stays put. This is the one frame; a page
  * hands it its rail (`components/rail.tsx`), its identity line and its views.
  * The recipe is `docs/internal/frontend/recipes/detail-with-rail.md`.
+ *
+ * The item comes before the list in the document, though the list is drawn
+ * first: Tab from the shell reaches the item's own way back, views and
+ * controls, and the rail's search and every one of its rows come after them
+ * rather than standing between a keyboard and the page it opened.
  */
 export type Step = { disabled: boolean; run: () => void }
 
@@ -167,13 +172,16 @@ export function StepArrows({
  * identity line) stays put from `xl` while the body scrolls under it; narrower
  * the page scrolls as a whole. `name` and `stateKey` are the Workspace's: the
  * help sheet is titled by the one and the remembered place kept under the
- * other, so a page moving onto this frame keeps both as they were.
+ * other, so a page moving onto this frame keeps both as they were. `escape`
+ * is the Workspace's too: what Escape lets go of on this page (a picked run),
+ * answering whether it took the key.
  */
 export function DetailPage({
   name,
   what,
   stateKey,
   refresh,
+  escape,
   steps,
   rail,
   back,
@@ -189,11 +197,13 @@ export function DetailPage({
   what: string
   stateKey: string
   refresh?: () => void
+  /** What Escape lets go of here; `true` when it took the key. */
+  escape?: () => boolean
   steps: { previous: Step; next: Step }
   /** The sibling rail (`Rail`), shown from `xl`. */
   rail: React.ReactNode
-  /** The way back to the list. */
-  back?: { href: string; label: React.ReactNode }
+  /** The way back to the list: where it leads and the list's name. */
+  back?: Back
   /** The page's name for the tab and the screen reader's heading. */
   title?: React.ReactNode
   /** Verbs beside the arrows, where a page has them in its context line. */
@@ -210,6 +220,7 @@ export function DetailPage({
       name={name}
       stateKey={stateKey}
       refresh={refresh}
+      escape={escape}
       commands={stepCommands(what, steps)}
     >
       {/* Held to the window where the rail stands beside it, so the list and
@@ -217,12 +228,13 @@ export function DetailPage({
           page is the one pane and scrolls as a whole. */}
       <Page fill="xl" className="gap-0 md:gap-0">
         <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          {rail}
-          <div className="flex min-w-0 flex-1 flex-col gap-5 xl:min-h-0">
+          {/* First in the document, second on screen: `order` puts the rail,
+              which follows it, on the leading edge from `xl`. */}
+          <div className="flex min-w-0 flex-1 flex-col gap-5 xl:order-last xl:min-h-0">
             <div className="flex min-w-0 shrink-0 flex-col gap-5">
               {head ?? (
                 <PageContext
-                  eyebrow={back && <PageBackLink href={back.href}>{back.label}</PageBackLink>}
+                  back={back}
                   title={title ?? name}
                   actions={
                     <>
@@ -238,6 +250,7 @@ export function DetailPage({
               {children}
             </div>
           </div>
+          {rail}
         </div>
       </Page>
     </Workspace>
