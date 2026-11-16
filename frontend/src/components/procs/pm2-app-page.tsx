@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import { createPortal } from "react-dom"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { ChartActivity } from "@/components/icons"
@@ -13,7 +14,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/hooks/use-now"
-import { DetailPage, useDetailTab, useSiblingSteps, type Step } from "@/components/detail-page"
+import { DetailPage, useDetailTab, useSiblingSteps } from "@/components/detail-page"
 import { FactDot, IdentityHeader } from "@/components/identity-header"
 import { ProductLogo, ProductLogos, hasProductLogo, pm2Product } from "@/components/product-logo"
 import { EmptyState } from "@/components/state"
@@ -137,82 +138,80 @@ export function PM2AppPage() {
   )
   const installed = inventory.data?.available !== false
 
-  // The frame every detail page shares; the rail is the list's, and nothing
-  // stands beside a server that has no PM2.
-  const frame: Frame = {
-    steps,
-    refresh: inventory.refresh,
-    rail: installed && (
-      <PM2AppRail
-        apps={rail.apps}
-        current={current}
-        several={daemons.length > 1}
-        loading={inventory.loading}
-        error={inventory.data ? undefined : inventory.error}
-        onRetry={inventory.refresh}
-        query={rail.query}
-        onQuery={rail.setQuery}
-        filtered={rail.filtered}
-        onClearFilters={rail.clearFilters}
-        caption={inventory.data ? rail.caption : "Reading PM2…"}
-        onOpen={open}
-        bindings={rail.bindings}
-      />
-    ),
-  }
+  // The line's place in the shared frame. The frame is drawn once, here, and
+  // the view below fills its line, so the page that was reading PM2 is the
+  // page that shows the application: two frames, one per state, made the
+  // workspace start again when the list landed, scroll and all.
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null)
+  const title = resolved.kind === "found" ? resolved.app.name : name || "Application"
 
-  return resolved.kind === "found" ? (
-    // Keyed, so another application opens on its own state: its log's
-    // worker, its scale dialog and its pending verb start clean.
-    <AppMain
-      key={resolved.app.key}
-      frame={frame}
-      app={resolved.app}
-      processes={processes}
-      daemons={daemons}
-      tab={tab}
-      setTab={setTab}
-      worker={worker && /^\d+$/.test(worker) ? Number(worker) : null}
-      onChanged={inventory.refresh}
-    />
-  ) : (
-    <AppAbsent frame={frame} name={name} inventory={inventory} resolved={resolved} tab={tab} />
-  )
-}
-
-/** What every state of the page hands the shared frame. */
-type Frame = {
-  steps: { previous: Step; next: Step }
-  refresh: () => void
-  rail: React.ReactNode
-}
-
-/** The application's detail frame: the way back, the walk and the rail (`DetailPage`). */
-function AppFrame({
-  frame,
-  title,
-  identity,
-  children,
-}: {
-  frame: Frame
-  title: string
-  identity?: React.ReactNode
-  children: React.ReactNode
-}) {
   return (
     <DetailPage
       name="Application"
       what="application"
       stateKey="pm2.app.page"
-      refresh={frame.refresh}
-      steps={frame.steps}
+      refresh={inventory.refresh}
+      steps={steps}
       back={BACK}
       title={title}
-      rail={frame.rail}
-      identity={identity}
+      // Nothing stands beside a server that has no PM2.
+      rail={
+        installed && (
+          <PM2AppRail
+            apps={rail.apps}
+            current={current}
+            several={daemons.length > 1}
+            loading={inventory.loading}
+            error={inventory.data ? undefined : inventory.error}
+            onRetry={inventory.refresh}
+            query={rail.query}
+            onQuery={rail.setQuery}
+            filtered={rail.filtered}
+            onClearFilters={rail.clearFilters}
+            caption={inventory.data ? rail.caption : "Reading PM2…"}
+            onOpen={open}
+            bindings={rail.bindings}
+          />
+        )
+      }
+      identity={<div ref={setSlot} className="contents" />}
     >
-      {children}
+      {resolved.kind === "found" ? (
+        // Keyed, so another application opens on its own state: its log's
+        // worker, its scale dialog and its pending verb start clean.
+        <AppMain
+          key={resolved.app.key}
+          slot={slot}
+          app={resolved.app}
+          processes={processes}
+          daemons={daemons}
+          tab={tab}
+          setTab={setTab}
+          worker={worker && /^\d+$/.test(worker) ? Number(worker) : null}
+          onChanged={inventory.refresh}
+        />
+      ) : (
+        <AppAbsent slot={slot} name={name} inventory={inventory} resolved={resolved} tab={tab} />
+      )}
     </DetailPage>
+  )
+}
+
+/** A view's part of the frame: its identity line, drawn into the frame's place for it. */
+function AppFrame({
+  slot,
+  identity,
+  children,
+}: {
+  slot: HTMLElement | null
+  identity?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      {identity && slot && createPortal(identity, slot)}
+      {children}
+    </>
   )
 }
 
@@ -261,13 +260,13 @@ function useRail(processes: PM2Process[]) {
  * open and no word about why.
  */
 function AppAbsent({
-  frame,
+  slot,
   name,
   inventory,
   resolved,
   tab,
 }: {
-  frame: Frame
+  slot: HTMLElement | null
   name: string
   inventory: ReturnType<typeof usePoll<PM2Inventory>>
   resolved: Exclude<ReturnType<typeof pm2Resolve>, { kind: "found" }>
@@ -275,19 +274,17 @@ function AppAbsent({
 }) {
   // The same frame as the page proper, arrows and all: it is where the line
   // under it stands, and the way off a name that opens nothing.
-  const title = name || "Application"
   if (!inventory.data) {
     if (inventory.error) {
       return (
-        <AppFrame frame={frame} title={title}>
+        <AppFrame slot={slot}>
           <PM2Unanswered error={inventory.error} onRetry={inventory.refresh} />
         </AppFrame>
       )
     }
     return (
       <AppFrame
-        frame={frame}
-        title={title}
+        slot={slot}
         identity={
           // The line's final shape while PM2 is read, the command's and the
           // menu's places held, so nothing under it moves when it lands (D11).
@@ -310,14 +307,14 @@ function AppAbsent({
   }
   if (!inventory.data.available) {
     return (
-      <AppFrame frame={frame} title={title}>
+      <AppFrame slot={slot}>
         <PM2Missing />
       </AppFrame>
     )
   }
   const mark = hasProductLogo("pm2") ? <ProductLogos ids={["pm2"]} /> : undefined
   return (
-    <AppFrame frame={frame} title={title}>
+    <AppFrame slot={slot}>
       {resolved.kind === "ambiguous" ? (
         <EmptyState
           icon={ChartActivity}
@@ -354,7 +351,7 @@ function AppAbsent({
 }
 
 function AppMain({
-  frame,
+  slot,
   app,
   processes,
   daemons,
@@ -363,7 +360,7 @@ function AppMain({
   worker,
   onChanged,
 }: {
-  frame: Frame
+  slot: HTMLElement | null
   app: PM2App
   processes: PM2Process[]
   daemons: PM2Daemon[]
@@ -472,8 +469,7 @@ function AppMain({
 
   return (
     <AppFrame
-      frame={frame}
-      title={app.name}
+      slot={slot}
       identity={
         <AppIdentity
           app={app}
