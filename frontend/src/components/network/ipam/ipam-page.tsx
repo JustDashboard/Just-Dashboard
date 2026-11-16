@@ -123,7 +123,7 @@ export function AddressPlanningPage() {
   ]
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="Address planning" />
       <HostIdentity
         fallback={Hash}

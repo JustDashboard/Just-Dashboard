@@ -6,7 +6,7 @@ import { Captures } from "@/components/network/captures"
 
 export default function PacketCapturesPage() {
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <Suspense>
         <Captures />
       </Suspense>

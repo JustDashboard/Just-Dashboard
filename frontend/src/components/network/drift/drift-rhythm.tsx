@@ -168,7 +168,7 @@ function Beat({ entry, at, fresh }: { entry: Inspection; at: number; fresh: bool
     <span
       title={`${new Date(entry.at).toLocaleTimeString()} · ${beatWords(entry)}`}
       className={cn(
-        "absolute inset-y-1 flex w-1.5 -translate-x-full flex-col-reverse overflow-hidden rounded-[2px] transition-[left] duration-1000 ease-linear",
+        "absolute inset-y-1 flex w-1.5 -translate-x-full flex-col-reverse overflow-hidden rounded-xs transition-[left] duration-1000 ease-linear",
         fresh && "animate-rise",
         entry.moves.length > 0 && "ring-1 ring-foreground/60",
       )}

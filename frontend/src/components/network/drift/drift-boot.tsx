@@ -170,7 +170,7 @@ export function DriftBoot({ boot }: { boot: DriftReport["boot"] }) {
               </section>
               <section aria-label="Execution evidence" className="space-y-2">
                 <p className="text-xs font-medium">Execution evidence</p>
-                <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-hint">
+                <dl className="grid grid-cols-start-main gap-x-4 gap-y-1.5 text-hint">
                   <dt className="text-muted-foreground">Current boot</dt>
                   <dd>
                     <ShortDigest value={activation.bootId} />

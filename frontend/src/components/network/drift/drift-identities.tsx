@@ -15,7 +15,7 @@ export function DriftIdentities({ report }: { report: DriftReport }) {
     <Panel plain aria-label="Configuration identities">
       <PanelHeader title="Configuration identities" />
       <PanelBody className="space-y-3">
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-2 text-body">
+        <dl className="grid grid-cols-start-main gap-x-6 gap-y-2 text-body">
           <dt className="text-muted-foreground">Saved file</dt>
           <dd>
             <ShortDigest value={report.savedGeneration} />

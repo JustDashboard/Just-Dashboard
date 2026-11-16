@@ -19,7 +19,6 @@ import {
   stickyTableHeader,
 } from "@/components/ui/table"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { copyText } from "@/lib/clipboard"
 import {
   ownerLabel,
@@ -29,6 +28,7 @@ import {
   type IPAMOwner,
   type IPAMReservation,
 } from "@/lib/network/ipam"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const OWNER_PRODUCT: Partial<Record<IPAMOwner, string>> = {
   docker_network: "docker",
@@ -72,7 +72,7 @@ export function IPAMReservations({
   const router = useRouter()
   // From `sm` a card is one line; narrower, how the hand-off stands takes a
   // second line under the block on every card alike.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const held = reservations.filter((row) => row.state !== "released").length
   return (
     <Panel plain aria-label="Reservations">

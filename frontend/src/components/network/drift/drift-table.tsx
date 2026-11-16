@@ -1,7 +1,6 @@
 "use client"
 
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { SearchInput } from "@/components/search-input"
 import { ProductGlyph } from "@/components/product-logo"
@@ -31,6 +30,7 @@ import {
 } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { DriftMark, ShortDigest } from "@/components/network/drift/marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export type DriftScope = "all" | "differ" | "incomplete" | "matching"
 
@@ -86,7 +86,7 @@ export function DriftTable({
   query: string
   onQuery: (query: string) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   const counts = driftCounts(rows)
   const sorted = driftSorted(rows)
   const inDomain = domain ? sorted.filter((row) => row.domain === domain) : sorted
@@ -210,7 +210,7 @@ export function DriftTable({
             }
           />
         ) : wide ? (
-          <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+          <Table className="table-fixed" containerClassName="max-h-rail">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
                 <TableHead className="w-44">State</TableHead>

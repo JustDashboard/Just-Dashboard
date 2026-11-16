@@ -1,7 +1,6 @@
 "use client"
 
 import { useRef, type RefObject } from "react"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
@@ -17,6 +16,7 @@ import {
 } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { DriftBlocks, ShortDigest } from "@/components/network/drift/marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Line = {
   dashed?: boolean
@@ -111,7 +111,7 @@ export function DriftPicture({
   selected?: DriftDomain
   onDomain: (domain: DriftDomain) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const saved = rows.filter((row) => row.domain === "saved")
@@ -186,7 +186,7 @@ export function DriftPicture({
           <p className="eyebrow">Saved</p>
           <p className="text-body leading-snug font-medium">{title}</p>
           <p className="text-hint leading-snug text-muted-foreground">{hint}</p>
-          <div ref={hub} className="relative z-10 mt-4 flex">
+          <div ref={hub} className="relative z-raised mt-4 flex">
             <WireHost />
           </div>
           <div
@@ -264,7 +264,7 @@ function DomainNode({
     return (
       <div className="flex min-w-0 flex-col items-center gap-2">
         {beam}
-        <div ref={mark} className="relative z-10 flex">
+        <div ref={mark} className="relative z-raised flex">
           {drawn}
         </div>
         <div className="min-w-0 text-center">

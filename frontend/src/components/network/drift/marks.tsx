@@ -35,7 +35,7 @@ export function DriftBlocks({ rows, className }: { rows: DriftRow[]; className?:
         <span
           key={row.id}
           title={`${row.label} · ${driftReading(row.status).label}`}
-          className={cn("size-2.5 rounded-[2px]", STATUS_FILL[row.status] ?? STATUS_FILL.unknown)}
+          className={cn("size-2.5 rounded-xs", STATUS_FILL[row.status] ?? STATUS_FILL.unknown)}
         />
       ))}
     </span>

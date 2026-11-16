@@ -128,7 +128,7 @@ export default function NetworkOverviewPage() {
   const failed = !data && Boolean(overview.error)
   const nodeOf = (id: string) => flowNode(id, data!, links)
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="Network" />
       <NetworkIdentity
         overview={data}

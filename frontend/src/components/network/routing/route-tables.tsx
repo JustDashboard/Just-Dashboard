@@ -7,6 +7,7 @@ import { Pencil, Plus, Trash } from "@/components/icons"
 import { del } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkRoute, NetworkRouting, NetworkRule } from "@/lib/types"
+import { breakpointQuery } from "@/lib/breakpoints"
 import { cn } from "@/lib/utils"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -48,7 +49,7 @@ const OWNER_WORD: Record<NetworkRoute["owner"], string> = {
 
 // From here the seven columns fit beside the rail; narrower, a route is two lines.
 const WIDE = "(min-width: 1100px)"
-const RULES_WIDE = "(min-width: 768px)"
+const RULES_WIDE = breakpointQuery("md")
 
 export type RouteTarget = {
   /** What was typed, trimmed. */
@@ -353,7 +354,7 @@ function Owner({ route, short }: { route: NetworkRoute; short?: boolean }) {
       <span className={cn("truncate", route.managed ? "text-brand" : "text-muted-foreground")}>
         {OWNER_WORD[route.owner]}
       </span>
-      {!short && <span className="text-muted-foreground/60">· {route.protocol}</span>}
+      {!short && <span className="text-faint">· {route.protocol}</span>}
     </span>
   )
 }

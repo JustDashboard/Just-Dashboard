@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Peer = BGPView["families"][number]["peers"][number] & { family: string; localAs: number }
 
@@ -200,7 +201,7 @@ function Neighbours({ peers }: { peers: Peer[] }) {
               <li
                 key={`${p.family}:${p.address}`}
 
-                className="grid h-[4.5rem] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 text-xs"
+                className="grid h-[4.5rem] min-w-0 grid-cols-main-end items-center gap-x-3 px-4 text-xs"
               >
                 <div className="min-w-0 space-y-1">
                   <Named name={p.address} detail={p.description ?? p.hostname ?? p.family} />
@@ -233,7 +234,7 @@ function Adjacencies({ neighbours }: { neighbours: NonNullable<BGPView["ospf"]> 
           {neighbours.map((n) => (
             <li
               key={`${n.version}:${n.routerId}:${n.interface}`}
-              className="grid h-11 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-4 text-xs sm:grid-cols-[minmax(0,1.4fr)_5rem_minmax(0,1fr)_minmax(0,1fr)_5rem] sm:px-5"
+              className="grid h-11 min-w-0 grid-cols-main-end items-center gap-x-4 px-4 text-xs sm:grid-cols-[minmax(0,1.4fr)_5rem_minmax(0,1fr)_minmax(0,1fr)_5rem] sm:px-5"
             >
               <Named name={n.routerId} detail={n.address} mono />
               <span className="text-muted-foreground max-sm:hidden">OSPFv{n.version}</span>
@@ -316,7 +317,7 @@ function RouteBrowser({ families }: { families: string[] }) {
   const [busy, setBusy] = useState(false)
   const [view, setView] = useState<BGPRoutesView>()
   const [error, setError] = useState<string>()
-  const wide = useMediaQuery("(min-width: 768px)")
+  const wide = useBreakpoint("md")
   if (supported.length === 0) return null
   const read = async () => {
     if (busy) return

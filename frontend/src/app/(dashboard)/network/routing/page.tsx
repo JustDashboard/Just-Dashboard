@@ -194,7 +194,7 @@ function Routing() {
   const failed = !data && routing.error
   return (
     <SaveBarProvider>
-      <Page className="animate-rise gap-5 md:gap-5">
+      <Page rise className="gap-5 md:gap-5">
         <PageContext eyebrow="Network" title="Routing" />
         <RoutingIdentity
           routing={data}

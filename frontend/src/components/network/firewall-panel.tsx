@@ -842,7 +842,7 @@ function Destination({ to }: { to: string }) {
   if (!match) return <>{to || "Any destination"}</>
   return (
     <span className="numeric font-mono">
-      <span className="text-[var(--tag-pink)]">{match[1]}</span>
+      <span className="text-tag-pink">{match[1]}</span>
       {match[2] && <span className="text-muted-foreground">{match[2]}</span>}
     </span>
   )
@@ -1112,7 +1112,7 @@ function FirewallDefaults({
                   {edited && (
                     <span
                       aria-hidden
-                      className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-[var(--git-modified)]"
+                      className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
                     />
                   )}
                   <span className="flex min-w-0 items-center gap-2 text-sm font-medium">

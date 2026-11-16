@@ -73,7 +73,7 @@ export default function NetworkDriftPage() {
   const read = usePoll<DriftReport>((signal) => get("/network/drift", undefined, signal), POLL)
   if (!read.data)
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext title="Network drift" />
         <HostIdentity
           label="About the managed network"
@@ -178,7 +178,7 @@ function Drift({ read, data }: { read: PollState<DriftReport>; data: DriftReport
   }
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title="Network drift" />
       <HostIdentity
         label="About the managed network"
