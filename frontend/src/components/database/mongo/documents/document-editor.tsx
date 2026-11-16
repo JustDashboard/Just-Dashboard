@@ -5,7 +5,14 @@ import { ApiError, errorMessage } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { CodeEditor } from "@/components/code-editor"
-import { FieldCheck, FormFact, FormFacts, OptionList, OptionRow } from "@/components/form"
+import {
+  FieldCheck,
+  FieldChecks,
+  FormFact,
+  FormFacts,
+  OptionList,
+  OptionRow,
+} from "@/components/form"
 import { DialogSubject, Modal } from "@/components/modal"
 import { Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -92,15 +99,21 @@ function grammarOf(reading: Reading): string {
 
 function ReadingLine({ reading }: { reading: Reading }) {
   return (
-    <div aria-live="polite" className="min-h-5">
+    <div className="min-h-5">
       {reading.state === "bad" ? (
-        <p className="text-hint text-destructive">{reading.message}</p>
-      ) : reading.state === "shell" ? (
-        <FieldCheck met>
-          Shell syntax: the server reads ObjectId(…), ISODate(…) and unquoted keys
-        </FieldCheck>
+        <p role="alert" className="text-hint text-destructive">
+          {reading.message}
+        </p>
       ) : (
-        <FieldCheck met={reading.state === "json"}>Extended JSON</FieldCheck>
+        <FieldChecks>
+          {reading.state === "shell" ? (
+            <FieldCheck met>
+              Shell syntax: the server reads ObjectId(…), ISODate(…) and unquoted keys
+            </FieldCheck>
+          ) : (
+            <FieldCheck met={reading.state === "json"}>Extended JSON</FieldCheck>
+          )}
+        </FieldChecks>
       )}
     </div>
   )

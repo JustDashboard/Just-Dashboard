@@ -501,7 +501,6 @@ export function ImportDialog({
                     spellCheck={false}
                     autoComplete="off"
                     placeholder="orders_2026"
-                    aria-invalid={taken || undefined}
                     className="max-w-sm font-mono sm:h-8"
                     onChange={(event) => setName(event.target.value)}
                   />
