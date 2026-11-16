@@ -10,28 +10,29 @@ import {
   Lightning,
   ListOrdered,
   Puzzle,
-  SidebarLeftClose,
-  SidebarLeftOpen,
   Table,
   Trash,
 } from "@/components/icons"
-import { usePanelSize } from "@/lib/panel-size"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { FormFact } from "@/components/form"
 import { PaneBar } from "@/components/phone-panes"
-import { ResizeHandle } from "@/components/resize-handle"
-import { EmptyState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import type { Verb } from "@/components/verbs"
 import { useCatalog, useTableDetail } from "@/components/database/data/use-table"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
+import { SchemaHeadSkeleton } from "@/components/database/kit/schema-head"
 import { SectionFrame } from "@/components/database/kit"
-import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
+import {
+  WORKBENCH_PAGE,
+  WorkbenchFrame,
+  WorkbenchSide,
+  sideVerbs,
+  useSideColumn,
+} from "@/components/database/workbench/chrome"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
   objectParams,
@@ -52,10 +53,7 @@ import { TableView } from "@/components/database/schema/table-view"
 import { useDestroy } from "@/components/database/schema/use-destroy"
 import { useSettledAddress } from "@/components/database/schema/use-settled-address"
 
-// The Data page's rail width, so moving between the two pages does not move it.
-const RAIL = { min: 200, max: 480, fallback: 256 }
 const NO_VERBS: Verb[] = []
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 /**
  * The schema browser of a SQL engine: everything a schema holds, by kind, in
@@ -85,12 +83,12 @@ export function SqlSchema() {
 
   /* --------------------------------------------------- how the columns lie */
 
-  const beside = useMediaQuery("(min-width: 1024px)")
+  // Every database workbench's rule and widths (`useSideColumn`): beside the
+  // object while the frame leaves it room, over it where it does not.
+  const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
+  const column = useSideColumn("databases.schema.rail", frameWidth)
+  const beside = column.beside
   const [railPinned, setRailPinned] = useViewState("databases.schema.rail", true)
-  const [railWidth, setRailWidth, resetRailWidth] = usePanelSize(
-    "databases.schema.rail",
-    RAIL.fallback,
-  )
   // Where the rail lies over the object it is what opens when nothing is
   // chosen, and it is put away when the address names something.
   const selectedKey = selected ? `${selected.type}:${selected.schema}:${selected.name}` : ""
@@ -102,7 +100,6 @@ export function SqlSchema() {
   }
   const railShown = beside ? railPinned : railOver
   const toggleRail = () => (beside ? setRailPinned(!railPinned) : setRailOver(!railOver))
-  const railColumn = clamp(railWidth, RAIL.min, RAIL.max)
 
   /* ------------------------------------------------- what may be made here */
 
@@ -236,21 +233,10 @@ export function SqlSchema() {
           which database, then the tree and the object as two columns of one
           surface, with a hairline between them. */}
       <WorkbenchFrame
+        ref={frame}
         section="schema"
         slot="schema-browser"
-        style={{ "--jd-schema-rail": `${railColumn}px` } as React.CSSProperties}
-        menu={
-          beside
-            ? [
-                {
-                  key: "rail",
-                  label: railShown ? "Hide the objects" : "Show the objects",
-                  icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
-                  run: toggleRail,
-                },
-              ]
-            : NO_VERBS
-        }
+        menu={sideVerbs(column, railShown, "objects", toggleRail)}
         bar={
           !beside && (
             <PaneBar<"objects" | "open">
@@ -272,12 +258,7 @@ export function SqlSchema() {
         }
       >
         {railShown && (
-          <div
-            className={cn(
-              "flex min-h-0 flex-col border-hairline bg-card",
-              beside ? "relative w-(--jd-schema-rail) shrink-0 border-r" : "absolute inset-0 z-30",
-            )}
-          >
+          <WorkbenchSide column={column} label="Objects width">
             <SchemaRail
               catalog={catalog}
               selected={selected}
@@ -288,19 +269,7 @@ export function SqlSchema() {
               onRefresh={refreshAll}
               saidBeside={beside && selected === null}
             />
-            {beside ? (
-              <ResizeHandle
-                side="left"
-                label="Objects width"
-                value={railColumn}
-                min={RAIL.min}
-                max={RAIL.max}
-                onChange={(px, commit) => setRailWidth(clamp(px, RAIL.min, RAIL.max), commit)}
-                onReset={resetRailWidth}
-                className="absolute inset-y-0 -right-1 z-20"
-              />
-            ) : null}
-          </div>
+          </WorkbenchSide>
         )}
 
         {/* Under the tree, where the tree lies over it, the object is not
@@ -360,43 +329,16 @@ export function SqlSchema() {
                 )}
               >
                 {catalog.error && !data ? (
-                  <ReadFailed
+                  <ErrorState
+                    retryable
                     error={catalog.error}
                     onRetry={refreshCatalog}
                     className="w-full max-w-md"
                   />
                 ) : !data ? (
-                  // The catalogue is on its way: the shape of what it will say.
-                  <div
-                    role="status"
-                    aria-label="Reading the schema"
-                    className="w-full space-y-6 self-start"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Skeleton className="size-10 rounded-lg" />
-                      <div className="space-y-2">
-                        <Skeleton className="h-3.5 w-28" />
-                        <Skeleton className="h-3 w-56 max-w-full" />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-10 gap-y-5 xl:grid-cols-4">
-                      {["w-10", "w-16", "w-20", "w-14"].map((width, index) => (
-                        <div key={index} className="space-y-2.5">
-                          <Skeleton className="h-2.5 w-14" />
-                          <Skeleton className={cn("h-6", width)} />
-                          <Skeleton className="h-2.5 w-24" />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="space-y-4">
-                      {["w-40", "w-28", "w-32", "w-24"].map((width) => (
-                        <div key={width} className="space-y-1.5">
-                          <Skeleton className={cn("h-3", width)} />
-                          <Skeleton className="h-1 w-full" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  // The catalogue is on its way: the shape of what it will say,
+                  // the head and a ranked list, as Data's landing waits.
+                  <SchemaHeadSkeleton label="Reading the schema" className="self-start" />
                 ) : (
                   // A schema that is not there is not an empty one: nothing can
                   // be made in it, and the way on is the one that exists.

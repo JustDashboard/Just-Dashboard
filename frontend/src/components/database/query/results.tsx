@@ -2,12 +2,14 @@
 
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
-import { useId, useRef, useState } from "react"
+import { useState } from "react"
 import { ChevronDown, Download, Sparkles, StopCircle, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DbExportFormat } from "@/lib/types"
+import { Sweep } from "@/components/loading"
 import { EmptyState, Notice } from "@/components/state"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { ChipCount, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -128,8 +130,6 @@ export function Results({
   const { engine } = useDatabase()
   const keys = useKeyNames()
   const run = held?.run
-  const tabsId = useId()
-  const tabs = useRef<HTMLDivElement>(null)
 
   // Which statement's result is open: the one worth looking at when a run
   // lands, and from then on the one the reader picked.
@@ -150,24 +150,6 @@ export function Results({
   const fetchMore = (of: RunStep, limit: number) => {
     showStep(of.index)
     onFetchMore(of, limit)
-  }
-
-  const onTabKey = (event: React.KeyboardEvent) => {
-    const at = VIEWS.findIndex((entry) => entry.id === view)
-    const to =
-      event.key === "ArrowRight"
-        ? (at + 1) % VIEWS.length
-        : event.key === "ArrowLeft"
-          ? (at + VIEWS.length - 1) % VIEWS.length
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? VIEWS.length - 1
-              : -1
-    if (to < 0) return
-    event.preventDefault()
-    onView(VIEWS[to].id)
-    tabs.current?.querySelector<HTMLElement>(`[data-view="${VIEWS[to].id}"]`)?.focus()
   }
 
   const failures = run ? run.steps.filter((entry) => entry.status === "error").length : 0
@@ -361,45 +343,35 @@ export function Results({
     canRun
 
   return (
-    <div data-slot="query-results" className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <Tabs
+      value={view}
+      onValueChange={(next) => onView(next as ResultsViewId)}
+      data-slot="query-results"
+      className="flex min-h-0 min-w-0 flex-1 flex-col gap-0"
+    >
       <div className="flex h-9 shrink-0 items-stretch border-b border-hairline bg-surface-header pr-1.5">
-        {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
-        <div
-          ref={tabs}
-          role="tablist"
-          aria-label="What the statement returned"
-          className="flex min-w-0 [scrollbar-width:none] items-stretch overflow-x-auto [&::-webkit-scrollbar]:hidden"
-          onKeyDown={onTabKey}
-        >
-          {VIEWS.map((entry) => {
-            const selected = view === entry.id
-            return (
-              <button
-                key={entry.id}
-                type="button"
-                role="tab"
-                id={`${tabsId}-${entry.id}`}
-                data-view={entry.id}
-                aria-selected={selected}
-                aria-controls={selected ? `${tabsId}-panel` : undefined}
-                tabIndex={selected ? 0 : -1}
-                className={tabClasses(selected, "h-9")}
-                onClick={() => onView(entry.id)}
-              >
-                {entry.label}
-                {entry.id === "results" && run && run.steps.length > 1 && (
-                  <ChipCount>{run.steps.length}</ChipCount>
-                )}
-                {entry.id === "messages" && failures > 0 && (
+        <ViewTabList
+          label="What the statement returned"
+          size="sm"
+          value={view}
+          className="min-w-0 border-b-0"
+          views={VIEWS.map((entry) => ({
+            key: entry.id,
+            label:
+              entry.id === "messages" && failures > 0 ? (
+                <>
+                  {entry.label}
                   <span className="text-destructive">
                     <ChipCount className="opacity-100">{failures}</ChipCount>
                     <span className="sr-only"> failed</span>
                   </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
+                </>
+              ) : (
+                entry.label
+              ),
+            count: entry.id === "results" && run && run.steps.length > 1 ? run.steps.length : undefined,
+          }))}
+        />
         <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
           {run && !running && run.steps.length > 0 && view !== "plan" && (
             <span className="numeric text-hint text-muted-foreground max-sm:hidden">
@@ -422,15 +394,10 @@ export function Results({
           )}
         </div>
       </div>
-      <div
-        role="tabpanel"
-        id={`${tabsId}-panel`}
-        aria-labelledby={`${tabsId}-${view}`}
-        className="flex min-h-0 min-w-0 flex-1 flex-col"
-      >
+      <TabsContent value={view} className="flex min-h-0 min-w-0 flex-col">
         {body}
-      </div>
-    </div>
+      </TabsContent>
+    </Tabs>
   )
 }
 
@@ -447,9 +414,7 @@ function Waiting({ run, onCancel }: { run: Run; onCancel: () => void }) {
       : "Running…"
   return (
     <div role="status" className="flex min-h-0 flex-1 flex-col">
-      <div aria-hidden className="h-0.5 shrink-0 overflow-hidden bg-meter-track">
-        <div className="h-full w-1/3 animate-sweep bg-primary" />
-      </div>
+      <Sweep className="h-0.5 shrink-0" />
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
         <p className="flex items-center gap-2 text-body">
           <TextShimmer>{doing}</TextShimmer>

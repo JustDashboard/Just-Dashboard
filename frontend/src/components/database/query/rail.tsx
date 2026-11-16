@@ -1,8 +1,6 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
   ChevronRight,
@@ -14,32 +12,30 @@ import {
   Trash,
 } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { relativeTime, timestamp } from "@/lib/format"
+import { grouped, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { PollState } from "@/hooks/use-poll"
 import { IconAction, rowReveal } from "@/components/icon-action"
-import { SearchInput } from "@/components/search-input"
-import { EmptyNote, EmptyState } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { Stale } from "@/components/stale"
 import { StatusDot } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabs } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+import { TabsContent } from "@/components/ui/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
-import { nameHue } from "@/components/database/home/kinds"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ContainerPicker } from "@/components/database/kit/container-picker"
 import { useDatabase } from "@/components/database/shell/database-context"
+import {
+  RAIL_ROW,
+  RailFind,
+  RailGroupHead,
+  RailNoMatch,
+  RailSkeleton,
+  RailTitle,
+} from "@/components/database/workbench/rail"
 import type { SchemaModel, SchemaTable } from "@/components/database/query/completion"
 import { focusSoon } from "@/components/database/query/focus"
 import { StatementLine } from "@/components/database/query/messages"
@@ -122,139 +118,49 @@ export function QueryRail({
   picked: string
   onPickSchema: (schema: string) => void
 }) {
-  const tabsId = useId()
-  const tabs = useRef<HTMLDivElement>(null)
-  const onTabKey = (event: React.KeyboardEvent) => {
-    const at = VIEWS.findIndex((entry) => entry.id === view)
-    const to =
-      event.key === "ArrowRight"
-        ? (at + 1) % VIEWS.length
-        : event.key === "ArrowLeft"
-          ? (at + VIEWS.length - 1) % VIEWS.length
-          : -1
-    if (to < 0) return
-    event.preventDefault()
-    onView(VIEWS[to].id)
-    tabs.current?.querySelector<HTMLElement>(`[data-view="${VIEWS[to].id}"]`)?.focus()
-  }
-
   return (
     <div data-slot="query-rail" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
-      <div
-        ref={tabs}
-        role="tablist"
-        aria-label="Saved queries, history, schema and snippets"
-        className="flex h-10 shrink-0 [scrollbar-width:none] items-stretch overflow-x-auto border-b border-hairline bg-surface-header [&::-webkit-scrollbar]:hidden"
-        onKeyDown={onTabKey}
+      <ViewTabs
+        label="Saved queries, history, schema and snippets"
+        views={VIEWS.map((entry) => ({
+          key: entry.id,
+          label: entry.label,
+          count: entry.id === "saved" ? saved.data?.length : undefined,
+        }))}
+        value={view}
+        onValueChange={onView}
+        rootClassName="min-h-0 flex-1"
+        className="bg-surface-header [&_[role=tab]]:px-2.5"
       >
-        {VIEWS.map((entry) => {
-          const selected = view === entry.id
-          return (
-            <button
-              key={entry.id}
-              type="button"
-              role="tab"
-              id={`${tabsId}-${entry.id}`}
-              data-view={entry.id}
-              aria-selected={selected}
-              aria-controls={selected ? `${tabsId}-panel` : undefined}
-              tabIndex={selected ? 0 : -1}
-              className={cn(tabClasses(selected, "h-10"), "px-2.5")}
-              onClick={() => onView(entry.id)}
-            >
-              {entry.label}
-              {entry.id === "saved" && saved.data && saved.data.length > 0 && (
-                <ChipCount>{saved.data.length}</ChipCount>
-              )}
-            </button>
-          )
-        })}
-      </div>
-      <div
-        role="tabpanel"
-        id={`${tabsId}-panel`}
-        aria-labelledby={`${tabsId}-${view}`}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        {view === "saved" && (
-          <SavedList
-            saved={saved}
-            canWrite={canWrite}
-            current={openSaved}
-            onOpen={onOpenSaved}
-            onRename={onRenameSaved}
-            onDelete={onDeleteSaved}
-          />
-        )}
-        {view === "history" && <HistoryList history={history} onOpen={onOpenStatement} />}
-        {view === "schema" && (
-          <SchemaTree
-            schema={schema}
-            picked={picked}
-            onPick={onPickSchema}
-            onInsert={onInsert}
-            onOpenTable={onOpenTable}
-          />
-        )}
-        {view === "snippets" && <SnippetList snippets={snippets} onOpen={onOpenStatement} />}
-      </div>
+        <TabsContent value={view} className="flex min-h-0 flex-col">
+          {view === "saved" && (
+            <SavedList
+              saved={saved}
+              canWrite={canWrite}
+              current={openSaved}
+              onOpen={onOpenSaved}
+              onRename={onRenameSaved}
+              onDelete={onDeleteSaved}
+            />
+          )}
+          {view === "history" && <HistoryList history={history} onOpen={onOpenStatement} />}
+          {view === "schema" && (
+            <SchemaTree
+              schema={schema}
+              picked={picked}
+              onPick={onPickSchema}
+              onInsert={onInsert}
+              onOpenTable={onOpenTable}
+            />
+          )}
+          {view === "snippets" && <SnippetList snippets={snippets} onOpen={onOpenStatement} />}
+        </TabsContent>
+      </ViewTabs>
     </div>
   )
 }
 
 /* ---------------------------------------------------------------- shared */
-
-function RailSearch({
-  value,
-  onChange,
-  label,
-  trailing,
-}: {
-  value: string
-  onChange: (value: string) => void
-  label: string
-  trailing?: React.ReactNode
-}) {
-  return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-hairline p-1.5">
-      <SearchInput
-        dense
-        value={value}
-        placeholder={label}
-        aria-label={label}
-        containerClassName="sm:w-full"
-        onChange={(event) => onChange(event.target.value)}
-      />
-      {trailing}
-    </div>
-  )
-}
-
-function RailSkeleton({ lines = 2 }: { lines?: 1 | 2 }) {
-  const widths = ["w-32", "w-24", "w-36", "w-28", "w-20", "w-32"]
-  return (
-    <div aria-hidden className="space-y-3 px-3 pt-3">
-      {widths.map((width, index) => (
-        <div key={index} className="space-y-1.5">
-          <Skeleton className={cn("h-3", width)} />
-          {lines === 2 && <Skeleton className="h-2.5 w-44 max-w-full" />}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function NothingMatches({ onClear }: { onClear: () => void }) {
-  return (
-    <div className="px-2 py-6 text-center">
-      <p className="text-body text-muted-foreground">Nothing here is called that.</p>
-      <Button size="xs" variant="ghost" className="mt-2" onClick={onClear}>
-        Clear the search
-      </Button>
-    </div>
-  )
-}
 
 /* ----------------------------------------------------------------- saved */
 
@@ -306,9 +212,9 @@ function SavedList({
 
   if (!saved.data) {
     return saved.error ? (
-      <ReadError error={saved.error} onRetry={saved.refresh} className="m-2" />
+      <ErrorState retryable error={saved.error} onRetry={saved.refresh} className="m-2" />
     ) : (
-      <RailSkeleton />
+      <RailSkeleton lines={2} groups={0} />
     )
   }
   if (saved.data.length === 0) {
@@ -326,9 +232,9 @@ function SavedList({
   }
   return (
     <>
-      <RailSearch value={find} onChange={setFind} label="Find a saved query" />
+      <RailFind value={find} onChange={setFind} placeholder="Find a saved query" />
       <ul ref={rows} aria-label="Saved queries" className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {list.length === 0 && <NothingMatches onClear={() => setFind("")} />}
+        {list.length === 0 && <RailNoMatch as="li" onClear={() => setFind("")} />}
         {list.map((query, at) => {
           const selected = query.id === current
           const link: Verb = {
@@ -494,9 +400,9 @@ function HistoryList({
 
   if (!history.data) {
     return history.error ? (
-      <ReadError error={history.error} onRetry={history.refresh} className="m-2" />
+      <ErrorState retryable error={history.error} onRetry={history.refresh} className="m-2" />
     ) : (
-      <RailSkeleton />
+      <RailSkeleton lines={2} groups={0} />
     )
   }
   if (history.data.length === 0) {
@@ -510,10 +416,10 @@ function HistoryList({
   }
   return (
     <>
-      <RailSearch
+      <RailFind
         value={find}
         onChange={setFind}
-        label="Find in the history"
+        placeholder="Find in the history"
         trailing={
           <IconAction
             label="Read the history again"
@@ -525,7 +431,7 @@ function HistoryList({
         }
       />
       <ul aria-label="Statements that were run" className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {list.length === 0 && <NothingMatches onClear={() => setFind("")} />}
+        {list.length === 0 && <RailNoMatch as="li" onClear={() => setFind("")} />}
         {list.slice(0, limit).map((entry) => (
           <li key={entry.id}>
             <button
@@ -550,8 +456,8 @@ function HistoryList({
                 {entry.success && (
                   <span className="numeric min-w-0 truncate">
                     {(entry.rowsAffected ?? 0) > 0 && entry.rowCount === 0
-                      ? `${entry.rowsAffected!.toLocaleString("en-US")} changed`
-                      : `${entry.rowCount.toLocaleString("en-US")} ${entry.rowCount === 1 ? "row" : "rows"}`}
+                      ? `${grouped(entry.rowsAffected!)} changed`
+                      : `${grouped(entry.rowCount)} ${entry.rowCount === 1 ? "row" : "rows"}`}
                   </span>
                 )}
               </span>
@@ -625,13 +531,23 @@ function SchemaTree({
   const schemas = schema.head?.schemas ?? []
   return (
     <>
-      <div className="flex shrink-0 items-center gap-1 border-b border-hairline p-1.5">
+      <div className="flex shrink-0 items-center gap-1 border-b border-hairline p-1">
         {engine.can("schemas") && schemas.length > 1 ? (
-          <SchemaPicker schemas={schemas} current={shown} onPick={onPick} />
+          <ContainerPicker
+            items={schemas.map((entry) => ({
+              name: entry.name,
+              system: entry.system,
+              figure: entry.tables >= 0 ? grouped(entry.tables) : undefined,
+            }))}
+            current={shown}
+            noun={engine.nouns.container}
+            nouns={engine.nouns.containers}
+            onPick={onPick}
+          />
         ) : (
-          <span className="min-w-0 flex-1 truncate px-1 font-mono text-xs text-muted-foreground">
+          <RailTitle className="font-mono text-xs font-normal text-muted-foreground">
             {shown || engine.nouns.objects}
-          </span>
+          </RailTitle>
         )}
         <IconAction
           label={`Read the ${engine.nouns.objects} again`}
@@ -641,19 +557,26 @@ function SchemaTree({
           <RefreshClockwise />
         </IconAction>
       </div>
-      <RailSearch
+      {/* The tree is the last reading: the read just asked for failed. */}
+      <Stale
+        form="strip"
+        error={model.tables.length > 0 ? schema.error : undefined}
+        subject={`the ${engine.nouns.objects}`}
+        onRetry={schema.refresh}
+      />
+      <RailFind
         value={find}
         onChange={setFind}
-        label={`Find a ${engine.nouns.object} or a column`}
+        placeholder={`Find a ${engine.nouns.object} or a column`}
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {schema.error && model.tables.length === 0 ? (
-          <ReadError error={schema.error} onRetry={schema.refresh} className="m-1" />
+          <ErrorState retryable error={schema.error} onRetry={schema.refresh} className="m-1" />
         ) : schema.loading && model.tables.length === 0 ? (
-          <RailSkeleton lines={1} />
+          <RailSkeleton groups={0} />
         ) : tables.length === 0 ? (
           needle ? (
-            <NothingMatches onClear={() => setFind("")} />
+            <RailNoMatch onClear={() => setFind("")} />
           ) : (
             <EmptyState
               className="mt-2 border-0 px-3 py-8"
@@ -692,8 +615,7 @@ function SchemaTree({
             className="mt-1 ml-1 text-muted-foreground"
             onClick={() => setLimit((n) => n + STEP)}
           >
-            Show {Math.min(STEP, tables.length - limit)} more of{" "}
-            {tables.length.toLocaleString("en-US")}
+            Show {Math.min(STEP, tables.length - limit)} more of {grouped(tables.length)}
           </Button>
         )}
         {schema.truncated && (
@@ -740,7 +662,12 @@ function TableNode({
   const kind = rowObjectKind(table.type)
   return (
     <li>
-      <div className="group flex h-7 items-center rounded-md transition-colors hover:bg-row-hover max-sm:h-9">
+      <div
+        className={cn(
+          "group flex items-center rounded-md transition-colors hover:bg-row-hover",
+          RAIL_ROW,
+        )}
+      >
         <button
           type="button"
           aria-expanded={open}
@@ -815,100 +742,6 @@ function TableNode({
   )
 }
 
-function SchemaPicker({
-  schemas,
-  current,
-  onPick,
-}: {
-  schemas: CatalogHead["schemas"]
-  current: string
-  onPick: (schema: string) => void
-}) {
-  const { engine } = useDatabase()
-  const [find, setFind] = useState("")
-  const needle = find.trim().toLowerCase()
-  const match = (name: string) => !needle || name.toLowerCase().includes(needle)
-  const own = schemas.filter((schema) => !schema.system && match(schema.name))
-  const system = schemas.filter((schema) => schema.system && match(schema.name))
-  const item = (schema: CatalogHead["schemas"][number]) => (
-    <DropdownMenuItem
-      key={schema.name}
-      className={cn(schema.name === current && "bg-accent")}
-      onSelect={() => onPick(schema.name)}
-    >
-      <SchemaMark name={schema.name} />
-      <MenuItemText
-        hint={
-          schema.tables >= 0 && (
-            <span className="numeric text-hint text-muted-foreground">
-              {schema.tables.toLocaleString("en-US")}
-            </span>
-          )
-        }
-      >
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-      </MenuItemText>
-    </DropdownMenuItem>
-  )
-  return (
-    <DropdownMenu onOpenChange={(open) => !open && setFind("")}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={`${engine.nouns.container}: ${current || "default"}`}
-          className="h-7 min-w-0 flex-1 justify-start gap-1.5 px-1.5"
-        >
-          <SchemaMark name={current} />
-          <span className="min-w-0 truncate font-mono text-xs">{current || "default"}</span>
-          <ChevronDown className="ml-auto size-3 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        {schemas.length > 12 && (
-          <div className="p-1 pb-2">
-            <Input
-              value={find}
-              placeholder={`Find a ${engine.nouns.container}`}
-              aria-label={`Find a ${engine.nouns.container}`}
-              className="h-7 sm:h-7"
-              onChange={(event) => setFind(event.target.value)}
-              // The menu reads typed letters as type-ahead; in the box they are text.
-              onKeyDown={(event) => event.key !== "Escape" && event.stopPropagation()}
-            />
-          </div>
-        )}
-        <div className="max-h-72 overflow-y-auto">
-          {own.map(item)}
-          {system.length > 0 && (
-            <>
-              {own.length > 0 && <DropdownMenuSeparator />}
-              <DropdownMenuLabel>The engine&rsquo;s own</DropdownMenuLabel>
-              {system.map(item)}
-            </>
-          )}
-          {own.length + system.length === 0 && (
-            <p className="px-2 py-3 text-center text-hint text-muted-foreground">
-              No {engine.nouns.container} is called that
-            </p>
-          )}
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-/** A schema's own colour, stable for its name, as a small square before it. */
-function SchemaMark({ name }: { name: string }) {
-  return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-sm"
-      style={{ background: nameHue(name) }}
-    />
-  )
-}
-
 /* -------------------------------------------------------------- snippets */
 
 function SnippetList({
@@ -941,18 +774,15 @@ function SnippetList({
   }
   return (
     <>
-      <RailSearch value={find} onChange={setFind} label="Find a snippet" />
+      <RailFind value={find} onChange={setFind} placeholder="Find a snippet" />
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {list.length === 0 && <NothingMatches onClear={() => setFind("")} />}
+        {list.length === 0 && <RailNoMatch as="li" onClear={() => setFind("")} />}
         {SNIPPET_GROUPS.map((group) => {
           const inGroup = list.filter((snippet) => snippet.group === group)
           if (inGroup.length === 0) return null
           return (
-            <section key={group} aria-label={group} className="pb-1">
-              <h3 className="eyebrow flex items-center gap-1.5 px-2 pt-2 pb-1">
-                {group}
-                <span className="numeric">{inGroup.length}</span>
-              </h3>
+            <section key={group} aria-label={group} className="pt-1.5">
+              <RailGroupHead label={group} count={inGroup.length} />
               <ul>
                 {inGroup.map((snippet) => (
                   <li key={snippet.id}>

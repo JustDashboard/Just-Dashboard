@@ -5,7 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { Eye, Fingerprint, Key, Linked, MoreHorizontal, Notes } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
-import { SchemaMark } from "@/components/database/schema/rail"
+import { NameMark } from "@/components/database/kit/marks"
 import type { DiagramColor } from "@/components/database/diagram/document"
 import {
   HEADER_HEIGHT,
@@ -99,7 +99,7 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
               letter by the name. */}
           {qualified && table.schema && (
             <>
-              <SchemaMark name={table.schema} className="mr-1.5 inline-block align-baseline" />
+              <NameMark name={table.schema} className="mr-1.5 inline-block align-baseline" />
               <span className="font-normal text-muted-foreground">{table.schema}.</span>
             </>
           )}
@@ -246,7 +246,7 @@ function ColumnRow({ table, column, hit }: { table: string; column: DbGraphColum
       <span
         className={cn(
           "shrink-0 truncate font-mono text-micro",
-          column.nullable ? "text-muted-foreground/60" : "text-muted-foreground",
+          column.nullable ? "text-faint" : "text-muted-foreground",
         )}
       >
         {shortType(column.type)}

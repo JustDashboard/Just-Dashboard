@@ -1,11 +1,10 @@
 "use client"
 
+import { PanelHeader } from "@/components/panel"
 import { RankList, RankSkeleton } from "@/components/rank-list"
-import { EngineMark } from "@/components/database/kit"
+import { SchemaHead, largestTables } from "@/components/database/kit/schema-head"
 import { objectParams, tableParams } from "@/components/database/schema/address"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
-import { schemaFigures } from "@/components/database/schema/landing-figures"
-import { SchemaMark } from "@/components/database/schema/rail"
 import { Composition } from "@/components/database/schema/statistics"
 import type { DbCatalog, DbTableStats, SchemaObject } from "@/components/database/schema/types"
 import { useDatabase } from "@/components/database/shell/database-context"
@@ -80,7 +79,7 @@ export function SchemaLanding({
   }, [asked, reread])
 
   const measured = stats.data?.supported ? stats.data.tables : undefined
-  const figures = useMemo(() => schemaFigures(catalog, measured), [catalog, measured])
+  const figures = useMemo(() => largestTables(catalog, measured), [catalog, measured])
   // The engine is still being asked: a figure the catalogue lacks is on its way, not absent.
   const measuring = measures && !stats.data && !stats.error
 
@@ -121,33 +120,31 @@ export function SchemaLanding({
             total === 0 && "mx-auto min-h-full max-w-xl justify-center",
           )}
         >
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <EngineMark engine={engine} />
-            <div className="min-w-0 flex-1">
-              <h2 className="flex min-w-0 items-center gap-2 font-mono text-title font-medium">
-                {catalog.schema && <SchemaMark name={catalog.schema} />}
-                <span className="truncate">{name}</span>
-              </h2>
-              <p className="truncate text-body text-muted-foreground">
-                {total === 0
-                  ? `Nothing in this ${engine.nouns.container} yet.`
-                  : facts.length > 0
-                    ? facts.join(" · ")
-                    : `A ${engine.nouns.container} of ${engine.label}`}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              {first && (
-                <Button size="sm" onClick={first.run}>
-                  <first.icon className="size-3.5" />
-                  {first.label}
-                </Button>
-              )}
-              {rest.length + verbs.length > 0 && (
-                <VerbMenu verbs={[...rest, ...verbs]} label={`More for ${name}`} />
-              )}
-            </div>
-          </div>
+          <SchemaHead
+            engine={engine}
+            schema={catalog.schema}
+            name={name}
+            line={
+              total === 0
+                ? `Nothing in this ${engine.nouns.container} yet.`
+                : facts.length > 0
+                  ? facts.join(" · ")
+                  : `A ${engine.nouns.container} of ${engine.label}`
+            }
+            verbs={
+              <>
+                {first && (
+                  <Button size="sm" onClick={first.run}>
+                    <first.icon className="size-3.5" />
+                    {first.label}
+                  </Button>
+                )}
+                {rest.length + verbs.length > 0 && (
+                  <VerbMenu verbs={[...rest, ...verbs]} label={`More for ${name}`} />
+                )}
+              </>
+            }
+          />
 
           {note && <p className="text-hint leading-relaxed text-muted-foreground">{note}</p>}
 
@@ -160,9 +157,7 @@ export function SchemaLanding({
             >
               {figures.largest.length > 0 ? (
                 <section aria-label={`Largest in ${name}`} className="min-w-0">
-                  <h3 className="border-b border-hairline pb-2 text-title font-medium">
-                    Largest in {name}
-                  </h3>
+                  <PanelHeader plain level={3} title={`Largest in ${name}`} />
                   {/* Figures in a column and each one's share of the schema,
                       not a bar under every name. */}
                   <RankList
@@ -193,9 +188,7 @@ export function SchemaLanding({
               ) : tables.length > 0 && !measuring ? (
                 // Nothing ranks them: the tables by name, as the engine lists them.
                 <section aria-label={`Tables of ${name}`} className="min-w-0">
-                  <h3 className="border-b border-hairline pb-2 text-title font-medium">
-                    {groupSpec("tables").plural}
-                  </h3>
+                  <PanelHeader plain level={3} title={groupSpec("tables").plural} />
                   <ul className="divide-y divide-hairline">
                     {tables.slice(0, LISTED).map((table) => (
                       <ObjectRow
@@ -221,9 +214,7 @@ export function SchemaLanding({
                 <div className="min-w-0 space-y-6">
                   {figures.reads && (
                     <section aria-label="How it is read" className="min-w-0">
-                      <h3 className="border-b border-hairline pb-2 text-title font-medium">
-                        How it is read
-                      </h3>
+                      <PanelHeader plain level={3} title="How it is read" />
                       <div className="pt-3">
                         <Composition
                           label={`${grouped(figures.reads.byIndex + figures.reads.byScan)} reads`}
@@ -250,9 +241,7 @@ export function SchemaLanding({
                   )}
                   {enums.length > 0 && (
                     <section aria-label="Enum types" className="min-w-0">
-                      <h3 className="border-b border-hairline pb-2 text-title font-medium">
-                        Enum types
-                      </h3>
+                      <PanelHeader plain level={3} title="Enum types" />
                       <ul className="divide-y divide-hairline">
                         {enums.map((type) => (
                           <li key={type.name}>
@@ -286,9 +275,7 @@ export function SchemaLanding({
                   )}
                   {views.length > 0 && (
                     <section aria-label="Views" className="min-w-0">
-                      <h3 className="border-b border-hairline pb-2 text-title font-medium">
-                        {groupSpec("views").plural}
-                      </h3>
+                      <PanelHeader plain level={3} title={groupSpec("views").plural} />
                       <ul className="divide-y divide-hairline">
                         {views.slice(0, LISTED).map(({ object, group }) => (
                           <ObjectRow
