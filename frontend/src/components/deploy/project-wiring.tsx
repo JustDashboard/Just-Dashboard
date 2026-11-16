@@ -303,9 +303,7 @@ export function ProjectWiring({
                   </WireMark>
                   {/* The containers' state in the tile's corner, the way a
                       session's system sits on its browser's mark. */}
-                  <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-                    <StatusDot tone={runtimeTone} />
-                  </span>
+                  <StatusDot tone={runtimeTone} corner="md" />
                 </span>
               ) : (
                 // Nothing observed is not something to add: no product, so no

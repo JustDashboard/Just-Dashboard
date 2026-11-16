@@ -1595,8 +1595,11 @@ test.describe("a deployment's traffic", () => {
       expect(Math.abs(bottom - lines[0][1])).toBeLessThanOrEqual(0.5)
     }
 
-    const pages = page.getByRole("heading", { name: "Pages", exact: true }).locator("../..")
-    const head = await pages.locator("h3").locator("..").boundingBox()
+    // The facet is a section under a plain section head; the head's right edge is the header's.
+    const pages = page
+      .getByRole("heading", { name: "Pages", exact: true })
+      .locator("xpath=ancestor::section[1]")
+    const head = await pages.locator("header").first().boundingBox()
     const share = await pages.locator("[data-slot=rank-share]").first().boundingBox()
     expect(Math.abs(share!.x + share!.width - (head!.x + head!.width))).toBeLessThanOrEqual(1)
   })

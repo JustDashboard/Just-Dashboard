@@ -99,15 +99,19 @@ const stackTemplate = {
   },
 }
 
-test("the picker has a Your templates section that says how to make one", async ({ page }) => {
+test("the picker has a Your templates section that leads to where one is made", async ({
+  page,
+}) => {
   await mockNewProject(page)
   await page.goto("/deploy/new?source=template")
   const section = page.getByRole("region", { name: "Your templates" })
   await expect(section).toBeVisible()
+  // One line and the way on (PGD-12): the Templates page says how to make one.
+  await expect(section.getByText("Templates you add appear here.")).toBeVisible()
+  // The Yours chip is not drawn at 0, as the fleet hides an empty filter (PGD-11).
   await expect(
-    section.getByText(/Save a running deployment as one from its Settings/),
-  ).toBeVisible()
-  await expect(section.getByText(/add one from a Compose file on the Templates page/)).toBeVisible()
+    page.getByRole("group", { name: "Template topics" }).getByRole("button", { name: /^Yours/ }),
+  ).toHaveCount(0)
   await expect(section.getByRole("link", { name: "Open Templates" })).toHaveAttribute(
     "href",
     "/deploy/templates",

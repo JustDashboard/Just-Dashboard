@@ -14,6 +14,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { PanelHeader } from "@/components/panel"
+import type { GitTone } from "@/lib/git-status"
 import type {
   DeploymentRelease,
   ReleaseComparisonResponse,
@@ -281,12 +283,7 @@ function ReleaseName({ release, id }: { release?: DeploymentRelease; id: number 
 function ChangeSection({ title, changes }: { title: string; changes: Change[] }) {
   return (
     <section className="min-w-0 space-y-1" aria-label={title}>
-      <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline pb-2">
-        <h3 className="text-title leading-tight font-semibold tracking-tight">{title}</h3>
-        <span className="numeric shrink-0 text-hint text-muted-foreground">
-          {changes.length} changed
-        </span>
-      </div>
+      <PanelHeader plain level={3} title={title} count={`${changes.length} changed`} />
       <ul className="divide-y divide-hairline">
         {changes.map((change) => (
           <ChangeRow key={change.key} change={change} />
@@ -296,16 +293,21 @@ function ChangeSection({ title, changes }: { title: string; changes: Change[] })
   )
 }
 
+/** A change's letter in its git hue, as classes the theme registers. */
+const GIT_TEXT: Partial<Record<GitTone, string>> = {
+  added: "text-git-added",
+  modified: "text-git-modified",
+  deleted: "text-git-deleted",
+}
+
 function ChangeRow({ change }: { change: Change }) {
   const tone = CHANGE_TONE[change.change]
-  const colour = tone ? `var(--git-${tone})` : undefined
   return (
     <li className="min-w-0 space-y-1.5 py-2.5">
       <div className="flex min-w-0 items-center gap-2">
         <span
           title={change.change}
-          className="w-3 shrink-0 font-mono text-xs font-semibold"
-          style={{ color: colour }}
+          className={cn("w-3 shrink-0 font-mono text-xs font-semibold", tone && GIT_TEXT[tone])}
         >
           {LETTER[change.change]}
         </span>
@@ -326,10 +328,10 @@ function ChangeRow({ change }: { change: Change }) {
       >
         <Value
           value={change.from}
-          className="text-(--git-deleted) line-through decoration-(--git-deleted)/50"
+          className="text-git-deleted line-through decoration-git-deleted/50"
         />
         <span className="text-muted-foreground"> → </span>
-        <Value value={change.to} className="text-(--git-added)" />
+        <Value value={change.to} className="text-git-added" />
       </p>
     </li>
   )

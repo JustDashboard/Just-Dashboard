@@ -49,11 +49,7 @@ export function RequestPath({
     <span className={cn("min-w-0 truncate font-mono", className)}>
       <span className={plain ? undefined : tokenClass("path")}>{path}</span>
       {query &&
-        (plain ? (
-          <span className="text-muted-foreground/60">?{query}</span>
-        ) : (
-          <QueryText query={query} />
-        ))}
+        (plain ? <span className="text-faint">?{query}</span> : <QueryText query={query} />)}
     </span>
   )
 }
@@ -198,7 +194,7 @@ export function ClientCell({
         ) : network?.product ? (
           <ProductGlyph id={network.product} />
         ) : Place ? (
-          <Place className="size-3.5 text-muted-foreground/60" />
+          <Place className="size-3.5 text-faint" />
         ) : null}
       </span>
       {agent && network?.product && <ProductGlyph id={network.product} />}
@@ -207,7 +203,7 @@ export function ClientCell({
       ) : ip ? (
         <Address ip={ip} plain={plain} />
       ) : (
-        <span className="text-muted-foreground/60">—</span>
+        <span className="text-faint">—</span>
       )}
     </span>
   )
@@ -236,7 +232,7 @@ export function Address({
     <span
       className={cn(
         "numeric truncate font-mono",
-        networkOf(ip).kind === "server" || plain ? "text-muted-foreground/60" : tokenClass("ip"),
+        networkOf(ip).kind === "server" || plain ? "text-faint" : tokenClass("ip"),
         className,
       )}
     >

@@ -7,7 +7,6 @@ import { del, errorMessage, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { githubAppStage, useGitHubApp, type GitHubAppStage } from "@/hooks/use-github"
 import type {
   DeploymentCredential,
@@ -43,6 +42,7 @@ import {
   WireNode,
   WirePlaceholder,
 } from "@/components/wire/wire"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The dashboard's own identity on GitHub. Created once through GitHub's
@@ -183,7 +183,7 @@ function Picture({
   admin: boolean
   credentials?: DeploymentCredential[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const appMark = useRef<HTMLDivElement>(null)
   const serverMark = useRef<HTMLDivElement>(null)

@@ -21,11 +21,11 @@ export function hasSourceDeny(firewall: FirewallStatus | undefined, ip: string):
 }
 
 export function blockUnavailable(firewall: FirewallStatus | undefined, error?: Error): string {
-  if (error) return "The host firewall could not be read. Open Firewall to check it."
+  if (error) return "The host firewall could not be read."
   if (!firewall) return "Checking the host firewall…"
   if (firewall.error) return firewall.error
   if (!firewall.available) return "No supported host firewall is available."
-  if (!firewall.enabled) return "The host firewall is disabled. Enable it in Firewall first."
+  if (!firewall.enabled) return "The host firewall is disabled."
   if (!firewall.capabilities?.editable)
     return firewall.capabilities?.readOnlyReason || "This host firewall is read-only."
   return ""

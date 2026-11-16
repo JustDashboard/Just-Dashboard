@@ -1,20 +1,17 @@
 "use client"
 
-import { Check, Copy } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import type { ContainerDetail, DeploymentRuntimeService } from "@/lib/types"
-import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
 import { FormSection } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
+import { Digest } from "@/components/code"
 import { ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { stateWord } from "@/components/docker/container-cells"
-import { shortDigest } from "@/components/deploy/runtime-model"
 
 /** `oomKilled` is omitted by the server when false, and the shared type predates it. */
 type Detail = ContainerDetail & { oomKilled?: boolean }
@@ -83,7 +80,11 @@ export function ServiceDetails({
                 {detail.image}
               </Fact>
               <Fact label="Digest" mono>
-                <Digest id={detail.imageId} />
+                {detail.imageId ? (
+                  <Digest value={detail.imageId} label="Digest" />
+                ) : (
+                  <Muted>unknown</Muted>
+                )}
               </Fact>
             </Facts>
           </FormSection>
@@ -135,7 +136,14 @@ export function ServiceDetails({
             </Facts>
           </FormSection>
 
-          <FormSection title="Networks" hint={detail.networkMode && `mode ${detail.networkMode}`}>
+          <FormSection
+            title="Networks"
+            actions={
+              detail.networkMode && (
+                <span className="text-hint text-muted-foreground">mode {detail.networkMode}</span>
+              )
+            }
+          >
             {detail.networkDetails.length === 0 ? (
               <p className="text-hint text-muted-foreground">Not joined to a network.</p>
             ) : (
@@ -189,23 +197,4 @@ function Fact({
 
 function Muted({ children }: { children: React.ReactNode }) {
   return <span className="font-sans text-body text-muted-foreground">{children}</span>
-}
-
-/** The short digest, and the whole one on the clipboard. */
-function Digest({ id }: { id: string }) {
-  const { copy, copied } = useCopy()
-  const short = shortDigest(id)
-  if (!short) return <Muted>unknown</Muted>
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span title={id}>sha256:{short}</span>
-      <IconAction
-        label={copied ? "Digest copied" : "Copy the full digest"}
-        onClick={() => void copy(id)}
-        className="size-5"
-      >
-        {copied ? <Check /> : <Copy />}
-      </IconAction>
-    </span>
-  )
 }

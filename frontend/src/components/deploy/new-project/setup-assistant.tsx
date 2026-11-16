@@ -91,7 +91,7 @@ export function SetupAssistant({
     <aside
       aria-label="The assistant setting this up"
       data-slot="setup-assistant"
-      className="z-40 flex min-h-0 min-w-0 flex-col overflow-hidden bg-background max-xl:fixed max-xl:inset-0 xl:col-start-1 xl:row-start-1 xl:rounded-xl xl:border xl:border-hairline"
+      className="z-float flex min-h-0 min-w-0 flex-col overflow-hidden bg-background max-xl:fixed max-xl:inset-0 xl:col-start-1 xl:row-start-1 xl:rounded-xl xl:border xl:border-hairline"
     >
       <div className="flex shrink-0 items-center gap-2.5 border-b border-hairline bg-surface-header p-2.5">
         <AssistantMark product={product} working={busy} size="sm" />
@@ -130,7 +130,7 @@ export function SetupAssistant({
       )}
       {!busy && status.tone === "done" && (
         <div className="shrink-0 border-t border-hairline p-2.5">
-          <Button className="h-11 w-full animate-rise sm:h-9" onClick={onReview}>
+          <Button className="w-full animate-rise" onClick={onReview}>
             Review and deploy
             <ArrowRight />
           </Button>

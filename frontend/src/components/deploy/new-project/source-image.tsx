@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { deploymentName } from "@/components/deploy/vocabulary"
 import { ProductGlyph, ProductLogo, hostProduct, imageProduct } from "@/components/product-logo"
-import { CODE } from "@/components/deploy/run-evidence"
+import { CODE } from "@/components/code"
 import { useSourceInspection } from "./use-source-inspection"
 import {
   imageName,
@@ -179,7 +179,7 @@ export function SourceImage({
     // One measure, the page's own. Five of the six sources opened in a 672px
     // column centred under a full-width title and strip, so pressing a tab
     // moved the page's left edge and left a field of nothing on either side.
-    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-fill">
       {/* The one surface on this screen that carries depth (§16): what runs is
           what the reader opened this tab to decide, and the registry field
           beside it is the fallback for a tag this host has not pulled. Two
@@ -222,7 +222,7 @@ export function SourceImage({
               pads for the edges and pulls the padding back out, so the rows
               still start where the filter field above them does. */}
           <div
-            className="-mx-3 max-h-[min(60vh,40rem)] overflow-y-auto px-3 xl:max-h-none xl:min-h-0 xl:flex-1"
+            className="-mx-3 max-h-[min(60svh,40rem)] overflow-y-auto px-3 xl:max-h-none xl:min-h-0 xl:flex-1"
             key={images.loading ? "loading" : "listed"}
           >
             {offeredStacks.length > 0 && (
@@ -381,7 +381,7 @@ export function SourceImage({
               the secondary path. With no images pulled, there is nothing to
               choose and the registry field *is* the way forward. */}
           <Button
-            className="h-11 w-full sm:h-9"
+            className="w-full"
             variant={tags.length > 0 || offeredStacks.length > 0 ? "outline" : "default"}
             pending={busy === "registry"}
             disabled={!reference.trim()}

@@ -790,7 +790,7 @@ function RequestFilterBar({
           onClick={() => onLiveChange(!live)}
           title="Follow new requests as they arrive, on top of this window"
           className={cn(
-            "h-8 shrink-0 gap-2 px-2.5 font-normal max-sm:h-10",
+            "shrink-0 gap-2 px-2.5 font-normal",
             live && "border-border-strong bg-accent",
           )}
         >
@@ -802,7 +802,7 @@ function RequestFilterBar({
           <Button
             size="sm"
             variant="outline"
-            className="h-8 shrink-0 px-2.5 font-normal max-sm:h-10 max-sm:px-3"
+            className="shrink-0 px-2.5 font-normal max-sm:px-3"
             asChild
           >
             <a
@@ -821,7 +821,7 @@ function RequestFilterBar({
             variant="outline"
             disabled
             aria-label="Export"
-            className="h-8 shrink-0 px-2.5 font-normal max-sm:h-10 max-sm:px-3"
+            className="shrink-0 px-2.5 font-normal max-sm:px-3"
           >
             <Download className="size-3.5 text-muted-foreground" />
             <span className="text-body max-sm:hidden">Export</span>
@@ -871,7 +871,7 @@ function TookFilter({
           aria-pressed={banded}
           title="Only requests that took between two durations"
           className={cn(
-            "h-8 shrink-0 gap-1.5 px-2.5 font-normal max-sm:h-10",
+            "shrink-0 gap-1.5 px-2.5 font-normal",
             banded && "border-border-strong bg-accent",
           )}
         >

@@ -26,7 +26,7 @@ import {
   type ReleaseNodeState,
 } from "@/components/deploy/vocabulary"
 import { BranchChip, ShortSha } from "@/components/git/marks"
-import { CODE, ShellWords } from "@/components/deploy/run-evidence"
+import { CODE, ShellWords } from "@/components/code"
 import {
   CONFIGURE_STEPS,
   type ConfigureFlow,
@@ -257,7 +257,7 @@ function PlanRowItem({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute top-0 left-6 z-10 h-1.5 w-px",
+            "pointer-events-none absolute top-0 left-6 z-raised h-1.5 w-px",
             LINE[position],
           )}
         />
@@ -266,7 +266,7 @@ function PlanRowItem({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute top-9.5 bottom-0 left-6 z-10 w-px",
+            "pointer-events-none absolute top-9.5 bottom-0 left-6 z-raised w-px",
             LINE[position],
           )}
         />
@@ -314,7 +314,7 @@ function PlanRowItem({
             )}
           >
             <span className="min-w-0 truncate">{row.reading}</span>
-            {row.facts && <span className="shrink-0 text-muted-foreground/80">{row.facts}</span>}
+            {row.facts && <span className="shrink-0 text-faint">{row.facts}</span>}
           </span>
           {row.ref && (
             <span className="mt-0.5 flex min-w-0 items-center gap-1.5">

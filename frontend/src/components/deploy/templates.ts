@@ -101,11 +101,3 @@ export function templateDeployHref(id: string): string {
 export function templateFilename(id: string): string {
   return `${id}.json`
 }
-
-/**
- * The two ways to make one, said wherever there are none yet: Save as
- * template on a running deployment's settings, and a Compose file — or a
- * definition exported from another dashboard — on the Templates page.
- */
-export const YOUR_TEMPLATES_EMPTY =
-  "Templates you add appear here. Save a running deployment as one from its Settings → General, or add one from a Compose file on the Templates page."

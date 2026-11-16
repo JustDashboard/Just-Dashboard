@@ -90,7 +90,7 @@ export function ReleasePipeline({
                   className={cn(
                     "truncate text-xs font-medium",
                     group.state === "pending" && "text-muted-foreground",
-                    group.state === "absent" && "text-muted-foreground/60",
+                    group.state === "absent" && "text-faint",
                     failed && "text-destructive",
                   )}
                 >

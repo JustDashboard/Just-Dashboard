@@ -150,13 +150,6 @@ export function badgeOf(
   }
 }
 
-/** The short form of a digest, as the release comparison shows one. */
-export function shortDigest(digest: string | undefined) {
-  if (!digest) return ""
-  const [, hex = digest] = digest.split(":")
-  return hex.slice(0, 12)
-}
-
 /** A severity's colour on the bar and its key: the worst red, down to a quiet blue. */
 export const SEVERITY_COLOR: Record<Exclude<VulnerabilitySeverity, "UNKNOWN">, string> = {
   CRITICAL: "var(--destructive)",
