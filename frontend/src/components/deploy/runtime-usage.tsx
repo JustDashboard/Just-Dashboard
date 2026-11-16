@@ -555,19 +555,20 @@ function Readings({
             Disk I/O
           </>
         }
-        value={
-          read !== null || write !== null ? (
-            <LiveBytes value={(read ?? 0) + (write ?? 0)} suffix="/s" />
-          ) : (
-            "—"
-          )
-        }
+        // Read as the Network tile beside it reads: the one direction is the
+        // figure and the other its detail. The sum with both in the detail
+        // left no room for the minute it was recorded at, before the first
+        // live frame.
+        value={read !== null ? <LiveBytes value={read} suffix="/s" /> : "—"}
         trend={trend(trends.disk, "Disk I/O", HUE.disk)}
         hint={
-          read !== null || write !== null
-            ? `${rate(read)} read · ${rate(write)} written${liveDisk ? "" : ` · ${asOf}`}`
-            : undefined
+          write !== null
+            ? `${rate(write)} written${liveDisk ? "" : ` · ${asOf}`}`
+            : read !== null && !liveDisk
+              ? asOf
+              : undefined
         }
+        trailing={read !== null ? "read" : undefined}
       />
     </StatGrid>
   )
