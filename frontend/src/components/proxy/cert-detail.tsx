@@ -46,9 +46,9 @@ const CHAIN_VERDICT: Record<ChainVerdict, { label: string; verdict: Verdict }> =
  */
 function CopyValue({ value, label }: { value: string; label: string }) {
   return (
-    <span className="flex min-w-0 items-start gap-1">
+    <span className="flex min-w-0 items-center gap-1">
       <span className="min-w-0 font-mono text-hint break-all">{value}</span>
-      <CopyAction text={value} label={`Copy ${label}`} className="-my-1 shrink-0" />
+      <CopyAction text={value} label={`Copy ${label}`} className="-my-1.5 shrink-0" />
     </span>
   )
 }

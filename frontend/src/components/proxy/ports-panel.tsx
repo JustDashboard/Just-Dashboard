@@ -421,12 +421,16 @@ function PortsView() {
               </span>
             </Fact>
             <Fact className="numeric text-foreground">{counts.all} listening</Fact>
-            <Freshness
-              at={data.at}
-              paused={paused}
-              refreshing={refreshing}
-              stale={Boolean(shared.error)}
-            />
+            {/* A component is not a Fact to the line: it is wrapped in one,
+                or the line gives it a second dot. */}
+            <Fact>
+              <Freshness
+                at={data.at}
+                paused={paused}
+                refreshing={refreshing}
+                stale={Boolean(shared.error)}
+              />
+            </Fact>
           </>
         }
         state={
@@ -859,7 +863,7 @@ function Freshness({
   const now = useNow(1000)
   const ago = sinceWords(now - at)
   return (
-    <Fact className="whitespace-nowrap tabular-nums">
+    <span className="whitespace-nowrap tabular-nums">
       {refreshing
         ? "Refreshing…"
         : paused
@@ -867,7 +871,7 @@ function Freshness({
           : stale
             ? `Last updated ${ago}`
             : `Updated ${ago}`}
-    </Fact>
+    </span>
   )
 }
 
