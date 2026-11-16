@@ -322,15 +322,14 @@ test("on a phone a capture's line is as tall while it is read as once it is", as
   await page.goto(`/network/captures/${id}`)
   // The loading line declares the loaded line's verbs, so no row is reserved
   // for them and none appears when they land.
-  const line = detail(page).locator("[data-slot='host-identity']")
-  await expect(line).toHaveAttribute("aria-busy", "true")
+  const line = page.locator("[data-slot='host-identity'][aria-busy='true']")
+  await expect(line).toBeVisible()
   await risen(page)
   const loading = (await line.boundingBox())!
   release()
   await expect(page.getByRole("link", { name: "Download PCAP" })).toBeVisible()
-  await expect(line).not.toHaveAttribute("aria-busy", "true")
   await risen(page)
-  const loaded = (await line.boundingBox())!
+  const loaded = (await page.getByRole("region", { name: `About ${run.name}` }).boundingBox())!
   expect(loaded.height).toBeCloseTo(loading.height, 0)
   expect(loaded.y).toBeCloseTo(loading.y, 0)
 })

@@ -574,7 +574,8 @@ export function TableWaiting({
   const wide = useMediaQuery(`(min-width: ${wideFrom})`)
   return (
     <Panel aria-label={title} aria-busy>
-      <PanelHeader title={title}>
+      {/* The count's place is held, so the head is its loaded height. */}
+      <PanelHeader title={title} count={"\u00a0"}>
         {/* The line's own height: the chips or the verb that will stand on it. */}
         <span aria-hidden className={cn("h-7", chips && "max-sm:basis-full")} />
       </PanelHeader>

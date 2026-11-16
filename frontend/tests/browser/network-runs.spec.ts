@@ -643,8 +643,8 @@ test("on a phone a run's line is as tall while it is read as once it is", async 
   const state = await fixture(page, [record])
   state.hold = true
   await page.goto(`/network/runs/${record.id}`)
-  const line = page.locator("[data-slot='host-identity']").first()
-  await expect(line).toHaveAttribute("aria-busy", "true")
+  const line = page.locator("[data-slot='host-identity'][aria-busy='true']")
+  await expect(line).toBeVisible()
   await risen(page)
   const loading = (await line.boundingBox())!
   state.release()

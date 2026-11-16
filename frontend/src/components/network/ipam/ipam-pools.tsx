@@ -90,8 +90,10 @@ export function IPAMPools({
       <PanelBody className="space-y-5">
         {children}
         {loading ? (
-          <div aria-hidden className="grid gap-4">
-            <Skeleton className="h-[180px] rounded-xl" />
+          <div aria-hidden className="grid gap-4 lg:grid-cols-2">
+            {[0, 1].map((i) => (
+              <Skeleton key={i} className="h-[180px] rounded-xl" />
+            ))}
           </div>
         ) : pools.length === 0 ? (
           <EmptyState

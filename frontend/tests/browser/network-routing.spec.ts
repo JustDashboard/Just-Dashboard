@@ -345,6 +345,21 @@ test("a lookup the kernel refuses is said on the answer's line, with a retry", a
   await expect(answer).toContainText("10.8.0.7 leaves on wg0")
 })
 
+test("where the package manager has no FRR, BGP points at Packages", async ({ page }) => {
+  await mockNetwork(page)
+  await page.route("**/api/v1/packages/frr", (route) =>
+    json(route, { error: { code: "not_found", message: "No such package" } }, 404),
+  )
+  await page.goto("/network/routing?tab=bgp")
+  await loaded(page)
+  await expect(page.getByText("FRR is not installed", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Find FRR in Packages" })).toHaveAttribute(
+    "href",
+    "/packages?q=frr",
+  )
+  await expect(page.getByRole("button", { name: "Install frr" })).toHaveCount(0)
+})
+
 test("each view is in the address, and the old hand-off still opens the form", async ({ page }) => {
   await mockNetwork(page)
   await page.goto("/network/routing?tab=history")
@@ -359,11 +374,9 @@ test("each view is in the address, and the old hand-off still opens the form", a
 
   await page.getByRole("tab", { name: "BGP" }).click()
   await expect(page).toHaveURL(/\?tab=bgp$/)
+  // Where the package manager has FRR it installs in place, as WireGuard does.
   await expect(page.getByText("FRR is not installed", { exact: true })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Find FRR in Packages" })).toHaveAttribute(
-    "href",
-    "/packages?q=frr",
-  )
+  await expect(page.getByRole("button", { name: "Install frr", exact: true })).toBeVisible()
   await page.getByRole("tab", { name: "Forwarding" }).click()
   await expect(page).toHaveURL(/\?tab=forwarding$/)
   await expect(page.getByRole("switch", { name: "IPv4 forwarding" })).toBeVisible()

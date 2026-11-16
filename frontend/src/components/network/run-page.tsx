@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { ChevronDown, ChevronUp, Notes } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
 import { IdentityHeader } from "@/components/identity-header"
+import { Bone } from "@/components/bone"
 import { Fact } from "@/components/fact-line"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, NeedsAdmin } from "@/components/state"
@@ -246,7 +247,14 @@ function RunMain({
         ) : (
           <>
             {/* The loaded line's own parts, so it is as tall loading as loaded. */}
-            <IdentityHeader loading fallback={Notes} state command menu={false} />
+            <IdentityHeader
+              loading
+              fallback={Notes}
+              // The state is a body-size word once read, so its bone is too.
+              state={<Bone className="w-24 text-body" />}
+              command
+              menu={false}
+            />
             <LoadingRows rows={4} />
           </>
         )}
