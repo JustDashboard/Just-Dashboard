@@ -15,6 +15,7 @@ import { copyText } from "@/lib/clipboard"
 import { bytes, compactCount, duration, percent, plural, timestamp } from "@/lib/format"
 import type { ProcessInspect, ProcessLink, ProcessRow, ProcessTree } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import { useNow } from "@/hooks/use-now"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
@@ -84,6 +85,15 @@ export type OverviewProps = {
 }
 
 /**
+ * Shows the list under the picture: glided to, or at once when motion is
+ * reduced, and with the keyboard, so the next Tab goes into the list and not
+ * on along the picture.
+ */
+function showChildren() {
+  scrollIntoViewRespectingMotion(document.getElementById(CHILDREN_LIST), { focus: true })
+}
+
+/**
  * The process's Overview, one scroll in the order it is asked about: what is
  * wrong, what it is using now, where it sits — what supervises it, what
  * started it, what it started and what it listens on, as one wired picture —
@@ -100,7 +110,9 @@ export function ProcessOverview(props: OverviewProps) {
       <ProcessPicture {...props} />
       {(childGroups(children).length > CHILDREN_DRAWN ||
         childGroups(children).some((group) => group.length > 1)) && (
-        <div id={CHILDREN_LIST} className="scroll-mt-4">
+        // Focusable by script only: a press on the folded children in the
+        // picture takes the keyboard here with the scroll (`showChildren`).
+        <div id={CHILDREN_LIST} tabIndex={-1} className="scroll-mt-4 outline-none">
           <Section
             title={
               <>
@@ -345,10 +357,7 @@ function ProcessPicture({ process: row, gone, tree, inspect, onOpen, onTab }: Ov
             · {bytes(rss)}
           </span>
         ),
-        open: () =>
-          document
-            .getElementById(CHILDREN_LIST)
-            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        open: showChildren,
         label: `Show the ${group.length} ${link.name} processes it started`,
         wire: {
           tone: group.some((l) => l.state === "zombie") ? "danger" : "default",
@@ -369,10 +378,7 @@ function ProcessPicture({ process: row, gone, tree, inspect, onOpen, onTab }: Ov
         eyebrow: "Started by it",
         title: `${plural(rest, "more process", "more processes")}`,
         hint: "Listed under the picture",
-        open: () =>
-          document
-            .getElementById(CHILDREN_LIST)
-            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        open: showChildren,
         label: "Show every process it started",
         wire: { tone: "default", dashed: true, carries: false },
       })
