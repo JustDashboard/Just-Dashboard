@@ -3,7 +3,14 @@
 import { useState, type CSSProperties } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ChevronLeft, ChevronRight, EyeOff, Logout, MagnifyingGlass } from "@/components/icons"
+import {
+  ChevronLeft,
+  ChevronRight,
+  EyeOff,
+  Logout,
+  MagnifyingGlass,
+  Pause,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
@@ -11,6 +18,7 @@ import { sectionOf, type SectionKey } from "@/lib/sidebar-sections"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { useCommandPalette } from "@/components/shell/command-palette"
+import { useMotionPaused } from "@/components/shell/motion-pause"
 import { KEYCAP, useLauncherKeys } from "@/components/command-search/keycaps"
 import { Logo, LogoMark } from "@/components/logo"
 import { UpdateNoticeSlot } from "@/components/update/update-notice-slot"
@@ -63,6 +71,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -339,7 +348,9 @@ export function AppSidebar() {
               <LogoMark className="hidden group-data-[collapsible=icon]:block" />
             </Link>
           )}
-          <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:hidden" />
+          {/* A finger's box in the drawer, pulled back by its own margin so
+              the glyph and the row keep the place a 32px control gave them. */}
+          <SidebarTrigger className="-my-1.5 -mr-1.5 size-11 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:hidden" />
         </div>
 
         {/* Ask stands beside Search because it is the other thing a person may
@@ -459,23 +470,35 @@ export function AppSidebar() {
 function SearchButton({ onOpen }: { onOpen: () => void }) {
   const keys = useLauncherKeys()
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-label="Search"
-      aria-keyshortcuts={keys.replace("⌘", "Meta")}
-      className="group/search flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-sidebar-border bg-card pr-1.5 pl-2.5 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:border-rule-brand hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-    >
-      <MagnifyingGlass className="size-4 shrink-0 text-brand" />
-      <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search…</span>
-      <span className="flex gap-0.5 group-data-[collapsible=icon]:hidden">
+    // The well is the box and the button is the word in it, because of the
+    // keycaps. A control is named by the words it shows (WCAG 2.5.3), and
+    // inside the button the caps were words it showed: "Search… Ctrl K" on
+    // screen under the name "Search". Beside the button they are the
+    // shortcut's picture and nothing else; `aria-keyshortcuts` is how the
+    // shortcut is said. The button's `::after` covers the whole well, so a
+    // press anywhere on it, the caps included, is a press on Search, and the
+    // well draws the ring for the button inside it.
+    <div className="group/search relative flex h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-sidebar-border bg-card pr-1.5 text-body text-muted-foreground focus-ring-within transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:border-rule-brand hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:h-9">
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label="Search"
+        aria-keyshortcuts={keys.replace("⌘", "Meta")}
+        // Stretched over the well's own border, so the button's box is the
+        // well's height: 44px under a finger, not 42.
+        className="-my-px flex min-w-0 flex-1 items-center gap-2 self-stretch pl-2.5 text-left outline-hidden group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0 after:absolute after:-inset-px after:rounded-lg"
+      >
+        <MagnifyingGlass className="size-4 shrink-0 text-brand" />
+        <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search…</span>
+      </button>
+      <span aria-hidden="true" className="flex gap-0.5 group-data-[collapsible=icon]:hidden">
         {keys.split("+").map((key) => (
           <kbd key={key} className={cn(KEYCAP, "group-hover/search:text-foreground")}>
             {key}
           </kbd>
         ))}
       </span>
-    </button>
+    </div>
   )
 }
 
@@ -504,7 +527,7 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
       // is a row in the list, one that goes out instead of in. Muted rather
       // than the rows' foreground so it does not compete with the page you
       // are on for "where am I".
-      className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="flex h-11 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 hover:bg-menu-hover hover:text-sidebar-accent-foreground md:h-8"
     >
       <ChevronLeft className="size-4 shrink-0" />
       <span className="truncate group-data-[collapsible=icon]:hidden">{label}</span>
@@ -624,6 +647,11 @@ function NavRow({
 }) {
   const Icon = item.icon
   const href = useNavHref(item.href)
+  const { setOpenMobile } = useSidebar()
+  // A row the rail goes into is lit while you are somewhere inside it, which
+  // is not the page its link opens: it is the current one of the list, and
+  // only a page's own row is the current page.
+  const current = active ? ("section" in item ? "true" : "page") : undefined
   const content = (
     <>
       <Icon className="size-4" />
@@ -649,22 +677,31 @@ function NavRow({
           type="button"
           isActive={active}
           tooltip={item.title}
-          className="h-8 text-body"
+          aria-current={current}
+          className="text-body"
           onClick={enter}
         >
           {content}
         </SidebarMenuButton>
       ) : (
-        <SidebarMenuButton asChild isActive={active} tooltip={item.title} className="h-8 text-body">
+        <SidebarMenuButton
+          asChild
+          isActive={active}
+          tooltip={item.title}
+          aria-current={current}
+          className="text-body"
+        >
           <Link
             href={href ?? item.href}
-            onClick={
-              enter &&
-              ((event) => {
-                event.preventDefault()
-                enter()
-              })
-            }
+            // A press that opens a page puts the phone's drawer away at once,
+            // the page you are already on included: the address does not
+            // change for that one, so nothing else would close it. A press
+            // that only drills into a panel leaves the drawer open.
+            onClick={(event) => {
+              if (!enter) return setOpenMobile(false)
+              event.preventDefault()
+              enter()
+            }}
           >
             {content}
           </Link>
@@ -715,9 +752,10 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
   const name = user ? displayNameOf(user) : "not signed in"
   const twoFactor = Boolean(user?.totpEnabled)
   const entries = PERSONAL_NAV.filter((item) => !item.capability || can(item.capability))
+  const [motionPaused, setMotionPaused] = useMotionPaused()
   // Reduced motion collapses durations but not delays, so the stagger is motion-safe only.
   const stagger = "animate-rise motion-safe:[animation-delay:var(--rise-at)]"
-  const lastRow = entries.length + 1
+  const lastRow = entries.length + 2
   const riseAt = (row: number) => ({ "--rise-at": `${(lastRow - row) * 18}ms` }) as CSSProperties
 
   return (
@@ -725,7 +763,10 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label={`Account menu for ${name}`}
+          // The name starts with the words the card shows, so someone who
+          // says what they see ("click Operator") reaches it; what the card
+          // opens comes after them.
+          aria-label={[name, user?.role, "account menu"].filter(Boolean).join(", ")}
           className="group/account flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg border border-sidebar-border bg-card px-2.5 py-2 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:min-h-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent active:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
         >
           {user ? (
@@ -738,8 +779,10 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
               ?
             </span>
           )}
+          {/* The space between the two lines is for whoever reads them as
+              one run of text: without it the card says "Operatoradmin". */}
           <span className="grid min-w-0 flex-1 gap-0.5 group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-body leading-tight font-semibold">{name}</span>
+            <span className="truncate text-body leading-tight font-semibold">{name}</span>{" "}
             <span className="truncate text-hint leading-tight text-muted-foreground capitalize">
               {user?.role ?? "—"}
             </span>
@@ -803,9 +846,23 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator className="mx-2 bg-hairline" />
+        {/* This browser's, not the account's, so it stands apart from the
+            account's pages: the same request as the system's reduced-motion
+            setting, for this product alone. The menu stays open on a press,
+            so the mark is seen to change. */}
+        <DropdownMenuCheckboxItem
+          checked={motionPaused}
+          onCheckedChange={setMotionPaused}
+          onSelect={(event) => event.preventDefault()}
+          style={riseAt(entries.length + 1)}
+          className={cn("gap-2.5 rounded-md pl-2 font-normal focus-ring-inset", stagger)}
+        >
+          <Pause className="size-4" />
+          Pause animations
+        </DropdownMenuCheckboxItem>
         <DropdownMenuItem
           onSelect={() => logout()}
-          style={riseAt(entries.length + 1)}
+          style={riseAt(entries.length + 2)}
           className={cn(
             "min-h-11 gap-2.5 rounded-md px-2 font-normal focus-ring-inset sm:min-h-8",
             stagger,

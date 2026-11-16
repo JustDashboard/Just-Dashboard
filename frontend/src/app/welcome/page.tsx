@@ -4,6 +4,9 @@ import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { WelcomeFlow } from "@/components/onboarding/welcome-flow"
+// For what it does on load: a browser that paused the product's animations is
+// paused here too, outside the shell that holds the switch.
+import "@/components/shell/motion-pause"
 
 /**
  * The first-run question, outside the shell: the rail is what it decides, so
@@ -13,7 +16,8 @@ import { WelcomeFlow } from "@/components/onboarding/welcome-flow"
  * Its own scroll container, as the shell's `SidebarInset` is for every other
  * page, so a flow screen held to the window (`<Page fill="xl">`) has a
  * definite height to hold to. It stands on sign-in's ground, the screen it
- * follows.
+ * follows. It is the window's `<main>`, as sign-in's panel is: with no shell
+ * there is no other landmark, and the flow was content in none.
  */
 export default function WelcomePage() {
   const { status, loading } = useAuth()
@@ -26,8 +30,8 @@ export default function WelcomePage() {
   }, [loading, status, router])
 
   return (
-    <div className="auth-backdrop h-svh overflow-y-auto bg-background">
+    <main className="auth-backdrop h-svh overflow-y-auto bg-background">
       {!loading && status?.authenticated && <WelcomeFlow />}
-    </div>
+    </main>
   )
 }
