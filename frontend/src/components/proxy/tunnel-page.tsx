@@ -27,6 +27,8 @@ import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { MoreTile, WireMarks } from "@/components/wire/wire-marks"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
 import { Segments } from "@/components/segments"
 import { useNow } from "@/hooks/use-now"
 import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
@@ -445,11 +447,18 @@ function HostnameRow({ hostname, tunnelId }: { hostname: TunnelHostname; tunnelI
  * the connector dialled out from here, to this server's proxy. Connected,
  * a line moves where both its ends are up, and is red and dashed where one
  * is not; not connected, the same picture is drawn dashed, as what will be
- * wired. Wide, the four stand in a row with the hostnames stacked at the
- * start; narrow, in one column.
+ * wired.
+ *
+ * Wide, the four stand in a row: the hostnames stacked at the start with
+ * their words toward the outside, and the edge, the connector and this
+ * server each with its words under its mark. On a phone it is the one phone
+ * form (`WireMarks`): the hostnames' marks — the Hostnames list under the
+ * picture names them — over the edge, the connector and this server, each
+ * named, the lines running down between them.
  */
 function TunnelPicture({ status }: { status: TunnelStatus }) {
   const wide = useBreakpoint("lg")
+  const held = useMotionHeld()
   const container = useRef<HTMLDivElement>(null)
   const edge = useRef<HTMLDivElement>(null)
   const connector = useRef<HTMLDivElement>(null)
@@ -460,117 +469,164 @@ function TunnelPicture({ status }: { status: TunnelStatus }) {
   )
   const lines = tunnelLines(status)
   const connected = status.connected
-  const hostnames = status.hostnames.slice(0, wide ? PICTURED : 1)
+  const hostnames = status.hostnames.slice(0, PICTURED)
   const more = status.hostnames.length - hostnames.length
   const origin = status.origin
   const running = status.connector.state === "running" && !status.connector.foreign
+  const label = connected ? "The way a visitor arrives" : "What a tunnel wires"
+
+  const nameTone = (hostname: TunnelHostname) => {
+    const record = dnsWords(hostname)
+    return record.tone === "danger" ? "danger" : record.tone === "warning" ? "warning" : "logo"
+  }
+  const placeholder = {
+    title: <span className="text-muted-foreground">Deployment domains</span>,
+    hint: "turned on in a project's Domains",
+  }
+  const edgeWords = {
+    eyebrow: "Cloudflare",
+    title: "Edge",
+    hint: connected
+      ? status.ready
+        ? plural(status.readyConnections, "connection")
+        : "no connection"
+      : "terminates HTTPS",
+  }
+  const connectorMark = connected ? (
+    <WireMark tone={running ? "logo" : "danger"} size="lg">
+      <ProductGlyph id="docker" />
+    </WireMark>
+  ) : (
+    <WirePlaceholder size="lg" product="docker" />
+  )
+  const connectorText = {
+    eyebrow: "Connector",
+    title: "cloudflared",
+    hint: connected
+      ? running
+        ? (status.connector.address ?? "running")
+        : connectorWords(status.connector)
+      : "dials out from here",
+  }
+  const serverWords = {
+    eyebrow: "This server",
+    title: !origin ? "this server's proxy" : origin.hostGateway ? "nginx" : "Caddy ingress",
+    // One line, cut with the whole address a hover away: it broke mid-word as
+    // "http://just-dashboard-" over "ingress:80".
+    hint: origin && (
+      <span className="block truncate font-mono" title={origin.service}>
+        {origin.service}
+      </span>
+    ),
+  }
+
+  if (!wide) {
+    const ids = hostnames.map((hostname) => `name:${hostname.hostname}`)
+    return (
+      <WireMarks
+        role="group"
+        aria-label={label}
+        className="mx-auto w-full"
+        tiers={[
+          hostnames.length === 0
+            ? { id: "names", mark: <WirePlaceholder size="md" fallback={Globe} />, ...placeholder }
+            : {
+                title: "Hostnames",
+                nodes: [
+                  ...hostnames.map((hostname, index) => ({
+                    id: ids[index],
+                    mark: (
+                      <WireMark tone={nameTone(hostname)} size="sm">
+                        <Globe aria-hidden />
+                      </WireMark>
+                    ),
+                    name: hostname.hostname,
+                  })),
+                  ...(more > 0
+                    ? [
+                        {
+                          id: "name:more",
+                          mark: <MoreTile count={more} />,
+                          name: `and ${plural(more, "more hostname")} in the list`,
+                          round: true,
+                          anonymous: true,
+                        },
+                      ]
+                    : []),
+                ],
+              },
+          {
+            id: "edge",
+            mark: (
+              <WireMark tone="logo" size="lg">
+                <ProductGlyph id="cloudflare" />
+              </WireMark>
+            ),
+            ...edgeWords,
+          },
+          { id: "connector", mark: connectorMark, ...connectorText },
+          { id: "server", mark: <WireHost size="lg" />, ...serverWords },
+        ]}
+        wires={[
+          ...(hostnames.length === 0
+            ? [{ from: "names", to: "edge", line: lines.edge }]
+            : hostnames.map((hostname, index) => ({
+                from: ids[index],
+                to: "edge",
+                line: lines.hostname(hostname),
+              }))),
+          { from: "edge", to: "connector", line: lines.edge },
+          { from: "connector", to: "server", line: lines.origin },
+        ].map(({ from, to, line }, index) => ({
+          from,
+          to,
+          still: !line.live || held,
+          dashed: line.dashed,
+          tone: line.tone,
+          duration: 2.6,
+          delay: index * 0.3,
+        }))}
+      />
+    )
+  }
 
   const hostnameNodes =
     hostnames.length === 0 ? (
       <WireNode
         nodeRef={names[0]}
-        align={wide ? "end" : "start"}
+        align="end"
         mark={<WirePlaceholder size="md" fallback={Globe} />}
-        title={<span className="text-muted-foreground">Deployment domains</span>}
-        hint="turned on in a project's Domains"
+        {...placeholder}
       />
     ) : (
-      hostnames.map((hostname, index) => {
-        const record = dnsWords(hostname)
-        return (
-          <WireNode
-            key={hostname.hostname}
-            nodeRef={names[index]}
-            align={wide ? "end" : "start"}
-            mark={
-              <WireMark
-                tone={
-                  record.tone === "danger"
-                    ? "danger"
-                    : record.tone === "warning"
-                      ? "warning"
-                      : "logo"
-                }
-                size="md"
-              >
-                <Globe aria-hidden />
-              </WireMark>
-            }
-            title={
-              <span className="block max-w-56 truncate font-mono" title={hostname.hostname}>
-                {hostname.hostname}
-              </span>
-            }
-            hint={
-              !wide && more > 0
-                ? `and ${plural(more, "more hostname")}`
-                : hostname.routed
-                  ? record.label
-                  : "Not routed"
-            }
-          />
-        )
-      })
+      hostnames.map((hostname, index) => (
+        <WireNode
+          key={hostname.hostname}
+          nodeRef={names[index]}
+          align="end"
+          mark={
+            <WireMark tone={nameTone(hostname)} size="md">
+              <Globe aria-hidden />
+            </WireMark>
+          }
+          title={
+            <span className="block max-w-56 truncate font-mono" title={hostname.hostname}>
+              {hostname.hostname}
+            </span>
+          }
+          hint={hostname.routed ? dnsWords(hostname).label : "Not routed"}
+        />
+      ))
     )
 
-  const edgeNode = (
-    <WireNode
-      nodeRef={edge}
-      align={wide ? "center" : "start"}
-      eyebrow="Cloudflare"
-      mark={
-        <WireMark tone="logo" size="lg">
-          <ProductGlyph id="cloudflare" />
-        </WireMark>
-      }
-      title="Edge"
-      hint={
-        connected
-          ? status.ready
-            ? plural(status.readyConnections, "connection")
-            : "no connection"
-          : "terminates HTTPS"
-      }
-    />
-  )
-  const connectorNode = (
-    <WireNode
-      nodeRef={connector}
-      align={wide ? "center" : "start"}
-      eyebrow="Connector"
-      mark={
-        connected ? (
-          <WireMark tone={running ? "logo" : "danger"} size="lg">
-            <ProductGlyph id="docker" />
-          </WireMark>
-        ) : (
-          <WirePlaceholder size="lg" product="docker" />
-        )
-      }
-      title="cloudflared"
-      hint={
-        connected
-          ? running
-            ? (status.connector.address ?? "running")
-            : connectorWords(status.connector)
-          : "dials out from here"
-      }
-    />
-  )
-  const serverNode = (
-    <WireNode
-      nodeRef={server}
-      align="start"
-      eyebrow="This server"
-      mark={<WireHost size={wide ? "lg" : "md"} />}
-      title={!origin ? "this server's proxy" : origin.hostGateway ? "nginx" : "Caddy ingress"}
-      hint={origin && <span className="font-mono">{origin.service}</span>}
-    />
-  )
-
   const count = Math.max(1, hostnames.length)
-  const beams = (
-    <>
+  return (
+    <div
+      ref={container}
+      role="group"
+      aria-label={label}
+      className="relative mx-auto w-full max-w-5xl py-6"
+    >
       {Array.from({ length: count }, (_, index) => (
         <TunnelBeam
           key={`name-${index}`}
@@ -578,7 +634,7 @@ function TunnelPicture({ status }: { status: TunnelStatus }) {
           fromRef={names[index]}
           toRef={edge}
           line={hostnames[index] ? lines.hostname(hostnames[index]) : lines.edge}
-          wide={wide}
+          held={held}
           delay={index * 0.3}
         />
       ))}
@@ -587,7 +643,7 @@ function TunnelPicture({ status }: { status: TunnelStatus }) {
         fromRef={edge}
         toRef={connector}
         line={lines.edge}
-        wide={wide}
+        held={held}
         delay={0.4}
       />
       <TunnelBeam
@@ -595,45 +651,37 @@ function TunnelPicture({ status }: { status: TunnelStatus }) {
         fromRef={connector}
         toRef={server}
         line={lines.origin}
-        wide={wide}
+        held={held}
         delay={0.8}
       />
-    </>
-  )
-
-  return (
-    <div
-      ref={container}
-      role="group"
-      aria-label={connected ? "The way a visitor arrives" : "What a tunnel wires"}
-      className="relative mx-auto w-full max-w-5xl py-4 lg:py-6"
-    >
-      {beams}
-      {wide ? (
-        <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(3rem,0.5fr)_auto_minmax(3rem,0.6fr)_auto_minmax(3rem,0.6fr)_minmax(0,1fr)] items-center pb-10">
-          <div className="flex min-w-0 flex-col items-end gap-4">
-            {hostnameNodes}
-            {more > 0 && (
-              <p className="pr-14 text-hint text-muted-foreground">
-                and {plural(more, "more hostname")} in the list
-              </p>
-            )}
-          </div>
-          <div aria-hidden />
-          {edgeNode}
-          <div aria-hidden />
-          {connectorNode}
-          <div aria-hidden />
-          {serverNode}
-        </div>
-      ) : (
-        <div className={cn("flex flex-col gap-7")}>
+      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(3rem,0.5fr)_auto_minmax(3rem,0.6fr)_auto_minmax(3rem,0.6fr)_auto_minmax(0,0.6fr)] items-center pb-10">
+        <div className="flex min-w-0 flex-col items-end gap-4">
           {hostnameNodes}
-          {edgeNode}
-          {connectorNode}
-          {serverNode}
+          {more > 0 && (
+            <p className="pr-14 text-hint text-muted-foreground">
+              and {plural(more, "more hostname")} in the list
+            </p>
+          )}
         </div>
-      )}
+        <div aria-hidden />
+        <WireNode
+          nodeRef={edge}
+          align="center"
+          mark={
+            <WireMark tone="logo" size="lg">
+              <ProductGlyph id="cloudflare" />
+            </WireMark>
+          }
+          {...edgeWords}
+        />
+        <div aria-hidden />
+        <WireNode nodeRef={connector} align="center" mark={connectorMark} {...connectorText} />
+        <div aria-hidden />
+        {/* The far end is labelled under its mark as the middle two are: it
+            carried its words beside it, a third placement in one picture. */}
+        <WireNode nodeRef={server} align="center" mark={<WireHost size="lg" />} {...serverWords} />
+        <div aria-hidden />
+      </div>
     </div>
   )
 }
@@ -643,14 +691,14 @@ function TunnelBeam({
   fromRef,
   toRef,
   line,
-  wide,
+  held,
   delay,
 }: {
   containerRef: RefObject<HTMLDivElement | null>
   fromRef: RefObject<HTMLDivElement | null>
   toRef: RefObject<HTMLDivElement | null>
   line: TunnelLine
-  wide: boolean
+  held: boolean
   delay: number
 }) {
   return (
@@ -658,8 +706,8 @@ function TunnelBeam({
       containerRef={containerRef}
       fromRef={fromRef}
       toRef={toRef}
-      shape={wide ? "s" : "arc"}
-      still={!line.live}
+      shape="s"
+      still={!line.live || held}
       dashed={line.dashed}
       tone={line.tone}
       duration={2.6}
