@@ -6,6 +6,9 @@ import { ClientMark } from "@/components/client-mark"
 import { WireHost, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { Plus } from "@/components/icons"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { WireMarks } from "@/components/wire/wire-marks"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
+import { useBreakpoint } from "@/lib/breakpoints"
 import { relativeTime } from "@/lib/format"
 import {
   isoOf,
@@ -34,8 +37,10 @@ const noSubscribe = () => () => {}
  * is open, since every screen comes through it. Hovering a computer lights
  * its own wire and dims the rest.
  *
- * Wide, the three stand in lanes; below `lg` they stack and the wires go, so
- * each computer's line says what its wire would have.
+ * Wide, the three stand in lanes. On a phone it is the one phone form
+ * (`WireMarks`): this browser, the server named, and the computers' marks
+ * fanned under it with their wires, unnamed — the Computers cards under the
+ * picture are the list, and a phone was shown the four names twice.
  */
 export function ComputerPicture({
   overview,
@@ -48,6 +53,8 @@ export function ComputerPicture({
   const you = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
+  const wide = useBreakpoint("lg")
+  const held = useMotionHeld()
   const ids = overview.computers.map((computer) => computer.id).join(",")
   const refs = useMemo(() => {
     const out = new Map<string, RefObject<HTMLSpanElement | null>>()
@@ -64,6 +71,79 @@ export function ComputerPicture({
   const live = overview.computers.some((computer) => computer.live > 0)
   const engine = overview.engine
   const running = engine.state === "running"
+  const hubHint = running ? (
+    overview.stream.state === "running" ? (
+      `guacd ${engine.version} · Moonlight Web ${overview.stream.version}`
+    ) : (
+      `guacd ${engine.version}`
+    )
+  ) : (
+    <span className="text-warning">engine not running</span>
+  )
+
+  if (!wide)
+    return (
+      <WireMarks
+        data-slot="computer-picture"
+        className="animate-rise"
+        tiers={[
+          {
+            title: "You",
+            nodes: [
+              {
+                id: "you",
+                mark: agent ? <ClientMark userAgent={agent} /> : <span className="size-11" />,
+                name: "This browser",
+              },
+            ],
+          },
+          {
+            id: "hub",
+            mark: <WireHost />,
+            eyebrow: "This server",
+            title: hostname ?? "This server",
+            hint: hubHint,
+          },
+          {
+            title: "Computers",
+            nodes: [
+              ...overview.computers.map((computer) => ({
+                id: computer.id,
+                mark: <ComputerMark os={computer.os} reach={reachability(computer)} size="sm" />,
+                name: computer.name,
+                href: sessionHref(computer.id),
+              })),
+              {
+                id: "add",
+                mark: (
+                  <WirePlaceholder size="sm">
+                    <Plus />
+                  </WirePlaceholder>
+                ),
+                label: "Add a computer",
+                href: "/remote-desktop/new",
+                round: true,
+                anonymous: true,
+              },
+            ],
+          },
+        ]}
+        wires={[
+          { from: "you", to: "hub", still: !live || held, duration: 2.2 },
+          ...overview.computers.map((computer) => {
+            const reach = reachability(computer)
+            return {
+              from: "hub",
+              to: computer.id,
+              still: reach.kind !== "live" || held,
+              dashed: reach.kind === "closed" || reach.kind === "offline",
+              tone: reach.kind === "closed" ? ("warning" as const) : ("default" as const),
+              duration: 2.2,
+            }
+          }),
+        ]}
+      />
+    )
 
   return (
     <div data-slot="computer-picture" className="relative animate-rise py-4">
@@ -75,9 +155,8 @@ export function ComputerPicture({
           shape="s"
           startXOffset={30}
           endXOffset={-30}
-          still={!live}
+          still={!live || held}
           duration={2.2}
-          className="max-lg:hidden"
         />
         {overview.computers.map((computer, index) => {
           const to = refs.get(computer.id)
@@ -92,13 +171,13 @@ export function ComputerPicture({
               shape="s"
               startXOffset={30}
               endXOffset={-24}
-              still={reach.kind !== "live"}
+              still={reach.kind !== "live" || held}
               dashed={reach.kind === "closed" || reach.kind === "offline"}
               tone={reach.kind === "closed" ? "warning" : "default"}
               duration={2.2}
               delay={(index % 6) * 0.35}
               className={cn(
-                "transition-opacity max-lg:hidden",
+                "transition-opacity",
                 reach.kind === "offline" && "opacity-40",
                 focus !== null && focus !== computer.id && "opacity-15",
               )}
@@ -118,7 +197,7 @@ export function ComputerPicture({
             />
           </div>
 
-          <div aria-hidden className="max-lg:hidden" />
+          <div aria-hidden />
 
           <div className="flex min-w-0 lg:justify-center">
             <WireNode
@@ -127,21 +206,11 @@ export function ComputerPicture({
               mark={<WireHost />}
               eyebrow="This server"
               title={hostname ?? "This server"}
-              hint={
-                running ? (
-                  overview.stream.state === "running" ? (
-                    `guacd ${engine.version} · Moonlight Web ${overview.stream.version}`
-                  ) : (
-                    `guacd ${engine.version}`
-                  )
-                ) : (
-                  <span className="text-warning">engine not running</span>
-                )
-              }
+              hint={hubHint}
             />
           </div>
 
-          <div aria-hidden className="max-lg:hidden" />
+          <div aria-hidden />
 
           <section aria-label="Computers" className="min-w-0">
             <p className="eyebrow mb-3 flex items-center gap-1.5">
@@ -161,10 +230,7 @@ export function ComputerPicture({
                     focus !== null && focus !== computer.id && "opacity-40",
                   )}
                 >
-                  <ComputerNode
-                    computer={computer}
-                    nodeRef={refs.get(computer.id)}
-                  />
+                  <ComputerNode computer={computer} nodeRef={refs.get(computer.id)} />
                 </li>
               ))}
               <li className="min-w-0">
