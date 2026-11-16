@@ -249,7 +249,7 @@ export function RailRow({
         {figures.length > 0 && (
           <span
             className={cn(
-              "flex shrink-0 items-baseline gap-1.5 transition-opacity",
+              "flex max-w-[55%] min-w-0 items-baseline justify-end gap-1.5 transition-opacity",
               // As wide as the menu at least, so the menu never covers the name.
               menu && "min-w-5 justify-end",
               menu &&
@@ -261,8 +261,9 @@ export function RailRow({
                 key={figure.key}
                 title={figure.title}
                 className={cn(
-                  "shrink-0 truncate text-right text-hint",
-                  figure.mono ? "font-mono" : "numeric",
+                  "truncate text-right text-hint",
+                  // A figure is never cut; a word (a signature, a table) gives way.
+                  figure.mono ? "min-w-0 font-mono" : "numeric shrink-0",
                   figure.quiet ? "text-faint" : "text-muted-foreground",
                   figure.className,
                 )}

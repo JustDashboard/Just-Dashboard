@@ -320,7 +320,6 @@ function RailGroup({
                             text: tail.text,
                             title: tail.title,
                             mono: !spec.rows,
-                            className: "max-w-[45%]",
                           },
                         ]
                       : []
