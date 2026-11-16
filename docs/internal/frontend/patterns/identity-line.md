@@ -93,8 +93,9 @@ on (§3), and twenty hues in a row of four would be saying nothing.
 other pages' line was `HostIdentity`; since 0.8.7 the header is `HostIdentity` too. Given a `state`, a
 `command` or a `menu` it takes the project's layout: a 40px tile beside two rows, the title with its
 state after it, the facts under them, the command and its `⋯` at the far end across both, 16px above the
-hairline; on a phone the tile, the title and the command keep the first row, the state takes the next
-and the facts run the full width. `label` makes the line a landmark ("About api"). Without those props
+hairline. On a phone it is one row and one line of facts: a 32px tile, the title, and the command as
+its icon with `⋯` at the far end; the state after the title when both fit, otherwise first on the
+facts line; the facts one line that drops whole facts rather than wrap. `label` makes the line a landmark ("About api"). Without those props
 the line is drawn as it always was — a 48px tile, the facts under the title, the `aside` at the far
 end — so a page opts in by passing them.
 
