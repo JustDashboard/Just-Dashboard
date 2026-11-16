@@ -680,7 +680,7 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   a label rather than as the panel's switch. Under that, the Files half is a
   strip with the root path (middle-truncated), **new file** and **refresh** inline, and hidden files /
   new folder / open in Files behind one menu — `file-tree.tsx` draws that strip, and each entry in the
-  same folders and pages the Files page draws (`files/file-icon.tsx`), in the colours folders were
+  same folders and pages the Files page draws (`components/file-icon.tsx`), in the colours folders were
   labelled with there. (The Files page's own sidebar is no longer this tree but a fixed list of
   places, `files-sidebar.tsx`.) A file opens over the panel body (`InlineFile`) with no Save in its
   header: a Save on every file opened to be read was a command with nothing to do. The first edit

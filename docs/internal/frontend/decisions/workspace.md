@@ -10,7 +10,7 @@ disagree, the standard wins.
 **A file is drawn as what it is, and a folder in the colour it was given.** The file manager drew
 Material Design Icons' file family, a stencil per category in one flat tone: it told a config from a
 certificate, but a directory of forty files was forty stencils and the format's own mark — the thing it
-is recognised by — was nowhere. `files/file-icon.tsx` now draws its own two shapes, the ones every
+is recognised by — was nowhere. `components/file-icon.tsx` now draws its own two shapes, the ones every
 desktop file manager has trained the eye on. A **folder** is two-toned, its tab behind its face, with
 what it holds pressed into the face a step darker — a product's Simple Icons mark for `.git`, `.docker`
 or `node_modules` (single-shape drawings, so a mask of one reads as the mark), a glyph from this
