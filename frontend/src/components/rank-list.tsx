@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { sharePercent } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -122,7 +123,7 @@ export function RankList({
                 data-slot="rank-share"
                 className="numeric w-10 shrink-0 text-right text-hint text-muted-foreground"
               >
-                {item.share === undefined ? "" : percent(item.share)}
+                {item.share === undefined ? "" : sharePercent(item.share)}
               </span>
             )}
           </li>
@@ -150,15 +151,8 @@ export function RankSkeleton({ rows = 5, className }: { rows?: number; className
   )
 }
 
-/** A share in whole percent, without calling a sliver nothing or a near-whole all of it. */
-export function percent(share: number) {
-  if (share <= 0) return "0%"
-  if (share >= 1) return "100%"
-  const whole = Math.round(share * 100)
-  if (whole === 0) return "<1%"
-  if (whole === 100) return ">99%"
-  return `${whole}%`
-}
+/** @deprecated import `sharePercent` from `@/lib/format` */
+export const percent = sharePercent
 
 export type SplitPart = {
   key: string

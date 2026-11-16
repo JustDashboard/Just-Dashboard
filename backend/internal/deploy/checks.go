@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 )
 
@@ -205,8 +206,11 @@ type CheckAttemptEvidence struct {
 	StatusCode     int           `json:"statusCode,omitempty"`
 	ContainerState string        `json:"containerState,omitempty"`
 	ExitCode       int           `json:"exitCode,omitempty"`
-	OutputDigest   string        `json:"outputDigest,omitempty"`
-	Code           string        `json:"code,omitempty"`
+	// Restarts is how often the candidate's container had died and been
+	// started again when the gate stopped waiting for it.
+	Restarts     int    `json:"restarts,omitempty"`
+	OutputDigest string `json:"outputDigest,omitempty"`
+	Code         string `json:"code,omitempty"`
 
 	// RedirectOrigin is where an unfollowed redirect pointed: its scheme and
 	// host only, since a login redirect's query carries state tokens.
@@ -238,6 +242,49 @@ type CheckRunner struct {
 	http       *http.Client
 	dial       func(context.Context, string, string) (net.Conn, error)
 	now        func() time.Time
+}
+
+// containerLivenessReader is the part of a check backend that reads a
+// candidate's state, which the Docker client has.
+type containerLivenessReader interface {
+	ContainerLiveness(context.Context, string) (dockerx.ContainerLiveness, error)
+}
+
+// A candidate that dies and is started again over and over is given up on
+// before the attempts run out, but not early: an application that exits while
+// the database it waits for is still starting gets its first thirty seconds
+// and five restarts before the gate reads that as a loop.
+const (
+	crashLoopRestarts = 5
+	crashLoopGrace    = 30 * time.Second
+)
+
+// candidateGone says the target's container is down for good, or has been
+// dying and restarting long enough to read as a loop, so asking it again only
+// waits out the attempts: a start command that fails before the server
+// listens would otherwise read as "could not connect" two minutes later.
+func (r *CheckRunner) candidateGone(ctx context.Context, target CheckTarget, started time.Time) (dockerx.ContainerLiveness, bool) {
+	reader, ok := r.containers.(containerLivenessReader)
+	if !ok || target.ContainerID == "" {
+		return dockerx.ContainerLiveness{}, false
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	state, err := reader.ContainerLiveness(readCtx, target.ContainerID)
+	if err != nil {
+		return state, false
+	}
+	switch {
+	case state.Running:
+		return state, false
+	case state.Restarting:
+		return state, state.RestartCount >= crashLoopRestarts && r.now().Sub(started) >= crashLoopGrace
+	case state.Status == "exited" || state.Status == "dead":
+		// Docker marks a container restarting the moment it exits when its
+		// policy starts it again, so exited means nothing will.
+		return state, true
+	}
+	return state, false
 }
 
 func NewCheckRunner(containers ContainerCheckBackend) *CheckRunner {
@@ -286,6 +333,14 @@ func (r *CheckRunner) Run(ctx context.Context, check PlannedCheck, target CheckT
 		}
 		result := r.runAttempt(ctx, CheckKind(check.Kind), config, target, timeout)
 		result.Number = attempt
+		if result.Outcome == HealthFailed {
+			if state, gone := r.candidateGone(ctx, target, started); gone {
+				result.Code, result.ContainerState = "application_exited", state.Status
+				result.ExitCode, result.Restarts = state.ExitCode, state.RestartCount
+				evidence.Attempts = append(evidence.Attempts, result)
+				break
+			}
+		}
 		evidence.Attempts = append(evidence.Attempts, result)
 		if result.Outcome == HealthPassed || result.Outcome == HealthDisabled || result.Outcome == HealthUnavailable {
 			break
@@ -548,6 +603,12 @@ func checkFailureMessage(phase string, outcome HealthOutcome, checks ...CheckEvi
 			reason = "the application's runtime address is unavailable"
 		case "exit_nonzero":
 			reason = fmt.Sprintf("the check command exited with code %d", last.ExitCode)
+		case "application_exited":
+			if last.Restarts > 0 {
+				reason = fmt.Sprintf("the application kept exiting (code %d, restarted %d time(s)) instead of answering", last.ExitCode, last.Restarts)
+			} else {
+				reason = fmt.Sprintf("the application exited with code %d and nothing starts it again, so nothing answered", last.ExitCode)
+			}
 		case "handshake_failed":
 			reason = "the game server accepted the connection but did not answer a status handshake"
 		case "no_answer":
