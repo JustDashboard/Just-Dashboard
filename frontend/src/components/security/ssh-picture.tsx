@@ -164,7 +164,7 @@ export function SSHPicture({
                 {ports.map((port) => (
                   <span key={port}>
                     <span className="text-muted-foreground">:</span>
-                    <span className="text-[var(--tag-pink)]">{port}</span>{" "}
+                    <span className="text-tag-pink">{port}</span>{" "}
                   </span>
                 ))}
               </span>
