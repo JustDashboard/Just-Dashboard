@@ -9,7 +9,13 @@ import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
 import { Well } from "@/components/panel"
 import { Spinner } from "@/components/loading"
-import { Tag } from "@/components/tag"
+import {
+  COMMAND_CLASS,
+  CommandClassTag,
+  TRANSCRIPT_KEPT,
+  commandMs,
+  type CommandClass,
+} from "@/components/database/query/command-class"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
 import { redisClassify, redisCommand } from "@/components/database/redis/api"
@@ -64,20 +70,17 @@ const ELSEWHERE: Record<string, { view: ConsoleElsewhere; why?: string }> = {
   SSUBSCRIBE: { view: "pubsub" },
 }
 
-const KEEP = 60
+/** Redis's classes of a command, in the one console vocabulary. */
+const CLASS: Record<RedisCommandClass, CommandClass> = {
+  read: "read",
+  write: "write",
+  dangerous: "removes",
+  blocked: "refused",
+}
 
 /** The tag a command's class takes: a read is the ordinary case and says nothing. */
 export function ClassTag({ value, admin }: { value: RedisCommandClass; admin?: boolean }) {
-  return (
-    <>
-      {value !== "read" && (
-        <Tag tone={value === "write" ? "default" : value === "dangerous" ? "warning" : "danger"}>
-          {value === "write" ? "writes" : value === "dangerous" ? "removes data" : "not run here"}
-        </Tag>
-      )}
-      {admin && <Tag>admin</Tag>}
-    </>
-  )
+  return <CommandClassTag value={CLASS[value]} admin={admin} />
 }
 
 const CAPABILITY: Record<string, string> = {
@@ -150,7 +153,7 @@ export function ConsoleView({
 
   const add = (entry: Omit<ConsoleEntry, "id" | "db">) =>
     setEntries((held) => [
-      ...held.slice(-(KEEP - 1)),
+      ...held.slice(-(TRANSCRIPT_KEPT - 1)),
       { ...entry, db, id: (held[held.length - 1]?.id ?? 0) + 1 },
     ])
 
@@ -454,15 +457,14 @@ function Entry({
       <div className="flex min-w-0 items-baseline gap-2">
         <span className="shrink-0 text-muted-foreground select-none">db{entry.db ?? ""}&gt;</span>
         <span className="min-w-0 flex-1 font-medium break-all whitespace-pre-wrap">
-          {entry.command}
+          <CommandWord
+            command={entry.command}
+            color={entry.class && COMMAND_CLASS[CLASS[entry.class]].color}
+          />
         </span>
         <span className="flex shrink-0 items-center gap-2 font-sans text-hint text-muted-foreground">
           {entry.class && <ClassTag value={entry.class} />}
-          {entry.ms !== undefined && (
-            <span className="numeric">
-              {entry.ms < 10 ? entry.ms.toFixed(2) : Math.round(entry.ms)} ms
-            </span>
-          )}
+          {entry.ms !== undefined && <span className="numeric">{commandMs(entry.ms)}</span>}
         </span>
       </div>
       <div className="mt-0.5 min-w-0">
@@ -489,5 +491,18 @@ function Entry({
         )}
       </div>
     </div>
+  )
+}
+
+/** The command with its first word in the hue of what it does, as MongoDB's console draws it. */
+function CommandWord({ command, color }: { command: string; color: string | undefined }) {
+  const match = /^(\s*)(\S+)([\s\S]*)$/.exec(command)
+  if (!match || !color) return <>{command}</>
+  return (
+    <>
+      {match[1]}
+      <span style={{ color }}>{match[2]}</span>
+      {match[3]}
+    </>
   )
 }
