@@ -149,7 +149,7 @@ test("a section's landing page is found by the name the rail gives it inside the
   await page.goto("/account")
   await open(page)
   for (const [query, page_] of [
-    ["page: control center", "Databases"],
+    ["page: databases", "Databases"],
     ["page: projects", "Deployments"],
     ["page: live", "Processes"],
   ]) {

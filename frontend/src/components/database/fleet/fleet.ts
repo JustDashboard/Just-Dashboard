@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import type { DbFleet, DbFleetEntry, DbTopoEdge, DbTopology } from "@/lib/types"
 import type { DbBackupSummary, DbPowerAction } from "@/components/database/fleet/types"
 
@@ -380,8 +381,40 @@ export function describeEdge(edge: DbTopoEdge): string {
   if (edge.via.includes("env")) parts.push("named in its environment")
   if (edge.via.includes("stack")) parts.push("same compose stack")
   if (edge.via.includes("network")) parts.push("shares a network")
-  if (edge.sessions > 0)
-    parts.push(edge.sessions === 1 ? "1 open session" : `${edge.sessions} open sessions`)
+  if (edge.sessions > 0) parts.push(plural(edge.sessions, "open session"))
   else if (edge.via.includes("session")) parts.push("seen connected")
   return parts.join(" · ")
+}
+
+/** A thing a card counts, as one and as many: the pair, never a word with its `s` cut off. */
+export type Nouns = { one: string; many: string }
+
+/**
+ * What a database holds, in the word its engine uses. The fleet sends the
+ * plural; its singular is looked up rather than made by stripping an `s`,
+ * which turned "indexes" into "indexe".
+ */
+const OBJECT_NOUNS: Record<DbFleetEntry["objectWord"], Nouns> = {
+  tables: { one: "table", many: "tables" },
+  collections: { one: "collection", many: "collections" },
+  keys: { one: "key", many: "keys" },
+}
+
+/** The pair for what a connection holds; an unknown plural keeps its own word for both. */
+export function objectNouns(objectWord: string): Nouns {
+  return Object.hasOwn(OBJECT_NOUNS, objectWord)
+    ? OBJECT_NOUNS[objectWord as DbFleetEntry["objectWord"]]
+    : { one: objectWord, many: objectWord }
+}
+
+/** What a card's reading counts: a key–value store has clients, not sessions. */
+export function sessionNouns(kind: string): Nouns {
+  return kind === "keyvalue"
+    ? { one: "client", many: "clients" }
+    : { one: "session", many: "sessions" }
+}
+
+/** The word for `n` of a thing, without the figure: the figure is drawn in its own weight. */
+export function nounFor(n: number, nouns: Nouns): string {
+  return n === 1 ? nouns.one : nouns.many
 }

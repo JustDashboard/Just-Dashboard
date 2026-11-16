@@ -61,11 +61,22 @@ export function EnvironmentTag({
  * A protected connection: the dashboard refuses every change to its data or
  * schema. A property of the connection, so it is a tag beside the name and
  * the pages below it simply draw no write control.
+ *
+ * `compact` is the lock alone, where there is room for a mark and not for the
+ * word (a card's head, a table's name cell): the word is still there for a
+ * reader who cannot see the lock, and the sentence for a pointer resting on
+ * it. It was a second component, `ProtectedMark`, in the fleet's folder.
  */
-export function ProtectedTag({ className }: { className?: string }) {
+export function ProtectedTag({ compact, className }: { compact?: boolean; className?: string }) {
   return (
-    <Tag icon={LockClosed} className={className}>
-      protected
+    <Tag
+      icon={LockClosed}
+      title={
+        compact ? "Protected: the dashboard refuses every change to its data or schema" : undefined
+      }
+      className={className}
+    >
+      {compact ? <span className="sr-only">protected</span> : "protected"}
     </Tag>
   )
 }

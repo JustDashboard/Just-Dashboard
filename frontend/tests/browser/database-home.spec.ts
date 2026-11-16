@@ -1920,11 +1920,17 @@ async function identityHolds(page: Page, what: string) {
   if (facts.lines > 1) {
     expect(facts.width, `the facts have room on ${what}`).toBeGreaterThan(280)
   }
-  // No dot stands between two facts, so none is left hanging where a line of them ends.
-  expect(
-    await line.evaluate((identity) => identity.lastElementChild!.textContent ?? ""),
-    `a separator in the facts on ${what}`,
-  ).not.toContain("·")
+  // The facts are a FactLine: each dot is drawn in the gap before its fact and
+  // clipped where a fact starts a line, so none is left hanging where a line
+  // ends. No other dot is written into the facts.
+  const run = await line.evaluate((identity) => {
+    const facts = identity.lastElementChild!
+    const copy = facts.cloneNode(true) as HTMLElement
+    for (const dot of copy.querySelectorAll("[data-slot=fact] > [aria-hidden]")) dot.remove()
+    return { lined: facts.querySelector("[data-slot=fact-line]") !== null, text: copy.textContent }
+  })
+  expect(run.lined, `the facts are a FactLine on ${what}`).toBe(true)
+  expect(run.text, `a separator in the facts on ${what}`).not.toContain("·")
 }
 
 for (const [label, viewport] of [

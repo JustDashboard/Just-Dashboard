@@ -324,7 +324,7 @@ export function DatabaseCreation({
     // The catalogue and the chosen engine's settings side by side, each the
     // height of the window with its own scroll: choosing an engine never
     // scrolls the catalogue away.
-    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_26rem] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch">
+    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_26rem] xl:grid-rows-fill xl:items-stretch">
       <Panel plain id={`${id}-catalogue`} tabIndex={-1} className="min-w-0 scroll-mt-4 xl:min-h-0">
         <PanelHeader
           title="Engines"
@@ -710,7 +710,7 @@ export function DatabaseCreation({
                 </Button>
               }
             >
-              <Button className="h-11 sm:h-9" disabled={blocked} onClick={() => void create()}>
+              <Button disabled={blocked} onClick={() => void create()}>
                 <Play />
                 {container ? "Retry connection setup" : "Create"}
               </Button>
