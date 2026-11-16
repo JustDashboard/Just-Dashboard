@@ -410,7 +410,9 @@ export function EventsPage() {
             >
               <PanelHeader
                 title="Containers"
-                count={rows.length}
+                // In words, as the Events head under it counts: a bare figure
+                // before the key read as part of it, "8 ● Failed".
+                count={plural(rows.length, "container")}
                 actions={<OutcomeKey className="max-md:hidden" />}
               />
               <PanelBody flush>
@@ -478,28 +480,34 @@ export function EventsPage() {
                   placeholder="Container, image, stack or person"
                   containerClassName="sm:w-72"
                 />
-                <ChipStrip aria-label="Narrowed to" className="sm:ml-auto">
-                  {reading && (
-                    <FilterChip
-                      selected
-                      aria-label={`Stop showing only ${READING_LABEL[reading].toLowerCase()}`}
-                      onClick={() => setReading("")}
-                    >
-                      {READING_LABEL[reading]}
-                      <Cross aria-hidden className="size-3" />
-                    </FilterChip>
-                  )}
-                  {container && (
-                    <FilterChip
-                      selected
-                      aria-label="Show every container's events"
-                      onClick={() => setContainer("")}
-                    >
-                      {chosen?.name ?? container.slice(0, 12)}
-                      <Cross aria-hidden className="size-3" />
-                    </FilterChip>
-                  )}
-                </ChipStrip>
+                {/* Drawn only while something narrows the list, and as a
+                    group: an empty strip named "Narrowed to" with no role was
+                    a name a screen reader never reads (axe:
+                    aria-prohibited-attr). */}
+                {(reading || container) && (
+                  <ChipStrip role="group" aria-label="Narrowed to" className="sm:ml-auto">
+                    {reading && (
+                      <FilterChip
+                        selected
+                        aria-label={`Stop showing only ${READING_LABEL[reading].toLowerCase()}`}
+                        onClick={() => setReading("")}
+                      >
+                        {READING_LABEL[reading]}
+                        <Cross aria-hidden className="size-3" />
+                      </FilterChip>
+                    )}
+                    {container && (
+                      <FilterChip
+                        selected
+                        aria-label="Show every container's events"
+                        onClick={() => setContainer("")}
+                      >
+                        {chosen?.name ?? container.slice(0, 12)}
+                        <Cross aria-hidden className="size-3" />
+                      </FilterChip>
+                    )}
+                  </ChipStrip>
+                )}
               </PanelToolbar>
               <PanelBody flush>
                 {entries.length === 0 ? (
