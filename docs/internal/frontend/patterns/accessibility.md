@@ -101,7 +101,7 @@ One mark, one model. The strips that looked like tabs once had four.
 | Views of one page | `tablist`, `tab`, `tabpanel` | one tab stop; ←/→ move and show, Home and End jump | `ViewTabs`, `ViewTabList` |
 | Pages of a section | links in a `nav`, `aria-current="page"` | Tab to each, Enter follows | a link strip, never a tablist |
 | Filters, several at once | toggle buttons, `aria-pressed` | Tab to each, Space or Enter toggles | `FilterChip` in a `ChipStrip` |
-| One of a few short words | a radio group | one tab stop; arrows move and choose | `Segments` |
+| One of a few short words | a radio group | one tab stop; arrows move and choose | `Segments`, `WindowPicker` |
 | A menu of verbs | `menu`, `menuitem`, `menuitemcheckbox` | ↑/↓, first letters, Enter, Escape back to the trigger; a choice closes it | `DropdownMenu`, `VerbMenu` |
 | A phone's panes | buttons in a `nav`, `aria-current="page"` | Tab, Enter | `PaneBar` |
 | A rail of siblings | links in a `nav`, the one on screen `aria-current="page"` | Tab into the search and the rows; Alt+↑ and Alt+↓ walk it from anywhere on the page | `Rail`, `DetailPage` |
