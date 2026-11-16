@@ -3,7 +3,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
 import { Box, FileText, ListOrdered, Play, RefreshClockwise } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -16,7 +15,7 @@ import { Page, PageContext, PageState } from "@/components/page"
 import { ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -243,22 +242,7 @@ function ConfigurationPage() {
       />
 
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-0">
-        {admin && (
-          <TabsPrimitive.List
-            aria-label="Configuration views"
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            {VIEWS.map((view) => (
-              <TabsPrimitive.Trigger
-                key={view.key}
-                value={view.key}
-                className={tabClasses(tab === view.key, "h-10")}
-              >
-                {view.label}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
-        )}
+        {admin && <ViewTabList label="Configuration views" value={tab} views={[...VIEWS]} />}
 
         <TabsContent value="files" className="min-w-0 space-y-6 pt-6">
           {files.error ? (

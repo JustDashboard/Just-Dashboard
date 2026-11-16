@@ -418,9 +418,9 @@ function TLSReport() {
           label="Domain to scan"
           htmlFor="tls-domain"
           hint={
-            <span className="wrap-anywhere">
-              {typed.target ? `Scans ${targetHint(typed.target)}` : "A name, host:port or URL"}
-            </span>
+            typed.target && (
+              <span className="wrap-anywhere">{`Scans ${targetHint(typed.target)}`}</span>
+            )
           }
           error={fieldError && <span className="wrap-anywhere">{fieldError}</span>}
         >

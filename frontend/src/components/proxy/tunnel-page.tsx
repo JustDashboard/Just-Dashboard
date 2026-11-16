@@ -705,11 +705,8 @@ function Setup({
           </>
         }
       />
+      {/* The picture says it: cloudflared dials out, so no port opens here. */}
       <TunnelPicture status={status} />
-      <p className="mx-auto max-w-2xl text-center text-body text-pretty text-muted-foreground">
-        cloudflared dials out from this server to Cloudflare, which answers for your domains over
-        HTTPS, so no port opens here.
-      </p>
       <div className="mx-auto w-full max-w-3xl min-w-0 space-y-6">
         {!admin ? (
           <Notice title="Only an administrator connects a tunnel">
