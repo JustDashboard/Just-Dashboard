@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, Trash } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -360,7 +361,7 @@ function StagePreview({
           <span className={cn("min-w-0 truncate", waiting && "opacity-60")}>
             {data.writeStage
               ? `What reaches ${data.writeStage}: it is not run in a preview`
-              : `${data.returned.toLocaleString("en-US")} sample ${data.returned === 1 ? "document" : "documents"} after ${stage.op}`}
+              : `${plural(data.returned, "sample document")} after ${stage.op}`}
             {data.inputLimited
               ? ` · over the first ${data.inputLimit.toLocaleString("en-US")} input documents`
               : ""}

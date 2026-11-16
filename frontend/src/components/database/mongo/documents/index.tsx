@@ -19,7 +19,7 @@ import {
   Trash,
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
-import { bytes, grouped } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -614,7 +614,7 @@ function Documents({
             {info.type === "view"
               ? `on ${info.viewOn}`
               : info.statsKnown
-                ? `${grouped(info.count)} ${info.count === 1 ? "document" : "documents"} · ${bytes(info.size)}`
+                ? `${plural(info.count, "document")} · ${bytes(info.size)}`
                 : ""}
           </span>
         )}

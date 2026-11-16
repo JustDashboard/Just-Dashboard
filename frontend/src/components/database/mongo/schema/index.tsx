@@ -1,6 +1,6 @@
 "use client"
 
-import { bytes, grouped } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { tabClasses } from "@/components/tabs"
 import { ChipCount } from "@/components/chips"
 import {
@@ -67,7 +67,7 @@ function Schema(workbench: Workbench) {
         <CollectionKindTag kind={kind} />
         {info?.statsKnown && (
           <span className="numeric min-w-0 truncate text-hint text-muted-foreground max-md:hidden">
-            {grouped(info.count)} {info.count === 1 ? "document" : "documents"} · {bytes(info.size)}
+            {plural(info.count, "document")} · {bytes(info.size)}
           </span>
         )}
         <span className="min-w-0 flex-1" />

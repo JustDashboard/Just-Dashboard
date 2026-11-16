@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useMemo, useState } from "react"
 import { Key } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
@@ -208,8 +209,7 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
         )}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
           <p className="numeric min-w-0 flex-1 text-hint text-muted-foreground">
-            Based on {schema.sampled.toLocaleString("en-US")}{" "}
-            {schema.sampled === 1 ? "document" : "documents"}
+            Based on {plural(schema.sampled, "document")}
             {schema.total >= 0 ? ` of about ${schema.total.toLocaleString("en-US")}` : ""} ·{" "}
             {schema.fields.length.toLocaleString("en-US")} fields ·{" "}
             {schema.durationMs.toLocaleString("en-US")} ms

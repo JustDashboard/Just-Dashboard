@@ -16,7 +16,7 @@ import {
 } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
@@ -313,7 +313,7 @@ export function PipelineView({
                     <MenuItemText
                       hint={
                         <span className="numeric text-hint text-muted-foreground">
-                          {entry.stages.length} {entry.stages.length === 1 ? "stage" : "stages"}
+                          {plural(entry.stages.length, "stage")}
                         </span>
                       }
                     >
@@ -706,8 +706,7 @@ function Result({
           ))}
         </div>
         <span className="numeric min-w-0 flex-1 truncate text-hint text-muted-foreground">
-          {result.returned.toLocaleString("en-US")}{" "}
-          {result.returned === 1 ? "document" : "documents"}
+          {plural(result.returned, "document")}
           {result.hasMore ? ", and more past the limit" : ""}
           {result.truncated ? " · cut at 8 MiB" : ""}
           {` · ${result.durationMs.toLocaleString("en-US")} ms`}
@@ -850,7 +849,7 @@ function TextDialog({
         <>
           <p className="mr-auto min-w-0 text-hint text-muted-foreground">
             {parsed.ok
-              ? `${parsed.stages.length} ${parsed.stages.length === 1 ? "stage" : "stages"}. Stages that are switched off are not part of the text.`
+              ? `${plural(parsed.stages.length, "stage")}. Stages that are switched off are not part of the text.`
               : ""}
           </p>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
