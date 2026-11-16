@@ -149,7 +149,9 @@ export function DatabaseHeader({ className }: { className?: string }) {
  * The header's one command: what the database holds, opened, in the engine's
  * own word ("Open data", "Browse keys"). Drawn while the server runs, and held
  * while a start or a stop is under way: there is nothing behind it to open.
- * `compact` keeps the glyph alone on a phone, for the item pages' strip.
+ * `compact` is the item pages' strip: an outline button, because the item's
+ * own line under it holds the page's one brand-faced command, and the glyph
+ * alone on a phone.
  */
 export function OpenContents({ compact }: { compact?: boolean }) {
   const { conn, engine, status, href } = useDatabase()
@@ -164,12 +166,13 @@ export function OpenContents({ compact }: { compact?: boolean }) {
       <span className={cn(compact && "max-sm:sr-only")}>{label}</span>
     </>
   )
+  const variant = compact ? "outline" : "default"
   return change ? (
-    <Button size="sm" disabled aria-label={label}>
+    <Button size="sm" variant={variant} disabled aria-label={label}>
       {face}
     </Button>
   ) : (
-    <Button size="sm" asChild>
+    <Button size="sm" variant={variant} asChild>
       <Link href={href("data")} aria-label={label}>
         {face}
       </Link>
