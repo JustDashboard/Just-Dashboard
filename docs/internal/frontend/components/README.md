@@ -245,7 +245,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `CanvasZoom`, `CanvasZoomWord`, `FLOAT` | [Workbench](workbench.md) | `components/canvas-zoom.tsx` | A canvas's zoom out, percent, in, Fit and Tidy, a word beside Fit, and the ground of a control floating on a canvas. | new (WP-15) |
 | `ZoomBar`, `FLOAT` | [Workbench](workbench.md) | `components/database/diagram/chrome.tsx` | The ER diagram's own zoom bar and its ground. | deprecated (use `CanvasZoom`, `FLOAT` from `canvas-zoom.tsx`, WP-15) |
 | `CodeEditor`, `EditorCommands` (type) | [Workbench](workbench.md) | `components/code-editor.tsx` | Monaco, wired to the dashboard's palette and keys. | keep |
-| `PaneBar`, `PaneBack`, `paneShown`, `PaneBreak` (type), `PaneStop` (type) | [Workbench](workbench.md) | `components/phone-panes.tsx` | One pane at a time on a phone: the bar at the foot, the way back, and which pane shows. | keep |
+| `PaneBar`, `PaneBack`, `paneShown`, `PaneBreak` (type), `PaneStop` (type) | [Workbench](workbench.md) | `components/phone-panes.tsx` | One pane at a time on a phone: the bar at the foot (a bar in the bottom stack), the way back, and which pane shows. | keep |
 | `ResizeHandle` | [Workbench](workbench.md) | `components/resize-handle.tsx` | The grab strip between a side column and the work, by pointer or by keys. | keep |
 | `WorkbenchHeader` | [Workbench](workbench.md) | `components/workbench-header.tsx` | A workbench's top bar: the way back, the mark, the name, state, command and tools. | new (WP-33) |
 | `XtermPane`, `XtermActions` (type) | [Workbench](workbench.md) | `components/xterm-pane.tsx` | An xterm.js terminal wired to a PTY over a socket. | keep |
