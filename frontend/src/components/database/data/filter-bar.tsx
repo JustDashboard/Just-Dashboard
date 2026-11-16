@@ -92,7 +92,7 @@ export function FilterBar({
           operators={operators}
           onApply={(filter) => onFiltersChange([...filters, filter])}
         >
-          <Button type="button" size="xs" variant="outline" className="shrink-0 max-sm:h-8">
+          <Button type="button" size="xs" variant="outline" className="shrink-0">
             <FilterIcon />
             {filters.length === 0 ? "Filter" : "Add filter"}
           </Button>
@@ -161,7 +161,7 @@ export function FilterBar({
                   type="button"
                   size="xs"
                   variant="ghost"
-                  className="shrink-0 text-muted-foreground max-sm:h-8"
+                  className="shrink-0 text-muted-foreground"
                 >
                   <ArrowUp />
                   Sort

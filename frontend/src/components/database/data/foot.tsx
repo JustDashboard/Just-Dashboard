@@ -94,16 +94,60 @@ export function Pager({
           {countError ? "Count again" : "Count exactly"}
         </Button>
       )}
+      <PageControls
+        pageSize={pageSize}
+        sizes={PAGE_SIZES}
+        sizeLabel="Rows a page"
+        onPageSize={onPageSize}
+        onPrevious={facts.hasPrevious ? () => onPage(pageNumber - 1) : undefined}
+        onNext={facts.hasNext ? () => onPage(pageNumber + 1) : undefined}
+      >
+        <PageField page={pageNumber} last={facts.lastPage} onPage={onPage} />
+      </PageControls>
+    </>
+  )
+}
+
+/**
+ * The controls of a pager, the same on every grid of rows or documents: how
+ * many a page, and the previous and next page, at one size — 24px on a
+ * desktop, 32px under a finger — with the size picker left to a desktop,
+ * where there is room for it. Between the two arrows goes whatever says
+ * where the reader is (SQL's page field). What a page is, and the words for
+ * its range, are the engine's own and stay with its caller.
+ */
+export function PageControls({
+  pageSize,
+  sizes,
+  sizeLabel,
+  onPageSize,
+  onPrevious,
+  onNext,
+  children,
+}: {
+  pageSize: number
+  sizes: readonly number[]
+  /** The picker's name: "Rows a page", "Documents a page". */
+  sizeLabel: string
+  onPageSize: (size: number) => void
+  /** Absent where there is no page before this one. */
+  onPrevious?: () => void
+  /** Absent where there is no page after it. */
+  onNext?: () => void
+  children?: React.ReactNode
+}) {
+  return (
+    <>
       <Select value={String(pageSize)} onValueChange={(next) => onPageSize(Number(next))}>
         <SelectTrigger
           size="sm"
-          aria-label="Rows a page"
+          aria-label={sizeLabel}
           className="h-6 gap-1 px-1.5 text-hint max-sm:hidden sm:data-[size=sm]:h-6"
         >
           <SelectValue />
         </SelectTrigger>
         <SelectContent align="end">
-          {PAGE_SIZES.map((size) => (
+          {sizes.map((size) => (
             <SelectItem key={size} value={String(size)} className="text-xs">
               {size} a page
             </SelectItem>
@@ -114,17 +158,17 @@ export function Pager({
         <IconAction
           label="Previous page"
           className="size-6 max-sm:size-8"
-          disabled={!facts.hasPrevious}
-          onClick={() => onPage(pageNumber - 1)}
+          disabled={!onPrevious}
+          onClick={() => onPrevious?.()}
         >
           <ChevronLeft />
         </IconAction>
-        <PageField page={pageNumber} last={facts.lastPage} onPage={onPage} />
+        {children}
         <IconAction
           label="Next page"
           className="size-6 max-sm:size-8"
-          disabled={!facts.hasNext}
-          onClick={() => onPage(pageNumber + 1)}
+          disabled={!onNext}
+          onClick={() => onNext?.()}
         >
           <ChevronRight />
         </IconAction>
@@ -223,14 +267,7 @@ export function ChangeBar({
           {changeSummary(counts)}
         </span>
       )}
-      <Button
-        type="button"
-        size="xs"
-        variant="outline"
-        className="max-sm:h-8"
-        disabled={applying}
-        onClick={onDiscard}
-      >
+      <Button type="button" size="xs" variant="outline" disabled={applying} onClick={onDiscard}>
         Discard
       </Button>
       {/* Busy, not disabled, while the statements are fetched: a button that
@@ -240,7 +277,6 @@ export function ChangeBar({
         type="button"
         size="xs"
         variant="outline"
-        className="max-sm:h-8"
         disabled={blocked || applying}
         aria-busy={reviewing || undefined}
         onClick={onReview}
@@ -251,7 +287,6 @@ export function ChangeBar({
       <Button
         type="button"
         size="xs"
-        className="max-sm:h-8"
         disabled={blocked}
         aria-busy={applying || reviewing || undefined}
         onClick={onApply}

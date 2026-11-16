@@ -2,15 +2,16 @@
 
 import { useEffect, useRef, useState } from "react"
 import { ApiError, fetchResponse, errorMessage } from "@/lib/api"
-import { bytes, grouped } from "@/lib/format"
+import { bytes, grouped, plural } from "@/lib/format"
+import { exportBlob, exportProgress, saveExport, streamExport } from "@/lib/stream-export"
 import { notify } from "@/lib/toast"
 import { Segments } from "@/components/segments"
-import { Field, FormFact, FormFacts, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { Field, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { FileDrop } from "@/components/database/data/file-drop"
 import { EngineMark } from "@/components/database/kit"
 import { importFile, type MongoTarget } from "@/components/database/mongo/api"
 import { draftLabel, isEmptyDraft, type QueryDraft } from "@/components/database/mongo/query"
@@ -76,37 +77,15 @@ export function useMongoExport() {
           relaxed: request.relaxed && format !== "csv" ? 1 : undefined,
         },
       )
-      if (!response.body) throw new Error("The export response has no body")
-
-      const parts: BlobPart[] = []
-      const reader = response.body.getReader()
-      let received = 0
-      let said = 0
-      for (;;) {
-        // The server ends a failed export by breaking the connection: the
-        // read throws, and nothing is saved.
-        const { done, value } = await reader.read()
-        if (done) break
-        parts.push(value)
-        received += value.byteLength
-        if (received - said >= 1 << 20) {
-          said = received
-          notify.raw.loading(`Exporting ${name}… ${bytes(received)}`, { id: toast })
-        }
-      }
-
-      const disposition = response.headers.get("Content-Disposition") ?? ""
-      const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `${name}.${format}`
-      const url = URL.createObjectURL(
-        new Blob(parts, {
-          type: response.headers.get("Content-Type") ?? "application/octet-stream",
-        }),
-      )
-      const link = document.createElement("a")
-      link.href = url
-      link.download = filename
-      link.click()
-      URL.revokeObjectURL(url)
+      const read = await streamExport(response, {
+        signal: controller.signal,
+        progress: exportProgress(name, toast),
+      })
+      // The server ends a failed export by breaking the connection, and
+      // nothing is saved.
+      if (read.cut) throw new Error("The export broke off")
+      const { received } = read
+      saveExport(exportBlob(read.parts, response), response, `${name}.${format}`)
 
       notify.dismiss(toast)
       const truncated = response.headers.get("X-Export-Truncated")
@@ -203,17 +182,18 @@ export function ExportDialog({
       }
     >
       <div className="space-y-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{request.target.collection}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={request.target.collection}
+          mono
+          facts={
+            <>
               <FormFact label="Database" mono>
                 {request.target.database}
               </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         {queried && (
           <Field label="Which documents">
@@ -449,46 +429,36 @@ export function ImportDialog({
       }
     >
       <div className="space-y-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{target.collection}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={target.collection}
+          mono
+          facts={
+            <>
               <FormFact label="Database" mono>
                 {target.database}
               </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         {report ? (
           <ImportOutcome report={report} />
         ) : (
           <>
-            <Field
-              label="File"
-              htmlFor="mongo-import-file"
-              hint="NDJSON or JSON keeps every type (Extended JSON). CSV and TSV fields become strings."
-            >
-              <Input
-                id="mongo-import-file"
-                type="file"
-                accept=".json,.ndjson,.jsonl,.csv,.tsv,.tab,application/json,text/csv"
-                disabled={busy !== null}
-                onChange={(event) => {
-                  const chosen = event.target.files?.[0] ?? null
-                  setFile(chosen)
-                  if (!chosen) {
-                    setPreview(null)
-                    return
-                  }
-                  const guessed = formatOf(chosen.name)
-                  const as = formats.includes(guessed) ? guessed : (formats[0] ?? "ndjson")
-                  setFormat(as)
-                  void look(chosen, as)
-                }}
-              />
-            </Field>
+            <FileDrop
+              file={file}
+              accept=".json,.ndjson,.jsonl,.csv,.tsv,.tab,application/json,text/csv"
+              formats="NDJSON or JSON keeps every type (Extended JSON). CSV and TSV fields become strings."
+              disabled={busy !== null}
+              onFile={(chosen) => {
+                setFile(chosen)
+                const guessed = formatOf(chosen.name)
+                const as = formats.includes(guessed) ? guessed : (formats[0] ?? "ndjson")
+                setFormat(as)
+                void look(chosen, as)
+              }}
+            />
 
             {file && (
               <Field label="Read it as">
@@ -587,9 +557,9 @@ function ImportPreview({ report }: { report: MongoImportReport }) {
               {row.map((cell, at) => (
                 <td key={at} className="max-w-64 truncate px-2 py-1 whitespace-nowrap">
                   {cell === null ? (
-                    <span className="text-muted-foreground/60">not set</span>
+                    <span className="text-faint">not set</span>
                   ) : cell === "" ? (
-                    <span className="text-muted-foreground/60 italic">&quot;&quot;</span>
+                    <span className="text-faint italic">&quot;&quot;</span>
                   ) : (
                     cell
                   )}
@@ -612,7 +582,7 @@ function ImportOutcome({ report }: { report: MongoImportReport }) {
         title={
           report.mode === "replace"
             ? `The collection now holds the file's ${grouped(report.inserted)} documents`
-            : `${grouped(report.inserted)} ${report.inserted === 1 ? "document" : "documents"} imported`
+            : `${plural(report.inserted, "document")} imported`
         }
       >
         {report.skipped > 0

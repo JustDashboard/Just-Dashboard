@@ -416,7 +416,7 @@ export function JsonView({
 function JsonText({ json, depth }: { json: Json; depth: number }): React.ReactNode {
   const pad = "  ".repeat(depth + 1)
   const close = "  ".repeat(depth)
-  const punctuation = "text-muted-foreground/60"
+  const punctuation = "text-faint"
   if (json.k === "object") {
     // A wrapper — {"$oid": "…"} — is one value, not a document to open out.
     const typed = fromJson(json)

@@ -1,8 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchResponse, get } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { fetchResponse } from "@/lib/api"
+import {
+  exportBlob,
+  exportProgress,
+  saveExport,
+  settledExport,
+  streamExport,
+} from "@/lib/stream-export"
 import { notify } from "@/lib/toast"
 import type { DbExportFormat } from "@/lib/types"
 import {
@@ -12,7 +18,6 @@ import {
   exportEnd,
   exportReport,
 } from "@/components/database/data/export"
-import type { DbExportState } from "@/components/database/data/types"
 import { rowsQuery, type ViewState } from "@/components/database/data/view"
 
 export interface ExportRequest {
@@ -24,23 +29,6 @@ export interface ExportRequest {
   /** Only these columns, in this order. */
   columns?: string[]
   limit?: number
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-/** The server's record of how an export went, once it has stopped running. */
-async function settled(id: number, exportId: string): Promise<DbExportState | null> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      const state = await get<DbExportState>(`/databases/${id}/export/status`, { exportId })
-      if (state.status !== "running") return state
-    } catch {
-      // No record: the server restarted or has forgotten. The file's own mark answers.
-      return null
-    }
-    await sleep(500)
-  }
-  return null
 }
 
 /**
@@ -56,6 +44,8 @@ export function useExport(id: number) {
   const [running, setRunning] = useState<string | null>(null)
   const flight = useRef<AbortController | null>(null)
   useEffect(() => () => flight.current?.abort(), [])
+  // The toast's own "export more" asks for the same export again, larger.
+  const again = useRef<(request: ExportRequest) => void>(() => {})
 
   const run = useCallback(
     async (request: ExportRequest) => {
@@ -68,7 +58,6 @@ export function useExport(id: number) {
       const toast = notify.loading(`Exporting ${request.table}…`, {
         action: { label: "Cancel", onClick: () => controller.abort() },
       })
-      let received = 0
       try {
         const response = await fetchResponse(
           `/databases/${id}/export`,
@@ -86,51 +75,21 @@ export function useExport(id: number) {
             exportId,
           },
         )
-        if (!response.body) throw new Error("The export response has no body")
-
-        const parts: BlobPart[] = []
-        const reader = response.body.getReader()
-        let said = 0
-        let cut = false
-        try {
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            parts.push(value)
-            received += value.byteLength
-            // Once a megabyte, so a long export is seen to be moving.
-            if (received - said >= 1 << 20) {
-              said = received
-              notify.raw.loading(`Exporting ${request.table}… ${bytes(received)}`, { id: toast })
-            }
-          }
-        } catch (err) {
-          if (controller.signal.aborted) throw err
-          // The server ends a failed export by breaking the connection.
-          cut = true
-        }
-
-        const type = response.headers.get("Content-Type") ?? "application/octet-stream"
-        const blob = new Blob(parts, { type })
+        const read = await streamExport(response, {
+          signal: controller.signal,
+          progress: exportProgress(request.table, toast),
+        })
+        const blob = exportBlob(read.parts, response)
         const tail = await blob.slice(Math.max(0, blob.size - MARK_TAIL)).text()
-        const state = await settled(id, exportId)
+        const state = await settledExport(id, exportId)
         // A broken connection is a failed export whatever else is known; the
         // server's record, when it has one, says why.
-        const read = exportEnd(state, request.format, tail)
-        const ended = cut ? { ...read, status: "failed" as const } : read
+        const end = exportEnd(state, request.format, tail)
+        const ended = read.cut ? { ...end, status: "failed" as const } : end
         const report = exportReport(ended, request.table, limit)
 
-        if (ended.status !== "failed") {
-          const disposition = response.headers.get("Content-Disposition") ?? ""
-          const filename =
-            /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `${request.table}.${request.format}`
-          const url = URL.createObjectURL(blob)
-          const link = document.createElement("a")
-          link.href = url
-          link.download = filename
-          link.click()
-          URL.revokeObjectURL(url)
-        }
+        if (ended.status !== "failed")
+          saveExport(blob, response, `${request.table}.${request.format}`)
 
         notify.dismiss(toast)
         if (report.tone === "success") notify.success(report.title)
@@ -144,7 +103,7 @@ export function useExport(id: number) {
             action: more
               ? {
                   label: `Export up to ${EXPORT_ROWS_MAX.toLocaleString("en-US")}`,
-                  onClick: () => void run({ ...request, limit: EXPORT_ROWS_MAX }),
+                  onClick: () => again.current({ ...request, limit: EXPORT_ROWS_MAX }),
                 }
               : undefined,
           })
@@ -160,6 +119,10 @@ export function useExport(id: number) {
     },
     [id],
   )
+
+  useEffect(() => {
+    again.current = (request) => void run(request)
+  }, [run])
 
   return { run, running }
 }

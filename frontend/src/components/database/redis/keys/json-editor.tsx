@@ -36,8 +36,8 @@ import {
   nodeSize,
   parseJsonDoc,
   printJsonDoc,
-  type JsonNode,
-} from "@/components/database/redis/keys/json-doc"
+  type BareJsonNode as JsonNode,
+} from "@/components/database/kit/json-doc"
 import type { KeyEditorProps } from "@/components/database/redis/keys/key-pane"
 import { MemberDialog } from "@/components/database/redis/keys/member-dialog"
 import { ReadError } from "@/components/database/redis/read-error"
@@ -248,7 +248,7 @@ export function JsonEditor({ redis, name, epoch, onChanged, confirm }: KeyEditor
         <span className="min-w-0 flex-1" />
         {dirty && (
           <>
-            <span className="text-hint font-medium text-(--git-modified)">Unsaved changes</span>
+            <span className="text-hint font-medium text-git-modified">Unsaved changes</span>
             <Button size="xs" variant="ghost" disabled={busy} onClick={() => setText(null)}>
               Revert
             </Button>
@@ -400,8 +400,8 @@ type NodeActions = {
 }
 
 const KIND_CLASS: Record<JsonNode["kind"], string> = {
-  object: "text-muted-foreground/70",
-  array: "text-muted-foreground/70",
+  object: "text-faint",
+  array: "text-faint",
   string: VALUE_KIND_CLASS.string,
   number: VALUE_KIND_CLASS.number,
   boolean: VALUE_KIND_CLASS.boolean,
@@ -469,7 +469,7 @@ function Node({
         {name !== undefined && (
           <span className="shrink-0 text-muted-foreground">
             {name}
-            <span className="text-muted-foreground/50">:</span>
+            <span className="text-faint">:</span>
           </span>
         )}
         <span className={cn("min-w-0 truncate", KIND_CLASS[node.kind])}>

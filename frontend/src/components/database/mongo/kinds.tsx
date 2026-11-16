@@ -44,7 +44,7 @@ const FAMILY: Record<TypeFamily, FamilySpec> = {
   moment: { color: "var(--tag-cyan)", text: KIND_HUE.datetime },
   id: { color: "var(--tag-slate)", text: KIND_HUE.uuid },
   nested: { color: "var(--tag-blue)", text: KIND_HUE.json },
-  nothing: { color: "var(--muted-foreground)", text: "text-muted-foreground/70" },
+  nothing: { color: "var(--muted-foreground)", text: "text-faint" },
   other: { color: "var(--tag-slate)", text: KIND_HUE.binary },
 }
 
@@ -96,7 +96,7 @@ export function typeInfo(type: string): { label: string; family: TypeFamily } & 
  * shell is a call rather than a digit.
  */
 export function valueClass(type: BsonType): string {
-  if (type === "long" || type === "decimal") return "numeric text-(--tag-pink)"
+  if (type === "long" || type === "decimal") return "numeric text-tag-pink"
   return FAMILY[FAMILY_OF[type]].text
 }
 
@@ -187,11 +187,11 @@ export type CollectionKind = "collection" | "view" | "timeseries" | "capped" | "
 type CollectionKindSpec = { label: string; icon: Icon; hue: string }
 
 export const COLLECTION_KINDS: Record<CollectionKind, CollectionKindSpec> = {
-  collection: { label: "Collection", icon: Layers, hue: "text-(--tag-blue)" },
+  collection: { label: "Collection", icon: Layers, hue: "text-tag-blue" },
   // The same hue a view has among SQL objects: one kind, one colour, across engines.
   view: { label: "View", icon: ROW_OBJECT_KINDS.view.icon, hue: ROW_OBJECT_KINDS.view.hue },
-  timeseries: { label: "Time series", icon: ChartActivity, hue: "text-(--tag-cyan)" },
-  capped: { label: "Capped", icon: RotateClockwise, hue: "text-(--tag-pink)" },
+  timeseries: { label: "Time series", icon: ChartActivity, hue: "text-tag-cyan" },
+  capped: { label: "Capped", icon: RotateClockwise, hue: "text-tag-pink" },
   system: { label: "System", icon: SettingsGear, hue: "text-muted-foreground" },
 }
 

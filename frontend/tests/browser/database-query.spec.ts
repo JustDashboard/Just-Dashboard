@@ -1079,7 +1079,7 @@ test("Cancel takes Run's place while a statement is out, and stops it by its nam
   await write(page, "select slow from customers")
   await page.keyboard.press("ControlOrMeta+Enter")
 
-  const cancel = commands(page).getByRole("button", { name: "Cancel" })
+  const cancel = commands(page).getByRole("button", { name: "Stop", exact: true })
   await expect(cancel).toBeVisible()
   await expect(runButton(page)).toHaveCount(0)
   await expect(commands(page).getByRole("status")).toContainText(/Running…\s*0:0\d/)
@@ -1970,7 +1970,7 @@ test("a search of ticked tables reads those tables and no others, and says which
   const { sent } = await mockWork(page)
   await page.goto("/databases/1/search")
   // The scope is chosen before the scan: which of this schema's tables are read.
-  await page.getByRole("button", { name: "Every table (3)" }).click()
+  await page.getByRole("button", { name: "Every table 3" }).click()
   const list = page.getByRole("list", { name: "The tables read" })
   await expect(list.getByRole("listitem")).toHaveCount(3)
   // The view is left out, as a search of the whole schema leaves it out.

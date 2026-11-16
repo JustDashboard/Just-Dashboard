@@ -63,22 +63,22 @@ const kind = (
 // Written out so the stylesheet holds them: a class assembled at run time is
 // one Tailwind never saw.
 const HUE_TEXT: Record<string, string> = {
-  blue: "text-(--tag-blue)",
-  violet: "text-(--tag-violet)",
-  green: "text-(--tag-green)",
-  amber: "text-(--tag-amber)",
-  pink: "text-(--tag-pink)",
-  cyan: "text-(--tag-cyan)",
-  slate: "text-(--tag-slate)",
+  blue: "text-tag-blue",
+  violet: "text-tag-violet",
+  green: "text-tag-green",
+  amber: "text-tag-amber",
+  pink: "text-tag-pink",
+  cyan: "text-tag-cyan",
+  slate: "text-tag-slate",
 }
 const HUE_FILL: Record<string, string> = {
-  blue: "bg-(--tag-blue)",
-  violet: "bg-(--tag-violet)",
-  green: "bg-(--tag-green)",
-  amber: "bg-(--tag-amber)",
-  pink: "bg-(--tag-pink)",
-  cyan: "bg-(--tag-cyan)",
-  slate: "bg-(--tag-slate)",
+  blue: "bg-tag-blue",
+  violet: "bg-tag-violet",
+  green: "bg-tag-green",
+  amber: "bg-tag-amber",
+  pink: "bg-tag-pink",
+  cyan: "bg-tag-cyan",
+  slate: "bg-tag-slate",
 }
 
 export const REDIS_KINDS: Record<RedisKind, RedisKindInfo> = {

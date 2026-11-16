@@ -8,7 +8,7 @@ import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { CodeEditor } from "@/components/code-editor"
 import { Segments } from "@/components/segments"
-import { Field, FieldCheck, FormFact, FormFacts } from "@/components/form"
+import { Field, FieldCheck, FieldChecks, FormFact, FormFacts } from "@/components/form"
 import { EmptyState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
@@ -300,13 +300,17 @@ export function ValidationView({ mongo, catalog, collection: info, confirm }: Wo
                 }}
               />
             </div>
-            <div aria-live="polite" className="min-h-5">
+            <div className="min-h-5">
               {problem ? (
-                <p className="text-hint text-destructive">{problem}</p>
+                <p role="alert" className="text-hint text-destructive">
+                  {problem}
+                </p>
               ) : (
-                <FieldCheck met={!empty}>
-                  {empty ? "No rule: every document is accepted" : "Reads as one document"}
-                </FieldCheck>
+                <FieldChecks>
+                  <FieldCheck met={!empty}>
+                    {empty ? "No rule: every document is accepted" : "Reads as one document"}
+                  </FieldCheck>
+                </FieldChecks>
               )}
             </div>
           </div>

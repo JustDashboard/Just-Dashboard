@@ -17,13 +17,53 @@ export const KIND_HUE: Record<GridColumnKind, string> = {
   number: "numeric",
   text: "",
   unknown: "",
-  boolean: "text-(--tag-violet)",
-  datetime: "text-(--tag-cyan)",
-  date: "text-(--tag-cyan)",
-  time: "text-(--tag-cyan)",
-  json: "text-(--tag-blue)",
-  array: "text-(--tag-blue)",
-  enum: "text-(--tag-pink)",
-  uuid: "text-(--tag-slate)",
-  binary: "text-(--tag-slate)",
+  boolean: "text-tag-violet",
+  datetime: "text-tag-cyan",
+  date: "text-tag-cyan",
+  time: "text-tag-cyan",
+  json: "text-tag-blue",
+  array: "text-tag-blue",
+  enum: "text-tag-pink",
+  uuid: "text-tag-slate",
+  binary: "text-tag-slate",
+}
+
+/** A row's change before it is saved. */
+export type ChangeState = "inserted" | "updated" | "deleted"
+
+/**
+ * The legend for a staged change: the sign a diff uses, the words for it and
+ * the `--git-*` hue it is drawn in, wherever a row waiting to be saved is
+ * shown — the grid's gutter, the row panel, the cards on a phone and the
+ * count in the status strip.
+ *
+ * `short` sits after a row's title or a count ("+2 new", "edited"); `long`
+ * says it alone, as the gutter's sign is read out ("Marked for deletion").
+ * The classes are whole literals so Tailwind finds them.
+ */
+export const CHANGE_STATE: Record<
+  ChangeState,
+  { sign: string; short: string; long: string; hue: string; edge: string }
+> = {
+  inserted: {
+    sign: "+",
+    short: "new",
+    long: "New row",
+    hue: "text-git-added",
+    edge: "border-l-git-added",
+  },
+  updated: {
+    sign: "~",
+    short: "edited",
+    long: "Edited",
+    hue: "text-git-modified",
+    edge: "border-l-git-modified",
+  },
+  deleted: {
+    sign: "−",
+    short: "to delete",
+    long: "Marked for deletion",
+    hue: "text-git-deleted",
+    edge: "border-l-git-deleted",
+  },
 }

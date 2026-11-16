@@ -11,7 +11,7 @@ const PAGE = 100
 
 /** The word redis-cli prints before a value that is not a string. */
 function Kind({ children }: { children: React.ReactNode }) {
-  return <span className="text-muted-foreground/70 select-none">({children}) </span>
+  return <span className="text-faint select-none">({children}) </span>
 }
 
 /**
@@ -59,7 +59,7 @@ export function Reply({ reply, depth = 0 }: { reply: RedisReply; depth?: number 
         </span>
       )
     case "boolean":
-      return <span className="text-(--tag-violet)">({String(reply.value)})</span>
+      return <span className="text-tag-violet">({String(reply.value)})</span>
     case "string":
       return <Text reply={reply} />
     case "array":
@@ -114,7 +114,7 @@ function Items({ reply, depth }: { reply: Extract<RedisReply, { type: "array" }>
     <span className="block min-w-0">
       {items.slice(0, shown).map((item, at) => (
         <span key={at} className="flex min-w-0 items-start gap-2">
-          <span className="shrink-0 whitespace-pre text-muted-foreground/70 select-none">
+          <span className="shrink-0 whitespace-pre text-faint select-none">
             {index(at + 1, items.length)})
           </span>
           <span className="min-w-0 flex-1">
@@ -136,13 +136,13 @@ function Entries({ reply, depth }: { reply: Extract<RedisReply, { type: "map" }>
     <span className="block min-w-0">
       {entries.slice(0, shown).map((entry, at) => (
         <span key={at} className="flex min-w-0 items-start gap-2">
-          <span className="shrink-0 whitespace-pre text-muted-foreground/70 select-none">
+          <span className="shrink-0 whitespace-pre text-faint select-none">
             {index(at + 1, entries.length)}#
           </span>
           <span className="shrink-0">
             <Reply reply={entry.key} depth={depth + 1} />
           </span>
-          <span className="shrink-0 text-muted-foreground/70 select-none">=&gt;</span>
+          <span className="shrink-0 text-faint select-none">=&gt;</span>
           <span className="min-w-0 flex-1">
             <Reply reply={entry.value} depth={depth + 1} />
           </span>

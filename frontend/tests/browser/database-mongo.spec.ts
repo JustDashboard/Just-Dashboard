@@ -1229,11 +1229,11 @@ test.describe("documents", () => {
     const dialog = page.getByRole("dialog", { name: "Delete documents" })
     // It opens on the filter the query bar holds.
     await expect(dialog.getByLabel("Filter")).toHaveValue('{ "status": "paid" }')
-    await dialog.getByRole("button", { name: "Count the matches" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await expect(dialog).toContainText("2 documents match")
     // Another filter is another count: the number on the button is never of the old one.
     await dialog.getByLabel("Filter").fill('{ "status": "shipped" }')
-    await expect(dialog.getByRole("button", { name: "Count the matches" })).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Count", exact: true })).toBeVisible()
     await dialog.getByLabel("Filter").fill('{ "status": "paid" }')
     await dialog.getByRole("button", { name: /Delete 2 documents/ }).click()
 
@@ -1258,7 +1258,7 @@ test.describe("documents", () => {
     const dialog = page.getByRole("dialog", { name: "Update documents" })
     await dialog.getByLabel("Filter").fill('{ "status": "paid" }')
     await dialog.getByLabel("Update").fill('{ "$set": { "seen": true } }')
-    await dialog.getByRole("button", { name: "Count the matches" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await dialog.getByRole("button", { name: "Update 2 documents" }).click()
     await expect(dialog).toBeHidden()
     expect(mongo.asked("PATCH /mongo/documents").map((call) => call.body.dryRun)).toEqual([
@@ -1404,7 +1404,9 @@ test.describe("documents", () => {
     await sort.fill("{ age: 5 }")
     await sort.press("Enter")
     // On the sort, in the server's words — and not on the filter, though one is typed.
-    await expect(page.locator("#mongo-query-sort-problem")).toContainText("$sort key ordering")
+    // The option is a Field: its error is what the box is described by.
+    await expect(sort).toHaveAccessibleDescription(/\$sort key ordering/)
+    await expect(sort).toHaveAttribute("aria-invalid", "true")
     await expect(page.locator("#mongo-query-filter-problem")).toHaveCount(0)
     // The documents from before stay, and the line over them says why and asks again.
     const held = page.locator("[data-slot=mongo-read-failed]")
@@ -1419,7 +1421,7 @@ test.describe("documents", () => {
     await expect(page.locator("[data-slot=mongo-query-refusal]")).toContainText(
       "FieldPath field names may not start with",
     )
-    await expect(page.locator("#mongo-query-sort-problem")).toHaveCount(0)
+    await expect(sort).not.toHaveAttribute("aria-invalid", "true")
   })
 
   test("a page that could not be read says which, why, and whose documents are on screen", async ({
@@ -2439,15 +2441,15 @@ test.describe("performance", () => {
     await expect(page.locator("[data-slot=mongo-busiest]")).toHaveCount(0)
     // What such a server does report is still there.
     await expect(page.getByText("Databases on this server")).toBeVisible()
-    await expect(page.getByRole("group", { name: "Performance views" })).toBeHidden()
+    await expect(page.getByRole("tablist", { name: "Performance views" })).toBeHidden()
   })
 
   test("the replica set is a view only where the server is a member of one", async ({ page }) => {
     await mockMongo(page)
     await page.goto(PERFORMANCE)
-    const strip = page.getByRole("group", { name: "Performance views" })
-    await expect(strip.getByRole("button", { name: "Operations", exact: true })).toBeVisible()
-    await expect(strip.getByRole("button", { name: "Replica set" })).toHaveCount(0)
+    const strip = page.getByRole("tablist", { name: "Performance views" })
+    await expect(strip.getByRole("tab", { name: "Operations", exact: true })).toBeVisible()
+    await expect(strip.getByRole("tab", { name: "Replica set" })).toHaveCount(0)
     await page.unrouteAll({ behavior: "ignoreErrors" })
 
     await mockMongo(page, { topology: "replicaset" })

@@ -1,22 +1,22 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useMemo, useState } from "react"
 import { Key } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { Segments } from "@/components/segments"
-import { Meter } from "@/components/meter"
 import { SearchInput } from "@/components/search-input"
 import { EmptyState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { RunningCommand } from "@/components/database/query/running-command"
 import { EngineMark } from "@/components/database/kit"
 import { analyseSchema } from "@/components/database/mongo/api"
 import { CodeField } from "@/components/database/mongo/code-field"
 import {
-  StopButton,
   Stopped,
-  useElapsed,
+  useSecondsRunning,
   useStoppable,
   worthShowing,
 } from "@/components/database/mongo/in-flight"
@@ -86,7 +86,7 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
   const [query, setQuery] = useState("")
   // A sample of ten thousand documents can take a while: it says how long, and can be stopped.
   const flight = useStoppable()
-  const seconds = useElapsed(busy)
+  const seconds = useSecondsRunning(busy)
 
   const filterBad = shapeProblem(filter, "document")
   const analyse = async () => {
@@ -152,7 +152,7 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
         )}
       </div>
       {busy && worthShowing(seconds) ? (
-        <StopButton seconds={seconds} onStop={flight.stop} className="h-8" />
+        <RunningCommand seconds={seconds} onStop={flight.stop} className="h-8" />
       ) : (
         <Button
           size="sm"
@@ -208,8 +208,7 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
         )}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
           <p className="numeric min-w-0 flex-1 text-hint text-muted-foreground">
-            Based on {schema.sampled.toLocaleString("en-US")}{" "}
-            {schema.sampled === 1 ? "document" : "documents"}
+            Based on {plural(schema.sampled, "document")}
             {schema.total >= 0 ? ` of about ${schema.total.toLocaleString("en-US")}` : ""} ·{" "}
             {schema.fields.length.toLocaleString("en-US")} fields ·{" "}
             {schema.durationMs.toLocaleString("en-US")} ms
@@ -240,7 +239,7 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
             <li
               aria-hidden
               className={cn(
-                "sticky top-0 z-10 grid gap-x-4 bg-card px-3 py-1.5 text-hint font-medium text-muted-foreground @max-2xl:hidden",
+                "sticky top-0 z-raised grid gap-x-4 bg-card px-3 py-1.5 text-hint font-medium text-muted-foreground @max-2xl:hidden",
                 GRID,
               )}
             >
@@ -291,7 +290,7 @@ function FieldRow({
         </span>
         {field.indexed && (
           <span
-            className="flex shrink-0 items-center text-(--tag-cyan)"
+            className="flex shrink-0 items-center text-tag-cyan"
             title={`In ${field.indexes.length === 1 ? "the index" : "the indexes"} ${field.indexes.join(", ")}`}
           >
             <Key aria-hidden className="size-3" />
@@ -331,13 +330,6 @@ function FieldRow({
       </div>
 
       <div className="min-w-0 space-y-1 self-start">
-        <div className="flex h-2 items-center">
-          <Meter
-            size="thin"
-            value={field.presence * 100}
-            label={`${field.path} is in ${shareWords(field.presence)} of the sampled documents`}
-          />
-        </div>
         <p className="numeric flex flex-wrap items-center gap-x-1.5 text-hint text-muted-foreground">
           {shareWords(field.presence)}
           {missing > 0 && !element && (
