@@ -58,7 +58,43 @@
     "StatusBadge",
     "TabLink",
     "Term",
-    "TopBar",
-    "WorkbenchHeader"
-  ]
+    "TopBar"
+  ],
+  "inFlight": {
+    "about": "Misses that the other 0.9.0 wave-3 packages make (new exports with no row yet) or mend (a name the docs already use, whose component arrives with them). They land one by one, so the check accepts each of these as a miss or not. WP-41 empties these lists with the others.",
+    "noRow": [
+      "ConsoleLine (components/console-view.tsx)",
+      "ConsoleState (components/console-view.tsx)",
+      "INLINE_LINK (components/inline-link.tsx)",
+      "KEYCAP (components/keycaps.tsx)",
+      "KeyPiece (components/keycaps.tsx)",
+      "MonoValue (components/wire/mono-value.tsx)",
+      "MoreTile (components/wire/wire-marks.tsx)",
+      "ONWARD_LINK (components/inline-link.tsx)",
+      "ROW_NAME (components/ui/table.tsx)",
+      "SECONDARY_COLUMN (components/ui/table.tsx)",
+      "ShortcutGroup (components/keycaps.tsx)",
+      "ShortcutHandler (hooks/use-shortcuts.ts)",
+      "ShortcutMap (hooks/use-shortcuts.ts)",
+      "SingleKeySwitch (components/keycaps.tsx)",
+      "TextLink (components/inline-link.tsx)",
+      "WireMarks (components/wire/wire-marks.tsx)",
+      "WireMarksHub (components/wire/wire-marks.tsx)",
+      "WireMarksNode (components/wire/wire-marks.tsx)",
+      "WireMarksRow (components/wire/wire-marks.tsx)",
+      "WireMarksTier (components/wire/wire-marks.tsx)",
+      "WireMarksWire (components/wire/wire-marks.tsx)",
+      "WorkbenchBack (components/workbench-header.tsx)",
+      "jobLineToTranscript (components/transcript-line.tsx)",
+      "keyWays (components/keycaps.tsx)",
+      "monoBreaks (components/wire/mono-breaks.ts)",
+      "setMotionPaused (components/shell/motion-pause.ts)",
+      "streamKind (components/transcript-line.tsx)",
+      "useLauncherKeys (components/keycaps.tsx)",
+      "useMotionPaused (components/shell/motion-pause.ts)",
+      "useSingleKeyShortcuts (hooks/use-shortcuts.ts)"
+    ],
+    "rowNotExport": [],
+    "unknownName": ["WorkbenchHeader"]
+  }
 }
