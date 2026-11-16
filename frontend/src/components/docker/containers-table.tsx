@@ -1,6 +1,6 @@
 "use client"
 
-import { Box, ChevronDown, ChevronUp } from "@/components/icons"
+import { Box } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useNow } from "@/hooks/use-now"
 import { HUE } from "@/components/live-figure"
@@ -11,6 +11,8 @@ import { Status, StatusDot } from "@/components/status-dot"
 import { Sparkline } from "@/components/sparkline"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
+  ROW_NAME,
+  SortHead,
   stickyTableHeader,
   Table,
   TableBody,
@@ -99,33 +101,24 @@ export function ContainerRows({
   // One shape, chosen here, rather than a hidden twin of the other: a
   // reading that exists in a hidden copy is two answers to every query (§12).
   const wide = useBreakpoint("xl")
+  const by = (column: SortKey) => ({
+    active: sort.key === column,
+    descending: sort.dir === "desc",
+    onSort: () => onSort(column),
+  })
   if (wide) {
     return (
       <div className="min-w-0">
         <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
-              <SortHead label="Container" column="name" sort={sort} onSort={onSort} />
-              <SortHead label="State" column="state" sort={sort} onSort={onSort} className="w-44" />
-              <SortHead
-                label="CPU"
-                column="cpu"
-                sort={sort}
-                onSort={onSort}
-                className="w-32 text-right 2xl:w-44"
-              />
-              <SortHead
-                label="Memory"
-                column="memory"
-                sort={sort}
-                onSort={onSort}
-                className="w-36 text-right"
-              />
+              <SortHead label="Container" {...by("name")} />
+              <SortHead label="State" {...by("state")} className="w-44" />
+              <SortHead label="CPU" {...by("cpu")} align="right" className="w-32 2xl:w-44" />
+              <SortHead label="Memory" {...by("memory")} align="right" className="w-36" />
               <TableHead className="hidden w-36 text-right 2xl:table-cell">Network</TableHead>
               <TableHead className="w-32 2xl:w-36">Ports</TableHead>
-              <TableHead className="w-28">
-                <span className="sr-only">Actions</span>
-              </TableHead>
+              <TableHead label="Actions" className="w-28" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -156,42 +149,6 @@ export function ContainerRows({
         />
       ))}
     </ul>
-  )
-}
-
-/** A column heading that sorts by its column, saying so to a screen reader. */
-function SortHead({
-  label,
-  column,
-  sort,
-  onSort,
-  className,
-}: {
-  label: string
-  column: SortKey
-  sort: ContainerSort
-  onSort: (key: SortKey) => void
-  className?: string
-}) {
-  const active = sort.key === column
-  const Arrow = sort.dir === "asc" ? ChevronUp : ChevronDown
-  return (
-    <TableHead
-      className={className}
-      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-    >
-      <button
-        type="button"
-        onClick={() => onSort(column)}
-        className={cn(
-          "-mx-1 inline-flex items-center gap-1 rounded-sm px-1 focus-ring transition-colors hover:text-foreground",
-          active && "text-foreground",
-        )}
-      >
-        {label}
-        {active && <Arrow aria-hidden className="size-3" />}
-      </button>
-    </TableHead>
   )
 }
 
@@ -333,7 +290,8 @@ function Identity({
       <ProductLogo id={containerProduct(container)} size="sm" fallback={Box} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          <RowLink title={container.name} onClick={() => onOpen(container.id)}>
+          {/* The row's name (ROW_NAME): it lands once RowLink passes its props on. */}
+          <RowLink {...ROW_NAME} title={container.name} onClick={() => onOpen(container.id)}>
             {container.name}
           </RowLink>
         </div>
