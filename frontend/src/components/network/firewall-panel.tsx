@@ -207,8 +207,14 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
 
   // The shortcuts' `?` stands where a detail page keeps it, on the row above
   // the line, not beside the page's command; a phone has no keyboard for it.
+  // The row holds the button's height before the workspace that draws it is
+  // up, so the line under it does not move when the firewall is read.
   const header = (
-    <PageContext title="Firewall" actions={<WorkspaceHelp compact />} className="max-sm:hidden" />
+    <PageContext
+      title="Firewall"
+      actions={<WorkspaceHelp compact />}
+      className="min-h-6 max-sm:hidden"
+    />
   )
   const refreshVerb: Verb = {
     key: "refresh",
