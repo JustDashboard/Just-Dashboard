@@ -130,7 +130,7 @@ test("an address that names no database says so and opens no other", async ({ pa
     )
     await expect(strip(page)).toHaveCount(0)
     // The rail stays on the section: no pages of a database that is not there.
-    expect(await railPages(page), path).toEqual(["Control center", "Map", "Add a database"])
+    expect(await railPages(page), path).toEqual(["Databases", "Map", "Add a database"])
     expect(where(page)).toBe(path)
   }
 })
@@ -333,7 +333,7 @@ test("a password asked for is not shown once the popover it was asked in has clo
   // Asked for and waited for, it is shown — and quoted so a shell reads none of it.
   await show.click()
   await expect(string).toContainText("s3cret")
-  await page.getByRole("button", { name: "psql", exact: true }).click()
+  await page.getByRole("radio", { name: "psql", exact: true }).click()
   await expect(string).toHaveText(
     "psql 'postgres://app:s3cret@127.0.0.1:5432/shop_main?sslmode=disable'",
   )

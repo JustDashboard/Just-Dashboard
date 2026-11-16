@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import type { ApiToken, ApiTokenConnection, ApiTokenDeployments } from "@/lib/types"
 
 /** The endpoint an AI client is pointed at. Only an MCP key opens it. */
@@ -88,7 +89,7 @@ export function deploymentsWithin(
  */
 function deploymentWords(token: Pick<ApiToken, "deployments" | "deploymentIds">): string {
   const count = token.deploymentIds?.length ?? 0
-  const some = count === 1 ? "1 deployment" : `${count} deployments`
+  const some = plural(count, "deployment")
   switch (token.deployments ?? "") {
     case "read":
       return count === 0 ? "reads deployments" : `reads ${some}`

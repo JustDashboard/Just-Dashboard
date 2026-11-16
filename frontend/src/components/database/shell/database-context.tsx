@@ -325,7 +325,7 @@ export function DatabaseProvider({ id, children }: { id: number; children: React
   // they say which pages this engine has, and a page mounted before them
   // would ask a key–value store for its tables.
   if (value || !(loaded || error) || recheck.loading) {
-    return <PageState eyebrow="Databases" title={titleOf(pathname, found?.name)} />
+    return <PageState title={titleOf(pathname, found?.name)} />
   }
   // A list that failed is why the database cannot be shown only while
   // nothing has answered since; a second read that came back without it has.
@@ -333,7 +333,6 @@ export function DatabaseProvider({ id, children }: { id: number; children: React
   if (failure) {
     return (
       <PageState
-        eyebrow="Databases"
         title={titleOf(pathname)}
         error={failure}
         onRetry={() => {
@@ -365,7 +364,7 @@ function titleOf(pathname: string, name?: string) {
 export function DatabaseNotFound() {
   return (
     <Page>
-      <PageContext eyebrow="Databases" title="Database not found" />
+      <PageContext title="Database not found" />
       <EmptyState
         icon={Database}
         title="Database not found"

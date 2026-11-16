@@ -8,8 +8,11 @@ import {
   fleetReadings,
   groupFleet,
   matchesQuery,
+  nounFor,
+  objectNouns,
   powerOffers,
   reachWord,
+  sessionNouns,
   sortFleet,
   STALE_BACKUP_MS,
   storedBytes,
@@ -393,5 +396,24 @@ describe("what the databases feed", () => {
   test("a link is described by how it is known", () => {
     expect(describeEdge(topology.edges[1])).toBe("named in its environment · 3 open sessions")
     expect(describeEdge(topology.edges[3])).toBe("same compose stack · shares a network")
+  })
+})
+
+describe("the words a card counts in", () => {
+  test("a singular is looked up, not made by cutting an s", () => {
+    expect(nounFor(1, objectNouns("tables"))).toBe("table")
+    expect(nounFor(2, objectNouns("tables"))).toBe("tables")
+    expect(nounFor(1, objectNouns("collections"))).toBe("collection")
+    expect(nounFor(1, objectNouns("keys"))).toBe("key")
+    expect(nounFor(0, objectNouns("keys"))).toBe("keys")
+    // A plural it does not know is not cut into a word nobody uses.
+    expect(nounFor(1, objectNouns("indexes"))).toBe("indexes")
+  })
+
+  test("a key-value store counts clients, the rest sessions", () => {
+    expect(nounFor(1, sessionNouns("keyvalue"))).toBe("client")
+    expect(nounFor(3, sessionNouns("keyvalue"))).toBe("clients")
+    expect(nounFor(1, sessionNouns("relational"))).toBe("session")
+    expect(nounFor(0, sessionNouns("document"))).toBe("sessions")
   })
 })
