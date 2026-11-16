@@ -40,7 +40,7 @@ is a card. Everything else is plain.
 | Prop | What it does |
 | --- | --- |
 | `plain` | No frame: the title, the hairline, the content. 400 of 424 panels pass it. |
-| `framed` | The frame, said out loud. Framed is still the default, so today a panel without `plain` is framed. The wave-2 passes mark each framed caller with `framed` and the reason in a comment. WP-39 then flips the default to plain and retires `plain` (PRM-08). `framed={false}` is plain. |
+| `framed` | The frame, said out loud. Framed is still the default, so a panel without `plain` is framed. A framed caller passes `framed` with the reason in a comment; once every one does, the default flips to plain and `plain` retires (WP-39, PRM-08). `framed={false}` is plain. |
 | `interactive` | The panel is a link or a button. Its border steps up under the pointer, and nothing else moves. |
 | `…section props` | `aria-label`, `id`, `className` and the rest of a `<section>`'s props. |
 
@@ -152,7 +152,8 @@ for a region that should read as distinct. A `Group` of related inputs takes `ro
 | `BarReading` | One block of a band: a head, a bar, one line and one strip of marks, the same height in every state (§10) | Not a `BarList`: nothing is listed under the bar, and it is the only thing a band's bar is drawn with |
 | `MissingThing` | A page whose subject is absent: the thing drawn as itself, one headline, the next step as a button ([`states.md`](states.md#a-thing-that-is-not-there-has-one-screen)). It is the proxy's `EngineSetup` made general | Not an `EmptyState` (an empty list) or an `ErrorState` (a failed read). A new page never copies `EngineSetup` |
 | `EmptyState` | A list with nothing in it: what it would hold (`mark`), one sentence, the step that fills it. The proxy overview's `OverviewEmpty` is the same job inside one of its blocks, and stays its own | Not for an absent subject (`MissingThing`) or a failed read (`ErrorState`) |
-| Rail | The list an item's page came from, beside it from `xl` (D9). One `Rail` lands in WP-07 ([`rail.md`](rail.md)); until then a page copies `procs/process-rail.tsx` | Not a sheet over the list, and not a second generic rail |
+| `EmptyNote` | "Nothing here" inside something already framed: a rail, a picker, a panel under a filter. One line at the row's own size (`dense` in a rail), with `action` for the way out | Not an `EmptyState`, which would be a frame in a frame |
+| `Rail` | The list an item's page came from, beside it from `xl` (D9): `Rail` and `RailRow` in `components/rail.tsx`, inside `DetailPage` ([`rail.md`](rail.md)) | Not a sheet over the list, and not a rail of your own: the areas' copies are gone or deprecated |
 
 **Reach for `Panel`/`Pane`/`Page`, and add a variant there rather than a one-off in a feature page.**
 Before these existed, fourteen pages read as fourteen products.

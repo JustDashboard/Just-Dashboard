@@ -101,8 +101,8 @@ what took their place (`components/network/drift/`):
   breathing only while an inspection is in flight. A press narrows the table to them. The other
   three figures are the table's chips, and the proposals the plan's own review button.
 - **A picture of where the saved configuration goes** (`drift-picture.tsx`), a `WireFlow` with
-  `spec.json` as its hub and the domains as its end column, full width (0.9.0; the backups map's
-  shape until then): `spec.json` wired to the rendered files, the kernel objects, the boot unit and the
+  the saved spec as its hub and the domains as its end column, full width (0.9.0; the backups map's
+  shape until then): the spec file wired to the rendered files, the kernel objects, the boot unit and the
   blocklists, each drawn as the product that reads it — netfilter's flame for the nftables files and
   admission chains, systemd's brackets for the units, Linux for the kernel's devices, routes and
   settings, WireGuard for a tunnel, Spamhaus and FireHOL for their lists (four marks arrived for it,

@@ -596,7 +596,7 @@ valid on one bar, worst first, the line naming the soonest to end in that standi
 left; and **Applications**, what the sites stand in front of drawn as itself, those refusing
 connections first, the line carrying the health check's answer. A press opens its site. Until
 0.8.5 Traffic's five and Certificates' five soonest were rows under their bars, the second on a
-`StandingBar`. What a site fronts is read off the Ports page's
+`StandingBar` (removed after 0.8.5). What a site fronts is read off the Ports page's
 sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
 else its unit — never the port alone, so an upstream nothing on the list names keeps the
 engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else"; the

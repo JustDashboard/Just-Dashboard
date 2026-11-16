@@ -607,9 +607,9 @@ named Hourly, Daily, Weekly and Monthly scripts, and a line guarded on `/run/sys
 be "left to systemd" with the timer that does its work; and a **Cron log** (the service logs on the
 cron daemon's unit journal, else a cron file, else the journal's `CRON` lines, through the cron lens
 with its sessions hidden as a chip and its runs and lost output counted on its chips). Every
-schedule opens a page of its own (`procs/schedule-page.tsx`):
-`/processes/scheduled/cron/<user>:<line>` or `/processes/scheduled/cron/system:<file>:<line>` for
-a cron line, and `/processes/scheduled/timers/<unit>` for a timer. Each page sits on the shared
+schedule opens a page of its own (`procs/schedule-page.tsx`): `/processes/scheduled/cron/[id]`
+for a cron line (the id is the account and the line, or "system", the file and the line), and
+`/processes/scheduled/timers/[unit]` for a timer. Each page sits on the shared
 detail frame with every schedule as a rail, soonest first (`schedule-rail.tsx`). Its Overview is
 built from one set of parts (`procs/schedule-sheet.tsx`): the schedule in a sentence over its
 expression, its figures, **When it runs** — the next five runs listed beside the week drawn as

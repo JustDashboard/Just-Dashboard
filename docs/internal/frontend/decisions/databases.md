@@ -39,7 +39,7 @@ as zero, the line giving the products that read each; and **Backups**, every dat
 can dump counted never, over a week ago — the age every other reading of the section calls stale —
 this week and today on one bar, worst first, the line naming the worst database in that standing
 with its newest dump's age. A press opens the database, or under Backups its Backups page. Until
-0.8.5 each block's five were rows under its bar, Backups' on a `StandingBar`. Backups and
+0.8.5 each block's five were rows under its bar, Backups' on a `StandingBar` (removed after 0.8.5). Backups and
 the Sites page's Certificates had also drawn a track under every row with a dot on it until 0.7.5, which
 went at the operator's request: the track had no scale, so the dot said less than the age beside
 it, a database never backed up was drawn at a place it did not have, and the track's hairline
