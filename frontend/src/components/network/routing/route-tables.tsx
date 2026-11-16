@@ -149,14 +149,8 @@ export function RoutesTable({
   return (
     <Panel aria-label="Routes" data-routing="routes">
       <PanelHeader
-        title={
-          <>
-            Routes
-            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-              {target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
-            </span>
-          </>
-        }
+        title="Routes"
+        count={target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
         actions={
           hiddenLocal > 0 && (
             <InfoTip label="What is not listed">
@@ -442,14 +436,8 @@ export function RulesTable({
   return (
     <Panel aria-label="Policy rules" data-routing="rules">
       <PanelHeader
-        title={
-          <>
-            Policy rules
-            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-              {rules.length}
-            </span>
-          </>
-        }
+        title="Policy rules"
+        count={rules.length}
         actions={
           onAdd && (
             <Button size="xs" variant="outline" onClick={onAdd}>

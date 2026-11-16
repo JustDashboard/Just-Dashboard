@@ -8,8 +8,9 @@ import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { DiffCount } from "@/components/docker/stack-diff"
-import { diffCounts, lineDiff } from "@/components/docker/stack-views"
+import { DiffCount } from "@/components/diff-count"
+import { DiffView } from "@/components/files/diff-view"
+import { diffCounts, lineDiff, unifiedBody } from "@/lib/diff"
 import { plural } from "@/lib/format"
 import type { DriftReport, DriftRow, OwnedRepair } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
@@ -322,29 +323,10 @@ function ReviewedRepair({ item }: { item: OwnedRepair }) {
       {item.after && (
         <>
           {!item.before && <p className="text-hint text-muted-foreground">File absent before</p>}
-          {/* The exact change, in the well every read-only output sits in. */}
-          <Well className="p-0 text-hint">
-            <pre className="py-1">
-              {lines.map((line, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    "flex px-3 break-all whitespace-pre-wrap",
-                    line.kind === "added" && "bg-wash-success text-success",
-                    line.kind === "removed" && "bg-wash-danger text-destructive",
-                    line.kind !== "added" && line.kind !== "removed" && "text-muted-foreground",
-                  )}
-                >
-                  <span aria-hidden className="w-4 shrink-0 select-none">
-                    {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : ""}
-                  </span>
-                  <span className="sr-only">
-                    {line.kind === "added" ? "after: " : line.kind === "removed" ? "before: " : ""}
-                  </span>
-                  <span className="min-w-0">{line.text}</span>
-                </div>
-              ))}
-            </pre>
+          {/* The exact change, drawn by the one diff view, in the well every
+              read-only output sits in. */}
+          <Well className="p-0">
+            <DiffView body={unifiedBody(lines)} singleFile />
           </Well>
         </>
       )}

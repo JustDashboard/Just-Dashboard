@@ -10,8 +10,9 @@ import type { PollState } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { WireHost, WirePlaceholder } from "@/components/wire/wire"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { MissingThing } from "@/components/missing-thing"
+import { InstallHandoff, usePackageKnown } from "@/components/install-handoff"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -70,29 +71,7 @@ export function BGPPanel({ read }: { read: PollState<BGPView> }) {
       <Panel plain aria-label="BGP">
         <PanelHeader title="BGP" actions={<Status tone="unknown" label="FRR not installed" />} />
         <PanelBody>
-          <EmptyState
-            className="h-56 py-0"
-            mark={
-              <span aria-hidden className="flex items-center">
-                <WireHost size="sm" />
-                <span className="w-14 border-t border-dashed border-border-strong" />
-                <WirePlaceholder size="sm" fallback={RouteGlyph} />
-              </span>
-            }
-            title="FRR is not installed"
-            description={
-              <>
-                BGP needs a provider that offers a session to its customers: most colocation, Vultr,
-                Equinix Metal, Hetzner&rsquo;s dedicated servers. With FRR installed its neighbours,
-                their state and their prefixes appear here.
-              </>
-            }
-            action={
-              <Button asChild size="sm" variant="outline">
-                <Link href="/packages?q=frr">Find FRR in Packages</Link>
-              </Button>
-            }
-          />
+          <FrrMissing onInstalled={read.refresh} />
         </PanelBody>
       </Panel>
     )
@@ -144,6 +123,51 @@ export function BGPPanel({ read }: { read: PollState<BGPView> }) {
   )
 }
 
+const FRR_PITCH =
+  "BGP needs a provider that offers a session to its customers: most colocation, Vultr, Equinix Metal, Hetzner’s dedicated servers."
+
+/**
+ * Where FRR is not installed: the install in place where this server's
+ * package manager has it, as WireGuard and Tailscale install on the VPN page,
+ * and the way to Packages where it cannot say. The step's place is held
+ * while the package manager is asked, so the block keeps one height.
+ */
+function FrrMissing({ onInstalled }: { onInstalled: () => void }) {
+  const known = usePackageKnown("frr")
+  if (known === "known")
+    return (
+      <InstallHandoff
+        pkg="frr"
+        products={[]}
+        icon={RouteGlyph}
+        title="FRR is not installed"
+        onInstalled={onInstalled}
+        phases={false}
+      >
+        {FRR_PITCH}
+      </InstallHandoff>
+    )
+  return (
+    <MissingThing
+      size="block"
+      reason="not-installed"
+      icon={RouteGlyph}
+      title="FRR is not installed"
+      step={
+        known === "asking" ? (
+          <Skeleton className="h-(--control-compact) w-28 rounded-md" />
+        ) : (
+          <Button asChild size="sm" variant="outline">
+            <Link href="/packages?q=frr">Find FRR in Packages</Link>
+          </Button>
+        )
+      }
+    >
+      {FRR_PITCH}
+    </MissingThing>
+  )
+}
+
 function peerTone(state: string) {
   return state === "Established" ? "running" : state === "Idle" ? "danger" : "warning"
 }
@@ -152,7 +176,7 @@ function Neighbours({ peers }: { peers: Peer[] }) {
   const wide = useMediaQuery("(min-width: 1100px)")
   return (
     <Panel aria-label="BGP neighbours">
-      <PanelHeader title={<Counted title="Neighbours" count={peers.length} />} />
+      <PanelHeader title="Neighbours" count={peers.length} />
       <PanelBody flush>
         {wide ? (
           <Table className="table-fixed">
@@ -228,7 +252,7 @@ function Neighbours({ peers }: { peers: Peer[] }) {
 function Adjacencies({ neighbours }: { neighbours: NonNullable<BGPView["ospf"]> }) {
   return (
     <Panel aria-label="OSPF neighbours">
-      <PanelHeader title={<Counted title="OSPF neighbours" count={neighbours.length} />} />
+      <PanelHeader title="OSPF neighbours" count={neighbours.length} />
       <PanelBody flush>
         <ul aria-label="OSPF neighbours" className="divide-y divide-hairline">
           {neighbours.map((n) => (
@@ -251,17 +275,6 @@ function Adjacencies({ neighbours }: { neighbours: NonNullable<BGPView["ospf"]> 
         </ul>
       </PanelBody>
     </Panel>
-  )
-}
-
-function Counted({ title, count }: { title: string; count: number }) {
-  return (
-    <>
-      {title}
-      <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-        {count}
-      </span>
-    </>
   )
 }
 
@@ -338,11 +351,7 @@ function RouteBrowser({ families }: { families: string[] }) {
   }
   return (
     <Panel aria-label="BGP routes">
-      <PanelHeader
-        title={
-          view && !view.error ? <Counted title="Routes" count={view.routes.length} /> : "Routes"
-        }
-      />
+      <PanelHeader title="Routes" count={view && !view.error ? view.routes.length : undefined} />
       <PanelToolbar>
         <form
           className="flex min-w-0 flex-1 flex-wrap items-center gap-2"

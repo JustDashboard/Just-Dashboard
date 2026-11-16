@@ -108,14 +108,8 @@ export function DriftTable({
   return (
     <Panel aria-label="Comparisons">
       <PanelHeader
-        title={
-          <>
-            Comparisons
-            <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-              {rows.length}
-            </span>
-          </>
-        }
+        title="Comparisons"
+        count={rows.length}
       >
         <ChipStrip aria-label="State" className="mr-auto">
           <FilterChip {...chip("all")}>

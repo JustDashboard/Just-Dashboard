@@ -488,8 +488,10 @@ test("a switch something needs is locked, the picture says by what, and its row 
   const heights = await rows.evaluateAll((elements) =>
     elements.map((element) => element.getBoundingClientRect().height),
   )
-  expect(heights[0]).toBe(heights[1])
-  expect(heights[0]).toBeLessThanOrEqual(48)
+  // To two decimals: a row of another height is whole pixels apart, and CI's
+  // layout reads sub-pixel float noise (47.999969 against 48).
+  expect(heights[0]).toBeCloseTo(heights[1], 2)
+  expect(heights[0]).toBeLessThanOrEqual(48.01)
   await page.getByRole("button", { name: "About IPv4 forwarding" }).focus()
   const tip = page.getByRole("tooltip")
   await expect(tip).toContainText("Turning it off would stop 5 Docker networks")

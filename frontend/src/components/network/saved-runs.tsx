@@ -3,24 +3,24 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { Connection, Notes, RefreshClockwise, SettingsSliders, Wrench } from "@/components/icons"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
+import { Notes, RefreshClockwise, SettingsSliders, Wrench } from "@/components/icons"
 import { WireMark } from "@/components/wire/wire"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { Ago } from "@/components/ago"
 import { PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
+import { EmptyNote, EmptyState, ErrorState, NeedsAdmin } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipCount, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
-import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
-import { plural, timestamp } from "@/lib/format"
+import { plural } from "@/lib/format"
 import {
   diagnosticFinished,
   diagnosticReading,
@@ -131,10 +131,9 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
     return (
       <>
         <PageContext title="Saved runs" />
-        <EmptyState
-          icon={Notes}
-          title="Saved diagnostics need the admin capability"
-          description="Retained tests can include private network targets and decoded packet fields."
+        <NeedsAdmin
+          what="Saved diagnostics"
+          why="Kept runs can hold private targets and decoded packet fields."
           action={
             <Button asChild size="sm" variant="outline">
               <Link href="/network/tools">Run a tool</Link>
@@ -150,8 +149,9 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
   return (
     <>
       <PageContext title="Saved runs" />
-      <HostIdentity
+      <IdentityHeader
         label="About saved runs"
+        loading={!poll.data && !poll.error}
         fallback={Notes}
         title="Saved runs"
         state={
@@ -164,29 +164,22 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
           ) : poll.error ? (
             <Status tone="unknown" label="Not read" />
           ) : (
-            <TextShimmer className="text-xs">Reading…</TextShimmer>
+            true
           )
         }
         facts={
           poll.data ? (
             <>
-              <span className="numeric">{plural(runs.length, "run")} kept</span>
-              {policy.data && (
-                <>
-                  <FactDot />
-                  <span>{retentionWords(policy.data)}</span>
-                </>
-              )}
+              {/* What needs a look leads, so a phone's one line keeps it. */}
               {list.counts.failed > 0 && (
-                <>
-                  <FactDot />
-                  <span className="text-warning">{list.counts.failed} failed</span>
-                </>
+                <Fact className="text-warning">{list.counts.failed} failed</Fact>
               )}
+              <Fact className="numeric">{plural(runs.length, "run")} kept</Fact>
+              {policy.data && <Fact>{retentionWords(policy.data)}</Fact>}
             </>
-          ) : (
+          ) : poll.error ? (
             <span>&nbsp;</span>
-          )
+          ) : undefined
         }
         command={
           <Button asChild size="sm">
@@ -265,20 +258,18 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
                 their grey places stood. */}
             {poll.data ? <RunChips list={list} /> : <div aria-hidden className="h-7" />}
             {!poll.data ? (
-              <LoadingRows rows={4} className="[&>*]:h-14 [&>*]:rounded-xl" />
+              <ChoiceListSkeleton rows={4} lines={2} />
             ) : shown.length === 0 ? (
-              <EmptyNote>
-                No run matches.{" "}
-                <button
-                  type="button"
-                  className="rounded-sm font-medium text-foreground focus-ring hover:underline"
-                  onClick={() => {
+              <EmptyNote
+                action={{
+                  label: "Show every run",
+                  onClick: () => {
                     list.setQuery("")
                     list.setScope("all")
-                  }}
-                >
-                  Show every run
-                </button>
+                  },
+                }}
+              >
+                No run matches.
               </EmptyNote>
             ) : (
               <ChoiceList aria-label="Saved runs">
@@ -332,12 +323,13 @@ function RunRow({ run, onChanged }: { run: DiagnosticRun; onChanged: () => void 
       }
       trailing={
         <span className="flex items-center gap-4">
-          <time
-            dateTime={run.createdAt}
-            className="numeric w-36 truncate text-right text-hint text-muted-foreground max-lg:hidden"
-          >
-            {timestamp(run.createdAt)}
-          </time>
+          {/* How long ago, as rows say it everywhere; the instant is its title. */}
+          <Ago
+            at={run.createdAt}
+            units={2}
+            live={false}
+            className="w-24 truncate text-right text-hint text-muted-foreground max-lg:hidden"
+          />
           <span className="flex w-44 justify-end max-sm:hidden">
             <Status label={reading.label} tone={reading.tone} />
           </span>
@@ -354,22 +346,19 @@ function RunRow({ run, onChanged }: { run: DiagnosticRun; onChanged: () => void 
 }
 
 /**
- * Nothing watched yet: the probe's mark, one sentence, and the step that
- * makes one — a port check on Tools, watched from its result.
+ * Nothing watched yet: the one empty note, and the step that makes one — a
+ * port check on Tools, watched from its result. The step goes somewhere, so
+ * it is a link where `EmptyNote`'s own action is a button.
  */
 export function WatchedProbesEmpty() {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-3">
-      <WireMark tone="logo" size="sm">
-        <Connection aria-hidden />
-      </WireMark>
-      <p className="min-w-0 flex-1 text-body text-muted-foreground">
-        No probe is watched. Watch a port check&rsquo;s result to have it checked on the watch
-        list&rsquo;s schedule.
-      </p>
-      <Button asChild size="sm" variant="outline">
-        <Link href="/network/tools?tool=port">Port check</Link>
-      </Button>
-    </div>
+    <EmptyNote as="div">
+      No probe is watched.
+      <span className="mt-2 flex justify-center">
+        <Button asChild size="xs" variant="ghost">
+          <Link href="/network/tools?tool=port">Port check</Link>
+        </Button>
+      </span>
+    </EmptyNote>
   )
 }
