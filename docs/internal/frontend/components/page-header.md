@@ -47,7 +47,9 @@ page passes move the pages that do otherwise.
 
 `IdentityVerbs({ verbs, name })` turns a thing's `Verb[]` into that `command` and `menu`: the first
 inline verb is the command, everything else goes in a menu named "More actions for `<name>`".
-Spread it in:
+The command says the verb's `short` word where it has one ("Logs" for "Open logs") and keeps `label`
+as its accessible name. On a phone the command is its icon alone, and the tip on hover or focus
+says that name, the words a screen reader hears, never the shorter ones. Spread it in:
 
 ```tsx
 <IdentityHeader

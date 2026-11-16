@@ -521,14 +521,23 @@ function CommandTip({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** What the command's icon-only buttons say, or nothing when none is drawn as an icon alone. */
+/**
+ * What the command's icon-only buttons say, or nothing when none is drawn as
+ * an icon alone: each one's accessible name, its `aria-label` where it has one
+ * (a command drawn with its `short` word), else its words.
+ */
 function iconWords(box: HTMLElement | null) {
   if (!box || !window.matchMedia(breakpointQuery("sm", "below")).matches) return null
   const words = Array.from(box.querySelectorAll<HTMLElement>("[data-size]"))
     .filter((button) => button.getClientRects().length > 0 && button.querySelector("svg"))
-    .map((button) => button.textContent?.trim())
+    .map((button) => buttonName(button))
     .filter(Boolean)
   return words.length > 0 ? words.join(" · ") : null
+}
+
+/** A button's name as a screen reader hears it, for the tip that says it aloud on a phone. */
+function buttonName(button: Pick<Element, "getAttribute" | "textContent">) {
+  return (button.getAttribute("aria-label") ?? button.textContent ?? "").trim()
 }
 
 /**
@@ -541,6 +550,12 @@ function iconWords(box: HTMLElement | null) {
  * One rule for every detail page, where there were four (the command on the
  * line, verbs on the back-link row, a local `HeaderVerbs`, a `VerbBar`), and
  * on a phone it is already the fold MOB-12 asks for: one button and a menu.
+ *
+ * The command says the verb's `short` word where it has one ("Logs" for "Open
+ * logs"), as `VerbBar` does, and keeps `label` as its accessible name. On a
+ * phone, where it is drawn as its icon alone, the tip says that name, so the
+ * icon is never explained in fewer words than a screen reader hears. The
+ * menu always says `label`.
  */
 export function IdentityVerbs({ verbs, name }: { verbs: Verb[]; name: string }): {
   command?: React.ReactNode
@@ -554,10 +569,11 @@ export function IdentityVerbs({ verbs, name }: { verbs: Verb[]; name: string }):
         size="sm"
         variant={lead.danger ? "destructive" : "default"}
         disabled={lead.disabled}
+        aria-label={lead.short ? lead.label : undefined}
         onClick={lead.run}
       >
         <lead.icon className="size-3.5" />
-        {lead.label}
+        {lead.short ?? lead.label}
       </Button>
     ),
     menu: rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${name}`} />,
