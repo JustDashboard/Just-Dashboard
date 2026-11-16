@@ -10,6 +10,15 @@ import { Button } from "@/components/ui/button"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
 
+/**
+ * The strip's controls at its ends, each in a slot of its own beside the tabs
+ * rather than over them: 24px under a mouse and 32 under a finger. Their press
+ * box grows up and down to 44 under a finger (`hit-area`) but not sideways,
+ * where it reached 10px over the tab beside it, so a thumb meant for the arrow
+ * selected the tab.
+ */
+const EDGE = "size-6 shrink-0 text-muted-foreground after:inset-x-0 pointer-coarse:size-8"
+
 /** Compact direct-PTY windows for the terminal title bar. */
 export function WindowStrip({
   windows,
@@ -84,11 +93,11 @@ export function WindowStrip({
     overflow.start ? "transparent, black 1.5rem" : "black"
   }, ${overflow.end ? "black calc(100% - 1.5rem), transparent" : "black"})`
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-0.5">
+    <div data-slot="window-strip" className="flex min-w-0 flex-1 items-center gap-0.5">
       {scrolling && (
         <IconAction
           label="Scroll tabs left"
-          className="size-6 shrink-0 text-muted-foreground"
+          className={EDGE}
           disabled={!overflow.start}
           onClick={() => scrollBy(-1)}
         >
@@ -140,7 +149,7 @@ export function WindowStrip({
       {scrolling && (
         <IconAction
           label="Scroll tabs right"
-          className="size-6 shrink-0 text-muted-foreground"
+          className={EDGE}
           disabled={!overflow.end}
           onClick={() => scrollBy(1)}
         >
@@ -151,7 +160,7 @@ export function WindowStrip({
           scrolling away with the tabs it would add to. */}
       <IconAction
         label="New window"
-        className="size-7 shrink-0"
+        className="size-7 shrink-0 after:inset-x-0 pointer-coarse:size-8"
         disabled={newDisabled}
         onClick={onNew}
       >
@@ -226,7 +235,8 @@ function WindowTab({
         // Tabs give up width before the strip scrolls, the way a browser's do,
         // but only down to a width that still reads a word of the label: a
         // row of "cl…" tabs that all fit says less than one that scrolls.
-        "group flex h-7 max-w-44 min-w-32 shrink items-center rounded-md border border-transparent pr-0.5 pl-2.5 transition-colors",
+        // 32px under a finger, the height of the controls at the strip's ends.
+        "group flex h-7 max-w-44 min-w-32 shrink items-center rounded-md border border-transparent pr-0.5 pl-2.5 transition-colors pointer-coarse:h-8",
         active
           ? "bg-accent text-foreground"
           : "text-muted-foreground hover:bg-row-hover hover:text-foreground",
@@ -249,8 +259,12 @@ function WindowTab({
         size="icon-sm"
         variant="ghost"
         aria-label={`Close window ${label}`}
+        // Its press box is its own box: the tab is inside a scroller, and a
+        // press box reaching past the tab made the strip scroll up and down
+        // under a thumb and sideways past its last tab. Under a finger the
+        // button is the tab's full height inside its border instead.
         className={cn(
-          "size-6 shrink-0 text-muted-foreground hover:text-destructive",
+          "size-6 shrink-0 text-muted-foreground after:inset-0 hover:text-destructive pointer-coarse:size-7.5",
           !active && rowReveal(),
         )}
         onClick={onClose}
