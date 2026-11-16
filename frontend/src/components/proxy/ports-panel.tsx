@@ -744,7 +744,7 @@ function SocketRow({
       }
       description={
         <span className="flex min-w-0 items-center gap-2">
-          <ReachWord socket={socket} className="max-w-[70%] shrink-0" />
+          <ReachWord socket={socket} className="max-w-full shrink-0" />
           <span className="min-w-0 truncate font-mono" title={addressLine(socket)}>
             {addressLine(socket)}
           </span>
