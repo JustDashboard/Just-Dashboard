@@ -1,8 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { StopCircle } from "@/components/icons"
-import { Button } from "@/components/ui/button"
 
 /**
  * A read the reader stopped. It is its own kind of failure — nothing went
@@ -22,8 +20,12 @@ const SHOWN_AFTER = 1
 /**
  * Whole seconds since `running` became true, counted while it stays so. `0`
  * while nothing is in flight.
+ *
+ * Not `useElapsed` (hooks/use-elapsed), which counts from a start time the
+ * caller holds: these surfaces hold only whether a read is out (a poll's
+ * `loading`), so the start is taken here, when it turns true.
  */
-export function useElapsed(running: boolean): number {
+export function useSecondsRunning(running: boolean): number {
   const [seconds, setSeconds] = useState(0)
   useEffect(() => {
     if (!running) return
@@ -69,30 +71,3 @@ export function useStoppable() {
 
 /** Whether a wait has gone on long enough to say so. */
 export const worthShowing = (seconds: number) => seconds >= SHOWN_AFTER
-
-/**
- * The command while its work is in flight and has been for a second: how
- * long it has run, counted as it runs, and the way to stop it. It takes the
- * command's own place, so the reader's eye is already there.
- */
-export function StopButton({
-  seconds,
-  onStop,
-  size = "sm",
-  className,
-}: {
-  seconds: number
-  onStop: () => void
-  size?: "xs" | "sm"
-  className?: string
-}) {
-  return (
-    <Button type="button" size={size} variant="outline" className={className} onClick={onStop}>
-      <StopCircle />
-      Stop
-      <span className="numeric text-muted-foreground" aria-live="off">
-        {seconds} s
-      </span>
-    </Button>
-  )
-}

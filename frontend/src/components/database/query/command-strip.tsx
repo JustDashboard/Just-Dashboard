@@ -2,7 +2,7 @@
 
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
-import { ChevronDown, Play, Route, StopCircle } from "@/components/icons"
+import { ChevronDown, Play, Route } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -25,6 +25,7 @@ import { ROW_LIMITS } from "@/components/database/query/results"
 import { elapsedText, type Run } from "@/components/database/query/run-model"
 import type { Risk } from "@/components/database/query/types"
 import { useElapsed } from "@/hooks/use-elapsed"
+import { RunningCommand } from "@/components/database/query/running-command"
 
 const LIMITS = ROW_LIMITS.map((limit) => ({
   value: String(limit),
@@ -275,7 +276,7 @@ export function CommandStrip({
   )
 }
 
-/** Cancel in Run's place while the statement is out, with how long it has been. */
+/** Stop in Run's place while the statement is out, with how long it has been. */
 function RunningControls({
   run,
   canCancel,
@@ -289,16 +290,11 @@ function RunningControls({
   return (
     <div className="flex shrink-0 items-center gap-2">
       {canCancel && (
-        <Button
-          size="sm"
-          variant="outline"
+        <RunningCommand
+          stopping={run.cancelling}
+          onStop={onCancel}
           className="h-7 px-2.5 max-sm:h-8"
-          disabled={run.cancelling}
-          onClick={onCancel}
-        >
-          <StopCircle />
-          Cancel
-        </Button>
+        />
       )}
       <span role="status" className="flex items-center gap-1.5 text-xs">
         <TextShimmer>

@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import type { Verb } from "@/components/verbs"
+import { RunningCommand } from "@/components/database/query/running-command"
 import { useGridLayout } from "@/components/database/grid"
 import { EngineMark } from "@/components/database/kit"
 import {
@@ -75,9 +76,8 @@ import {
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
 import {
-  StopButton,
   Stopped,
-  useElapsed,
+  useSecondsRunning,
   useStoppable,
   worthShowing,
 } from "@/components/database/mongo/in-flight"
@@ -144,7 +144,7 @@ export function PipelineView({
   const [limit, setLimit] = useViewState<Limit>(`databases.${id}.mongo.aggregate.limit`, "100")
   const [ran, setRan] = useState<Ran | null>(null)
   const [running, setRunning] = useState(false)
-  const seconds = useElapsed(running)
+  const seconds = useSecondsRunning(running)
   const [resultView, setResultView] = useViewState<ResultView>(
     `databases.${id}.mongo.aggregate.view`,
     "list",
@@ -419,7 +419,7 @@ export function PipelineView({
           )}
           {canRun &&
             (running && worthShowing(seconds) ? (
-              <StopButton size="xs" seconds={seconds} onStop={flight.stop} />
+              <RunningCommand size="xs" seconds={seconds} onStop={flight.stop} />
             ) : (
               <Button
                 size="xs"

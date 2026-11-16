@@ -10,13 +10,13 @@ import { Segments } from "@/components/segments"
 import { SearchInput } from "@/components/search-input"
 import { EmptyState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { RunningCommand } from "@/components/database/query/running-command"
 import { EngineMark } from "@/components/database/kit"
 import { analyseSchema } from "@/components/database/mongo/api"
 import { CodeField } from "@/components/database/mongo/code-field"
 import {
-  StopButton,
   Stopped,
-  useElapsed,
+  useSecondsRunning,
   useStoppable,
   worthShowing,
 } from "@/components/database/mongo/in-flight"
@@ -86,7 +86,7 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
   const [query, setQuery] = useState("")
   // A sample of ten thousand documents can take a while: it says how long, and can be stopped.
   const flight = useStoppable()
-  const seconds = useElapsed(busy)
+  const seconds = useSecondsRunning(busy)
 
   const filterBad = shapeProblem(filter, "document")
   const analyse = async () => {
@@ -152,7 +152,7 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
         )}
       </div>
       {busy && worthShowing(seconds) ? (
-        <StopButton seconds={seconds} onStop={flight.stop} className="h-8" />
+        <RunningCommand seconds={seconds} onStop={flight.stop} className="h-8" />
       ) : (
         <Button
           size="sm"

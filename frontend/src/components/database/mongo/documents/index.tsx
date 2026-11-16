@@ -65,7 +65,7 @@ import {
   useListed,
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
-import { Stopped, useElapsed, useStoppable } from "@/components/database/mongo/in-flight"
+import { Stopped, useSecondsRunning, useStoppable } from "@/components/database/mongo/in-flight"
 import {
   CollectionKindTag,
   CollectionMark,
@@ -230,7 +230,7 @@ function Documents({
     0,
     [id, identity],
   )
-  const seconds = useElapsed(poll.loading)
+  const seconds = useSecondsRunning(poll.loading)
   // The page on screen is kept under the one being read, so turning a page
   // sweeps over the old documents instead of collapsing to a skeleton.
   const [kept, setKept] = useState<MongoFindResult>()

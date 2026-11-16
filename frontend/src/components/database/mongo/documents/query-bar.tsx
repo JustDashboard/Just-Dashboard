@@ -17,8 +17,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { RunningCommand } from "@/components/database/query/running-command"
 import { CodeField } from "@/components/database/mongo/code-field"
-import { StopButton, worthShowing } from "@/components/database/mongo/in-flight"
+import { worthShowing } from "@/components/database/mongo/in-flight"
 import {
   draftLabel,
   optionCount,
@@ -221,7 +222,7 @@ export function QueryBar({
             Reset
           </Button>
           {running && worthShowing(seconds) ? (
-            <StopButton seconds={seconds} onStop={onStop} className="h-8" />
+            <RunningCommand seconds={seconds} onStop={onStop} className="h-8" />
           ) : (
             <Button type="submit" size="sm" className="h-8" pending={running} disabled={invalid}>
               Find
