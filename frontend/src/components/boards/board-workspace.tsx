@@ -45,6 +45,7 @@ import { IconAction } from "@/components/icon-action"
 import { Page } from "@/components/page"
 import { PaneHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
+import { WorkbenchHeader } from "@/components/workbench-header"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
@@ -642,8 +643,6 @@ function LoadedBoard({ board }: { board: Board }) {
 
   return (
     <Page fill="workspace">
-      {/* A workbench draws no page header, so its name is said, not drawn. */}
-      <h1 className="sr-only">Drawing: {name.trim() || board.name}</h1>
       <div
         data-slot="drawing-workspace"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border"
@@ -651,12 +650,11 @@ function LoadedBoard({ board }: { board: Board }) {
         {/* Two rows on a phone, on purpose: back, the name and the verbs, then
             the save state under the name. Wrapped wherever the next control
             ran out of room, the status landed between the buttons. */}
-        <PaneHeader className="grid min-h-12 grid-cols-start-main-end gap-x-1.5 gap-y-0 px-2 py-1.5 sm:flex">
-          <IconAction label="Back to Excalidraw" onClick={() => void go("/excalidraw")}>
-            <ArrowLeft />
-          </IconAction>
-          <span className="flex min-w-0 items-center gap-1.5">
-            <ProductLogo id="excalidraw" size="sm" className="max-sm:hidden" />
+        <WorkbenchHeader
+          back={{ label: "Back to Excalidraw", onClick: () => void go("/excalidraw") }}
+          heading={`Drawing: ${name.trim() || board.name}`}
+          mark={<ProductLogo id="excalidraw" size="sm" className="max-sm:hidden" />}
+          name={
             <Input
               aria-label="Drawing name"
               value={name}
@@ -671,36 +669,38 @@ function LoadedBoard({ board }: { board: Board }) {
               // As wide as the name, so the save state stands beside it
               // rather than a field's width away.
               className={cn(
-                "[field-sizing:content] h-8 w-auto max-w-full min-w-24 border-transparent bg-transparent px-2 text-body font-semibold shadow-none sm:max-w-80",
+                "-ml-2 [field-sizing:content] h-8 w-auto max-w-full min-w-24 border-transparent bg-transparent px-2 text-body font-semibold shadow-none sm:max-w-80",
                 // A name that cannot be edited is a name, not a field.
                 canWrite ? "hover:border-input" : "dark:bg-transparent",
               )}
             />
-          </span>
-          {/* As tall as the button a failed save puts in it, so the bar is
-              one height whatever the state says. */}
-          <span className="flex min-w-0 items-center gap-x-3 max-sm:order-last max-sm:col-span-3 max-sm:h-6 max-sm:pl-10 sm:mr-auto sm:pl-1">
-            <span role="status" className="flex min-w-0">
-              <Status tone={said.tone} label={said.label} className="min-w-0 font-normal" />
+          }
+          // As tall as the button a failed save puts in it, so the strip is
+          // one height whatever the state says.
+          state={
+            <span className="flex h-6 min-w-0 items-center gap-x-3">
+              <span role="status" className="flex min-w-0">
+                <Status tone={said.tone} label={said.label} className="min-w-0 font-normal" />
+              </span>
+              {saveState === "error" && canWrite && (
+                <Button variant="outline" size="xs" onClick={() => void flush()}>
+                  Try again
+                </Button>
+              )}
+              {live.peers.length > 0 && (
+                <Status
+                  tone="running"
+                  live
+                  label={`Live with ${listOf(live.peers.map((p) => p.name || p.user))}`}
+                  className="min-w-0 font-normal text-muted-foreground"
+                />
+              )}
             </span>
-            {saveState === "error" && canWrite && (
-              <Button variant="outline" size="xs" onClick={() => void flush()}>
-                Try again
-              </Button>
-            )}
-            {live.peers.length > 0 && (
-              <Status
-                tone="running"
-                live
-                label={`Live with ${listOf(live.peers.map((p) => p.name || p.user))}`}
-                className="min-w-0 font-normal text-muted-foreground"
-              />
-            )}
-          </span>
-          <span className="flex shrink-0 items-center gap-1.5">
-            {/* Nothing added to a drawing another tab changed could be saved,
-                so until it is read again the one verb is to read it again. */}
-            {saveState === "conflict" ? (
+          }
+          command={
+            // Nothing added to a drawing another tab changed could be saved,
+            // so until it is read again the one verb is to read it again.
+            saveState === "conflict" ? (
               <Button size="sm" onClick={() => window.location.reload()}>
                 <RefreshClockwise />
                 Reload
@@ -718,10 +718,10 @@ function LoadedBoard({ board }: { board: Board }) {
                   <span className="sm:hidden">Add</span>
                 </Button>
               )
-            )}
-            <VerbMenu label="Drawing actions" verbs={verbs} />
-          </span>
-        </PaneHeader>
+            )
+          }
+          menu={<VerbMenu label="Drawing actions" verbs={verbs} />}
+        />
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <div className="min-h-0 min-w-0 flex-1" aria-label={`${name} drawing canvas`}>
             <LiveCardProvider open={(href) => void go(href)}>

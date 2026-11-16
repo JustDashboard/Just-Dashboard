@@ -212,6 +212,8 @@ export default function GitPage() {
       />
     ) : (
       <Page fill="workspace">
+        {/* Named while the list is read, as the workspace it opens on is. */}
+        <PageContext title="Git" />
         <LoadingPanel rows={8} />
       </Page>
     )
