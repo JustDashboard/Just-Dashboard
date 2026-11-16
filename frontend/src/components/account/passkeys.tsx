@@ -31,9 +31,13 @@ import { VerbActions, type Verb } from "@/components/verbs"
  * how many there are and what one replaces are the head's line of facts, and
  * *Add a passkey* is on the title line.
  */
-export function PasskeysSection() {
+/** This account's passkeys, read once for the page's line and its Passkeys section. */
+export function usePasskeys() {
+  return usePoll((signal) => get<Passkey[]>("/account/passkeys", undefined, signal), 30000)
+}
+
+export function PasskeysSection({ keys }: { keys: ReturnType<typeof usePasskeys> }) {
   const { status } = useAuth()
-  const keys = usePoll((signal) => get<Passkey[]>("/account/passkeys", undefined, signal), 30000)
   const place = usePasskeyPlace()
   const hostname = useHostname()
   const [adding, setAdding] = useState(false)
