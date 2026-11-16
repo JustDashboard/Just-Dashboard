@@ -102,7 +102,7 @@ export function diffCounts(lines: DiffLine[]) {
 
 /**
  * The lines as a unified diff's body (`+`, `-` and a space before each), so
- * `DiffView` (`components/files/diff-view.tsx`) draws them the way it draws
+ * `DiffView` (`components/diff-view.tsx`) draws them the way it draws
  * every other diff. A gap is a context line holding the ellipsis.
  */
 export function unifiedBody(lines: DiffLine[]): string {
