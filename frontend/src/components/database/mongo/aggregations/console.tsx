@@ -33,7 +33,7 @@ import {
   commandMs,
   type CommandClass,
 } from "@/components/database/query/command-class"
-import { DatabaseMark } from "@/components/database/mongo/rail"
+import { NameMark } from "@/components/database/kit/marks"
 import { shapeProblem } from "@/components/database/mongo/shell"
 import type {
   MongoCapability,
@@ -326,7 +326,7 @@ export function ConsoleView({
                 <SelectContent position="popper" align="start" className="max-h-72">
                   {listedDatabases.map((name) => (
                     <SelectItem key={name} value={name} className="font-mono text-xs">
-                      <DatabaseMark name={name} />
+                      <NameMark name={name} />
                       {name}
                     </SelectItem>
                   ))}

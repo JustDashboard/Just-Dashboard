@@ -36,7 +36,7 @@ import { nameHue } from "@/components/database/home/kinds"
 import { EngineMark } from "@/components/database/kit"
 import { mongoProfiler, setProfiler } from "@/components/database/mongo/api"
 import { operationColor } from "@/components/database/mongo/kinds"
-import { DatabaseMark } from "@/components/database/mongo/rail"
+import { NameMark } from "@/components/database/kit/marks"
 import type {
   MongoDatabase,
   MongoProfilerEntry,
@@ -119,7 +119,7 @@ export function ProfilerView({
       <SelectContent position="popper" align="end" className="max-h-72">
         {listed.map((name) => (
           <SelectItem key={name} value={name} className="font-mono text-xs">
-            <DatabaseMark name={name} />
+            <NameMark name={name} />
             {name}
           </SelectItem>
         ))}

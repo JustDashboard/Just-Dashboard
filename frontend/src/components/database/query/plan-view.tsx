@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { Segments } from "@/components/segments"
 import { Well } from "@/components/panel"
 import { EmptyState } from "@/components/state"
+import { Sweep } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -187,9 +188,7 @@ export function PlanView({
   if (explained.phase === "running") {
     body = (
       <div role="status" className="flex min-h-0 flex-1 flex-col">
-        <div aria-hidden className="h-0.5 shrink-0 overflow-hidden bg-meter-track">
-          <div className="h-full w-1/3 animate-sweep bg-primary" />
-        </div>
+        <Sweep className="h-0.5 shrink-0" />
         <p className="p-4 text-body">
           <TextShimmer>
             {explained.analyze ? "Running the statement to measure it…" : "Asking for the plan…"}
