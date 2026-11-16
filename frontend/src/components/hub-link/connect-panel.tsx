@@ -195,11 +195,9 @@ export function ConnectPanel({
         </InfoTip>
       </p>
       {refusal && (
-        <div role="alert">
-          <Notice tone="danger" icon={Warning} title="Could not connect">
-            <FailureWords {...refusal} summary="What this server said" />
-          </Notice>
-        </div>
+        <Notice tone="danger" live="alert" icon={Warning} title="Could not connect">
+          <FailureWords {...refusal} summary="What this server said" />
+        </Notice>
       )}
     </Section>
   )

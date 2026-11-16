@@ -82,7 +82,7 @@ function ScrollButton() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 8 }}
           transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute bottom-3 left-1/2 z-10 inline-flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-md border border-border-strong bg-popover px-3 text-hint font-medium text-popover-foreground shadow-md focus-ring transition-colors hover:bg-control-hover"
+          className="absolute bottom-3 left-1/2 z-raised inline-flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-md border border-border-strong bg-popover px-3 text-hint font-medium text-popover-foreground shadow-md focus-ring transition-colors hover:bg-control-hover"
           onClick={() => void scrollToBottom()}
         >
           <ArrowDown aria-hidden className="size-3.5" />

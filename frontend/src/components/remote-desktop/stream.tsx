@@ -553,7 +553,7 @@ export function PinCard({
   return (
     <div
       role="status"
-      className="absolute top-3 right-3 z-10 flex max-w-xs flex-col gap-2.5 rounded-xl border border-hairline bg-popover p-3 shadow-lg"
+      className="absolute top-3 right-3 z-raised flex max-w-xs flex-col gap-2.5 rounded-xl border border-hairline bg-popover p-3 shadow-lg"
     >
       <div className="flex items-center gap-2">
         <ProductLogo id="sunshine" size="sm" />

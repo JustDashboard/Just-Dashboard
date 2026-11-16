@@ -44,7 +44,7 @@ import {
 } from "@/lib/terminal/keymap"
 import { usePanelSize } from "@/lib/panel-size"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
+import { useBelow } from "@/lib/breakpoints"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { Page } from "@/components/page"
@@ -94,6 +94,7 @@ import { EmptyState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { SplitGlyph } from "@/components/terminal/split-glyph"
 
 const AGENTS = {
   codex: { name: "Codex", command: "codex --yolo", logo: "openai" },
@@ -103,9 +104,6 @@ const AGENTS = {
 const RAIL = { min: 208, max: 480, base: 288 }
 const TOOLS = { min: 256, max: 640, base: 336 }
 const TERMINAL_MIN = 360
-// Tailwind's `lg`, below which the columns stop fitting beside each other
-// and the page shows one of them at a time (`phone-panes.tsx`).
-const STACKED = "(max-width: 1023px)"
 
 /** What a phone shows one of: the bar's stops. The last two are the tools column's two halves. */
 type PhonePane = "sessions" | "terminal" | ToolsTab
@@ -169,7 +167,9 @@ export default function TerminalPage() {
   // of its own to put it away and nothing to say which of the three was up.
   // A phone opens on the emulator: it is what the page is for, and the
   // session it shows is the one that was on screen last.
-  const phone = useMediaQuery(STACKED)
+  // Below `lg` the columns stop fitting beside each other and the page shows
+  // one of them at a time (`phone-panes.tsx`).
+  const phone = useBelow("lg")
   const [pane, setPane] = useState<PhonePane>("terminal")
   // Which half of the tools column is open, kept across a navigation:
   // somebody working out of git is on that tab all afternoon. Held here
@@ -724,7 +724,7 @@ export default function TerminalPage() {
 
   if (loading)
     return (
-      <Page fill className="p-2 lg:p-3">
+      <Page fill="workspace">
         <h1 className="sr-only">Terminal</h1>
         <LoadingPanel rows={4} />
       </Page>
@@ -769,7 +769,7 @@ export default function TerminalPage() {
       label: "Git",
       icon: PANE_GLYPH.git,
       count: changed,
-      countClassName: "bg-(--git-modified)",
+      countClassName: "bg-git-modified",
     },
   ]
 
@@ -827,17 +827,21 @@ export default function TerminalPage() {
           </Tooltip>
         ))}
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Split terminal"
-              title="Split terminal"
-              disabled={!activeWindow || creating || !data.persistent}
-            >
-              <Plus className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Split terminal"
+                  disabled={!activeWindow || creating || !data.persistent}
+                >
+                  <SplitGlyph />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Split terminal</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent
             align="end"
             onCloseAutoFocus={(event) => {
@@ -958,12 +962,12 @@ export default function TerminalPage() {
   )
 
   return (
-    <Page fill className="gap-2 p-0 lg:px-3 lg:py-3">
+    <Page fill="workspace" className="gap-2">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Terminal</h1>
       {data.persistenceError && (
-        <div role="alert" className="max-lg:px-2 max-lg:pt-2">
-          <Notice icon={ShieldOff} tone="danger" title="New terminals are unavailable">
+        <div className="max-lg:px-2 max-lg:pt-2">
+          <Notice icon={ShieldOff} tone="danger" live="alert" title="New terminals are unavailable">
             {data.persistenceError}. Existing sessions keep running on the server.
           </Notice>
         </div>
@@ -992,7 +996,8 @@ export default function TerminalPage() {
         style={{ "--jd-rail": `${railPx}px`, "--jd-tools": `${toolsPx}px` } as React.CSSProperties}
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border",
-          immersive && "fixed inset-0 z-50 rounded-none border-0 bg-background lg:rounded-none",
+          immersive &&
+            "fixed inset-0 z-immersive rounded-none border-0 bg-background lg:rounded-none",
         )}
       >
         <div className="flex min-h-0 min-w-0 flex-1">
@@ -1022,7 +1027,7 @@ export default function TerminalPage() {
               max={RAIL.max}
               onChange={(px, commit) => setRailWidth(px, commit)}
               onReset={resetRailWidth}
-              className="absolute inset-y-0 -right-1 z-20 max-lg:hidden"
+              className="absolute inset-y-0 -right-1 z-sticky max-lg:hidden"
             />
           </div>
 
@@ -1192,7 +1197,7 @@ export default function TerminalPage() {
                     {rect && visibleWindows.length > 1 && focused && (
                       <span
                         aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 z-20 ring-1 ring-ring ring-inset"
+                        className="pointer-events-none absolute inset-0 z-sticky ring-1 ring-ring ring-inset"
                       />
                     )}
                     {rect && dropTarget?.window === window.id && (
@@ -1258,7 +1263,7 @@ export default function TerminalPage() {
                 max={TOOLS.max}
                 onChange={(px, commit) => setToolsWidth(px, commit)}
                 onReset={resetToolsWidth}
-                className="absolute inset-y-0 -left-1 z-20 max-lg:hidden"
+                className="absolute inset-y-0 -left-1 z-sticky max-lg:hidden"
               />
               <WorkspaceTools
                 dir={currentDir}

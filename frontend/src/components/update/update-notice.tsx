@@ -96,7 +96,7 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
           : `Version ${target} is available`
 
   const celebrate = (
-    <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
+    <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-overlay size-full" />
   )
 
   const glyph =

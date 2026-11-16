@@ -74,7 +74,7 @@ export function WorktreeSection({
               verb={`Open the worktree on ${label}`}
               description={
                 <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="shrink-0 font-medium text-foreground/80">
+                  <span className="shrink-0 font-medium text-foreground">
                     {main?.name ?? "worktree"}
                   </span>
                   <span className="min-w-0 truncate font-mono text-micro" title={tree.path}>
@@ -93,7 +93,7 @@ export function WorktreeSection({
                       className="flex shrink-0 items-center gap-1 rounded-sm px-1 text-hint focus-ring hover:bg-accent"
                     >
                       <PullStateMark pull={pull} className="size-3.5" />
-                      <span className="numeric text-foreground/85">#{pull.number}</span>
+                      <span className="numeric text-foreground">#{pull.number}</span>
                       <ChecksMark checks={pull.checks} />
                       {more > 0 && <span className="numeric text-muted-foreground">+{more}</span>}
                     </button>

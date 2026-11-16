@@ -51,7 +51,7 @@ import {
 import { FormNote } from "@/components/form"
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox"
 import type { PastedImage } from "@/components/assistant/agent/images"
-import { Markdown } from "@/components/git/markdown"
+import { Markdown } from "@/components/markdown"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -179,7 +179,11 @@ export function AgentChat({
   settings: AssistantSettings | undefined
   /** Said on an empty conversation. */
   title: string
-  description: string
+  /**
+   * A line under the title, where the suggestions do not already say what it
+   * can do. The server-wide chat passes none: its chips are the answer.
+   */
+  description?: string
   placeholder: string
   suggestions?: AgentSuggestion[]
   /** A narrow column beside a form, rather than a page. */
@@ -491,7 +495,7 @@ function Empty({
 }: {
   product: string
   title: string
-  description: string
+  description?: string
   suggestions: AgentSuggestion[]
   compact?: boolean
   onAsk: (suggestion: AgentSuggestion) => void
@@ -510,9 +514,11 @@ function Empty({
       <AssistantMark product={product} size="md" />
       <div className="space-y-1">
         <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-        <p className="mx-auto max-w-md text-body leading-relaxed text-muted-foreground">
-          {description}
-        </p>
+        {description && (
+          <p className="mx-auto max-w-md text-body leading-relaxed text-muted-foreground">
+            {description}
+          </p>
+        )}
       </div>
       {suggestions.length > 0 && (
         <div className="flex max-w-2xl flex-wrap justify-center gap-2 pt-2">

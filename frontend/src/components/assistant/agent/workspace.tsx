@@ -20,6 +20,8 @@ import {
   type AgentStep,
 } from "@/components/assistant/agent/model"
 import { agentWorking, type AgentSession } from "@/components/assistant/agent/sessions"
+import { EmptyNote } from "@/components/state"
+import { PaneSection } from "@/components/panel"
 
 export type AgentPane = "chat" | "chats" | "activity"
 
@@ -134,6 +136,8 @@ function RailHead({ session, product }: { session: AgentSession; product: string
   )
 }
 
+const ACTIVITY_GROUP = "space-y-2 border-b-0 p-0"
+
 /** What this chat has changed, with a press to each, and what it has read. */
 function Activity({ session, className }: { session: AgentSession; className?: string }) {
   const { transcript } = session
@@ -149,10 +153,13 @@ function Activity({ session, className }: { session: AgentSession; className?: s
   const usage = totalUsage(transcript)
   return (
     <div data-slot="agent-activity" className={cn("flex min-h-0 flex-col gap-6", className)}>
-      <section className="space-y-2">
-        <h2 className="eyebrow">Changes</h2>
+      {/* The shared pane head, on the rail's own inset: the rail is one
+          column, so its groups are spaced rather than ruled. */}
+      <PaneSection title="Changes" level={2} className={ACTIVITY_GROUP}>
         {changes.length === 0 ? (
-          <p className="text-hint text-muted-foreground">Nothing yet.</p>
+          <EmptyNote dense className="text-left">
+            Nothing yet.
+          </EmptyNote>
         ) : (
           <ul className="space-y-2">
             <AnimatePresence initial={false}>
@@ -177,10 +184,9 @@ function Activity({ session, className }: { session: AgentSession; className?: s
             </AnimatePresence>
           </ul>
         )}
-      </section>
+      </PaneSection>
       {reads.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="eyebrow">What it read</h2>
+        <PaneSection title="What it read" level={2} className={ACTIVITY_GROUP}>
           <ul className="space-y-1.5">
             {reads.map((step) => {
               const mark = stepMark(step.call)
@@ -197,7 +203,7 @@ function Activity({ session, className }: { session: AgentSession; className?: s
               )
             })}
           </ul>
-        </section>
+        </PaneSection>
       )}
       {inputTokens(usage) + usage.output > 0 && (
         <p className="numeric mt-auto text-micro text-muted-foreground">

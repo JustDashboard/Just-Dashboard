@@ -22,8 +22,8 @@ import { DashboardUsersView, useDashboardUsers } from "@/components/account/dash
 export default function AccountUsersPage() {
   const users = useDashboardUsers()
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Account" title="Users" />
+    <Page rise>
+      <PageContext title="Users" />
       <DashboardUsersView users={users} />
     </Page>
   )

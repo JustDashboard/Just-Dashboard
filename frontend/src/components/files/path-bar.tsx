@@ -221,7 +221,7 @@ function SiblingMenu({ dir, onNavigate }: { dir: string; onNavigate: (path: stri
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/70 focus-ring-inset transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex size-5 shrink-0 items-center justify-center rounded-sm text-faint focus-ring-inset transition-colors hover:bg-accent hover:text-accent-foreground"
           aria-label={`Folders in ${dir}`}
         >
           <ChevronRight className="size-3.5" />
@@ -359,7 +359,7 @@ function PathInput({
       {matches.length > 0 && (
         <div
           data-path-suggestions
-          className="absolute top-full right-0 left-0 z-50 mt-1 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
+          className="absolute top-full right-0 left-0 z-overlay mt-1 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
         >
           {matches.map((entry, i) => (
             <button

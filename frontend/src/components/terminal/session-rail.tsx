@@ -10,6 +10,7 @@ import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
 import { Button } from "@/components/ui/button"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { Pane, PaneHeader } from "@/components/panel"
+import { EmptyNote } from "@/components/state"
 
 type RowHandlers = {
   activeId: string | null
@@ -84,13 +85,11 @@ export function SessionRail({
         ))}
         {/* On a phone the list is a pane of its own, and an empty one with
             nothing in it reads as a page that did not load. */}
-        {sessions.length === 0 && (
-          <p className="px-2 py-4 text-center text-xs text-muted-foreground">No sessions yet.</p>
-        )}
+        {sessions.length === 0 && <EmptyNote dense>No sessions yet.</EmptyNote>}
         {matches.length === 0 && filter && (
-          <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-            No session matches <span className="font-medium text-foreground">{filter}</span>.
-          </p>
+          <EmptyNote dense action={{ label: "Clear the filter", onClick: () => setFilter("") }}>
+            Nothing matches “{filter}”.
+          </EmptyNote>
         )}
       </div>
     </Pane>
