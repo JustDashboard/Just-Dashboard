@@ -169,16 +169,25 @@ const TEXT: Record<DiffRow["kind"], string | undefined> = {
 }
 
 /**
- * The wash behind a changed row, faint enough that a file of them is still
- * read as code. A hunk header takes the recessed ground instead, because it is
- * a divider rather than a line of either file.
+ * The wash behind an added or a removed line, faint enough that a file of
+ * them is still read as code. Anything else that shows a change the way a
+ * diff does (a release's changed settings) takes the same two.
+ */
+export const DIFF_WASH = {
+  add: "color-mix(in oklab, var(--git-added) 9%, transparent)",
+  del: "color-mix(in oklab, var(--git-deleted) 9%, transparent)",
+} as const
+
+/**
+ * The wash behind a changed row. A hunk header takes the recessed ground
+ * instead, because it is a divider rather than a line of either file.
  */
 const ROW_TINT: Record<DiffRow["kind"], string | undefined> = {
   heading: undefined,
   hunk: "var(--surface-sunken)",
   rename: undefined,
-  add: "color-mix(in oklab, var(--git-added) 9%, transparent)",
-  del: "color-mix(in oklab, var(--git-deleted) 9%, transparent)",
+  add: DIFF_WASH.add,
+  del: DIFF_WASH.del,
   context: undefined,
   meta: undefined,
 }
