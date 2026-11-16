@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   ChevronDoubleDown,
-  ChevronLeft,
-  ChevronRight,
   CloudUpload,
   Copy,
   Download,
@@ -26,21 +24,15 @@ import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { FormFact, FormFacts } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { PaneFooter } from "@/components/panel"
 import { EmptyState } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useGridLayout } from "@/components/database/grid"
+import { PageControls } from "@/components/database/data/foot"
+import { readableDuration } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
 import {
   cloneDocument,
@@ -532,7 +524,7 @@ function Documents({
     <>
       {result && (
         <span className="numeric text-hint whitespace-nowrap text-muted-foreground max-lg:hidden">
-          {result.durationMs.toLocaleString("en-US")} ms
+          {readableDuration(`${result.durationMs}ms`)}
         </span>
       )}
       {result?.truncated && (
@@ -549,46 +541,17 @@ function Documents({
       >
         {words}
       </span>
-      <Select
-        value={String(pageSize)}
-        onValueChange={(next) => {
-          setSize(Number(next))
+      <PageControls
+        pageSize={pageSize}
+        sizes={PAGE_SIZES}
+        sizeLabel="Documents a page"
+        onPageSize={(next) => {
+          setSize(next)
           select({ page: null })
         }}
-      >
-        <SelectTrigger
-          size="sm"
-          aria-label="Documents a page"
-          className="h-7 gap-1 px-2 text-xs data-[size=sm]:h-7 sm:data-[size=sm]:h-7"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent position="popper" align="end">
-          {PAGE_SIZES.map((option) => (
-            <SelectItem key={option} value={String(option)} className="text-xs">
-              {option} a page
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <div className="flex items-center">
-        <IconAction
-          label="Previous page"
-          className="size-7"
-          disabled={window_.page === 0}
-          onClick={() => turn(window_.page - 1)}
-        >
-          <ChevronLeft />
-        </IconAction>
-        <IconAction
-          label="Next page"
-          className="size-7"
-          disabled={!hasNext}
-          onClick={() => turn(window_.page + 1)}
-        >
-          <ChevronRight />
-        </IconAction>
-      </div>
+        onPrevious={window_.page === 0 ? undefined : () => turn(window_.page - 1)}
+        onNext={hasNext ? () => turn(window_.page + 1) : undefined}
+      />
     </>
   )
 
