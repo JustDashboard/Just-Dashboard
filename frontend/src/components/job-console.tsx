@@ -158,7 +158,9 @@ export function JobConsole({
     [lines],
   )
   if (!job) return null
-  const state = JOB_STATE[job.status]
+  // A status this console does not know — a newer server's, or an answer
+  // that was not a job — is drawn as the old icon drew it: not running.
+  const state = JOB_STATE[job.status] ?? "failed"
   const running = state === "running"
   return (
     <ConsoleView
