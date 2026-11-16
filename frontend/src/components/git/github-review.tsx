@@ -22,8 +22,9 @@ import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount, FilterChip } from "@/components/chips"
+import { ViewTabList, tabClasses } from "@/components/tabs"
+import { Tabs as TabsPrimitive } from "radix-ui"
+import { FilterChip } from "@/components/chips"
 import { ForgeFace } from "@/components/git/marks"
 import { Markdown } from "@/components/git/markdown"
 import { PreviewHeader } from "@/components/git/preview-header"
@@ -272,42 +273,51 @@ export function PullReview({
     (verdict !== "comment" && (!head || changed))
 
   return (
-    <section className="border-t border-hairline">
-      <div className="flex h-9 items-center border-b border-hairline px-1">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "conversation"}
-          className={tabClasses(tab === "conversation", "h-9 px-2.5")}
-          onClick={() => {
-            setTab("conversation")
-            setPage(1)
-          }}
-        >
-          <ChatBubble aria-hidden className="size-3.5" />
-          Conversation
-          {pull.comments > 0 && <ChipCount>{pull.comments}</ChipCount>}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "files"}
-          className={tabClasses(tab === "files", "h-9 px-2.5")}
-          onClick={() => {
-            setTab("files")
-            setPage(1)
-          }}
-        >
-          <FileText aria-hidden className="size-3.5" />
-          Files changed
-          {pull.files ? <ChipCount>{pull.files}</ChipCount> : null}
-        </button>
-        <span className="flex-1" />
-        <Button size="xs" variant="ghost" onClick={reload}>
-          <RefreshClockwise />
-          Reload
-        </Button>
-      </div>
+    // The two views as real tabs: arrow keys move between them and the
+    // chosen one names the view under it. They were role=tab buttons with no
+    // tablist, one of axe's critical findings on /git.
+    <TabsPrimitive.Root
+      value={tab}
+      onValueChange={(next) => {
+        setTab(next as "conversation" | "files")
+        setPage(1)
+      }}
+      className="border-t border-hairline"
+    >
+      <ViewTabList
+        label={`Views of #${pull.number}`}
+        size="sm"
+        value={tab}
+        className="px-1"
+        views={[
+          {
+            key: "conversation",
+            label: (
+              <>
+                <ChatBubble aria-hidden className="size-3.5" />
+                Conversation
+              </>
+            ),
+            count: pull.comments,
+          },
+          {
+            key: "files",
+            label: (
+              <>
+                <FileText aria-hidden className="size-3.5" />
+                Files changed
+              </>
+            ),
+            count: pull.files ?? undefined,
+          },
+        ]}
+        trailing={
+          <Button size="xs" variant="ghost" onClick={reload}>
+            <RefreshClockwise />
+            Reload
+          </Button>
+        }
+      />
       {changed && (
         <Notice tone="warning" title="New commits were pushed" className="m-3">
           Reload and read them before approving or requesting changes — a review is pinned to the
@@ -315,129 +325,135 @@ export function PullReview({
         </Notice>
       )}
 
-      {tab === "files" ? (
-        <>
-          {files.error && <ErrorState className="m-3" error={files.error} />}
-          {files.loading && <LoadingRows className="p-3" rows={3} />}
-          {!head && (
-            <p className="p-3 text-hint text-muted-foreground">
-              Reload the request to read its commit revision.
-            </p>
-          )}
-          {files.data && (
-            <>
-              {files.data.limited && (
-                <p className="p-3 text-hint text-warning">
-                  GitHub limits this list to 3,000 files. Open the request on GitHub for the
-                  remaining changes.
-                </p>
-              )}
-              <ul className="divide-y divide-hairline">
-                {files.data.files.map((f) => {
-                  const status = FILE_STATUS[f.status] ?? FILE_STATUS.modified
-                  return (
-                    <li key={f.filename}>
-                      <button
-                        type="button"
-                        aria-pressed={file === f.filename}
-                        className={cn(
-                          "flex w-full items-center gap-2 px-3 py-1.5 text-left focus-ring-inset hover:bg-row-hover",
-                          file === f.filename && "bg-accent",
-                        )}
-                        onClick={() => setFile(file === f.filename ? null : f.filename)}
-                      >
-                        <span
-                          aria-label={f.status}
-                          className="w-3 shrink-0 font-mono text-hint font-semibold"
-                          style={{ color: status.colour }}
+      <TabsPrimitive.Content value={tab} className="outline-none">
+        {tab === "files" ? (
+          <>
+            {files.error && <ErrorState className="m-3" error={files.error} />}
+            {files.loading && <LoadingRows className="p-3" rows={3} />}
+            {!head && (
+              <p className="p-3 text-hint text-muted-foreground">
+                Reload the request to read its commit revision.
+              </p>
+            )}
+            {files.data && (
+              <>
+                {files.data.limited && (
+                  <p className="p-3 text-hint text-warning">
+                    GitHub limits this list to 3,000 files. Open the request on GitHub for the
+                    remaining changes.
+                  </p>
+                )}
+                <ul className="divide-y divide-hairline">
+                  {files.data.files.map((f) => {
+                    const status = FILE_STATUS[f.status] ?? FILE_STATUS.modified
+                    return (
+                      <li key={f.filename}>
+                        <button
+                          type="button"
+                          aria-pressed={file === f.filename}
+                          className={cn(
+                            "flex w-full items-center gap-2 px-3 py-1.5 text-left focus-ring-inset hover:bg-row-hover",
+                            file === f.filename && "bg-accent",
+                          )}
+                          onClick={() => setFile(file === f.filename ? null : f.filename)}
                         >
-                          {status.letter}
-                        </span>
-                        <FileIcon
-                          entry={{
-                            name: f.filename.split("/").pop() ?? f.filename,
-                            isDir: false,
-                            isSymlink: false,
-                          }}
-                          className="size-4 shrink-0"
-                        />
-                        <span className="min-w-0 flex-1 truncate font-mono text-hint">
-                          {f.previous_filename ? `${f.previous_filename} → ` : ""}
-                          {f.filename}
-                        </span>
-                        <span className="numeric shrink-0 font-mono text-hint">
-                          <span className="text-git-added">+{f.additions}</span>{" "}
-                          <span className="text-git-deleted">−{f.deletions}</span>
-                        </span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
+                          <span
+                            aria-label={f.status}
+                            className="w-3 shrink-0 font-mono text-hint font-semibold"
+                            style={{ color: status.colour }}
+                          >
+                            {status.letter}
+                          </span>
+                          <FileIcon
+                            entry={{
+                              name: f.filename.split("/").pop() ?? f.filename,
+                              isDir: false,
+                              isSymlink: false,
+                            }}
+                            className="size-4 shrink-0"
+                          />
+                          <span className="min-w-0 flex-1 truncate font-mono text-hint">
+                            {f.previous_filename ? `${f.previous_filename} → ` : ""}
+                            {f.filename}
+                          </span>
+                          <span className="numeric shrink-0 font-mono text-hint">
+                            <span className="text-git-added">+{f.additions}</span>{" "}
+                            <span className="text-git-deleted">−{f.deletions}</span>
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+                <HistoryPaging
+                  busy={files.loading}
+                  start={(page - 1) * 100}
+                  unit="items"
+                  count={files.data.files.length}
+                  hasMore={files.data.hasMore}
+                  onPrevious={() => setPage(page - 1)}
+                  onNext={() => setPage(page + 1)}
+                />
+              </>
+            )}
+            {selected &&
+              (selected.patch ? (
+                <DiffView body={selected.patch} singleFile lineNumbers />
+              ) : (
+                <p className="p-3 text-hint text-muted-foreground">
+                  GitHub supplied no text patch for this file. It may be binary or too large; open
+                  it on GitHub to inspect it.
+                </p>
+              ))}
+          </>
+        ) : (
+          <div className="space-y-2.5 px-4 py-3">
+            {conversation.error && <ErrorState error={conversation.error} />}
+            {conversation.loading && <LoadingRows rows={3} />}
+            {conversation.data && entries.length === 0 && (
+              <p className="text-hint text-muted-foreground">
+                No comments yet — be the first to say something below.
+              </p>
+            )}
+            {entries.map((e) => {
+              const review = e.kind === "reviews" ? REVIEW_STATE[e.state ?? ""] : undefined
+              return (
+                <CommentCard
+                  key={`${e.kind}:${e.id}`}
+                  author={e.author}
+                  action={
+                    review
+                      ? review.action
+                      : e.kind === "inline"
+                        ? "commented on a line"
+                        : "commented"
+                  }
+                  mark={
+                    review?.Glyph ? (
+                      <review.Glyph aria-hidden className={cn("size-3.5 shrink-0", review.tone)} />
+                    ) : undefined
+                  }
+                  location={e.path ? `${e.path}${e.line ? `:${e.line}` : ""}` : undefined}
+                  at={e.at}
+                  body={e.body}
+                  repoUrl={repoUrl}
+                />
+              )
+            })}
+            {conversation.data && (conversation.data.hasMore || page > 1) && (
               <HistoryPaging
-                busy={files.loading}
+                busy={conversation.loading}
                 start={(page - 1) * 100}
                 unit="items"
-                count={files.data.files.length}
-                hasMore={files.data.hasMore}
+                count={conversation.data.entries.length}
+                hasMore={conversation.data.hasMore}
                 onPrevious={() => setPage(page - 1)}
                 onNext={() => setPage(page + 1)}
               />
-            </>
-          )}
-          {selected &&
-            (selected.patch ? (
-              <DiffView body={selected.patch} singleFile lineNumbers />
-            ) : (
-              <p className="p-3 text-hint text-muted-foreground">
-                GitHub supplied no text patch for this file. It may be binary or too large; open it
-                on GitHub to inspect it.
-              </p>
-            ))}
-        </>
-      ) : (
-        <div className="space-y-2.5 px-4 py-3">
-          {conversation.error && <ErrorState error={conversation.error} />}
-          {conversation.loading && <LoadingRows rows={3} />}
-          {conversation.data && entries.length === 0 && (
-            <p className="text-hint text-muted-foreground">
-              No comments yet — be the first to say something below.
-            </p>
-          )}
-          {entries.map((e) => {
-            const review = e.kind === "reviews" ? REVIEW_STATE[e.state ?? ""] : undefined
-            return (
-              <CommentCard
-                key={`${e.kind}:${e.id}`}
-                author={e.author}
-                action={
-                  review ? review.action : e.kind === "inline" ? "commented on a line" : "commented"
-                }
-                mark={
-                  review?.Glyph ? (
-                    <review.Glyph aria-hidden className={cn("size-3.5 shrink-0", review.tone)} />
-                  ) : undefined
-                }
-                location={e.path ? `${e.path}${e.line ? `:${e.line}` : ""}` : undefined}
-                at={e.at}
-                body={e.body}
-                repoUrl={repoUrl}
-              />
-            )
-          })}
-          {conversation.data && (conversation.data.hasMore || page > 1) && (
-            <HistoryPaging
-              busy={conversation.loading}
-              start={(page - 1) * 100}
-              unit="items"
-              count={conversation.data.entries.length}
-              hasMore={conversation.data.hasMore}
-              onPrevious={() => setPage(page - 1)}
-              onNext={() => setPage(page + 1)}
-            />
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
+      </TabsPrimitive.Content>
 
       {ctx.canControl && (
         <form
@@ -459,46 +475,54 @@ export function PullReview({
               />
             ) : null}
             <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-input bg-control focus-ring-within">
-              <div className="flex h-8 items-center border-b border-hairline px-1">
-                {(["write", "preview"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    role="tab"
-                    aria-selected={writing === mode}
-                    onClick={() => setWriting(mode)}
-                    className={tabClasses(writing === mode, "h-8 px-2.5 text-xs")}
-                  >
-                    {mode === "write" ? "Write" : "Preview"}
-                  </button>
-                ))}
-                <span className="ml-auto pr-2 text-micro text-muted-foreground">
-                  {ctx.githubLogin ? `as ${ctx.githubLogin}` : "as the checkout's owner"}
-                </span>
-              </div>
-              {writing === "write" ? (
-                <Textarea
-                  aria-label="Comment"
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  onKeyDown={(e) => {
-                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !blocked) {
-                      e.preventDefault()
-                      void send()
-                    }
-                  }}
-                  maxLength={60000}
-                  rows={4}
-                  placeholder={open ? "Leave a comment, or review the changes" : "Leave a comment"}
-                  className="min-h-24 resize-y rounded-none border-0 bg-transparent text-body shadow-none outline-none dark:bg-transparent"
-                />
-              ) : body.trim() ? (
-                <Markdown source={body} repoUrl={repoUrl} className="min-h-24 px-3 py-2.5" />
-              ) : (
-                <p className="min-h-24 px-3 py-2.5 text-hint text-muted-foreground italic">
-                  Nothing to preview.
-                </p>
-              )}
+              <TabsPrimitive.Root
+                value={writing}
+                onValueChange={(next) => setWriting(next as "write" | "preview")}
+              >
+                <div className="flex h-8 items-center border-b border-hairline px-1">
+                  <TabsPrimitive.List aria-label="Comment" className="flex">
+                    {(["write", "preview"] as const).map((mode) => (
+                      <TabsPrimitive.Trigger
+                        key={mode}
+                        value={mode}
+                        className={tabClasses(writing === mode, "h-8 px-2.5 text-xs")}
+                      >
+                        {mode === "write" ? "Write" : "Preview"}
+                      </TabsPrimitive.Trigger>
+                    ))}
+                  </TabsPrimitive.List>
+                  <span className="ml-auto pr-2 text-micro text-muted-foreground">
+                    {ctx.githubLogin ? `as ${ctx.githubLogin}` : "as the checkout's owner"}
+                  </span>
+                </div>
+                <TabsPrimitive.Content value={writing} className="outline-none">
+                  {writing === "write" ? (
+                    <Textarea
+                      aria-label="Comment"
+                      value={body}
+                      onChange={(e) => setBody(e.target.value)}
+                      onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !blocked) {
+                          e.preventDefault()
+                          void send()
+                        }
+                      }}
+                      maxLength={60000}
+                      rows={4}
+                      placeholder={
+                        open ? "Leave a comment, or review the changes" : "Leave a comment"
+                      }
+                      className="min-h-24 resize-y rounded-none border-0 bg-transparent text-body shadow-none outline-none dark:bg-transparent"
+                    />
+                  ) : body.trim() ? (
+                    <Markdown source={body} repoUrl={repoUrl} className="min-h-24 px-3 py-2.5" />
+                  ) : (
+                    <p className="min-h-24 px-3 py-2.5 text-hint text-muted-foreground italic">
+                      Nothing to preview.
+                    </p>
+                  )}
+                </TabsPrimitive.Content>
+              </TabsPrimitive.Root>
               <p className="flex items-center gap-1.5 border-t border-hairline px-2.5 py-1 text-micro text-muted-foreground">
                 <AcronymMarkdown aria-hidden className="size-3.5" />
                 Markdown works · ⌘↵ to send
@@ -536,7 +560,7 @@ export function PullReview({
           </div>
         </form>
       )}
-    </section>
+    </TabsPrimitive.Root>
   )
 }
 
