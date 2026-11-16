@@ -5,9 +5,7 @@ import { get } from "@/lib/api"
 import type { SystemdList } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { kindViews } from "@/components/logs/kind-views"
-import { ServiceLogs } from "@/components/logs/service-logs"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { LoadingRows } from "@/components/loading"
+import { EmbeddedLog } from "@/components/logs/embedded-log"
 import { interfaceLogSources } from "@/components/network/interfaces/log-sources"
 
 /**
@@ -17,28 +15,22 @@ import { interfaceLogSources } from "@/components/network/interfaces/log-sources
  * are asked once, from systemd's own list rather than the logs page's walk of
  * every file on the host; where they cannot be read the ring stands alone.
  * The pane waits for that answer, so a remembered unit is not opened on the
- * ring first and then swapped.
+ * ring first and then swapped. On a phone each is a card into the Logs page.
  */
 export function InterfacesLog() {
   const list = usePoll<SystemdList>((signal) => get("/systemd/", undefined, signal), 0)
-  const sources = useMemo(() => interfaceLogSources(list.data?.units), [list.data])
   const known = list.data !== undefined || list.error !== undefined
+  const sources = useMemo(
+    () => (known ? interfaceLogSources(list.data?.units) : undefined),
+    [known, list.data],
+  )
   return (
-    <Panel plain>
-      <PanelHeader title="Link log" />
-      <PanelBody flush className="pt-3">
-        {known ? (
-          <ServiceLogs
-            sources={sources}
-            views={kindViews}
-            storageKey="network.interfaces.log"
-            pickerLabel="Link log"
-            paneClassName="h-workbench min-h-80"
-          />
-        ) : (
-          <LoadingRows rows={6} className="h-workbench min-h-80" />
-        )}
-      </PanelBody>
-    </Panel>
+    <EmbeddedLog
+      title="Link log"
+      sources={sources}
+      views={kindViews}
+      storageKey="network.interfaces.log"
+      pickerLabel="Link log"
+    />
   )
 }

@@ -6,9 +6,8 @@ import type { LogSource } from "@/lib/types"
 import { dockerSource, fileSource, journalSource } from "@/lib/log/sources"
 import { usePoll } from "@/hooks/use-poll"
 import { kindViews } from "@/components/logs/kind-views"
-import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { LoadingRows } from "@/components/loading"
+import { EmbeddedLog } from "@/components/logs/embedded-log"
+import type { ServiceLogSource } from "@/components/logs/service-logs"
 import type { ProxyStatus } from "@/components/proxy/proxy-context"
 
 /** Where a host Caddy writes its requests, when its Caddyfile logs them to a file. */
@@ -104,6 +103,7 @@ export function engineLogSources(
  * details" and a file on the Logs page, and neither was where the question —
  * why is the proxy unhappy — gets asked. The page already opens on four
  * figures, so the log's own readings stay in its quick views and Insights.
+ * On a phone each source is a card into the Logs page (`EmbeddedLog`).
  */
 export function EngineLog({ status }: { status: ProxyStatus }) {
   // One question about each source that may not be there before it is
@@ -132,32 +132,14 @@ export function EngineLog({ status }: { status: ProxyStatus }) {
   )
   // The host's own logs are there to read while the ingress is asked about;
   // a pane whose only log is the ingress waits for the answer.
-  if (!status.nginx && !host && !settled) {
-    return (
-      <Panel plain>
-        <PanelHeader title="Engine log" />
-        <PanelBody flush className="pt-3">
-          <LoadingRows rows={4} />
-        </PanelBody>
-      </Panel>
-    )
-  }
-  if (sources.length === 0) return null
+  const waiting = !status.nginx && !host && !settled
   return (
-    <Panel plain aria-label="Engine log">
-      <PanelHeader title="Engine log" />
-      <PanelBody flush className="pt-3">
-        <ServiceLogs
-          sources={sources}
-          views={kindViews}
-          storageKey="proxy.engine"
-          pickerLabel="Engine log"
-          // The height every service's log takes. It was held to nine tenths
-          // of the window, forty rem at the least, so a log that is not
-          // streaming was the lower half of the page, empty.
-          paneClassName="h-workbench min-h-80"
-        />
-      </PanelBody>
-    </Panel>
+    <EmbeddedLog
+      title="Engine log"
+      sources={waiting ? undefined : sources}
+      views={kindViews}
+      storageKey="proxy.engine"
+      pickerLabel="Engine log"
+    />
   )
 }

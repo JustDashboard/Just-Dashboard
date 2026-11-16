@@ -11,9 +11,10 @@ import type { Job, JobLine } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/loading"
-import { Pane, PaneHeader } from "@/components/panel"
+import { ConsoleView, type ConsoleState } from "@/components/console-view"
+import { Tag } from "@/components/tag"
+import { jobLineToTranscript } from "@/components/transcript-line"
 
 /**
  * Watching an operation that outlives the page.
@@ -124,6 +125,20 @@ export function useJobConsole(options?: { onSuccess?: () => void }) {
   return { job, lines, attach, open, dismiss, cancel, running: Boolean(running) }
 }
 
+/** A job's status as the console's state. */
+const JOB_STATE: Record<Job["status"], ConsoleState> = {
+  running: "running",
+  succeeded: "ok",
+  failed: "failed",
+  cancelled: "cancelled",
+}
+
+/**
+ * A job's console (`ConsoleView`): its lines numbered from the job's own
+ * sequence (`jobLineToTranscript`), its state as a word, Stop for a reader
+ * the job's route would let start it, and a note while it runs that closing
+ * the page does not stop it — the recent list beside it is the way back.
+ */
 export function JobConsole({
   job,
   lines,
@@ -138,91 +153,30 @@ export function JobConsole({
   className?: string
 }) {
   const { can } = useAuth()
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [following, setFollowing] = useState(true)
-
-  useEffect(() => {
-    if (!following) return
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [lines, following])
-
+  const shown = useMemo(
+    () => lines.map((line) => ({ key: line.seq, line: jobLineToTranscript(line) })),
+    [lines],
+  )
   if (!job) return null
-  const running = job.status === "running"
-  // The buffer is bounded at both ends, so a very long run is truncated and
-  // says so rather than quietly showing a middle.
-  const dropped = job.lines - lines.length
-
+  // A status this console does not know — a newer server's, or an answer
+  // that was not a job — is drawn as the old icon drew it: not running.
+  const state = JOB_STATE[job.status] ?? "failed"
+  const running = state === "running"
   return (
-    <Pane className={cn("bg-surface-sunken", className)}>
-      <PaneHeader className="flex-wrap gap-2 px-3">
-        <JobIcon status={job.status} />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-          {job.title}
-          {!running && (
-            <span className="ml-2 font-normal text-muted-foreground">
-              {job.status} {job.endedAt && relativeTime(job.endedAt)}
-            </span>
-          )}
-        </span>
-        {running && onCancel && (!job.capability || can(job.capability)) && (
-          <Button size="xs" variant="ghost" className="text-destructive" onClick={onCancel}>
-            <Slash className="size-3" />
-            Stop
-          </Button>
-        )}
-        {!running && onDismiss && (
-          <Button size="xs" variant="ghost" onClick={onDismiss}>
-            Dismiss
-          </Button>
-        )}
-      </PaneHeader>
-
-      {job.error && (
-        <p className="border-b border-hairline bg-wash-danger px-3 py-1.5 text-hint text-destructive">
-          {job.error}
-        </p>
-      )}
-      {running && (
-        <p className="border-b border-hairline px-3 py-1.5 text-hint text-muted-foreground">
-          This keeps running if you close the page — reopen it from the recent list.
-        </p>
-      )}
-
-      <div
-        ref={scrollRef}
-        onScroll={() => {
-          const el = scrollRef.current
-          if (!el) return
-          setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
-        }}
-        className="max-h-80 min-h-24 overflow-auto p-2.5 font-mono text-hint leading-relaxed"
-      >
-        {dropped > 0 && (
-          <div className="mb-1.5 text-muted-foreground">
-            … {dropped} earlier {dropped === 1 ? "line" : "lines"} dropped …
-          </div>
-        )}
-        {lines.length === 0 ? (
-          <p className="text-muted-foreground">{running ? "Starting…" : "No output."}</p>
-        ) : (
-          lines.map((line) => (
-            <div
-              key={line.seq}
-              className={cn(
-                "break-all whitespace-pre-wrap",
-                // A status line is the runner's own voice rather than the
-                // command's, so it reads as a heading in the stream.
-                line.stream === "status" && "mt-1.5 font-medium text-primary",
-                line.stream === "stderr" && "text-warning",
-              )}
-            >
-              {line.text}
-            </div>
-          ))
-        )}
-      </div>
-    </Pane>
+    <ConsoleView
+      title={job.title}
+      state={state}
+      detail={!running && job.endedAt ? relativeTime(job.endedAt) : undefined}
+      note={running ? <Tag>Keeps running if you leave</Tag> : undefined}
+      lines={shown}
+      // The buffer is bounded at both ends, so a very long run is truncated
+      // and says so rather than quietly showing a middle.
+      dropped={job.lines - lines.length}
+      error={job.error}
+      onCancel={onCancel && (!job.capability || can(job.capability)) ? onCancel : undefined}
+      onDismiss={onDismiss}
+      className={className}
+    />
   )
 }
 

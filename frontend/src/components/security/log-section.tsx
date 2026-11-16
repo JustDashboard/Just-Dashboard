@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ApiError, get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
@@ -10,15 +10,9 @@ import type { LogLine } from "@/lib/types"
 import type { LensReading } from "@/lib/log/lenses"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import {
-  ServiceLogs,
-  type ServiceLogSource,
-  type ServiceLogsProps,
-} from "@/components/logs/service-logs"
+import { EmbeddedLog } from "@/components/logs/embedded-log"
+import type { ServiceLogSource, ServiceLogsProps } from "@/components/logs/service-logs"
 import type { LensReadingsState } from "@/components/logs/lens-readings"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ErrorState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 import { hostLogSource, type HostLogPlan, type HostLogProbe } from "@/components/security/host-logs"
 import type { Verb } from "@/components/verbs"
@@ -156,13 +150,12 @@ export function useReadingPress() {
 }
 
 /**
- * A service's log as a section of its Security page: a title and a hairline
- * over the pane, the way every other block in the section is drawn — the pane
- * is the one frame, because it owns its scroll (§7). What stands in for it is
- * said in the section's words: its files still being asked after, or the
- * page's own reason the pane would be empty (`instead`) — a firewall that is
- * not logging has nothing to show, and the control that changes that is on
- * the same page.
+ * A service's log as a section of its Security page (`EmbeddedLog`): the
+ * section's title over the pane, and a card into the Logs page on a phone.
+ * What stands in for it is said in the section's words: its files still
+ * being asked after, or the page's own reason the pane would be empty
+ * (`instead`) — a firewall that is not logging has nothing to show, and the
+ * control that changes that is on the same page.
  */
 export function HostLogSection({
   title,
@@ -192,27 +185,19 @@ export function HostLogSection({
   useEffect(() => {
     if (asked) ref.current?.scrollIntoView({ block: "start" })
   }, [asked])
+  const sources = useMemo(() => (log.data ? [log.data] : undefined), [log.data])
   return (
-    <Panel plain ref={ref}>
-      <PanelHeader title={title} />
-      <PanelBody flush className="pt-3">
-        {instead ? (
-          instead
-        ) : log.error && !log.data ? (
-          <ErrorState error={log.error} onRetry={log.refresh} />
-        ) : !log.data ? (
-          <LoadingRows rows={6} hold />
-        ) : (
-          <ServiceLogs
-            sources={[log.data]}
-            storageKey={storageKey}
-            lineVerbs={lineVerbs}
-            ask={ask}
-            answeredBy={readings}
-            paneClassName="h-workbench min-h-80"
-          />
-        )}
-      </PanelBody>
-    </Panel>
+    <EmbeddedLog
+      ref={ref}
+      title={title}
+      sources={sources}
+      instead={instead}
+      error={log.error && !log.data ? log.error : undefined}
+      onRetry={log.refresh}
+      storageKey={storageKey}
+      lineVerbs={lineVerbs}
+      ask={ask}
+      answeredBy={readings}
+    />
   )
 }
