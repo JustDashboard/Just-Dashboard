@@ -22,7 +22,7 @@ import { uptimeWords } from "@/components/database/mongo/performance/samples"
 import type { MongoMember } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { Fig, FigureLine } from "@/components/database/ops/performance-words"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 /** How far behind the primary a member is before the figure is a reading worth a hue. */
 const LAG_SECONDS = 10

@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import type { Verb } from "@/components/verbs"
-import { RunningCommand } from "@/components/database/query/running-command"
+import { RunningCommand } from "@/components/database/kit/running-command"
 import { useGridLayout } from "@/components/database/grid"
 import { EngineMark } from "@/components/database/kit"
 import {
@@ -80,7 +80,7 @@ import {
   useSecondsRunning,
   useStoppable,
   worthShowing,
-} from "@/components/database/mongo/in-flight"
+} from "@/components/database/kit/in-flight"
 import { CollectionMark, collectionKind } from "@/components/database/mongo/kinds"
 import type { MongoAggregateResult, MongoDoc } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"

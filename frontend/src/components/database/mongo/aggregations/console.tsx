@@ -32,7 +32,7 @@ import {
   TRANSCRIPT_KEPT,
   commandMs,
   type CommandClass,
-} from "@/components/database/query/command-class"
+} from "@/components/database/kit/command-class"
 import { NameMark } from "@/components/database/kit/marks"
 import { shapeProblem } from "@/components/database/mongo/shell"
 import type {
@@ -42,7 +42,7 @@ import type {
   MongoVerdict,
 } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 

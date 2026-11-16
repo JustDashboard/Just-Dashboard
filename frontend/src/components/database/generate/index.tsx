@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CodeView, EngineMark, SectionFrame } from "@/components/database/kit"
 import { SchemaChips } from "@/components/database/kit/schema-chips"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
   countsLine,

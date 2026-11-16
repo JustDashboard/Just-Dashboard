@@ -40,7 +40,7 @@ import {
 } from "@/components/database/kit/json-doc"
 import type { KeyEditorProps } from "@/components/database/redis/keys/key-pane"
 import { MemberDialog } from "@/components/database/redis/keys/member-dialog"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 /** How many entries of one object or array are drawn before the rest are asked for. */
 const PAGE = 100

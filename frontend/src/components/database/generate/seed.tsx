@@ -50,7 +50,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { SqlReview } from "@/components/database/kit/sql-review"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { TablePicker } from "@/components/database/generate/table-picker"
 import {

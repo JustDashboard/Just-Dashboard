@@ -10,7 +10,7 @@ import type {
   MongoPlanNode,
 } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { Segments } from "@/components/segments"
 import { FormNote } from "@/components/form"
 import { Meter } from "@/components/meter"

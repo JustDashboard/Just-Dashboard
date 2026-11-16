@@ -34,7 +34,7 @@ import {
 import { runningWords } from "@/components/database/mongo/performance/samples"
 import type { MongoOperation } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { DbClientMark } from "@/components/database/client-mark"
 import { clientOf } from "@/components/database/clients"
 import { useKnownClients } from "@/components/database/use-known-clients"

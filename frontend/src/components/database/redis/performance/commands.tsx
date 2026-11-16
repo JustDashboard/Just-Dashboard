@@ -24,7 +24,7 @@ import {
   TitleAside,
   TitleFact,
 } from "@/components/database/ops/performance-words"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { RedisCommandStat, RedisCommandStats } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
 

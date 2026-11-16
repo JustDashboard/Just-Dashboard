@@ -17,7 +17,7 @@ import {
 } from "@/components/assistant/agent/chat"
 import type { AgentSession } from "@/components/assistant/agent/sessions"
 import { AssistantProtected } from "@/components/database/assistant"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
   ERROR_QUESTION,

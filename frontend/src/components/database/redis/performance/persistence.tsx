@@ -21,7 +21,7 @@ import {
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { redisSave } from "@/components/database/redis/api"
 import { scheduleWords } from "@/components/database/redis/performance/schedule"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
 
 /**

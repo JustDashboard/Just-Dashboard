@@ -25,7 +25,7 @@ import { NameMark } from "@/components/database/kit/marks"
 import type { MongoDatabase, MongoServer } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { countScale, micros, perSecond } from "@/components/database/redis/performance/samples"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 // Module constants: `ChartPanel` is memoised on its props, and a series or a
 // formatter made fresh each render would redraw every chart on every sample.

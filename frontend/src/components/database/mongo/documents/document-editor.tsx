@@ -34,7 +34,7 @@ import {
 import { scan } from "@/components/database/mongo/shell"
 import type { MongoDoc, MongoWriteError } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 /**
  * A document laid out for editing: its Extended JSON, indented, every type

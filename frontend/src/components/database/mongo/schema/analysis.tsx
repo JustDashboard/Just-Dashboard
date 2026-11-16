@@ -10,7 +10,7 @@ import { Segments } from "@/components/segments"
 import { SearchInput } from "@/components/search-input"
 import { EmptyState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { RunningCommand } from "@/components/database/query/running-command"
+import { RunningCommand } from "@/components/database/kit/running-command"
 import { EngineMark } from "@/components/database/kit"
 import { analyseSchema } from "@/components/database/mongo/api"
 import { CodeField } from "@/components/database/mongo/code-field"
@@ -19,7 +19,7 @@ import {
   useSecondsRunning,
   useStoppable,
   worthShowing,
-} from "@/components/database/mongo/in-flight"
+} from "@/components/database/kit/in-flight"
 import { TypeTag, typeInfo } from "@/components/database/mongo/kinds"
 import {
   EMPTY_QUERY,

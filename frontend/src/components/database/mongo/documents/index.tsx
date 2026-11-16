@@ -65,7 +65,7 @@ import {
   useListed,
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
-import { Stopped, useSecondsRunning, useStoppable } from "@/components/database/mongo/in-flight"
+import { Stopped, useSecondsRunning, useStoppable } from "@/components/database/kit/in-flight"
 import {
   CollectionKindTag,
   CollectionMark,
@@ -96,7 +96,7 @@ import { mergeFilter } from "@/components/database/mongo/shell"
 import { ImportDialog } from "@/components/database/mongo/transfer"
 import type { MongoDoc, MongoFindResult } from "@/components/database/mongo/types"
 import { MongoWorkbench, type Workbench } from "@/components/database/mongo/workbench"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { HeadVerbs, ObjectHead, useHeadMenu } from "@/components/database/workbench/chrome"
 
 /** The documents before they land: a few of them, each a short run of fields. */
