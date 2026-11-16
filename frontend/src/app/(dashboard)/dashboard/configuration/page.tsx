@@ -487,26 +487,6 @@ function Configuration() {
         </PanelBody>
       </Panel>
 
-      {run && (
-        <Panel plain className="animate-rise">
-          <PanelHeader title={running ? "Restarting" : "Last restart"} />
-          <PanelBody>
-            <RestartProgress
-              run={run}
-              log={report.log}
-              restarting={restarting}
-              onDismiss={
-                admin
-                  ? () => {
-                      dismiss().catch((err) => notify.error("Could not dismiss", errorMessage(err)))
-                    }
-                  : undefined
-              }
-            />
-          </PanelBody>
-        </Panel>
-      )}
-
       {/* One centred column, a section to a row, as a project's settings
           are. The certificate is first because picking one fills the
           address, the interface and the allowlist under it. */}
@@ -556,6 +536,28 @@ function Configuration() {
             )
           }
         >
+          {/* The restart is the column's first section, as a deploy's pending
+              strip is: it ran at the page inset above a centred column, so
+              the page had two left edges. The Stack picture stays the one
+              full-width block. */}
+          {run && (
+            <SettingSection title={running ? "Restarting" : "Last restart"}>
+              <RestartProgress
+                run={run}
+                log={report.log}
+                restarting={restarting}
+                onDismiss={
+                  admin
+                    ? () => {
+                        dismiss().catch((err) =>
+                          notify.error("Could not dismiss", errorMessage(err)),
+                        )
+                      }
+                    : undefined
+                }
+              />
+            </SettingSection>
+          )}
           <SettingSection
             title="Certificate"
             state={<CertificateState report={report} />}

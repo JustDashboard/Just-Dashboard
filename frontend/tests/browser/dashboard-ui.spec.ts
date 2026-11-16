@@ -356,7 +356,7 @@ test("the version page is the history, with the update in the header", async ({ 
   expect((await history.boundingBox())!.y).toBe(before!.y)
   await page.keyboard.press("Escape")
 
-  await page.getByPlaceholder("Find a change, a version or a fix").fill("deployments")
+  await page.getByPlaceholder("Find a change").fill("deployments")
   await expect(history.getByRole("heading", { name: "0.6.6" })).toBeVisible()
   await expect(history.getByRole("heading", { name: "0.7.0" })).toHaveCount(0)
   // The way to the release's own note clears a search that hid it.
@@ -524,7 +524,7 @@ test("the configuration page edits in place and says where it lives", async ({ p
 
   // The restart record says what happened without a tinted banner, and its
   // transcript is the whole file rather than the tail the report carries.
-  const record = page.locator("section", { hasText: "Last restart" })
+  const record = page.locator("[data-slot=setting]", { hasText: "Last restart" })
   await expect(record.locator(".bg-wash-warning, .bg-wash-success")).toHaveCount(0)
   await record.getByRole("button", { name: /Transcript/ }).click()
   const transcript = record.getByRole("list", { name: "Apply transcript" })

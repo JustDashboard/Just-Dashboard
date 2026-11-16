@@ -243,7 +243,7 @@ export default function DashboardVersionPage() {
             <SearchInput
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Find a change, a version or a fix"
+              placeholder="Find a change"
             />
           }
         />
