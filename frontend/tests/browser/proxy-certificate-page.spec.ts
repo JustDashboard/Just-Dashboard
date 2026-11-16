@@ -199,6 +199,40 @@ for (const width of [1280, 390]) {
   })
 }
 
+for (const width of [1280, 390]) {
+  test(`at ${width} a certificate's line is as tall loading as loaded, with its verbs on it`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProxy(page, { included: true })
+    await mockCertificates(page)
+    await page.route("**/api/v1/certificates/certbot", (route) =>
+      json(route, certbotState({ autoRenew: true })),
+    )
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/certificates/", async (route: Route) => {
+      await held
+      await json(route, inventory)
+    })
+    await page.goto("/proxy/certificates/app.example.com")
+
+    const identity = page.locator("[data-slot='host-identity']")
+    await expect(identity).toContainText("Reading the certificate")
+    await risen(page)
+    const before = await identity.boundingBox()
+
+    release()
+    await expect(identity.getByRole("button", { name: /^Renew/ })).toBeVisible()
+    await risen(page)
+    const after = await identity.boundingBox()
+    expect(after?.y).toBe(before?.y)
+    expect(after?.height).toBe(before?.height)
+    // The verbs are the line's, not the back-link row's.
+    await expect(identity.getByRole("button", { name: "More actions for app.example.com" })).toBeVisible()
+  })
+}
+
 test("a row opens the certificate's page, with the sheet's contents as views", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockProxy(page, { included: true })

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Copy, Download, Warning } from "@/components/icons"
+import { Download, Warning } from "@/components/icons"
 import { downloadUrl, errorMessage, get, post, postFile } from "@/lib/api"
 import { calendarDate, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -16,9 +16,8 @@ import type {
   DecodedPEM,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { useCopy } from "@/hooks/use-copy"
 import { Field, OptionList, OptionRow } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
+import { CopyAction } from "@/components/copy"
 import { Modal } from "@/components/modal"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Section } from "@/components/section"
@@ -40,19 +39,16 @@ const CHAIN_VERDICT: Record<ChainVerdict, { label: string; verdict: Verdict }> =
   invalid: { label: "Invalid", verdict: "critical" },
 }
 
-/** A literal value with a copy tick beside it: fingerprints are compared by pasting. */
+/**
+ * A literal value with its copy action right after it: fingerprints are
+ * compared by pasting. The value takes its own width, not the row's, so the
+ * icon stands beside the words rather than at the frame's far edge (PGP-13).
+ */
 function CopyValue({ value, label }: { value: string; label: string }) {
-  const { copy, copied } = useCopy()
   return (
     <span className="flex min-w-0 items-start gap-1">
-      <span className="min-w-0 flex-1 font-mono text-hint break-all">{value}</span>
-      <IconAction
-        label={copied ? "Copied" : `Copy ${label}`}
-        onClick={() => void copy(value)}
-        className="-my-1 shrink-0"
-      >
-        {copied ? <Check /> : <Copy />}
-      </IconAction>
+      <span className="min-w-0 font-mono text-hint break-all">{value}</span>
+      <CopyAction text={value} label={`Copy ${label}`} className="-my-1 shrink-0" />
     </span>
   )
 }
@@ -71,7 +67,7 @@ function CopyList({ values, label }: { values: string[]; label: string }) {
 export function IdentityFacts({ facts }: { facts: CertificateFacts }) {
   const names = [...facts.dnsNames, ...facts.ipAddresses, ...facts.emails, ...facts.uris]
   return (
-    <DetailList>
+    <DetailList labelWidth="fixed">
       <Detail label="Subject">
         <CopyValue value={facts.subject || "—"} label="subject" />
       </Detail>
@@ -133,7 +129,7 @@ export function KeyFacts({ keyInfo }: { keyInfo: CertificateKey }) {
           these sites; chmod 600 it unless something in the group needs it.
         </Notice>
       ) : null}
-      <DetailList>
+      <DetailList labelWidth="fixed">
         <Detail label="Key file">
           <CopyValue value={keyInfo.path} label="key path" />
         </Detail>
@@ -494,7 +490,7 @@ export function PemDecoder({
         )}
         {result?.requests.map((csr, index) => (
           <Section key={index} title="Signing request">
-            <DetailList>
+            <DetailList labelWidth="fixed">
               <Detail label="Subject">
                 <CopyValue value={csr.subject || "—"} label="subject" />
               </Detail>
