@@ -219,13 +219,8 @@ function RowCard({
         )}
       </span>
       {row.state !== "clean" && (
-        <span
-          className={cn(
-            "shrink-0 font-mono text-hint",
-            row.state !== "clean" && CHANGE_STATE[row.state].hue,
-          )}
-        >
-          {row.state !== "clean" && CHANGE_STATE[row.state].short}
+        <span className={cn("shrink-0 font-mono text-hint", CHANGE_STATE[row.state].hue)}>
+          {CHANGE_STATE[row.state].short}
         </span>
       )}
       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />

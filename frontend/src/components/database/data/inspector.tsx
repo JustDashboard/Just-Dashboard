@@ -201,13 +201,8 @@ export function RowInspector({
         </span>
         {/* "New row" already says what the word would. */}
         {row && row.state !== "clean" && !(row.state === "inserted" && rowNumber === null) && (
-          <span
-            className={cn(
-              "shrink-0 font-mono text-hint",
-              row.state !== "clean" && CHANGE_STATE[row.state].hue,
-            )}
-          >
-            {row.state !== "clean" && CHANGE_STATE[row.state].short}
+          <span className={cn("shrink-0 font-mono text-hint", CHANGE_STATE[row.state].hue)}>
+            {CHANGE_STATE[row.state].short}
           </span>
         )}
         <span className="flex-1" />
