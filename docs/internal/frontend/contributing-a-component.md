@@ -42,8 +42,11 @@ In the same pull request:
 3. if it changes a rule, the rule's page in [`foundations/`](foundations/README.md),
    [`patterns/`](patterns/README.md) or [`standard.md`](standard.md).
 
-From WP-40 on, `src/docs-catalogue.test.js` fails when a shared export has no catalogue row, or
-when a doc names a component that is not an export.
+`src/docs-catalogue.test.js` fails when a shared export has no catalogue row, when a row names
+something that is not an export, and when a doc names a component the code does not have. Its
+baseline is empty: a new export arrives with its row. `scripts/doc-names.py`, run by
+`scripts/test-changed.sh` on every changed page here, also checks the files and routes a changed
+line names.
 
 ## How it is retired
 
@@ -51,7 +54,7 @@ In steps, so no pull request has to change every call site at once:
 
 1. Keep the old name working as a re-export or a thin wrapper with `/** @deprecated use X */`.
 2. Mark its catalogue row *deprecated* and point it at the replacement.
-3. Move the call sites, area by area, in the page passes.
+3. Move the call sites, area by area.
 4. Delete the old name, and add a lint rule that refuses it, so it cannot come back. The catalogue
    row goes, and the story of why moves to [`decisions/`](decisions/README.md).
 

@@ -33,18 +33,17 @@ page about one thing opens on (D1).
 
 ## The header placement rule
 
-Every detail page places the same things in the same places (PGH-02, PRX-01, PGB-02, PGD-27). The
-page passes move the pages that do otherwise.
+Every detail page places the same things in the same places.
 
 | What | Where | How |
 | --- | --- | --- |
 | The way back to the list | the back line, left | `PageContext back={{ href, label }}` |
-| Walk arrows (Alt+Up/Down) and the shortcuts' help | the back line, right | `PageContext actions`, hidden below `sm` |
+| Walk arrows (Alt+Up/Down) and the shortcuts' help | the back line, right, on a page with a way back; on a page with none, the help ends the identity line | `PageContext actions`, hidden below `sm`; else after the `⋯` in `IdentityHeader menu` |
 | Mark, name | the identity line | `IdentityHeader mark`/`logo`, `title` |
 | State word | beside the name | `IdentityHeader state` (a `Status`) |
 | Facts | under the name | `IdentityHeader facts`, written as `Fact`s |
-| The one command | the identity line's far end | `IdentityHeader command`, brand face |
-| Every other verb | `⋯` after the command | `IdentityHeader menu` |
+| The one command | the identity line's far end | `IdentityHeader command`, brand face; never a destructive verb |
+| Every other verb, and every destructive one | `⋯` after the command | `IdentityHeader menu` |
 
 `IdentityVerbs({ verbs, name })` turns a thing's `Verb[]` into that `command` and `menu`: the first
 inline verb is the command, everything else goes in a menu named "More actions for `<name>`".
@@ -74,13 +73,33 @@ on a phone (MOB-12), and it put the page's command in a second place.
 **Back links.** An item page one level under a list carries `back`, its one way back. A pane that a
 row opened inside a workspace uses `PaneBack` (`components/phone-panes.tsx`), which switches panes
 rather than following a link; the two are different jobs and stay separate. Section pages reached
-from the rail (Groups, Defaults, Alerts) carry a back line all or none: that is a content decision
-for the page passes. A flow's way out is `FlowHeader back={{ href, label }}`, drawn with the same
+from the rail (Groups, Defaults, Alerts) carry a back line all or none. A flow's way out is `FlowHeader back={{ href, label }}`, drawn with the same
 `BackLink`, not an eyebrow in capitals.
 
-`eyebrow` on `PageContext` is deprecated. A link passed there is still drawn. A string is not, as
-before, but in development it now logs that it was dropped, so the page pass removes it or turns it
-into `back`.
+`eyebrow` on `PageContext` is deprecated. A link passed there is still drawn. A string is not, and
+in development it logs that it was dropped: remove it, or turn it into `back`.
+
+## The identity line's rules
+
+The operator's decisions of 16 Nov 2026. They hold on every page that opens on an identity line,
+whatever its shape, and each recipe's checklist carries them.
+
+1. **A phone's header is one row.** The tile, the name and the verbs are one row, and the facts are
+   one line under it. The line clips, so danger and warning facts come first: write them first in
+   `facts`. Never add a row to fix a truncated name; cut a fact instead.
+2. **A command on a phone is always its icon**, with a tooltip and its words as its accessible
+   name. The words return from `sm` up. That covers a split command (a button with a menu on its
+   side) too: both halves are icons on a phone.
+3. **No destructive verb takes the brand face.** Terminate, Kill, Delete, Drop, Remove and the like
+   go behind the `⋯`, in the destructive ink. A page whose only verbs are destructive draws no
+   command: pass `menu` alone. With `IdentityVerbs`, mark a verb `inline` only when it is not
+   destructive, and when none is, build the menu with `VerbMenu` and leave `command` out.
+4. **`?` sits at the end of the identity line**, after the `⋯` (in `menu`, as Packages does, or as
+   `aside` on a line with no verbs), hidden on a phone. It gets a row of its own only where it
+   shares that row with a back link: on a page with `back`, it is on the back line
+   (`PageContext actions`, which `DetailPage` fills).
+5. **A section page names the one thing it is about when there is one** (ufw, systemd-resolved,
+   nginx), otherwise the section: "Traffic", with the uplink as a fact, not the uplink's name.
 
 ## Props
 
@@ -88,8 +107,8 @@ into `back`.
 
 `BackLink({ href, children })`: the 12px `ArrowLeft` link, for a way back outside `PageContext`; a
 long list name ends in an ellipsis. It is the one way back: `PageContext`, `PageState`, `FlowHeader`
-and `DetailPage` all draw it. `components/detail-page.tsx` drew a copy of its own (WP-07); its
-`BackLink` export is now a deprecated name for this one, so import it from `components/page.tsx`.
+and `DetailPage` all draw it. The `BackLink` export of `components/detail-page.tsx` is a deprecated
+name for this one, so import it from `components/page.tsx`.
 
 `PageState({ title, back?, error?, onRetry?, skeleton? })`: a page that has not got its data, or
 cannot get it. Give it `skeleton` in the page's final shape. A page that opens on an identity line
@@ -179,6 +198,9 @@ shape while it loads and nothing under the line moves when the words land (D11).
   it fits.
 - `tests/browser/deploy-header.spec.ts`, `deploy-run.spec.ts`, `network-vpn-page.spec.ts`,
   `network-device-page.spec.ts`, `account-ui.spec.ts`: the headers as pages draw them.
+- `tests/browser/design-system.spec.ts` gains the identity line's rules with this release's browser
+  gates: no destructive verb in the brand face, and on a phone a command that is its icon with a
+  name.
 - WP-39 adds the lint rules that ban `HostIdentity`, `HostFact`, `FactDot` and string eyebrows.
 
 ## Related

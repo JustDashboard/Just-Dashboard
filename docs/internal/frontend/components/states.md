@@ -133,8 +133,9 @@ identity header so the page keeps its shape.
   `className`; `track` draws the channel; `tone="quiet"` is the foreground fill over a reading that
   is already coloured; `label` makes it a `progressbar` of that name, otherwise it is `aria-hidden`.
   Under reduced motion, from the system or from `data-motion="paused"`, the bar stops and fills the
-  track in `--faint`. `OperationProgress` and the shell's splash draw through it; the other
-  hand-built bars move to it in the page passes, and then nothing else writes `animate-sweep`.
+  track in `--faint`. `OperationProgress` and the shell's splash draw through it; a few hand-built bars (a
+  deployment's build console, run pipeline and site preview, the credentials page, a bar reading's
+  own sweep) still write `animate-sweep` themselves.
 
 ## The phone
 

@@ -2,9 +2,35 @@
 
 A product, a host, a person and a file are drawn as what they are (D3).
 
-WP-41 cuts this page down to the rule; until then it holds the text that was in `design-system.md`
-§14, below. The dated stories it tells are also why the pages in
-[`../decisions/`](../decisions/README.md) look as they do.
+## The rule
+
+A thing the reader already knows by its mark is drawn with that mark, in its own colours, wherever
+it is named: on an identity line's tile, in a picture's node, before a fact, in a card, in a menu.
+
+| The thing | Drawn with | File |
+| --- | --- | --- |
+| A product (an image, a unit, a port's program, an engine, a channel, a certificate's issuer) | `ProductLogo` on a tile, `ProductGlyph` bare in a line, `ProductLogos` as a run; which product a thing is comes from the `…Product` helpers | `components/product-logo.tsx` |
+| A product with a state | `StateMark`: the tile with its status dot in the corner | `components/product-logo.tsx` |
+| A deployed project | `ProjectMark`, its own website's icon | `components/project-mark.tsx` |
+| This server, in a picture | `WireHost` | `components/wire/wire.tsx` |
+| A person or an account | `UserAvatar`, `InitialsMark`, `AvatarRun` | `components/user-avatar.tsx` |
+| What signed a session in | `ClientMark` | `components/client-mark.tsx` |
+| A repository's language | `LanguageMark` | `components/language-icon.tsx` |
+| A file or a folder | `FileIcon`, `FolderIcon` | `components/file-icon.tsx` |
+| The dashboard itself, as one thing among others | `DashboardMark` | `components/logo.tsx` |
+
+- **The artwork is the product's own**, from `public/logos/`, with its source and licence recorded
+  in `public/logos/NOTICE`. No GPL artwork. A logo is never tinted, greyed or redrawn.
+- **A thing with no logo keeps a glyph** (`fallback`) and its name. A mark never replaces the word:
+  it stands in front of it.
+- **A mark is wayfinding, not decoration.** A header, a section, a tile and a dialog carry no
+  icon of their own. The marks that stay are the thing itself, the rail's entries, and the ones
+  that are the message (a status, a notice, a verb on a button).
+- **A new product is added once**: its file, its line in the notice, its id in the helper that
+  recognises it.
+
+What follows is the text that was in `design-system.md` §14: why, and the cases. The dated stories
+it tells are also why the pages in [`../decisions/`](../decisions/README.md) look as they do.
 
 ## 14. A header is its title: things drawn as themselves
 

@@ -4,11 +4,12 @@ An item's detail is a page of its own (D9). It has its own route with a way back
 the address as `?tab=`, and from `xl` a rail of its siblings beside it. A sheet is only for a small
 add or edit form.
 
-**Reference:** `/processes/[pid]` (`procs/process-page.tsx`). The capture is `processes__pid` at
-1440 and on a 390 touch device. Its siblings are the container, stack, image, volume and network
+**Reference:** `/processes/[pid]` (`procs/process-page.tsx`, its rail `process-rail.tsx`). Open
+it against the fixtures of `tests/browser/processes-ui.spec.ts`, at 1440 and on a 390 touch
+device. Its siblings are the container, stack, image, volume and network
 pages under `/docker`, a service and a PM2 application under `/processes`, an account and a group,
-a package, a site, a stream and a certificate, the seven Network detail pages, and a database's
-account.
+a package, a site, a stream and a certificate, the seven Network detail pages, a port and a jail, a schedule, a backup job, and a
+database's account, statement, table and session.
 
 **Components:** `DetailPage`, `StepArrows`, `useSiblingSteps`, `stepCommands` and `useDetailTab`
 in `components/detail-page.tsx`, and `BackLink` in `components/page.tsx`
@@ -26,6 +27,13 @@ in `components/detail-page.tsx`, and `BackLink` in `components/page.tsx`
    ([`../components/page-header.md`](../components/page-header.md)).
 4. **The views**: a `ViewTabs` strip and the open view's pane. From `xl` the head stays put and
    the views scroll under it. Narrower, the page scrolls as a whole.
+
+That is the order on screen. In the document the item comes first and the rail last (`DetailPage`
+places the rail with `order` from `xl`), so a keyboard reaches the way back, the views and the
+controls before the rail's search and rows.
+
+The thing's verbs are on the identity line, one command and a `⋯` (`IdentityVerbs`), never a row
+of buttons beside the way back. The shortcuts' `?` shares the context line with the back link.
 
 ## Skeleton
 
@@ -58,7 +66,8 @@ export function ThingPage() {
 ```
 
 Keep a page's Workspace `name` and `stateKey` when it moves onto `DetailPage`. The help sheet is
-titled by the name, and the remembered place is kept under the key. The arrows' labels are
+titled by the name, and the remembered place is kept under the key. `escape` is passed to the
+Workspace too: it returns true when the page used the key itself (letting go of a picked run). The arrows' labels are
 "Previous <what>" and "Next <what>", and specs press them by those names.
 
 ## The view in the address
@@ -99,6 +108,11 @@ and the open view, scrolling as a whole. There is no rail and no stacked scrolli
 - [ ] Alt+↑ and Alt+↓ and the two arrows walk the rail's order, and the view goes with them.
 - [ ] The head holds still: the name shows at once from what the rail knows.
 - [ ] There is no description under the title. A verb is one word.
+- [ ] The identity line follows its rules: one command and a `⋯`; no destructive verb in the
+      brand face (Terminate, Kill, Delete and Drop go behind the `⋯`, and a page whose only verbs
+      are destructive draws no command); on a phone one row and one line of facts, the command
+      its icon, with danger and warning facts first.
+- [ ] The item comes before the rail in the document.
 - [ ] On a phone it is one pane with no rail.
 
 ## The spec to add

@@ -1,10 +1,40 @@
 # The identity line
 
-A page opens on what it is about (D1).
+A page opens on what it is about (D1): a mark, the name, its state, one line of live facts, and
+its verbs at the far end. The header is its title. It carries no picture of itself and no sentence
+under it.
 
-WP-41 cuts this page down to the rule; until then it holds the text that was in `design-system.md`
-§14, below. The dated stories it tells are also why the pages in
-[`../decisions/`](../decisions/README.md) look as they do.
+## The rule
+
+1. **Every page about one thing opens on `IdentityHeader`**: a project, a container, a site, an
+   engine, an account. A section's landing page opens on the section's own line. A workbench opens
+   on its strip (`WorkbenchHeader`) and a flow on its question (`FlowHeader`) instead.
+2. **The mark is the thing drawn as itself**: the product's logo, a project's own icon, an
+   account's picture ([`drawn-as-itself.md`](drawn-as-itself.md)). Never a decorative glyph on a
+   tinted plate.
+3. **The state is a dot and a word** beside the name, and the facts are live data: the source, the
+   branch, the release, counts. Not a description of the page.
+4. **One brand-faced command, the rest behind `⋯`** (`IdentityVerbs`). No destructive verb takes
+   the brand face: Terminate, Kill, Delete and Drop go behind the `⋯` in the destructive ink, and a
+   page whose only verbs are destructive draws no command.
+5. **On a phone it is one row and one line of facts.** The command is its icon, with a tooltip and
+   its words as its name. The line clips, so danger and warning facts come first. Never add a row
+   to fix a truncated name.
+6. **`?` ends the identity line.** It has a row of its own only where it shares that row with a
+   back link.
+7. **A section page names the one thing it is about when there is one** (ufw, systemd-resolved),
+   otherwise the section: "Traffic", not its uplink.
+8. **The way back is above the line**, on a page one level under a list (`PageContext back`). The
+   thing's verbs never go there.
+9. **The line stands at its loaded shape while it loads** (`IdentityHeader loading`), with what is
+   already known drawn as itself.
+10. **One `h1` a page**, drawn for a screen reader only: the rail says where you are for the eye.
+    Given a `label`, the line is a region named "About …".
+
+The props, the phone's measurements and the rules of 16 Nov 2026 in full are in
+[`../components/page-header.md`](../components/page-header.md). What follows is the text that was
+`design-system.md` §14: why a header is its title, and how the product got here. The dated stories
+it tells are also why the pages in [`../decisions/`](../decisions/README.md) look as they do.
 
 ## 14. A header is its title
 

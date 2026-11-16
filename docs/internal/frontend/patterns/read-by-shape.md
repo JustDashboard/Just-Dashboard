@@ -2,9 +2,25 @@
 
 A log line and a step's record are coloured by the shapes in them.
 
-WP-41 cuts this page down to the rule; until then it holds the text that was in `design-system.md`
-§14, below. The dated stories it tells are also why the pages in
-[`../decisions/`](../decisions/README.md) look as they do.
+## The rule
+
+- **A log line is cut into its shapes** (a time, a host, a program, an address, a status code, a
+  path, a quoted string) by `lib/log/tokens.ts`, and each shape takes its hue from the `--tag-*`
+  rung. `LogText` draws it. No shape takes a status hue unless it is a status: a string is not a
+  success.
+- **A level is a wash on the line**, not a coloured tag in front of it: a failure is found by
+  where it is, and says so in words.
+- **Text that was written is kept as written**, in a `CodeBlock` with its name, its length and a
+  copy; a command is `ShellWords`, a record `JsonCode`, a Dockerfile its pieces in the same palette
+  (`components/code.tsx`).
+- **A transcript is numbered lines** (`TranscriptRow`), a console is a `ConsoleView`, and a diff is
+  a `DiffView`. One renderer each, so the same line reads the same on every page.
+- **A record is drawn as what its values are**: a digest cut to twelve characters with a copy, a
+  commit as the Git page draws one, an image beside its product's mark.
+- **A log pane's filters narrow in place** and are kept in the address.
+
+What follows is the text that was in `design-system.md` §14: why, and the cases. The dated stories
+it tells are also why the pages in [`../decisions/`](../decisions/README.md) look as they do.
 
 ## 14. A header is its title: logs and records
 

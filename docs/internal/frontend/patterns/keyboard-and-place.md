@@ -1,6 +1,22 @@
 # Keyboard and place
 
-This page was `patterns/keyboard-and-place.md` until 0.9.0.
+A page owns its keys and remembers its place.
+
+## The rule
+
+- **A list page's keys come from `Workspace`** (`components/workspace/`): arrows, Home and End and
+  first letters move between rows, Enter opens, Ctrl/⌘+F goes to the page's search, F5 and
+  Ctrl/⌘+R refresh its reads, `?` opens the help. Other page-wide keys go through `useShortcuts`.
+- **Whoever is typing owns the keyboard.** A field, an editor, a terminal, a dialog and a menu take
+  their keys first.
+- **Single keys can be turned off**, in every help sheet.
+- **Back returns to where the reader was**: the row, the scroll, the search and the filters. A
+  filter worth sharing is in the address; a view is `?tab=`, replaced, never pushed.
+- **A detail page walks its siblings** with Alt+↑ and Alt+↓ and two arrows, the view carried.
+- **On a phone a page of several panes shows one**, over a bar at the foot.
+
+The contract for a keyboard and a screen reader is in [`accessibility.md`](accessibility.md). What
+follows is each surface's behaviour.
 
 `components/workspace/` supplies page-owned keyboard commands and place memory to Processes,
 Services, Git, Logs, the Docker overview and containers, Docker images, Docker stacks, Docker volumes, Docker networks, Packages, Backups, deployment setup, Audit and the Security

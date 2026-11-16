@@ -104,8 +104,10 @@ double-click resets. `side` says which side of the handle the column is on.
 palette's *This page* group, Ctrl/Cmd+F to the page's search, F5 and Ctrl/Cmd+R to refresh its
 reads, arrows, Home/End and typing to move between rows, Enter to open, `?` for help
 (`WorkspaceHelp`), and the row and scroll it returns to. Editors and portalled controls own their
-own keys. `WorkspaceHelp` is always the `?` cap at the end of the back line (`PageContext actions`,
-or `FlowHeader actions` on a flow), and is not drawn on a coarse pointer. Its sheet lists the keys
+own keys. `WorkspaceHelp` is the `?` cap. On a page with a way back it ends the back line
+(`PageContext actions`, or `FlowHeader actions` on a flow); on a page with none it ends the
+identity line, after the `⋯`, and never has a row to itself
+([`page-header.md`](page-header.md#the-identity-lines-rules)). It is not drawn on a coarse pointer. Its sheet lists the keys
 with `ShortcutList` and ends with the single-key switch (`SingleKeySwitch`). The rules are in [`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md).
 
 ## XtermPane and CodeEditor

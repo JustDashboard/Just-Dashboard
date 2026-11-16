@@ -7,7 +7,7 @@ outside its role's column is noise: fold it into the nearest role when the page 
 | --- | --- | --- | --- | --- |
 | Page | gutter | 20, 32 from `md` | `Page` (`px-5 md:px-8`) | `components/page.tsx` |
 | Page | section gap | 24, 32 from `md` | `Page` (`gap-6 md:gap-8`) | `components/page.tsx` |
-| Page | workbench | 0, 12 from `lg`, no gap | `<Page fill="workspace">` (coming, WP-09; hand-spelled today) | `components/page.tsx` |
+| Page | workbench | 0, 12 from `lg`, no gap | `<Page fill="workspace">` | `components/page.tsx` |
 | Section | head to body | 12 under the hairline | `PanelHeader plain` (`pb-3`) | `components/panel.tsx` |
 | Settings | rhythm | 32 between sections, 16 head to fields, 20 between fields | `SettingsColumn`, `FormSection` | `components/settings/settings-column.tsx`, `components/form.tsx` |
 | Surface | gutter | 20 | `px-5` | `Panel`, `Row`, `StatTile` |

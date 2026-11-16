@@ -76,8 +76,8 @@ tab stop: the title is the keyboard's way in.
 - `children`: the body; `foot`: the card's floor, pushed down so a run of cards lines its feet up.
 - `href` is what a modified press opens in a new tab; `onOpen` is the plain press.
 
-`RepoCard` (Git) and `DrawingCard` (Excalidraw) use it. The deploy and database fleet cards and the
-Overview's workspace card still carry the shell by hand and move in their page passes.
+`RepoCard` (Git), `DrawingCard` (Excalidraw) and the Overview's workspace card use it. The deploy
+and database fleet cards still carry the shell by hand.
 
 ## States
 

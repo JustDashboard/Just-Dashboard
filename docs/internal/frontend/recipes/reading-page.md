@@ -1,10 +1,123 @@
 # Reading page
 
-A page that reports. Reference: `/deploy/[id]`, a project's Overview.
+A page that reports: the reader arrives to find out what is true. Reference: a project's Overview,
+`/deploy/[id]`.
 
-**Status: moved text.** WP-41 gives this page the recipe shape (the reference shot, the regions, a
-skeleton, the four states, the phone, a checklist and the spec). Until then it holds the passes that
-were in `design-system.md`, below, and they are what a redesign runs.
+**Reference:** `components/deploy/project-shell.tsx` (the header every page of a project opens on)
+and `project-overview.tsx`. The shot is [`docs/readme/deployment.png`](../../../readme/deployment.png).
+Its siblings are the host Overview, the proxy overview, the Network overview, Security, Backups and
+a database's Home.
+
+**Components:** `Page`, `PageContext`, `PageState` (`components/page.tsx`); `IdentityHeader`,
+`IdentityVerbs` and `Fact` ([`../components/page-header.md`](../components/page-header.md));
+`WireFlow` ([`../components/wiring.md`](../components/wiring.md)); `ReadingLine`, `BarReading`,
+`RankList`, `ChartPanel` ([`../components/readings.md`](../components/readings.md)); `Panel plain`
+with `PanelHeader` ([`../components/section-head.md`](../components/section-head.md)); `ChoiceList`
+and `RowList` for what the sections hold.
+
+## The regions, in order
+
+1. **The back line**, only where the page sits under a list: the way back at the start, the walk
+   and the shortcuts' `?` at the end (`PageContext back`, `actions`).
+2. **The identity line**: the thing's mark, its name, its state as a dot and a word, one line of
+   live facts, then one brand-faced command and a `⋯` ([`../patterns/identity-line.md`](../patterns/identity-line.md)).
+3. **What needs a look**, when something does: one-line notices under the line (`NoticeLines`), or
+   a `Notice`. Nothing is drawn when all is well.
+4. **A picture of the thing** ([`../patterns/picture-first.md`](../patterns/picture-first.md)).
+5. **Readings in words**: `ReadingLines`, a band of `BarReading`s, or both
+   ([`../patterns/readings-in-words.md`](../patterns/readings-in-words.md)). No row of tiles.
+6. **Sections**, each a title and a hairline ([`../patterns/sections.md`](../patterns/sections.md)):
+   lists of things you open as cards, a table only for readings, a chart with its summary line.
+7. **A log at the page's foot**, where the thing has one (`EmbeddedLog` in a `LogSection`).
+
+## Skeleton
+
+```tsx
+export default function ThingPage() {
+  const thing = usePoll(readThing, 5000)
+  if (thing.error && !thing.data) {
+    return <PageState title="Thing" error={thing.error} onRetry={thing.refresh} />
+  }
+  const data = thing.data
+  return (
+    <Page rise>
+      <PageContext title="Thing" />
+      <IdentityHeader
+        label="About thing"
+        loading={!data}
+        mark="nginx"
+        title={data?.name}
+        state={data ? <Status tone={toneOf(data)} label={wordOf(data)} /> : true}
+        facts={data && <ThingFacts thing={data} />}
+        {...(data ? IdentityVerbs({ verbs: verbsOf(data), name: data.name }) : { command: true })}
+      />
+      <WireFlow phone="marks" loading={!data} start={callers(data)} hub={hub(data)} end={served(data)} />
+      <ReadingLines>
+        <ReadingLine mark={<ReadingMark hue={HUE.net} glyph={Globe} />} name="Traffic" trend={trend}>
+          {data ? `${rate(data)} requests a minute` : <NoReading />}
+        </ReadingLine>
+      </ReadingLines>
+      <Panel plain>
+        <PanelHeader title="Sites" count={data?.sites.length} link={{ href: "/proxy/sites", label: "All sites" }} />
+        <PanelBody>{data ? <SiteCards sites={data.sites} /> : <ChoiceListSkeleton rows={3} />}</PanelBody>
+      </Panel>
+    </Page>
+  )
+}
+```
+
+`Page` declares the reading register by default. A page that offers refresh, row movement or a
+search wraps itself in a `Workspace` ([`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md)).
+
+## The four states
+
+| State | What the page draws |
+| --- | --- |
+| Loading | Its final shape: the identity line as `IdentityHeader loading` with what is already known, the picture's `loading` form, each reading as `NoReading`, each list as its skeleton. Nothing moves when the reads land ([`../patterns/page-holds-still.md`](../patterns/page-holds-still.md)). |
+| Empty | Each section says so in its own body (`EmptyState` with what it would hold and the verb that fills it, or `EmptyNote` in a small block). The page's frame does not change. |
+| Unavailable | The thing the page is about is not there (Docker, a proxy engine, a module): `MissingThing size="page"` under the identity line, drawn as the thing with the next step. A page only an administrator opens is `NeedsAdmin`. |
+| Failed | A first read that fails is `PageState` with the error and Try again. A later read that fails keeps the last reading: `Stale` beside the block, or one `StaleNotice` for the page. One block's failure is its own `ErrorState`, in its place. |
+
+## The phone
+
+One column, the same order. The identity line is one row and one line of facts, its command an
+icon. The picture shrinks to its marks ([`../patterns/pictures-on-a-phone.md`](../patterns/pictures-on-a-phone.md)).
+`ReadingLines` is one column. Cards keep one line of state, and a table drops its secondary columns.
+A log at the foot is a card per source into the Logs page. Nothing scrolls sideways.
+
+## Checklist
+
+- [ ] The page opens on an identity line, not a text title, and the first block under it is a
+      picture or the thing itself.
+- [ ] The identity line follows its rules: one row and one line of facts on a phone, with danger
+      and warning facts first; the command an icon on a phone; no destructive verb in the brand
+      face; `?` at the line's end, or on the back line where there is a back link.
+- [ ] No row of tiles opens the page. Every figure is a fact, a node, a reading line, a band, a
+      rank or a chart.
+- [ ] Latency is in words, and every value goes through its one helper.
+- [ ] Every section is a title and a hairline. A framed block says why.
+- [ ] Things you open are `ChoiceRow`s, one height in every state. Nothing expands under a row.
+- [ ] No sentence under a title. A verb is one word.
+- [ ] Loading, empty, unavailable and failed are designed, and the page holds still through all
+      four.
+- [ ] One `h1`, sections as `h2`, every control named ([`../patterns/accessibility.md`](../patterns/accessibility.md)).
+- [ ] At 390 on a touch device: one column, no sideways scroll, press boxes of 44px.
+
+## The spec to add
+
+A browser spec against fixtures, with these checks:
+
+1. The identity line is found by its name ("About …") and says the thing's name, its state and its
+   command.
+2. The picture is there (`[data-slot=wire-flow]`), and the page has no `[data-slot=stat-tile]`
+   where the standard gives it none.
+3. A landmark below the first block sits at the same `top` before and after the reads land, at
+   1440 and at 390.
+4. A failed second read leaves the first reading on screen with *Not updating*.
+5. At 390 the document is no wider than the window.
+
+`tests/browser/deploy-project.spec.ts`, `deploy-header.spec.ts` and `docker-overview.spec.ts` are
+the models. `design-system.spec.ts` runs over every page for the shared rules.
 
 ## 15. Redesigning a page
 
@@ -22,21 +135,21 @@ no shadows, no icon plates, no badges, no rounded cards floating over the ground
 questions these passes had left open. Each is written once, where the list points, and a page
 redesigned now starts from them:
 
-- **A page opens on an identity line in the project's layout**: `HostIdentity` with a `state`, one
-  `command` and a `menu` (§14, *Any page can open as a project does*).
+- **A page opens on an identity line in the project's layout**: `IdentityHeader` with a `state`, one
+  `command` and a `menu` from `IdentityVerbs` (§14, *Any page can open as a project does*).
 - **No row of tiles opens a page.** A figure that is a reading is a fact on that line, a node of the
   picture or a `ReadingLine` (§16, *A project's Overview reads in sentences*); pass 2 below says
   where a tile still stands.
 - **A picture of things wired through one hub is `WireFlow`**, and it waits at its loaded shape
   (§2, the two paragraphs on it).
-- **An item's detail is a page with a rail, not a sheet**: a route of its own on the process page's
-  shape (`procs/process-page.tsx`, `process-rail.tsx`), which is a way back, the identity line with
-  its one command, the views as an underlined strip named in `?tab=`, and from `xl` the list it came
-  from as a rail with that list's own filter, Alt+↑ and Alt+↓ walking it with the view kept. The
-  address that opened the sheet redirects to the page. A sheet stays for a small add or edit form.
-  The rail becomes one `Rail` in WP-07 ([`detail-with-rail.md`](detail-with-rail.md)).
+- **An item's detail is a page with a rail, not a sheet**: a route of its own on `DetailPage`, which
+  is a way back, the identity line with its one command, the views as an underlined strip named in
+  `?tab=`, and from `xl` the list it came from as a `Rail` with that list's own filter, Alt+↑ and
+  Alt+↓ walking it with the view kept. The address that opened the sheet redirects to the page. A
+  sheet stays for a small add or edit form ([`detail-with-rail.md`](detail-with-rail.md)).
 - **Settings are one centred column** under one save bar, with a `PendingStrip` for what is stored
-  and not in force; the same bar serves a setting on a reading page and a column beside a rail (§7).
+  and not in force; the same bar serves a setting on a reading page and a column beside a rail
+  ([`settings-page.md`](settings-page.md)).
 - **A thing that is not there has one screen**, `components/missing-thing.tsx`
   ([`../components/states.md`](../components/states.md#a-thing-that-is-not-there-has-one-screen)).
   The proxy's `EngineSetup` is that screen (`MissingThing size="page"` with the install as its
@@ -133,11 +246,11 @@ The passes, in order. Each one is a diff you can review on its own.
 ### Where the page's name and its controls go
 
 Reading pages now keep their page name in a screen-reader-only `h1` through `PageContext`. The rail
-provides the visible location. A linked parent remains as a compact way back, while pages without
-one begin directly with their content. Put a control beside the data it changes: list commands in
+provides the visible location. A linked parent remains as a compact way back (`back`), while pages
+without one begin directly with their content. Put a control beside the data it changes: list commands in
 their section header or filter bar, workbench commands in the workbench strip, and empty-list commands
 in the empty state. The Metrics range, pause and export controls sit in the machine identity line;
-the proxy service verbs sit with the engine facts. Detail pages keep their verbs beside the way back
-and their resource name in the first facts or identity row. The deployment fleet puts its related
+the proxy service verbs sit with the engine facts. A detail page's verbs are on its identity line
+(one command, the rest behind `⋯`), never beside the way back. The deployment fleet puts its related
 pages and create command with the list filters; an empty fleet has its create command in the empty
 state.
