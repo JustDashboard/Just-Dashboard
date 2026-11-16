@@ -607,34 +607,27 @@ export function NextUp({ lanes, zone }: { lanes: ScheduleLane[]; zone?: string }
     if (at !== undefined && (!best || at < best.at)) best = { lane, at }
   }
   if (!best) {
-    return <p className="text-body text-muted-foreground">Nothing is due</p>
+    return <span className="text-xs text-muted-foreground">Nothing is due</span>
   }
   const at = clockLabel(best.at, now, zone)
+  // The page's state, beside its name: what fires next and when, in the
+  // line's own size. It stood where the page's command goes, as a 24px
+  // countdown that took a block of its own on a phone.
   return (
-    <div
+    <span
       data-slot="next-up"
-      className="flex min-w-0 items-center gap-4"
-      title={longClock(best.at, zone)}
+      className="inline-flex min-w-0 items-center gap-1.5 text-xs"
+      title={`${best.lane.name} at ${at.day ? `${at.day} ` : ""}${at.time} (${longClock(best.at, zone)})`}
     >
-      <div className="min-w-0 sm:text-right">
-        <p className="eyebrow">Next run</p>
-        <p className="flex min-w-0 items-center gap-1.5 text-body sm:justify-end">
-          <span
-            aria-hidden
-            className="size-2 shrink-0 rounded-xs"
-            style={{ background: KIND[best.lane.kind].color }}
-          />
-          <span className="truncate font-medium">{best.lane.name}</span>
-          <span className="numeric shrink-0 text-muted-foreground">
-            at {at.day ? `${at.day} ` : ""}
-            {at.time}
-          </span>
-        </p>
-      </div>
-      <p className="numeric text-2xl font-semibold tracking-tight tabular-nums">
-        {countdown(best.at - now)}
-      </p>
-    </div>
+      <span
+        aria-hidden
+        className="size-2 shrink-0 rounded-xs"
+        style={{ background: KIND[best.lane.kind].color }}
+      />
+      <span className="shrink-0 text-muted-foreground">Next run</span>
+      <span className="truncate font-medium">{best.lane.name}</span>
+      <span className="numeric shrink-0 font-medium">in {countdown(best.at - now)}</span>
+    </span>
   )
 }
 

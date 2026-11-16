@@ -291,39 +291,43 @@ export function Services() {
               )}
             </>
           }
-          aside={
-            <div className="flex flex-wrap items-center gap-3">
-              {failed > 0 ? (
-                <button
-                  type="button"
-                  aria-pressed={state === "failed"}
-                  onClick={() => setState(state === "failed" ? "" : "failed")}
-                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+          // The verdict is the page's state, beside its name, as Docker's
+          // pages say theirs; the right end is the page's command. It stood
+          // at the far right beside Reload unit files.
+          state={
+            failed > 0 ? (
+              <button
+                type="button"
+                aria-pressed={state === "failed"}
+                onClick={() => setState(state === "failed" ? "" : "failed")}
+                className="-mx-1.5 rounded-md px-1.5 py-0.5 focus-ring transition-colors hover:bg-row-hover"
+              >
+                <Status tone="danger" label={`${plural(failed, "service")} failed`} />
+              </button>
+            ) : restarting > 0 ? (
+              <Status tone="warning" label={`${plural(restarting, "service")} restarting`} />
+            ) : (
+              <Status tone="running" label="Nothing failed" />
+            )
+          }
+          command={
+            <span className="flex items-center gap-1">
+              {can("system.admin") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={reloading}
+                  title="systemctl daemon-reload: re-read every unit file after editing one"
+                  onClick={() => void daemonReload()}
                 >
-                  <Status tone="danger" label={`${plural(failed, "service")} failed`} />
-                </button>
-              ) : restarting > 0 ? (
-                <Status tone="warning" label={`${plural(restarting, "service")} restarting`} />
-              ) : (
-                <Status tone="running" label="Nothing failed" />
+                  <RefreshClockwise className="size-3.5" />
+                  {reloading ? "Reloading…" : "Reload unit files"}
+                </Button>
               )}
-              <div className="flex items-center gap-1">
-                {can("system.admin") && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="text-muted-foreground"
-                    disabled={reloading}
-                    title="systemctl daemon-reload: re-read every unit file after editing one"
-                    onClick={() => void daemonReload()}
-                  >
-                    <RefreshClockwise className="size-3.5" />
-                    {reloading ? "Reloading…" : "Reload unit files"}
-                  </Button>
-                )}
+              <span className="max-sm:hidden">
                 <WorkspaceHelp compact />
-              </div>
-            </div>
+              </span>
+            </span>
           }
         />
 

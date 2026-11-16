@@ -157,13 +157,17 @@ test("a running unit's page is a live readout of it", async ({ page }) => {
   // How exposed it is, in its tone, opening the view that says why.
   await expect(identity.getByRole("button", { name: /exposure 9\.2 · unsafe/ })).toBeVisible()
 
-  const tiles = page.locator("[data-testid='service-readings'] [data-slot='stat-tile']")
-  await expect(tiles).toHaveCount(4)
-  await expect(tiles.nth(0)).toContainText("of a core")
-  await expect(tiles.nth(0).locator("svg[role='img']")).toBeVisible()
-  await expect(tiles.nth(1)).toContainText("peak 61.0 MB")
-  await expect(tiles.nth(2)).toContainText("of 4915")
-  await expect(tiles.nth(3)).toContainText("on failure, after 5s")
+  // Its readings are sentences on a mark, as a PM2 application's are.
+  const lines = page.locator("[data-testid='service-readings'] [data-slot='reading-line']")
+  await expect(lines).toHaveCount(4)
+  await expect(
+    page.locator("[data-testid='service-readings'] [data-slot='stat-tile']"),
+  ).toHaveCount(0)
+  await expect(lines.nth(0)).toContainText("of a core")
+  await expect(lines.nth(0).locator("svg[role='img']")).toBeVisible()
+  await expect(lines.nth(1)).toContainText("peak 61.0 MB")
+  await expect(lines.nth(2)).toContainText("of 4915")
+  await expect(lines.nth(3)).toContainText("on failure, after 5s")
 
   // The command as it was run, not systemd's record of it, and every step around it.
   const command = page.getByTestId("service-command")

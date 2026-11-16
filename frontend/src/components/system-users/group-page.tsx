@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ViewTabList, type TabView } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { usePoll } from "@/hooks/use-poll"
@@ -203,6 +204,7 @@ function GroupMain({
               className="border-b-0 pb-0"
               fallback={Users}
               title={<span className="font-mono">{name}</span>}
+              facts={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
               state
               menu={false}
             />

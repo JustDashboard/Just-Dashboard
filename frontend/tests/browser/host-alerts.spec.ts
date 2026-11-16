@@ -106,7 +106,7 @@ test("an administrator reaches Alerts from Metrics and adds a disk and a contain
 
   await page.getByRole("button", { name: "Add rule" }).click()
   let form = page.getByRole("dialog", { name: "Add alert" })
-  await form.getByRole("button", { name: /Disk filling up/ }).click()
+  await form.getByRole("radio", { name: /Disk filling up/ }).click()
   // A disk has a line and no minutes.
   await expect(form.getByLabel("Averaged over")).toHaveCount(0)
   await form.getByLabel("At or above").fill("101")

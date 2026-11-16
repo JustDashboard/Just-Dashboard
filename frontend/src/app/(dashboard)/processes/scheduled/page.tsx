@@ -1,44 +1,32 @@
 "use client"
 
 import { Suspense, useEffect, useMemo } from "react"
-import { Copy } from "@/components/icons"
-import { get } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Plus } from "@/components/icons"
 import { plural } from "@/lib/format"
-import {
-  deferredToSystemd,
-  isExampleLine,
-  scheduleLanes,
-  timerFor,
-  type ScheduleLane,
-} from "@/lib/schedule"
-import type { Crontab, LogSourceIndex } from "@/lib/types"
+import { isExampleLine, type ScheduleLane } from "@/lib/schedule"
 import { useMetrics } from "@/hooks/use-metrics"
-import { usePoll } from "@/hooks/use-poll"
-import { useQuerySelection } from "@/hooks/use-query-selection"
-import { useSessionState, useViewState } from "@/lib/view-state"
+import { useAuth } from "@/hooks/use-auth"
+import { useSessionState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/hooks/use-now"
 import { ServiceLogs } from "@/components/logs/service-logs"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { HostIdentity, platformName } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { platformProduct } from "@/components/product-logo"
 import { EmptyNote, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
-import { CronJobSheet } from "@/components/procs/cron-job-sheet"
+import { Button } from "@/components/ui/button"
 import { CronJobsPanel } from "@/components/procs/cron-jobs"
-import { BAND_WINDOW, NextUp, ScheduleBand } from "@/components/procs/schedule-band"
+import { NextUp, ScheduleBand } from "@/components/procs/schedule-band"
+import { useSchedules } from "@/components/procs/schedule-data"
+import { laneHref, sheetAddress } from "@/components/procs/schedule-links"
 import { SystemCronPanel } from "@/components/procs/system-cron"
-import { TimerSheet } from "@/components/procs/timer-sheet"
-import { TimersPanel, type TimerList } from "@/components/procs/timers"
-import { cronLogSource } from "@/components/procs/shared"
+import { TimersPanel } from "@/components/procs/timers"
 
-/** How soon a log index that failed to answer is asked again. */
-const INDEX_RETRY = 30_000
-
-// The open job and timer live in the query string, which the App Router only
-// hands out inside a Suspense boundary.
+// The old sheets' addresses (`?job=`, `?timer=`) are read from the query
+// string, which the App Router only hands out inside a Suspense boundary.
 export default function ScheduledPage() {
   return (
     <Suspense>
@@ -66,40 +54,31 @@ export default function ScheduledPage() {
  * is the timers' head, armed, running and stopped as chips with how many
  * start on boot beside them; System cron is a fact and its section's count.
  *
- * The crontab and the timers are polled here rather than in their panels,
- * because the band and the countdown are made of both. A job, a timer and a
- * system cron line are each drawn as the product they run (§14), and each
- * opens a sheet: a job's week and the runs cron logged for it, a timer's
- * calendar in words and the runs of the service it fires. Both are in the
- * address (`?job=`, `?timer=`), so a sheet can be linked and Back closes it.
+ * The crontab and the timers are polled here rather than in their panels
+ * (`useSchedules`), because the band and the next run are made of both. A
+ * job, a timer and a system cron line are each drawn as the product they run
+ * (§14), and each opens a page of its own (`schedule-page.tsx`): a job's week
+ * and the runs cron logged for it, a timer's calendar in words and the runs
+ * of the service it fires, with every schedule beside it. The sheets' old
+ * addresses (`?job=`, `?timer=`) are sent on to those pages.
  */
 function Scheduled() {
   const { confirm, dialog } = useConfirm()
   const { host } = useMetrics()
-  const [user, setUser] = useViewState("processes.cron.user", "root")
+  const { can } = useAuth()
+  const router = useRouter()
+  const search = useSearchParams()
   const [adding, setAdding] = useSessionState("processes.cron.adding", false)
-  const [job, selectJob] = useQuerySelection("job")
-  const [timer, selectTimer] = useQuerySelection("timer")
-  const users = usePoll((signal) => get<string[]>("/cron/users", undefined, signal), 0)
-  const crontab = usePoll(
-    (signal) => get<Crontab>(`/cron/user/${encodeURIComponent(user)}`, undefined, signal),
-    30_000,
-    [user],
-  )
-  const timers = usePoll((signal) => get<TimerList>("/systemd/timers", undefined, signal), 30_000)
-  const system = usePoll((signal) => get<Crontab[]>("/cron/system", undefined, signal), 0)
-  // Where cron's log is on this host is a question the log index answers
-  // once: the daemon's unit, a cron file, or the journal by program. A read
-  // that failed is asked again, or the panel below would say so until the
-  // page was reloaded.
-  const logs = usePoll((signal) => get<LogSourceIndex>("/logs/sources", undefined, signal), 0)
-  useEffect(() => {
-    if (!logs.error) return
-    const retry = setTimeout(logs.refresh, INDEX_RETRY)
-    return () => clearTimeout(retry)
-  }, [logs.error, logs.refresh])
-  const cron = useMemo(() => cronLogSource(logs.data), [logs.data])
+  const schedules = useSchedules()
+  const { user, setUser, users, crontab, timers, system, logs, cron, zone, systemd, lanes } =
+    schedules
   const cronSources = useMemo(() => (cron ? [cron] : []), [cron])
+
+  // A link to one of the old sheets opens the page that replaced it.
+  const old = sheetAddress({ job: search.get("job"), timer: search.get("timer") }, user)
+  useEffect(() => {
+    if (old) router.replace(old)
+  }, [old, router])
 
   const jobs = useMemo(() => crontab.data?.jobs ?? [], [crontab.data])
   const timerList = useMemo(() => timers.data?.timers ?? [], [timers.data])
@@ -118,86 +97,59 @@ function Scheduled() {
   // for the same line, because the browser was five hours behind the server,
   // was the first thing that made the page unreadable. The zone is said in
   // the identity line when it is not the reader's.
-  const zone = crontab.data?.timeZone ?? system.data?.find((file) => file.timeZone)?.timeZone
   const browserZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
-  const systemd = Boolean(timers.data?.available)
+  const settled = schedules.settled
 
-  // The band is drawn from this minute: an expression's runs are computed
-  // once a minute, and every countdown ticks from them in between.
-  const now = useNow(60_000)
-  const minute = Math.floor(now / 60_000) * 60_000
-  const lanes = useMemo(
-    () =>
-      scheduleLanes({
-        crontab: crontab.data,
-        timers: timers.data?.timers,
-        system: system.data,
-        from: minute,
-        until: minute + BAND_WINDOW,
-        zone,
-        systemd,
-      }),
-    [crontab.data, timers.data, system.data, minute, zone, systemd],
-  )
-  const settled = Boolean(crontab.data && timers.data)
-
-  const open = (lane: ScheduleLane) => {
-    if (lane.kind === "timer") selectTimer(lane.timer!.unit)
-    else selectJob(lane.key)
+  const open = (lane: ScheduleLane) => router.push(laneHref(lane, user))
+  const openKey = (key: string) => {
+    const lane = lanes.find((one) => one.key === key)
+    if (lane) open(lane)
   }
-  const systemOpen = job?.startsWith("system:")
-    ? (system.data ?? [])
-        .flatMap((file) => file.jobs.map((line) => ({ file, line })))
-        .find(({ file, line }) => `system:${file.source}:${line.line}` === job)
-    : undefined
 
   return (
     <Page rise>
-      <PageContext eyebrow="Processes" title="Scheduled" />
+      <PageContext title="Scheduled" />
 
       {host && (
         <HostIdentity
           mark={platformProduct(host.platform)}
           title={host.hostname}
+          state={settled ? <NextUp lanes={lanes} zone={zone} /> : true}
+          loading={!settled}
           facts={
             <>
-              <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
+              <Fact product={platformProduct(host.platform)}>{platformName(host)}</Fact>
               {crontab.data && (
-                <>
-                  <FactDot />
-                  <span className="numeric">
-                    {plural(jobs.length - disabled, "cron job")} for {user}
-                    {disabled > 0 && `, ${disabled} disabled`}
-                  </span>
-                </>
+                <Fact className="numeric">
+                  {plural(jobs.length - disabled, "cron job")} for {user}
+                  {disabled > 0 && `, ${disabled} disabled`}
+                </Fact>
               )}
               {timers.data?.available && (
-                <>
-                  <FactDot />
-                  <span className="numeric">
-                    {armed} of {plural(timerList.length, "timer")} armed
-                  </span>
-                </>
+                <Fact className="numeric">
+                  {armed} of {plural(timerList.length, "timer")} armed
+                </Fact>
               )}
               {system.data && (
-                <>
-                  <FactDot />
-                  <span className="numeric">{plural(systemJobs, "system cron line")}</span>
-                </>
+                <Fact className="numeric">{plural(systemJobs, "system cron line")}</Fact>
               )}
               {zone && zone !== browserZone && (
-                <>
-                  <FactDot />
-                  <span
-                    title={`Times on this page are the server's (${zone}), not this browser's (${browserZone})`}
-                  >
-                    times in {zone}
-                  </span>
-                </>
+                <Fact
+                  title={`Times on this page are the server's (${zone}), not this browser's (${browserZone})`}
+                >
+                  times in {zone}
+                </Fact>
               )}
             </>
           }
-          aside={settled && <NextUp lanes={lanes} zone={zone} />}
+          command={
+            can("system.admin") ? (
+              <Button size="sm" disabled={!crontab.data?.revision} onClick={() => setAdding(true)}>
+                <Plus className="size-3.5" />
+                Add job
+              </Button>
+            ) : undefined
+          }
         />
       )}
 
@@ -211,17 +163,14 @@ function Scheduled() {
         confirm={confirm}
         adding={adding}
         onAddingChange={setAdding}
-        open={job}
-        onOpen={selectJob}
-        cron={cron}
+        onOpen={openKey}
         zone={zone}
       />
 
       <TimersPanel
         timers={timers}
         confirm={confirm}
-        onOpen={selectTimer}
-        detailOpen={timer !== null}
+        onOpen={(unit) => openKey(`timer:${unit}`)}
         zone={zone}
       />
 
@@ -230,7 +179,7 @@ function Scheduled() {
         zone={zone}
         systemd={systemd}
         timers={timerList}
-        onOpen={selectJob}
+        onOpen={openKey}
       />
 
       <Panel plain>
@@ -259,38 +208,6 @@ function Scheduled() {
         </PanelBody>
       </Panel>
 
-      <TimerSheet
-        unit={timer}
-        timer={timerList.find((t) => t.unit === timer)}
-        confirm={confirm}
-        onChanged={timers.refresh}
-        onOpenChange={(next) => !next && selectTimer(null)}
-        zone={zone}
-      />
-      <CronJobSheet
-        job={systemOpen?.line}
-        kind="system"
-        zone={zone}
-        skipped={Boolean(systemOpen && systemd && deferredToSystemd(systemOpen.line.command))}
-        instead={systemOpen ? timerFor(systemOpen.line.command, timerList) : undefined}
-        owner={systemOpen?.file.source ?? ""}
-        source={systemOpen?.file.source}
-        verbs={
-          systemOpen
-            ? [
-                {
-                  key: "copy",
-                  label: "Copy command",
-                  icon: Copy,
-                  inline: true,
-                  run: () => void copyText(systemOpen.line.command, "Command copied"),
-                },
-              ]
-            : []
-        }
-        cron={cron}
-        onOpenChange={(next) => !next && selectJob(null)}
-      />
       {dialog}
     </Page>
   )

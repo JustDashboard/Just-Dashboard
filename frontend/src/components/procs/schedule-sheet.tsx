@@ -32,20 +32,27 @@ const DAY = 24 * HOUR
  * The sheets were three tiles, a week strip, a command and a log stacked at
  * 20px with nothing louder than another, and the schedule itself — the one
  * thing a reader opens a schedule for — was a run of mono under the title.
+ * A cron line and a timer are pages of their own now (`schedule-page.tsx`);
+ * `flush` sets the parts on the page's own edge rather than a sheet's gutter.
  */
 export function SheetSection({
   title,
   actions,
+  flush,
   className,
   children,
 }: {
   title: React.ReactNode
   actions?: React.ReactNode
+  /** On a page's edge, not a sheet's 24px gutter. */
+  flush?: boolean
   className?: string
   children: React.ReactNode
 }) {
   return (
-    <section className={cn("min-w-0 border-t border-hairline px-6 py-6", className)}>
+    <section
+      className={cn("min-w-0 border-t border-hairline py-6", flush ? "px-0" : "px-6", className)}
+    >
       <div className="mb-4 flex min-h-6 items-center justify-between gap-3">
         <h3 className="text-body font-semibold">{title}</h3>
         {actions}
@@ -61,16 +68,19 @@ export function ScheduleSummary({
   expression,
   facts,
   notice,
+  flush,
 }: {
   sentence: React.ReactNode
   expression?: React.ReactNode
   /** Short facts after the expression: who it runs as, the clock it is read on. */
   facts?: React.ReactNode[]
   notice?: React.ReactNode
+  /** On a page's edge, not a sheet's 24px gutter. */
+  flush?: boolean
 }) {
   const shown = (facts ?? []).filter(Boolean)
   return (
-    <section className="space-y-4 px-6 pt-6 pb-6">
+    <section className={cn("space-y-4 pb-6", flush ? "px-0 pt-0" : "px-6 pt-6")}>
       {notice}
       <div className="space-y-1.5">
         <p className="eyebrow">Schedule</p>

@@ -229,7 +229,13 @@ function ProcessNotices({ process: row, gone, inspect, onOpen, onTab }: Overview
     )
   }
   if (notices.length === 0) return null
-  return <div className="grid min-w-0 gap-3 lg:grid-cols-2">{notices}</div>
+  // As many to a row as fit at 20rem each, so a lone callout takes the row
+  // rather than half of it beside nothing.
+  return (
+    <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(20rem,100%),1fr))] gap-3">
+      {notices}
+    </div>
+  )
 }
 
 /**

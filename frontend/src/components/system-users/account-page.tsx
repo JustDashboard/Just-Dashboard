@@ -24,6 +24,7 @@ import { ReadFailed } from "@/components/system-users/read-state"
 import { Button } from "@/components/ui/button"
 import { ViewTabList, type TabView } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { usePoll } from "@/hooks/use-poll"
 import { ApiError, del, get, patch } from "@/lib/api"
@@ -294,6 +295,7 @@ function AccountMain({
             className="border-b-0 pb-0"
             logo={<AccountMark user={{ username: name, system: false, uid: -1 }} size="lg" />}
             title={<span className="font-mono">{name}</span>}
+            facts={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
             state
             command
             menu={false}
