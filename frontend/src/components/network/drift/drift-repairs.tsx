@@ -59,6 +59,14 @@ export function DriftRepairs({
         title="Owned repair plan"
         actions={
           <>
+            {/* What the plan does is the head's tip, not a sentence under it. */}
+            {plan.items.length > 0 && (
+              <InfoTip label="What this plan applies">
+                {plan.executable
+                  ? "Boot files and owned admission rules can be applied one by one; the rest are proposals."
+                  : "This plan applies nothing: it proposes owned resources and leaves foreign ones alone."}
+              </InfoTip>
+            )}
             {plan.excluded.length > 0 && (
               <Popover>
                 <PopoverTrigger asChild>
@@ -92,13 +100,6 @@ export function DriftRepairs({
         }
       />
       <PanelBody className="space-y-3">
-        {plan.items.length > 0 && (
-          <p className="text-hint text-muted-foreground">
-            {plan.executable
-              ? "Pick what to review. Boot files and owned admission rules can be applied one by one; the rest are proposals."
-              : "Pick what to review. This plan applies nothing: it proposes owned resources and leaves foreign ones alone."}
-          </p>
-        )}
         {plan.blockers.map((reason) => (
           <p key={reason} className="text-body text-warning">
             {reason}

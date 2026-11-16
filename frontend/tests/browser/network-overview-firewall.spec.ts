@@ -189,11 +189,12 @@ for (const width of [1280, 390]) {
         })
         .check()
       expect(await top(rows.nth(1))).toBe(second)
-      // No framed notice stands over the plan: one sentence, then the rows.
+      // No framed notice or sentence stands over the plan: what it applies is
+      // the head's tip, then the rows.
       const plan = page.getByRole("region", { name: "Owned repair plan" })
       await expect(plan.getByText("Review only", { exact: true })).toHaveCount(1)
       await expect(plan.getByText("Selected repairs available")).toHaveCount(0)
-      await expect(plan).toContainText("Pick what to review.")
+      await expect(plan.getByRole("button", { name: "What this plan applies" })).toBeVisible()
       await expect(plan).toContainText("Review only")
       await plan.getByRole("button", { name: "Why 10.30.0.0/24 is review only" }).focus()
       await expect(page.getByRole("tooltip")).toContainText("Routes are restored by the boot unit")

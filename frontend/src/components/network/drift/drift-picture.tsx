@@ -143,9 +143,17 @@ export function DriftPicture({
         ),
       }}
       end={{ title: "Where it is written", nodes, heading: "narrow" }}
+      className={NO_START}
     />
   )
 }
+
+/**
+ * The picture has nothing on its start side. Wide that is an empty column the
+ * hub sits after; stacked it would be a "Saved" heading over nothing, over the
+ * hub that says "Saved" itself, so the empty column is not drawn there.
+ */
+const NO_START = "max-lg:[&_section:first-of-type]:hidden"
 
 /** The picture before the first inspection lands, at the shape it will have. */
 export function DriftPictureWaiting() {
@@ -165,6 +173,7 @@ export function DriftPictureWaiting() {
         loadingRows: 3,
         loadingLines: { eyebrow: false },
       }}
+      className={NO_START}
     />
   )
 }

@@ -107,7 +107,9 @@ export function DriftTable({
   return (
     <Panel aria-label="Comparisons">
       <PanelHeader title="Comparisons" count={rows.length}>
-        <ChipStrip aria-label="State" className="mr-auto">
+        {/* On a phone the chips take a row of their own, so the count stays
+            at the end of the title's row. */}
+        <ChipStrip aria-label="State" className="mr-auto max-sm:order-last max-sm:basis-full">
           <FilterChip {...chip("all")}>
             All <ChipCount>{rows.length}</ChipCount>
           </FilterChip>

@@ -240,7 +240,7 @@ export function IPAMCoverageTable({
           <ul aria-label="Sources" className="divide-y divide-hairline">
             {coverage.map((row, i) => (
               <li key={i} className="flex h-10 min-w-0 items-center gap-x-4 text-body">
-                <span className="w-32 shrink-0 truncate font-mono" title={row.source}>
+                <span className="w-24 shrink-0 truncate font-mono sm:w-32" title={row.source}>
                   {row.source}
                 </span>
                 <Status tone={COVERAGE_TONE[row.state]} label={row.state} className="shrink-0" />

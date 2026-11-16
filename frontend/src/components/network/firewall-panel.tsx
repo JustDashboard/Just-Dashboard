@@ -213,7 +213,7 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
     <PageContext
       title="Firewall"
       actions={<WorkspaceHelp compact />}
-      className="min-h-6 max-sm:hidden"
+      className="min-h-6 justify-end max-sm:hidden"
     />
   )
   const refreshVerb: Verb = {
