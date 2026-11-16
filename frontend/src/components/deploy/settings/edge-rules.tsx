@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { ListField } from "@/components/proxy/site-form"
+import { ListField } from "@/components/list-field"
 import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { useProject } from "@/components/deploy/project-context"
@@ -185,7 +185,10 @@ export function EdgeRulesForm({
             Boolean(refusal || limitRefusal) || problems.some(Boolean) || Boolean(limitProblem),
         })}
         actions={
-          canAdmin && (
+          // With no rule yet the row where the first will stand is the Add,
+          // so the section never offers it twice.
+          canAdmin &&
+          value.edgeRules.length > 0 && (
             <Button
               type="button"
               size="sm"

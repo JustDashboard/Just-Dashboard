@@ -1,7 +1,6 @@
 "use client"
 
 import { useRef, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { CloudUpload, Download, Plus, Rocket, Trash } from "@/components/icons"
 import { ApiError, del, get, getText, post } from "@/lib/api"
@@ -166,14 +165,7 @@ export function TemplatesPage() {
 
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Templates"
-      />
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Templates" />
       <input
         ref={file}
         type="file"
@@ -199,34 +191,45 @@ export function TemplatesPage() {
           <Panel plain>
             <PanelHeader
               title="Your templates"
+              count={
+                list && list.length > 0 ? (
+                  <>
+                    {plural(list.length, "template")}
+                    {inUse > 0 && ` · ${inUse} in use`}
+                  </>
+                ) : undefined
+              }
               actions={
-                <span className="flex flex-wrap items-center gap-3">
-                  {list && list.length > 0 && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {plural(list.length, "template")}
-                      {inUse > 0 && ` · ${inUse} in use`}
-                    </span>
-                  )}
-                  {admin && list && list.length > 0 && (
-                    <>
-                      <Button size="sm" variant="outline" pending={importing} onClick={chooseFile}>
-                        <CloudUpload className="size-3.5" />
-                        Import…
-                      </Button>
-                      {/* A phone's head has room for the count, Import and one
-                          word: the button keeps its name. */}
-                      <Button
-                        size="sm"
-                        aria-label="Add from Compose file"
-                        onClick={() => setComposeOpen(true)}
-                      >
-                        <Plus className="size-3.5" />
-                        <span className="sm:hidden">Add</span>
-                        <span className="max-sm:hidden">Add from Compose file</span>
-                      </Button>
-                    </>
-                  )}
-                </span>
+                admin &&
+                list &&
+                list.length > 0 && (
+                  <span className="flex items-center gap-1">
+                    {/* A phone's head has room for the count, one word and
+                        the ⋯: the button keeps its name. */}
+                    <Button
+                      size="sm"
+                      aria-label="Add from Compose file"
+                      onClick={() => setComposeOpen(true)}
+                    >
+                      <Plus className="size-3.5" />
+                      <span className="sm:hidden">Add</span>
+                      <span className="max-sm:hidden">Add from Compose file</span>
+                    </Button>
+                    {/* The section's one Add; a file is the other way in. */}
+                    <VerbActions
+                      verbs={[
+                        {
+                          key: "import",
+                          label: "Import a template file",
+                          icon: CloudUpload,
+                          disabled: importing,
+                          run: chooseFile,
+                        },
+                      ]}
+                      menuLabel="More ways to add a template"
+                    />
+                  </span>
+                )
               }
             />
             <PanelBody>
@@ -331,6 +334,11 @@ export function TemplatesPage() {
  * is and how many deployments use it. Pressing it draws it over the grid; its
  * verbs are at the end of that line, so deploying is one press from the card.
  * Every card is one height, used or not, deployable or not.
+ *
+ * Cards rather than the `ChoiceRow` list its siblings draw, on purpose: a
+ * press here chooses which template the picture shows, and stays chosen
+ * (`selected`, with its check), the way the picker's cards do, where a row
+ * opens what it names. A row has no chosen state to show that with.
  */
 function TemplateCard({
   template,
@@ -347,6 +355,9 @@ function TemplateCard({
 }) {
   const { summary } = template
   const usable = summary.deploymentSupported !== false
+  // The faint ink of an untinted tag is for the page's ground; on the chosen
+  // card's accent it is a step up, or the caps fail contrast.
+  const ink = selected ? "text-muted-foreground" : undefined
   return (
     <ChoiceCard
       index={index}
@@ -363,9 +374,9 @@ function TemplateCard({
       }
       trailing={
         <span className="mt-auto flex w-full min-w-0 items-center gap-2">
-          <Tag>{summary.sourceKind === "compose" ? "Compose stack" : "Image"}</Tag>
+          <Tag className={ink}>{summary.sourceKind === "compose" ? "Compose stack" : "Image"}</Tag>
           {usable ? (
-            template.deployments > 0 && <Tag>Used by {template.deployments}</Tag>
+            template.deployments > 0 && <Tag className={ink}>Used by {template.deployments}</Tag>
           ) : (
             <Tag tone="warning">Preview only</Tag>
           )}
@@ -624,7 +635,7 @@ function ComposeTemplateSheet({
       onOpenChange={onOpenChange}
       title="Add from Compose file"
       description="A template made from a pasted Compose file, validated as a built-in template is."
-      width="lg"
+      size="lg"
       footer={
         <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={Boolean(busy)}>

@@ -41,12 +41,8 @@ import { useProject } from "@/components/deploy/project-context"
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { ProjectFavicon } from "@/components/project-mark"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import {
   LimitField,
   useContainerPeaks,

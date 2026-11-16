@@ -10,6 +10,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * its trigger when its list closes, and the tip would otherwise sit open over
  * the row until the reader clicked somewhere else; the keyboard still gets it,
  * because that focus is `:focus-visible`.
+ *
+ * Kept only for the domain row's segments. `Explain face="wrap"` is the tip
+ * for a control everywhere else, but it prevents the click's default to keep
+ * a mouse's press from toggling the tip, and a Radix toggle skips its own
+ * handler on a prevented click, so a wrapped segment would never press. Once
+ * `Explain` lets a mouse's click through to the control, this goes.
  */
 export function HoverTip({ tip, children }: { tip: React.ReactNode; children: React.ReactNode }) {
   return (

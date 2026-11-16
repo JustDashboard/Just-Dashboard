@@ -509,7 +509,7 @@ test.describe("Tailnet only", () => {
     await who.fill("ALICE@example.com")
     await who.press("Enter")
     await expect(tailnet.getByText("alice@example.com is already on the list")).toBeVisible()
-    const list = tailnet.getByRole("list", { name: "Admitted on the tailnet" })
+    const list = tailnet.getByRole("list", { name: "Who may open it" })
     await expect(list.getByRole("listitem")).toHaveText(["alice@example.com", "tag:ci"])
     await expect(tailnet.getByText("Only 2 logins and tags")).toBeVisible()
     await expect(tailnet.getByText(/The application is told X-Tailnet-Login/)).toBeVisible()
@@ -1612,7 +1612,7 @@ test.describe("Automation", () => {
     await expect(page.getByText("Enabled", { exact: true }).first()).toBeVisible()
 
     await page.getByRole("button", { name: "Runs", exact: true }).click()
-    const runsSheet = page.getByRole("dialog", { name: "Nightly backup runs" })
+    const runsSheet = page.getByRole("dialog", { name: "Nightly backup · history" })
     await expect(runsSheet).toBeVisible()
     await expect(runsSheet.getByText("#4 Deploy", { exact: true })).toBeVisible()
     await page.keyboard.press("Escape")
@@ -1801,7 +1801,7 @@ test.describe("Automation", () => {
     await page.getByRole("button", { name: "Actions for Deploy hook" }).click()
     await page.getByRole("menuitem", { name: "Deliveries" }).click()
 
-    await expect(page.getByRole("heading", { name: "Deliveries · Deploy hook" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Deploy hook · history" })).toBeVisible()
     const sheet = page.getByRole("dialog")
     await expect(sheet.getByText("Accepted", { exact: true })).toBeVisible()
     await expect(sheet.getByText("Ignored", { exact: true })).toBeVisible()
@@ -2262,8 +2262,14 @@ test.describe("Password protection", () => {
     // sends no password.
     await page.goto("/deploy/7/settings/domains")
     await expect(password).toHaveAttribute("aria-pressed", "true")
+    // The row says who signs in; its two fields are a layer over it, so the
+    // list keeps one height per row.
+    const signIn = page.getByRole("button", { name: "Password · team on api.example.test" })
+    await expect(page.getByLabel("User name")).toHaveCount(0)
+    await signIn.click()
     await expect(page.getByLabel("User name")).toHaveValue("team")
     await expect(page.locator("#domain-password-0")).toHaveAttribute("placeholder", "Unchanged")
+    await page.keyboard.press("Escape")
     await https.click()
     await saveSettings(page)
     await expectSaved(page)
@@ -2282,6 +2288,7 @@ test.describe("Password protection", () => {
 
     // Turning it off sends no protection at all.
     await password.click()
+    await expect(signIn).toHaveCount(0)
     await expect(page.getByLabel("User name")).toHaveCount(0)
     await saveSettings(page)
     await expect.poll(() => puts.length).toBe(3)
