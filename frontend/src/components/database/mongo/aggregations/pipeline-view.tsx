@@ -84,6 +84,7 @@ import {
 import { CollectionMark, collectionKind } from "@/components/database/mongo/kinds"
 import type { MongoAggregateResult, MongoDoc } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
+import { OBJECT_HEAD } from "@/components/database/workbench/chrome"
 import { saveText } from "@/lib/download"
 
 const LIMITS = ["100", "500", "1000"] as const
@@ -276,7 +277,7 @@ export function PipelineView({
 
   return (
     <div data-slot="mongo-pipeline" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline px-3 py-1">
+      <div className={OBJECT_HEAD}>
         <h2 className="flex min-w-0 items-center gap-1.5">
           <CollectionMark kind={markKind} />
           <span className="min-w-0 truncate font-mono text-sm leading-6 font-medium">
