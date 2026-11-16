@@ -49,13 +49,15 @@ export function WorkspaceHelp(
     <Button
       // A single cap is as square as an icon's button: 23px wide as text, its
       // 24px press box reached past the end of the identity line it closes
-      // and gave the page half a pixel to scroll.
+      // and gave the page half a pixel to scroll. In a caller's plain wrapper
+      // the cap's small mono text is the button's baseline, which sat it
+      // 1.5px low on the line; `align-middle` centres the box instead.
       size="icon-xs"
       variant="ghost"
       aria-label={`${help.name} shortcuts`}
       title={`${help.name} shortcuts`}
       onClick={help.show}
-      className="pointer-coarse:hidden"
+      className="align-middle pointer-coarse:hidden"
     >
       <kbd aria-hidden className={KEYCAP}>
         ?
