@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight, Fingerprint, Key, Linked } from "@/components/icons"
+import { ArrowRight, Linked } from "@/components/icons"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { EmptyNote } from "@/components/state"
@@ -14,7 +14,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { PanelHeader } from "@/components/panel"
 import { CodeView } from "@/components/database/kit"
+import { ColumnsTable } from "@/components/database/schema/columns-table"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
 import type { DbTableDetail } from "@/components/database/data/types"
@@ -32,18 +34,6 @@ import { tableFacts } from "@/components/database/workbench/table-facts"
  */
 export function TableStructure({ detail }: { detail: DbTableDetail }) {
   const { href } = useDatabase()
-  const foreign = new Map(
-    detail.foreignKeys.flatMap((key) =>
-      key.columns.map((column, index) => [column, { key, index }] as const),
-    ),
-  )
-  const unique = new Set(
-    detail.indexes
-      .filter(
-        (index) => index.unique && !index.primary && index.columns.length === 1 && !index.predicate,
-      )
-      .map((index) => index.columns[0]),
-  )
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -56,85 +46,9 @@ export function TableStructure({ detail }: { detail: DbTableDetail }) {
         )}
 
         <Part title="Columns" count={detail.columns.length}>
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="h-8 w-10 pr-0 text-right">#</TableHead>
-                <TableHead className="h-8">Name</TableHead>
-                <TableHead className="h-8">Type</TableHead>
-                <TableHead className="h-8">NULL</TableHead>
-                <TableHead className="h-8">Default</TableHead>
-                <TableHead className="h-8">Key</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {detail.columns.map((column) => {
-                const reference = foreign.get(column.name)
-                return (
-                  <TableRow key={column.name} className="hover:bg-transparent">
-                    <TableCell className="numeric py-1.5 pr-0 text-right text-muted-foreground">
-                      {column.position}
-                    </TableCell>
-                    <TableCell className="py-1.5">
-                      <span className="font-mono font-medium">{column.name}</span>
-                      {/* What the column is for reads under its name: as a
-                          column of its own it was the one that fell off the
-                          right edge at an ordinary width. */}
-                      {column.comment && (
-                        <p
-                          className="max-w-80 truncate text-hint text-muted-foreground"
-                          title={column.comment}
-                        >
-                          {column.comment}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell className="py-1.5">
-                      <Tag mono>{column.type}</Tag>
-                    </TableCell>
-                    <TableCell className="py-1.5 text-muted-foreground">
-                      {column.nullable ? "yes" : "no"}
-                    </TableCell>
-                    <TableCell className="max-w-48 truncate py-1.5 font-mono text-muted-foreground">
-                      {column.generated
-                        ? `= ${column.generated}`
-                        : (column.default ?? (column.identity ? column.identity : ""))}
-                    </TableCell>
-                    <TableCell className="py-1.5">
-                      {/* The marks the Schema page's columns carry, glyphs and all. */}
-                      <span className="flex items-center gap-2">
-                        {detail.primaryKey.includes(column.name) && (
-                          <span className="flex items-center gap-1">
-                            <Key aria-hidden className="size-3 text-chart-2" />
-                            <Tag>primary</Tag>
-                          </span>
-                        )}
-                        {unique.has(column.name) && (
-                          <span className="flex items-center gap-1">
-                            <Fingerprint aria-hidden className="size-3 text-muted-foreground" />
-                            <Tag>unique</Tag>
-                          </span>
-                        )}
-                        {column.generated && <Tag>computed</Tag>}
-                        {reference && (
-                          <Link
-                            href={href("data", {
-                              schema: reference.key.refSchema ?? (detail.schema || null),
-                              table: reference.key.refTable,
-                            })}
-                            className="flex items-center gap-1 rounded-sm font-mono text-xs text-muted-foreground focus-ring transition-colors hover:text-foreground"
-                          >
-                            <Linked aria-hidden className="size-3 text-chart-1" />
-                            {reference.key.refTable}.{reference.key.refColumns[reference.index]}
-                          </Link>
-                        )}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+          {/* Schema's own columns table, read-only here: it reads down a
+              column to a block where the pane is narrow, as a phone's is. */}
+          <ColumnsTable detail={detail} linkTo="data" />
         </Part>
 
         <Part title="Indexes" count={detail.indexes.length}>
@@ -296,11 +210,9 @@ function Part({
 }) {
   return (
     <section aria-label={title} className="min-w-0">
-      {/* Its hairline runs to the same edges as the rules of the rows under it. */}
-      <h3 className="-mx-4 flex items-baseline gap-2 border-b border-hairline px-4 pb-2 text-title font-medium">
-        {title}
-        <span className="numeric text-xs font-normal text-muted-foreground">{count}</span>
-      </h3>
+      {/* The one section head; its hairline runs to the same edges as the
+          rules of the rows under it. */}
+      <PanelHeader plain level={3} title={title} count={count} className="-mx-4 px-4 pb-2" />
       {/* The rows bleed to the section's edge, as a table in a plain panel does. */}
       <div className={cn("-mx-4 min-w-0")}>{children}</div>
     </section>

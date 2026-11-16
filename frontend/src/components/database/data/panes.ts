@@ -17,11 +17,14 @@
  * over the table, as it does on a phone.
  */
 
-export const RAIL = { min: 200, max: 480, fallback: 256 }
+import { RAIL_SIZE, WORK_BESIDE_SIDE, clamp } from "@/components/database/workbench/side-model"
+
+/** Every database workbench's rail width (`side-model.ts`). */
+export const RAIL = { min: RAIL_SIZE.min, max: RAIL_SIZE.max, fallback: RAIL_SIZE.base }
 export const INSPECTOR = { min: 280, max: 640, fallback: 360 }
 
-/** The least the rows are left with beside the rail alone. */
-export const ROWS_BESIDE_RAIL = 480
+/** The least the rows are left with beside the rail alone: every workbench's floor. */
+export const ROWS_BESIDE_RAIL = WORK_BESIDE_SIDE
 /** The least the rows are left with beside the row panel: their strip still one line, three columns to read. */
 export const ROWS_BESIDE_PANEL = 560
 
@@ -39,8 +42,6 @@ export interface Panes {
   railMax: number
   inspectorMax: number
 }
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 /**
  * `frame` is the editor's measured width; `rail` and `inspector` the widths

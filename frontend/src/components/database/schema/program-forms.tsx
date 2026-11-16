@@ -726,11 +726,7 @@ export function TriggerDialog({
             onChange={(event) => set({ events: [event] })}
           />
         ) : (
-          <ChipStrip
-            role="group"
-            aria-label="The events it fires on"
-            className="max-sm:mx-0 max-sm:px-0"
-          >
+          <ChipStrip role="group" aria-label="The events it fires on" bleed={false}>
             {abilities.events.map((event) => (
               <FilterChip
                 key={event}
