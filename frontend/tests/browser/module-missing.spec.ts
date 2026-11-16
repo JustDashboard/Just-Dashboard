@@ -483,7 +483,7 @@ test("a server without PM2 names the command and opens the terminal it is typed 
     "href",
     "/terminal",
   )
-  await expectHeld(page, 390)
+  await expectHeld(page, 390, missing(page))
 })
 
 test("an account without the terminal is not sent to one", async ({ page }) => {

@@ -2,13 +2,7 @@
 
 import Link from "next/link"
 import { useState } from "react"
-import {
-  ArrowRight,
-  FileText,
-  FolderOpen,
-  SettingsSliders,
-  Trash,
-} from "@/components/icons"
+import { ArrowRight, FileText, FolderOpen, SettingsSliders, Trash } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { SaveBarProvider } from "@/components/settings/save-bar"
 import { Segments } from "@/components/segments"

@@ -540,7 +540,7 @@ function ServiceIdentity({
             <TextShimmer>{`${busy}…`}</TextShimmer>
           </span>
         ) : (
-          <span title={`${unit.activeState} (${unit.subState})`}>
+          <span className="inline-flex" title={`${unit.activeState} (${unit.subState})`}>
             <Status
               tone={tone}
               live={up}
