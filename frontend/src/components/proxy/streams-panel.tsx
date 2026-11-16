@@ -311,24 +311,28 @@ export function StreamsPage() {
       title="Port forwarding"
       // Laid out as a project's header, as the overview's line is: what needs
       // the reader beside the name, one command at the end, the rest in `⋯`.
+      // The state keeps one box whatever it is, so the pressable verdict
+      // does not stand taller than the "Reading" it replaces.
       state={
-        verdict ? (
-          <Verdict
-            verdict={verdict}
-            pressed={verdict.chip !== undefined && chip === verdict.chip}
-            onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
-          />
-        ) : noNginx ? (
-          <Status tone="stopped" label="Not installed" />
-        ) : !data ? (
-          error ? (
-            <Status tone="danger" label="Not read" />
+        <span className="flex h-6 items-center">
+          {verdict ? (
+            <Verdict
+              verdict={verdict}
+              pressed={verdict.chip !== undefined && chip === verdict.chip}
+              onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
+            />
+          ) : noNginx ? (
+            <Status tone="stopped" label="Not installed" />
+          ) : !data ? (
+            error ? (
+              <Status tone="danger" label="Not read" />
+            ) : (
+              <Status tone="unknown" label="Reading" />
+            )
           ) : (
-            <Status tone="unknown" label="Reading" />
-          )
-        ) : (
-          <Status tone="stopped" label="No forwards" />
-        )
+            <Status tone="stopped" label="No forwards" />
+          )}
+        </span>
       }
       // An empty list carries the command in its own empty state.
       command={!data && !error && !noNginx ? true : listed.length > 0 ? newStream : undefined}

@@ -342,6 +342,16 @@ function StreamMain({
         ),
       }
 
+  const windowed = (tab === "overview" || tab === "clients") && readable
+  const windowChoice = (
+    <Segments
+      label="Window"
+      value={span}
+      onChange={setSpan}
+      options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
+    />
+  )
+
   return frame(
     <>
       <StreamIdentity
@@ -373,18 +383,11 @@ function StreamMain({
           value={tab}
           views={views.map((key) => ({ key, label: TAB_LABEL[key] }))}
           sticky
-          trailing={
-            (tab === "overview" || tab === "clients") &&
-            readable && (
-              <Segments
-                label="Window"
-                value={span}
-                onChange={setSpan}
-                options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
-              />
-            )
-          }
+          // Beside the views where there is room; on a phone a row of its
+          // own under them, or it squeezed the strip and cut a view's name.
+          trailing={windowed && <span className="max-sm:hidden">{windowChoice}</span>}
         />
+        {windowed && <div className="pt-3 sm:hidden">{windowChoice}</div>}
 
         <TabsContent value="overview" className="pt-6">
           {tab === "overview" && readable && (
@@ -550,8 +553,13 @@ function StreamIdentity({
         ) : (
           <>
             {urgent && reach}
+            {/* On a phone the line is where it goes and who may reach it:
+                the kind of forward is the page's to say, and a line of
+                facts that wraps moved the views under it as it loaded. */}
             {streamTraits(stream).map((fact) => (
-              <Fact key={fact}>{fact}</Fact>
+              <Fact key={fact} className="max-sm:hidden">
+                {fact}
+              </Fact>
             ))}
             <Fact mono>→ {upstreamsOf(stream).join(", ")}</Fact>
             {!urgent && reach}

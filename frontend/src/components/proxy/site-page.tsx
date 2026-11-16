@@ -442,7 +442,11 @@ function SiteMain({
   const plainWarned = !vhost.tls && vhost.enabled && vhost.upstreams.length > 0
   const tlsFact = (
     <Fact>
-      <SiteTLS vhost={vhost} />
+      {/* Held to the line's 16px: the status's glyph, set inline, grew the
+          facts' row 3px past the bone it replaces. */}
+      <span className="inline-flex h-4 items-center align-top">
+        <SiteTLS vhost={vhost} />
+      </span>
     </Fact>
   )
   // What the site is, as the facts the Sites row carries, laid out as a

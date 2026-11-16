@@ -253,7 +253,12 @@ function TrafficPage() {
       ) : (
         <div data-slot="traffic-hour" className="space-y-6">
           <HourReadings hour={hour} />
-          <HourChart hour={hour} />
+          {/* As tall as the chart and its legend, which a chart with nothing
+              to plot yet does not draw, so nothing under it moves when the
+              hour lands. */}
+          <div className="min-h-[281px]">
+            <HourChart hour={hour} />
+          </div>
         </div>
       )}
 
