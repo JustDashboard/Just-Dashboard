@@ -101,13 +101,13 @@ test("full tuple and container proof keep UDP bytes and loss unknown", async ({ 
   await expect(total("TCP sent")).toHaveAttribute("title", "1 rows with measured sent deltas")
   await expect(total("Retransmits")).toContainText("Unknown")
   // The first row is read out in full; the container's whole identity is its evidence.
-  await expect(fact(reading(page), "Owner evidence")).toContainText(containerId)
-  await expect(fact(reading(page), "Outstanding-loss gauge max")).toContainText("Unknown")
+  await expect(fact(reading(page), "How its owner is known")).toContainText(containerId)
+  await expect(fact(reading(page), "Most counted lost at once")).toContainText("Unknown")
   await expect(fact(reading(page), "Retransmits")).toContainText("Unknown")
   await udp.getByRole("button", { name: "resolved · PID 412" }).click()
   await expect(fact(reading(page), "Sent")).toContainText("Unavailable for UDP")
   await expect(fact(reading(page), "Received")).toContainText("Unavailable for UDP")
-  await expect(fact(reading(page), "Outstanding-loss gauge max")).toContainText("Unknown")
+  await expect(fact(reading(page), "Most counted lost at once")).toContainText("Unknown")
   await expect(fact(reading(page), "Window")).toContainText("Observed span; no close event")
 })
 
@@ -340,7 +340,7 @@ test.describe("mobile socket evidence", () => {
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
-    await expect(fact(reading(page), "Owner evidence")).toContainText(containerId)
+    await expect(fact(reading(page), "How its owner is known")).toContainText(containerId)
     await recorderMenu(page, "Sample interval and retention")
     const sheet = page.getByRole("dialog", { name: "Sample interval and retention" })
     await sheet.getByLabel("Retention (days)").fill("1")

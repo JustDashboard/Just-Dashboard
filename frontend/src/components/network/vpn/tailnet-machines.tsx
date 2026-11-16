@@ -1,8 +1,8 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import { useState } from "react"
 import { External } from "@/components/icons"
-import { bytes } from "@/lib/format"
 import type { TailscalePeer } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useMediaQuery } from "@/hooks/use-mobile"
@@ -237,10 +237,7 @@ function Machine({ machine: p }: { machine: TailscalePeer }) {
           key: "moved",
           className: "w-40",
           node: moved ? (
-            <span className="numeric font-mono">
-              <span className="text-[var(--chart-5)]">↓ {bytes(p.rxBytes)}</span>{" "}
-              <span className="text-[var(--chart-2)]">↑ {bytes(p.txBytes)}</span>
-            </span>
+            <InOut rx={p.rxBytes} tx={p.txBytes} unit="bytes" className="text-body" />
           ) : (
             <span className="text-muted-foreground">nothing moved</span>
           ),

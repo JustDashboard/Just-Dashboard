@@ -77,9 +77,7 @@ async function selectedClient(page: Page, address = "192.0.2.10") {
 async function openInventory(page: Page, on = "Changes") {
   await page.getByRole("link", { name: "Inspect Fixture DNS", exact: true }).click()
   await expect(page).toHaveURL(/\/network\/dns\/services\/dns-fixture$/)
-  await expect(
-    shown(page).getByRole("heading", { name: "Configured listeners", exact: true }),
-  ).toBeVisible()
+  await expect(shown(page).getByRole("heading", { name: "Listeners", exact: true })).toBeVisible()
   if (on !== "Overview") await view(page, on)
 }
 
@@ -129,9 +127,7 @@ test("connection defaults read-only and sends only the selected native credentia
   // A connected engine is a page: the form's sheet is gone and its inventory is the page.
   await expect(page).toHaveURL(/\/network\/dns\/services\/dns-fixture$/)
   await expect(page.locator("[data-slot=sheet-content]")).toHaveCount(0)
-  await expect(
-    shown(page).getByRole("heading", { name: "Configured listeners", exact: true }),
-  ).toBeVisible()
+  await expect(shown(page).getByRole("heading", { name: "Listeners", exact: true })).toBeVisible()
   expect(control.mutations[0].body).toMatchObject({
     engine: "technitium",
     management: false,
@@ -197,7 +193,7 @@ test("inventory preserves separate native evidence, views, clients, zones, overr
   await openInventory(page, "Overview")
   // Each view holds its own sections, and the address names the view on screen.
   for (const [on, headings, texts] of [
-    ["Overview", ["Native owner and transport", "Configured listeners", "Native upstreams"], []],
+    ["Overview", ["Owner and transport", "Listeners", "Upstreams"], []],
     [
       "Clients",
       ["Client access policy", "Native views", "Named networks", "Native filtering groups"],
@@ -219,11 +215,11 @@ test("inventory preserves separate native evidence, views, clients, zones, overr
   }
   await view(page, "Overview")
   await expect(page).toHaveURL(/\/network\/dns\/services\/dns-fixture$/)
-  await expect(shown(page).getByText("Runtime · unknown", { exact: true })).toBeVisible()
+  // The Overview says each fact as a line, and what a reading rests on is behind its tip.
+  const runtime = shown(page).getByRole("definition").filter({ hasText: "unknown" }).first()
+  await expect(runtime).toBeVisible()
   await expect(
-    shown(page)
-      .getByText(/Basis: native fixture inventory/)
-      .first(),
+    shown(page).getByRole("button", { name: "What the runtime reading rests on" }),
   ).toBeVisible()
   await expect(shown(page).getByText(/\[::1\]:53/)).toBeVisible()
   await view(page, "Clients")

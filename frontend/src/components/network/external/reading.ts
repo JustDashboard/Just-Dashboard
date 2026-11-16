@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import type { DotTone } from "@/components/status-dot"
 import type { WireLine } from "@/components/wire/wire-flow-model"
 import {
@@ -132,7 +133,7 @@ export function reachVerdict(
   const failed = outcomes.filter((o) => o.kind === "failed").length
   const measured = outcomes.filter((o) => o.kind !== "none").length
   if (measured === 0) return { word: "No measurement yet", tone: "unknown" }
-  const of = `${reached} of ${enrolled.length} source${enrolled.length === 1 ? "" : "s"}`
+  const of = `${reached} of ${plural(enrolled.length, "source")}`
   if (failed > 0) return { word: `Reached from ${of}`, tone: reached > 0 ? "warning" : "danger" }
   if (reached < enrolled.length) return { word: `Reached from ${of}`, tone: "warning" }
   return { word: `Reached from ${of}`, tone: "running" }

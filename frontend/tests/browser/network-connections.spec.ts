@@ -323,8 +323,8 @@ test("the rail walks the list with the open view, and the arrows say where they 
   await rail.getByRole("radio", { name: /From the internet/ }).click()
   await expect(rail.getByRole("link", { name: "100.110.34.9" })).toHaveCount(0)
   await page.goto("/network/connections")
-  await expect(page.getByRole("radio", { name: /From the internet/ })).toHaveAttribute(
-    "aria-checked",
+  await expect(page.getByRole("button", { name: /From the internet/ })).toHaveAttribute(
+    "aria-pressed",
     "true",
   )
 })
@@ -435,8 +435,8 @@ test("the picture narrows the list: the internet to its chip, a program to its c
   await openMaturity(page, [])
   await visit(page, "/network/connections")
   await page.getByRole("button", { name: "Show only the addresses from the internet" }).click()
-  await expect(page.getByRole("radio", { name: /From the internet/ })).toHaveAttribute(
-    "aria-checked",
+  await expect(page.getByRole("button", { name: /From the internet/ })).toHaveAttribute(
+    "aria-pressed",
     "true",
   )
   await expect(page.locator("[data-slot=choice-list] > [data-slot=choice-row]")).toHaveCount(4)

@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { SECOND_LINE } from "./device-list"
 
 const NONE = "__none"
