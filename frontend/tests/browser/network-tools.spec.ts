@@ -547,7 +547,7 @@ test("readers keep the local calculator and comparison but never query IPAM", as
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "Check shared IPAM" })).toHaveCount(0)
   await expect(
-    page.getByText(/needs the admin capability; the comparison above stays in this browser/),
+    page.getByText("Checking against shared address planning needs an administrator."),
   ).toBeVisible()
   expect(calls).toEqual([])
 })
@@ -855,7 +855,7 @@ test("a reader is shown the calculator alone: no probe, no saved runs, no contro
   const calls = await tools(page, {}, reader)
   await page.goto("/network/tools?tool=tls&target=example.com")
   await expect(
-    page.getByText("Server diagnostics need the admin capability", { exact: true }),
+    page.getByText("Server diagnostics need an administrator", { exact: true }),
   ).toBeVisible()
   const rail = page.getByRole("navigation", { name: "Diagnostics" })
   await expect(rail.getByRole("button")).toHaveCount(1)

@@ -196,8 +196,7 @@ export function SubnetTool() {
               </div>
             ) : (
               <p className="text-hint text-muted-foreground">
-                Checking against shared address planning needs the admin capability; the comparison
-                above stays in this browser.
+                Checking against shared address planning needs an administrator.
               </p>
             )}
           </section>

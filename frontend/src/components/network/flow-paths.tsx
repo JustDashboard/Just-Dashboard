@@ -4,7 +4,8 @@ import Link from "next/link"
 import { bytes, plural } from "@/lib/format"
 import type { NetworkFlowEdge, NetworkTopologyFlows } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
+import { InfoTip } from "@/components/form"
 import { Tag } from "@/components/tag"
 
 export type FlowNode = { label: string; href?: string }
@@ -36,12 +37,17 @@ export function FlowPaths({
     <Panel plain>
       <PanelHeader
         title="Paths in use"
+        count={
+          flows.state === "ok"
+            ? `${plural(flows.classified, "tracked flow")}${flows.truncated ? " · first 65,536 read" : ""}`
+            : undefined
+        }
         actions={
-          flows.state === "ok" ? (
-            <span className="text-hint text-muted-foreground">
-              {plural(flows.classified, "tracked flow")}
-              {flows.truncated ? " · first 65,536 read" : ""}
-            </span>
+          flows.state === "ok" && !flows.accounting && shown.length > 0 ? (
+            <InfoTip label="What the counts are">
+              Counts are flows open at the moment of reading; the kernel is not counting their bytes
+              (net.netfilter.nf_conntrack_acct is off).
+            </InfoTip>
           ) : undefined
         }
       />
@@ -52,14 +58,9 @@ export function FlowPaths({
             <p className="mt-1">The wires above still show each device&rsquo;s traffic.</p>
           </Notice>
         ) : flows.state === "unavailable" ? (
-          <p className="text-body text-muted-foreground">
-            This host keeps no connection-tracking table, so which nodes trade traffic is not known
-            here.
-          </p>
+          <EmptyNote>This host keeps no connection-tracking table.</EmptyNote>
         ) : shown.length === 0 ? (
-          <p className="text-body text-muted-foreground">
-            No tracked flow crosses between the nodes above right now.
-          </p>
+          <EmptyNote>No tracked flow crosses between the nodes above.</EmptyNote>
         ) : (
           <ul className="flex flex-col divide-y divide-hairline" aria-label="Paths in use">
             {shown.map((edge) => {
@@ -91,12 +92,6 @@ export function FlowPaths({
               )
             })}
           </ul>
-        )}
-        {flows.state === "ok" && !flows.accounting && shown.length > 0 && (
-          <p className="mt-3 text-hint text-muted-foreground">
-            Counts are flows open at the moment of reading; the kernel is not counting their bytes
-            (net.netfilter.nf_conntrack_acct is off).
-          </p>
         )}
       </PanelBody>
     </Panel>
