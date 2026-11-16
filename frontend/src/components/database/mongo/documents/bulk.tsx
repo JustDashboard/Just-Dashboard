@@ -6,7 +6,7 @@ import { notify } from "@/lib/toast"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Segments } from "@/components/segments"
 import { Field, FormFact, FormFacts, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
@@ -19,14 +19,14 @@ import {
 import { CodeField } from "@/components/database/mongo/code-field"
 import { isEmptyDocument, shapeProblem } from "@/components/database/mongo/shell"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
-import { grouped } from "@/lib/format"
+import { grouped, plural } from "@/lib/format"
 
 export type BulkMode = "update" | "delete"
 
 /** A count taken for one filter text: it stands only while the text is that. */
 type Counted = { filter: string; scope: "many" | "one"; matched: number; exact: boolean }
 
-const documents = (n: number) => `${grouped(n)} ${n === 1 ? "document" : "documents"}`
+const documents = (n: number) => plural(n, "document")
 
 /**
  * Change or remove every document a filter matches.
@@ -261,23 +261,19 @@ function Bulk({
       description={`${verb} the documents of ${target.collection} that a filter matches`}
       footer={
         <>
-          <p aria-live="polite" className="mr-auto min-w-0 text-body">
+          <FormNote aria-live="polite" className="mr-auto min-w-0">
             {current ? (
               <>
-                <span className="numeric font-medium">
+                <span className="numeric font-medium text-foreground">
                   {current.exact ? "" : "about "}
                   {grouped(current.matched)}
                 </span>{" "}
-                <span className="text-muted-foreground">
-                  {current.matched === 1 ? "document matches" : "documents match"}
-                </span>
+                {current.matched === 1 ? "document matches" : "documents match"}
               </>
             ) : (
-              <span className="text-hint text-muted-foreground">
-                Nothing is written until the matches are counted.
-              </span>
+              "Nothing is written until the matches are counted."
             )}
-          </p>
+          </FormNote>
           <Button variant="outline" disabled={busy !== null} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -297,24 +293,23 @@ function Bulk({
               disabled={blocked || current !== null}
               onClick={() => void count()}
             >
-              Count the matches
+              Count
             </Button>
           )}
         </>
       }
     >
       <div className="space-y-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate font-mono text-body font-medium">{target.collection}</p>
-            <FormFacts>
-              <FormFact label="Database" mono>
-                {target.database}
-              </FormFact>
-            </FormFacts>
-          </div>
-        </div>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={target.collection}
+          mono
+          facts={
+            <FormFact label="Database" mono>
+              {target.database}
+            </FormFact>
+          }
+        />
 
         <Field
           label="Filter"

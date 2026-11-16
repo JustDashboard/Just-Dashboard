@@ -1267,14 +1267,14 @@ test.describe("keys", () => {
     // The whole database is emptied from Settings, with its name typed.
     await dialog.getByLabel("Pattern").fill("*")
     await expect(dialog.getByText("That pattern is every key")).toBeVisible()
-    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await expect(dialog.locator("[data-slot=redis-bulk-count]")).toContainText("9 keys match")
     await expect(dialog.getByRole("button", { name: /^Delete/ })).toHaveCount(0)
 
     await dialog.getByLabel("Pattern").fill("session:*")
     // A changed pattern has not been counted: there is nothing to delete yet.
     await expect(dialog.getByRole("button", { name: /^Delete/ })).toHaveCount(0)
-    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await expect(dialog.locator("[data-slot=redis-bulk-count]")).toContainText("2 keys match")
     await expect(dialog.locator("[data-slot=redis-bulk-count]")).toContainText("session:1")
     expect(
@@ -1407,7 +1407,7 @@ test.describe("keys", () => {
     const dialog = page.getByRole("dialog", { name: "Bulk actions" })
     await dialog.getByLabel("Pattern").fill("session:*")
     await dialog.getByRole("radio", { name: "Remove expiries" }).click()
-    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await expect(
       dialog.getByText("The next step names the count and asks once more."),
     ).toBeVisible()
@@ -1430,7 +1430,7 @@ test.describe("keys", () => {
     await page.getByRole("menuitem", { name: "Bulk actions…" }).click()
     await dialog.getByLabel("Pattern").fill("session:*")
     await dialog.getByRole("radio", { name: "Remove expiries" }).click()
-    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await dialog.getByRole("button", { name: "Remove the expiry of 2 keys…" }).click()
     await confirm.getByRole("button", { name: "Remove the expiry of 2 keys" }).click()
     await expect(page.getByText("2 keys no longer set to expire")).toBeVisible()

@@ -1229,11 +1229,11 @@ test.describe("documents", () => {
     const dialog = page.getByRole("dialog", { name: "Delete documents" })
     // It opens on the filter the query bar holds.
     await expect(dialog.getByLabel("Filter")).toHaveValue('{ "status": "paid" }')
-    await dialog.getByRole("button", { name: "Count the matches" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await expect(dialog).toContainText("2 documents match")
     // Another filter is another count: the number on the button is never of the old one.
     await dialog.getByLabel("Filter").fill('{ "status": "shipped" }')
-    await expect(dialog.getByRole("button", { name: "Count the matches" })).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Count", exact: true })).toBeVisible()
     await dialog.getByLabel("Filter").fill('{ "status": "paid" }')
     await dialog.getByRole("button", { name: /Delete 2 documents/ }).click()
 
@@ -1258,7 +1258,7 @@ test.describe("documents", () => {
     const dialog = page.getByRole("dialog", { name: "Update documents" })
     await dialog.getByLabel("Filter").fill('{ "status": "paid" }')
     await dialog.getByLabel("Update").fill('{ "$set": { "seen": true } }')
-    await dialog.getByRole("button", { name: "Count the matches" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await dialog.getByRole("button", { name: "Update 2 documents" }).click()
     await expect(dialog).toBeHidden()
     expect(mongo.asked("PATCH /mongo/documents").map((call) => call.body.dryRun)).toEqual([
