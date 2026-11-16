@@ -29,8 +29,8 @@ import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { ContentConflict } from "@/components/files/content-conflict"
-import { unifiedDiff } from "@/components/files/diff"
-import { DiffView } from "@/components/files/diff-view"
+import { unifiedDiff } from "@/lib/diff"
+import { DiffView } from "@/components/diff-view"
 import type { GitRun } from "@/components/git/run"
 import { PreviewHeader } from "@/components/git/preview-header"
 import { ConflictPreview } from "@/components/git/conflict-preview"
@@ -42,7 +42,7 @@ import { SubmodulePreview, LFSPreview, PatchPreview } from "@/components/git/ext
 import { ForgePreview } from "@/components/git/forge-preview"
 import { BlamePreview, RecoveryPreview, CommitSignature } from "@/components/git/inspect-panels"
 import { NameDialog } from "@/components/git/name-dialog"
-import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
+import { SourceBranch, SourceCommit, SourceMerge } from "@/components/git/glyphs"
 import { AuthorMark } from "@/components/git/marks"
 import { RefTags } from "@/components/git/ref-tags"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
@@ -822,10 +822,13 @@ function StashPreview({
         ctx.confirm({
           title: `Drop stash ${stash.index}`,
           confirmLabel: "Drop",
+          subject: {
+            mark: <SourceCommit className="size-5 text-muted-foreground" />,
+            name: `stash@{${stash.index}}`,
+            facts: <span className="truncate">{stash.message}</span>,
+          },
           description: (
-            <p className="text-destructive">
-              “{stash.message}” is thrown away. The changes it holds are not recoverable.
-            </p>
+            <p>“{stash.message}” is thrown away. The changes it holds are not recoverable.</p>
           ),
           action: async (c) => {
             await post("/git/stash/drop", { index: stash.index }, { confirm: c, query: q })

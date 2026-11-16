@@ -21,6 +21,7 @@ import type { GitFileChange, GitResult, GitStash, GitStatus } from "@/lib/types"
 import type { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { SourceCommit } from "@/components/git/glyphs"
+import { FileIcon } from "@/components/file-icon"
 import { GitExplain } from "@/components/git/help"
 import { IdentityDialog } from "@/components/git/identity-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
@@ -125,8 +126,18 @@ export function ChangesPanel({
         ? `Delete ${file.path.split("/").pop()}`
         : `Discard changes to ${file.path.split("/").pop()}`,
       confirmLabel: untracked ? "Delete" : "Discard",
+      subject: {
+        mark: (
+          <FileIcon
+            entry={{ name: file.path.split("/").pop() ?? file.path, isDir: false }}
+            className="size-6"
+          />
+        ),
+        name: file.path.split("/").pop() ?? file.path,
+        facts: <span className="font-mono break-all">{file.path}</span>,
+      },
       description: (
-        <p className="text-destructive">
+        <p>
           {untracked ? (
             <>
               <span className="font-mono break-all">{file.path}</span> has never been committed, so
@@ -152,7 +163,7 @@ export function ChangesPanel({
       title: clean ? "Discard everything" : "Discard every change",
       confirmLabel: "Discard all",
       description: (
-        <p className="text-destructive">
+        <p>
           Every tracked file is put back to the last commit.{" "}
           {clean ? "Untracked files are deleted as well." : "Untracked files are left alone."} This
           cannot be undone.

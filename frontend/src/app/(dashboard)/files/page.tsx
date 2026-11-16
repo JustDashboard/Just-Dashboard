@@ -57,13 +57,14 @@ import { GitHubAccountControl } from "@/components/git/github-account"
 import { FileEditorSheet } from "@/components/files/file-editor"
 import {
   defaultFolderColour,
+  FileIcon,
   folderColourOf,
   FolderColourProvider,
   FolderIcon,
   FolderSwatch,
   validFolderColour,
   type FolderColour,
-} from "@/components/files/file-icon"
+} from "@/components/file-icon"
 import { FolderColourMenu } from "@/components/files/folder-colour"
 import { COLUMN, FileRow } from "@/components/files/file-row"
 import { DiskRoom } from "@/components/files/disk-room"
@@ -804,11 +805,14 @@ export default function FilesPage() {
     confirm({
       title: entry.isDir ? "Delete folder" : "Delete file",
       confirmLabel: "Delete",
+      // What it acts on, drawn as itself; the button carries the danger, not the sentence.
+      subject: {
+        mark: <FileIcon entry={entry} className="size-6" />,
+        name: entry.name,
+        facts: <span className="font-mono break-all">{entry.path}</span>,
+      },
       description: (
-        <p className="text-destructive">
-          <b>{entry.path}</b> is deleted permanently
-          {entry.isDir ? ", along with everything inside it." : "."}
-        </p>
+        <p>It is deleted permanently{entry.isDir ? ", along with everything inside it." : "."}</p>
       ),
       action: async () => {
         await del("/files/delete", {
@@ -829,7 +833,7 @@ export default function FilesPage() {
       confirmLabel: "Delete all",
       workingLabel: "Deleting selected files…",
       description: (
-        <p className="text-destructive">
+        <p>
           {plural(targets.length, "selected item")} {targets.length === 1 ? "is" : "are"} deleted
           permanently
           {dirs.length > 0 ? ", folders and everything inside them included." : "."}
@@ -1522,7 +1526,7 @@ export default function FilesPage() {
   })
 
   return (
-    <Page fill data-files-workspace className="gap-2 p-0 md:px-0 md:py-0 lg:px-3 lg:py-3">
+    <Page fill="workspace" data-files-workspace className="gap-2">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Files</h1>
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
