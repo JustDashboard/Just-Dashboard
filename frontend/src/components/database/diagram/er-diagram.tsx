@@ -44,6 +44,8 @@ import {
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { grouped, plural } from "@/lib/format"
+import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
+import { motionMs } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
@@ -94,6 +96,7 @@ import {
   Saved,
 } from "@/components/database/diagram/chrome"
 import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
+import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
 import {
   DIAGRAM_COLORS,
   isArranged,
@@ -145,6 +148,8 @@ const READABLE = 0.7
 /** The picture never opens larger than this, however few tables it holds. */
 const ARRIVE_AT_MOST = 1.15
 const ZOOM = { min: 0.08, max: 2.5 }
+/** The grid a table snaps to, when the layout snaps: by a drag and by the arrows. */
+const GRID = 16
 
 /** How many tables the address asks for; 0 is the server's own default. */
 function readLimit(raw: string): number {
@@ -469,7 +474,7 @@ function Canvas({
       if (nodes.length === 0 || !box || box.width === 0) return
       // "Fit to view" is the reader asking for everything, however small.
       const padding = FIT_PADDING
-      if (all) return void flow.fitView({ padding, duration })
+      if (all) return void flow.fitView({ padding, duration: motionMs(duration) })
       const zoomFor = (part: Node[]) =>
         getViewportForBounds(
           flow.getNodesBounds(part),
@@ -499,7 +504,7 @@ function Canvas({
       void flow.fitView({
         nodes: target.length === nodes.length ? undefined : target.map((n) => ({ id: n.id })),
         padding,
-        duration,
+        duration: motionMs(duration),
         minZoom: READABLE,
         maxZoom: ARRIVE_AT_MOST,
       })
@@ -564,7 +569,12 @@ function Canvas({
 
   const panTo = useCallback(
     (table: string) => {
-      void flow.fitView({ nodes: [{ id: table }], padding: 0.6, duration: 300, maxZoom: 1.2 })
+      void flow.fitView({
+        nodes: [{ id: table }],
+        padding: 0.6,
+        duration: motionMs(300),
+        maxZoom: 1.2,
+      })
     },
     [flow],
   )
@@ -732,9 +742,9 @@ function Canvas({
     const zoom = typing ? null : zoomKey(e)
     if (zoom) {
       e.preventDefault()
-      if (zoom === "in") void flow.zoomIn({ duration: 150 })
-      else if (zoom === "out") void flow.zoomOut({ duration: 150 })
-      else void flow.zoomTo(1, { duration: 150 })
+      if (zoom === "in") void flow.zoomIn({ duration: motionMs(150) })
+      else if (zoom === "out") void flow.zoomOut({ duration: motionMs(150) })
+      else void flow.zoomTo(1, { duration: motionMs(150) })
       return
     }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return
@@ -744,6 +754,47 @@ function Canvas({
       searchRef.current?.focus()
     } else if (e.key === "i") toggleInspector()
     else if (e.key === "h" && focus) hide([focus])
+  }
+
+  // The arrows, while the keyboard is on the canvas (T10). Heard before React
+  // Flow's own, which moves a selection 5px and keeps nothing: here the
+  // chosen tables — the selection, else the focused table — move by a step,
+  // onto the grid where it snaps, and are kept as a drag keeps them. With
+  // none chosen, or the layout locked, the picture slides.
+  const onArrow = (e: React.KeyboardEvent) => {
+    const direction = arrowOf(e)
+    const box = canvas.current
+    const target = e.target as HTMLElement
+    if (!direction || !box || isTypingTarget(target) || target.closest(OWNER_SELECTOR)) return
+    if (!target.closest(".react-flow")) return
+    e.preventDefault()
+    e.stopPropagation()
+    const all = flow.getNodes()
+    const picked = all.filter((n) => n.selected)
+    const chosen = picked.length > 0 ? picked : all.filter((n) => n.id === focus)
+    if (!doc.locked && chosen.length > 0) {
+      const grid = doc.snap ? GRID : undefined
+      const next = new Map(
+        chosen.map((n) => [n.id, moved(n.position, direction, e.shiftKey, { grid })]),
+      )
+      setNodes((ns) => ns.map((n) => (next.has(n.id) ? { ...n, position: next.get(n.id)! } : n)))
+      update((d) => ({ ...d, positions: { ...snapshotPositions(), ...Object.fromEntries(next) } }))
+      return
+    }
+    const view = panned(
+      flow.getViewport(),
+      direction,
+      e.shiftKey,
+      all.length > 0
+        ? {
+            bounds: flow.getNodesBounds(all),
+            size: { width: box.clientWidth, height: box.clientHeight },
+          }
+        : undefined,
+    )
+    void flow.setViewport(view)
+    // Where the operator left the viewport, as a slide by the pointer is kept.
+    if (restored.current) update({ viewport: view })
   }
 
   // Which way the layout runs is a word in the head's menu: it was one of
@@ -1087,7 +1138,11 @@ function Canvas({
           inspector ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_18rem]" : "grid-cols-1",
         )}
       >
-        <div ref={canvas} className={cn("relative min-h-0 min-w-0", inspector && "max-lg:hidden")}>
+        <div
+          ref={canvas}
+          onKeyDownCapture={onArrow}
+          className={cn("relative min-h-0 min-w-0", inspector && "max-lg:hidden")}
+        >
           <ReactFlow
             nodes={shown}
             edges={shownEdges}
@@ -1127,10 +1182,13 @@ function Canvas({
             // A large schema is mostly off screen: what is not seen is not drawn.
             onlyRenderVisibleElements
             snapToGrid={doc.snap}
-            snapGrid={[16, 16]}
+            snapGrid={[GRID, GRID]}
             deleteKeyCode={null}
             aria-label={`Diagram of ${graph.schema || conn.name}`}
-            className="[&_.react-flow\_\_handle]:!border-0"
+            // A stop of its own, so the arrows reach it: a click on open
+            // ground puts the keyboard here, and Tab does.
+            tabIndex={0}
+            className="focus-ring-inset [&_.react-flow\_\_handle]:!border-0"
           >
             {doc.grid && (
               <Background

@@ -1,3 +1,4 @@
+import { ServerMap, type Icon } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { systemCensus, type System, type SystemKind } from "@/lib/server-systems"
 import { censusLine } from "@/components/map/rail"
@@ -18,6 +19,12 @@ export type MapBoard = {
     group: (systems: System[]) => { label: string; systems: System[] }[]
     /** Said in the rail when there is no system at all. */
     empty: string
+    /**
+     * The page's own mark and name over the rail, where nothing else on the
+     * page names it: the server map is a workbench with no header (PGW-13).
+     * The databases map stands under its own, so it has none.
+     */
+    head?: { icon: Icon; title: string }
   }
   /** What a system holds, in a few words: under its name in the rail and on its frame. */
   census: (system: System, most?: number) => string
@@ -72,6 +79,7 @@ export const SERVER_BOARD: MapBoard = {
         systems: systems.filter((s) => group.kinds.includes(s.kind)),
       })),
     empty: "Nothing on this server makes a system yet.",
+    head: { icon: ServerMap, title: "Map" },
   },
   census: censusLine,
   holds: (system) => {
