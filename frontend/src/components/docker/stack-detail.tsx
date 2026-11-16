@@ -67,7 +67,8 @@ import {
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconAction } from "@/components/icon-action"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostFact, IdentityHeader, IdentityVerbs } from "@/components/identity-header"
+import { HostFact, IdentityHeader, IdentityVerbs } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { VerdictButton } from "@/components/docker/docker-identity"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
@@ -700,9 +701,7 @@ function StackBody({
             className="animate-rise border-b-0 pb-0"
             logo={<StackMark stack={data} containers={containers} />}
             title={name}
-            facts={
-              <StackFacts data={data} running={counts.running + counts.starting} ports={ports} />
-            }
+            facts={stackFacts({ data, running: counts.running + counts.starting, ports })}
             {...IdentityVerbs({ verbs, name })}
             state={
               pending ? (
@@ -951,8 +950,13 @@ function StackMark({ stack, containers }: { stack: StackDetail; containers?: Con
  * uncommitted changes mean compose will deploy something that is in no
  * commit, and "behind" means a pull would change what deploying does), and
  * how much of it runs and how much of it is reachable.
+ *
+ * A checkout that is dirty or behind leads, so a phone's one line of facts
+ * never clips it. The facts are built by a plain function, not drawn as a
+ * component, so the identity line receives the `Fact`s themselves and puts
+ * its dots only between them.
  */
-function StackFacts({
+function stackFacts({
   data,
   running,
   ports,
@@ -962,42 +966,44 @@ function StackFacts({
   ports: number
 }) {
   const file = data.configPath?.split("/").pop()
+  const git = data.git
+  const gitFact = git && (
+    <Fact key="git">
+      <Link
+        href={`/git?repo=${encodeURIComponent(git.path)}`}
+        title={git.subject}
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
+      >
+        <HostFact product="git">{git.branch ?? "repository"}</HostFact>
+        {git.dirty && (
+          <span className="numeric" style={{ color: "var(--git-modified)" }}>
+            {git.changes} uncommitted
+          </span>
+        )}
+        {git.behind > 0 && <span className="numeric">{git.behind} behind</span>}
+      </Link>
+    </Fact>
+  )
+  const leads = Boolean(git && (git.dirty || git.behind > 0))
   return (
     <>
-      <HostFact product="docker-compose">{file ?? "Compose"}</HostFact>
+      {leads && gitFact}
+      <Fact key="file" product="docker-compose">
+        {file ?? "Compose"}
+      </Fact>
       {data.workingDir && (
-        <>
-          <FactDot />
-          <span className="truncate font-mono">{data.workingDir}</span>
-        </>
+        <Fact key="dir" mono>
+          {data.workingDir}
+        </Fact>
       )}
-      {data.git && (
-        <>
-          <FactDot />
-          <Link
-            href={`/git?repo=${encodeURIComponent(data.git.path)}`}
-            title={data.git.subject}
-            className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
-          >
-            <HostFact product="git">{data.git.branch ?? "repository"}</HostFact>
-            {data.git.dirty && (
-              <span className="numeric" style={{ color: "var(--git-modified)" }}>
-                {data.git.changes} uncommitted
-              </span>
-            )}
-            {data.git.behind > 0 && <span className="numeric">{data.git.behind} behind</span>}
-          </Link>
-        </>
-      )}
-      <FactDot />
-      <span className="numeric">
+      {!leads && gitFact}
+      <Fact key="running" className="numeric">
         {running} of {plural(data.total || data.services.length, "service")} running
-      </span>
+      </Fact>
       {ports > 0 && (
-        <>
-          <FactDot />
-          <span className="numeric">{plural(ports, "port")} published</span>
-        </>
+        <Fact key="ports" className="numeric">
+          {plural(ports, "port")} published
+        </Fact>
       )}
     </>
   )
