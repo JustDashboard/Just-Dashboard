@@ -1157,7 +1157,7 @@ test("unsaved full-page edits are guarded when changing files or leaving", async
   await finder.press("Enter")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.locator(".monaco-editor")).toContainText("dirty")
-  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Back to Files", exact: true }).click()
   await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await expect(page.locator(".monaco-editor")).toContainText("dirty")
@@ -1165,7 +1165,7 @@ test("unsaved full-page edits are guarded when changing files or leaving", async
   await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
   await expect(page).toHaveURL(/\/files\/editor\?/)
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
-  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Back to Files", exact: true }).click()
   await page.getByRole("button", { name: "Discard and leave", exact: true }).click()
   await expect(page).toHaveURL(/\/files\?path=/)
 })
@@ -1320,7 +1320,7 @@ test("image export saves live adjustments and a copy keeps the source dirty", as
   expect(red).toBeGreaterThan(0)
   expect(red).toBeLessThan(255)
   await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Back to Files", exact: true }).click()
   await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await page.getByRole("button", { name: "Save over original", exact: true }).click()
@@ -2292,7 +2292,7 @@ for (const exit of ["account cleanup", "editor departure"] as const) {
     if (exit === "account cleanup") {
       await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
     } else {
-      await page.getByRole("button", { name: "Files", exact: true }).click()
+      await page.getByRole("button", { name: "Back to Files", exact: true }).click()
       await page.getByRole("button", { name: "Discard and leave", exact: true }).click()
       await expect(page.getByLabel("Image editing canvas")).toHaveCount(0)
     }

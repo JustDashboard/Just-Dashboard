@@ -249,6 +249,46 @@ test("two changes to the address made by one press both land", async ({ page }) 
   )
 })
 
+test("on a phone a server's log is the screen's width, its views on a bar at the foot", async ({
+  page,
+}) => {
+  const journal = "journal:postgresql@17-main.service"
+  await mockDatabases(page, {
+    logSources: {
+      sources: [
+        {
+          id: journal,
+          label: "postgresql@17-main.service",
+          kind: "journal",
+          lens: "postgres",
+          rotated: false,
+          primary: true,
+        },
+      ],
+    },
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/databases/1/logs")
+  const bar = page.getByRole("navigation", { name: "Log views" })
+  await expect(bar.getByRole("button")).toHaveText([
+    "Live",
+    "History",
+    "Insights",
+    "Queries",
+    "Runs",
+  ])
+  const foot = (await bar.boundingBox())!
+  expect([foot.x, foot.width, Math.round(foot.y + foot.height)]).toEqual([0, 390, 844])
+  // The strip's own views give way to the bar, and the pane draws no frame.
+  await expect(page.getByRole("navigation", { name: "Log mode" })).toBeHidden()
+  await bar.getByRole("button", { name: "History" }).click()
+  await expect(page).toHaveURL(/view=search/)
+  await expect(bar.getByRole("button", { name: "History" })).toHaveAttribute("aria-current", "page")
+  await bar.getByRole("button", { name: "Queries" }).click()
+  await expect(page).toHaveURL(/view=queries/)
+  await expect(bar.getByRole("button", { name: "Queries" })).toHaveAttribute("aria-current", "page")
+})
+
 test("the switcher groups by engine, reads a stopped server as stopped and keeps the place on the one already open", async ({
   page,
 }) => {
@@ -678,10 +718,12 @@ test("the pages held to the window under the header end at its foot", async ({ p
           .locator("[data-slot=database-pages]")
           .evaluate((el) => el.scrollHeight - el.clientHeight),
       ).toBeLessThanOrEqual(1)
-      // Its frame's edges are the header's: the page's own gutters, not a workbench's.
+      // Its frame's edges are the header's: the page's own gutters, not a
+      // workbench's. Below `lg` Logs is the screen's width, as a project's
+      // Logs is, with its views on a bar at the foot.
       const gutter = await surface.evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft))
       const lead = await header(page).evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft))
-      expect(gutter, `${path} at ${width}`).toBe(lead)
+      expect(gutter, `${path} at ${width}`).toBe(path.endsWith("/logs") && width < 1024 ? 0 : lead)
     }
   }
 })

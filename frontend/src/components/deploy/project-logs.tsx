@@ -407,7 +407,15 @@ export function ProjectLogs() {
           says a pane is, and each view scrolls inside it. On a phone the
           shell holds this page to the window and the pane is what is left of
           it, out to the screen's edges. */}
-      <Pane className={PANE_SIZE}>
+      {/* On a phone the Requests stop is the list: the chart of the same
+          window is Insights' first reading, a stop away, where over the rows
+          it left two of them above the bar. */}
+      <Pane
+        className={cn(
+          PANE_SIZE,
+          view === "requests" && "max-md:[&_[data-slot=request-chart]]:hidden",
+        )}
+      >
         {phone &&
           (hourShown ? (
             <HourPage onBack={() => setHourOpen(false)}>

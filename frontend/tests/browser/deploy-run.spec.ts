@@ -886,7 +886,29 @@ test("is responsive from 390 to 1280 wide with no sideways scroll", async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath("run-mobile.png"), fullPage: true })
 
+  // One pane at a time under the header, never boxes stacked in a scrolling
+  // page: a running run opens on its logs, and the bar reaches the rest.
+  const bar = page.getByRole("navigation", { name: "Deployment" })
+  await expect(bar.getByRole("button")).toHaveText(["Logs", "Steps", "Step"])
+  await expect(bar.getByRole("button", { name: "Logs" })).toHaveAttribute("aria-current", "page")
+  await expect(page.getByRole("list", { name: "Deployment steps" })).toHaveCount(0)
+  const still = () =>
+    page
+      .locator("[data-workspace-shell-scroll]")
+      .evaluate((node) => node.scrollHeight <= node.clientHeight)
+  expect(await still()).toBe(true)
+  const foot = (await bar.boundingBox())!
+  expect(foot.y + foot.height).toBeCloseTo(900, 0)
+
+  await bar.getByRole("button", { name: "Steps" }).click()
   await page.getByRole("list", { name: "Deployment steps" }).getByRole("button").first().click()
+  // A step picked is its own pane, with the steps out of the way.
+  await expect(bar.getByRole("button", { name: "Step", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  await expect(page.getByRole("list", { name: "Deployment steps" })).toBeHidden()
+  expect(await still()).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { AnimatePresence, MotionConfig, motion } from "motion/react"
-import { ChatBubble, Logs, Sparkles } from "@/components/icons"
+import { ChatBubble, Logs, SettingsGear, Sparkles } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { PaneBar } from "@/components/phone-panes"
@@ -37,12 +37,19 @@ export function AgentWorkspace({
   product,
   chat,
   chats,
+  onSettings,
   className,
 }: {
   session: AgentSession
   product: string
   chat: React.ReactNode
   chats: React.ReactNode
+  /**
+   * The assistant's own page has a second view, its settings. On a phone
+   * that is the bar's last stop rather than a strip of tabs over the chat,
+   * so one strip picks what is shown.
+   */
+  onSettings?: () => void
   className?: string
 }) {
   const [pane, setPane] = useState<AgentPane>("chat")
@@ -79,10 +86,13 @@ export function AgentWorkspace({
             className={cn("flex-1", pane === "chats" && "max-lg:hidden")}
           />
         </aside>
-        <PaneBar
+        {/* Out to the screen's edges through the page's gutter, as every
+            other bar runs: inside it the bar began 20px in. */}
+        <PaneBar<AgentPane | "settings">
           label="Assistant panes"
           active={pane}
-          onPick={setPane}
+          onPick={(key) => (key === "settings" ? onSettings?.() : setPane(key))}
+          className="-mx-(--page-inset)"
           stops={[
             { key: "chat", label: "Chat", icon: <Sparkles /> },
             { key: "chats", label: "Chats", icon: <ChatBubble /> },
@@ -93,6 +103,9 @@ export function AgentWorkspace({
               count: changes,
               countClassName: "bg-success",
             },
+            ...(onSettings
+              ? [{ key: "settings" as const, label: "Settings", icon: <SettingsGear /> }]
+              : []),
           ]}
         />
       </div>

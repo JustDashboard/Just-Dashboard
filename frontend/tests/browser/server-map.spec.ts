@@ -283,10 +283,17 @@ test.describe("on a phone", () => {
     return mock
   }
 
-  test("it is only the map, edge to edge", async ({ page }) => {
+  test("it opens on the map, edge to edge, with the systems and the inspector on a bar", async ({
+    page,
+  }) => {
     await openPhone(page)
+    // The rail and the inspector are panes of their own, not columns beside
+    // the canvas: none is drawn until its stop is pressed.
     await expect(rail(page)).toHaveCount(0)
     await expect(inspector(page)).toHaveCount(0)
+    const bar = page.getByRole("navigation", { name: "Map panes" })
+    await expect(bar.getByRole("button")).toHaveText(["Systems", "Map", "Inspector"])
+    await expect(bar.getByRole("button", { name: "Map" })).toHaveAttribute("aria-current", "page")
     await expect(page.locator(".react-flow__minimap")).toHaveCount(0)
     for (const gone of [/inspector/, "Full screen", "Zoom in", "Fit", "All"]) {
       await expect(page.getByRole("button", { name: gone, exact: true })).toHaveCount(0)
@@ -303,6 +310,22 @@ test.describe("on a phone", () => {
     expect(first.x).toBeGreaterThanOrEqual(0)
     expect(first.x).toBeLessThan(16)
     expect((await view(page)).zoom).toBeGreaterThanOrEqual(0.5)
+  })
+
+  test("the bar reaches the systems and the inspector, each the whole pane", async ({ page }) => {
+    await openPhone(page)
+    const bar = page.getByRole("navigation", { name: "Map panes" })
+    await bar.getByRole("button", { name: "Systems" }).click()
+    await expect(rail(page)).toBeVisible()
+    const pane = (await page.locator("[data-pane=systems]").boundingBox())!
+    expect([pane.x, pane.width]).toEqual([0, 390])
+    // A system picked from the list is shown on the canvas.
+    await railRow(page, "system:project:1").click()
+    await expect(bar.getByRole("button", { name: "Map" })).toHaveAttribute("aria-current", "page")
+    await expect(rail(page)).toHaveCount(0)
+    await bar.getByRole("button", { name: "Inspector" }).click()
+    await expect(inspector(page)).toBeVisible()
+    await expect(page.locator("[data-slot=server-map]")).toBeAttached()
   })
 
   test("a system asked for by its address is still drawn whole, across the phone", async ({

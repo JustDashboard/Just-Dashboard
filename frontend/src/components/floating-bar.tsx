@@ -4,7 +4,7 @@ import { useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { CheckCircle } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { useStackOccupant } from "@/components/dock"
+import { STACK_EDGE, useBottomStack, useStackOccupant } from "@/components/dock"
 import { StatusDot } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 
@@ -79,7 +79,9 @@ export function FloatingBar({
 }) {
   const host = useFloatingBarHost()
   const [frame, setFrame] = useState<HTMLDivElement | null>(null)
-  useStackOccupant(frame, "bar")
+  // Over a pane page's bottom bar (order 0) when both are up, never on it.
+  const id = useStackOccupant(frame, "bar", { order: 1 })
+  const lift = useBottomStack().bars[id] ?? 0
   const sticky = position === "sticky"
   if (!sticky && !host) return null
 
@@ -87,6 +89,7 @@ export function FloatingBar({
     <div
       ref={setFrame}
       data-slot="floating-bar"
+      style={lift > 0 ? { bottom: lift + STACK_EDGE } : undefined}
       className={cn(
         "pointer-events-none z-float flex justify-center",
         sticky ? "sticky bottom-4" : "absolute inset-x-0 bottom-4 px-3 md:bottom-6",

@@ -6,6 +6,9 @@ import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft,
   ArrowUpRight,
+  ListUnordered,
+  Logs,
+  Information,
   External,
   Link as LinkGlyph,
   Play,
@@ -33,6 +36,9 @@ import type {
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
 import { Page, PageContext } from "@/components/page"
+import { PaneBar, type PaneStop } from "@/components/phone-panes"
+import { useBelow } from "@/lib/breakpoints"
+import { cn } from "@/lib/utils"
 import { Section } from "@/components/section"
 import { useTabTitle } from "@/components/shell/tab-title"
 import { ErrorState, Notice } from "@/components/state"
@@ -106,6 +112,26 @@ import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-s
  * compare it, roll back to it, pin it — declared once with the Deployments
  * rows' (`run-verbs.tsx`), so the run is not a dead end once it has finished.
  */
+type RunStop = "logs" | "steps" | "step"
+
+/** A phone's three panes: what the run wrote, its steps, and the step picked. */
+const RUN_STOPS: PaneStop<RunStop>[] = [
+  { key: "logs", label: "Logs", icon: <Logs /> },
+  { key: "steps", label: "Steps", icon: <ListUnordered /> },
+  { key: "step", label: "Step", icon: <Information /> },
+]
+
+/**
+ * How a press that brings a part of the page into view moves there: glided,
+ * or at once when the reader asked for less motion, in the system or with the
+ * product's pause. An explicit `smooth` overrides the stylesheet's
+ * `scroll-behavior: auto`, so the root rule cannot reach it.
+ */
+function glide(): ScrollBehavior {
+  if (document.documentElement.dataset.motion === "paused") return "instant"
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
+}
+
 export function RunPage() {
   const route = useParams<{ id: string; run: string }>()
   const router = useRouter()
@@ -125,6 +151,11 @@ export function RunPage() {
   // of the transcript.
   const [selectedStepId, setSelectedStepId] = useState<number>()
   const [inspectedStepId, setInspectedStepId] = useState<number>()
+  // On a phone the run is one pane at a time, picked on a bar at the foot:
+  // stacked, the build logs were a box 600px tall scrolling inside the page,
+  // with the steps and the picked step's record under it.
+  const phone = useBelow("lg")
+  const [asked, setStop] = useState<RunStop>()
   const [working, setWorking] = useState<
     "cancel" | "retry" | "redeploy" | "start" | "deploy" | "pin"
   >()
@@ -461,7 +492,9 @@ export function RunPage() {
   // bringing it into view.
   const showOutput = (stepId: number) => {
     setSelectedStepId(stepId)
-    document.getElementById("build-logs")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    if (phone) setStop("logs")
+    else
+      document.getElementById("build-logs")?.scrollIntoView({ behavior: glide(), block: "start" })
   }
 
   const showFailure = () => {
@@ -483,7 +516,9 @@ export function RunPage() {
   const showFailedStep = () => {
     if (!failedStep) return
     setInspectedStepId(failedStep.id)
-    document.getElementById("run-details")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    if (phone) setStop("step")
+    else
+      document.getElementById("run-details")?.scrollIntoView({ behavior: glide(), block: "start" })
   }
 
   // The header's buttons are the run's own verbs; the menu is the release's,
@@ -593,8 +628,109 @@ export function RunPage() {
     </>
   )
 
+  const stop: RunStop = asked ?? (active ? "logs" : "steps")
+  const outcome = (
+    <>
+      {/* A canary is drawn while its step runs and stays as its outcome;
+              a plan without one skips the step and draws nothing. */}
+      {!legacy &&
+        attempts.some(
+          (step) => step.key === "canary" && step.state !== "skipped" && step.state !== "pending",
+        ) && (
+          <RunCanary
+            projectId={projectId}
+            environmentId={run.environmentId}
+            runId={run.id}
+            active={attempts.some((step) => step.key === "canary" && step.state === "running")}
+          />
+        )}
+
+      {run.cancelRequested && active ? (
+        <Notice tone="warning" icon={Warning} title="Cancellation requested">
+          The current operation will stop safely and run its cleanup.
+        </Notice>
+      ) : runFailed(run.state) && (run.terminalReason || run.terminalCode) ? (
+        <RunFailure
+          run={run}
+          step={failedStep}
+          steps={attempts}
+          cause={cause}
+          kept={kept}
+          rows={rows}
+          deployment={deployment}
+          now={clock}
+          changedSince={changedSince}
+          fix={fix}
+          // Once the settings have moved on, the header's deploy is the way
+          // forward and the fix is a place to check, not the command.
+          fixIsCommand={!stale}
+          onShowOutput={showFailure}
+          onShowStep={showFailedStep}
+        />
+      ) : (run.state === "cancelled" || run.state === "superseded") && run.terminalReason ? (
+        // Nothing to decide, so a reading rather than a notice: why it stopped.
+        <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
+          <StatusDot tone="stopped" />
+          {run.terminalReason}
+        </p>
+      ) : null}
+
+      {/* Asked for, never shown unasked: the failure above is the decision,
+              and its own fix stays the command. */}
+      {(run.state === "failed" || run.state === "rolled_back") && (
+        <RunDiagnosis
+          projectId={projectId}
+          runId={runId}
+          canAsk={canRun}
+          canSetUp={can("system.admin")}
+          rows={rows}
+          onShowLine={showLine}
+        />
+      )}
+
+      {/* project.data is a separate poll from the run snapshot; reading
+              isLiveRelease before it lands would flash "Superseded" for every
+              successful run while the project fetch is still in flight — and a
+              preview's run waits for its preview the same way. */}
+      {run.state === "succeeded" && project.data && (!forPreview || previews.data) && (
+        <RunReady
+          live={isLiveRelease}
+          stopped={stopped}
+          startedSince={startedSince}
+          stoppedAt={run.endedAt}
+          url={url}
+          release={release}
+          liveRelease={liveRelease}
+          projectId={projectId}
+          ungated={attempts.some(
+            (step) => step.key === "activate" && step.evidence?.readinessGated === false,
+          )}
+        />
+      )}
+
+      {/* A rollback that asked for a side copy of the database links it here,
+              from waiting on this run to ready; the copy is worked with on the
+              Deployments page. */}
+      {run.operation === "rollback" && (
+        <RunDataCopies
+          projectId={projectId}
+          environmentId={run.environmentId}
+          runId={run.id}
+          enabled={!forPreview}
+        />
+      )}
+    </>
+  )
+
   return (
-    <Page rise className="pt-4 md:pt-5">
+    <Page
+      rise
+      className={cn(
+        "pt-4 md:pt-5",
+        // Held to the window on a phone, where the run is one pane under its header.
+        "max-lg:h-full max-lg:min-h-0 max-lg:gap-4 max-lg:overflow-hidden max-lg:pb-0 md:max-lg:pb-0",
+      )}
+    >
       <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-overlay size-full" />
       {/* The name is for assistive technology alone (§15): the header is the
           first thing drawn. */}
@@ -643,142 +779,123 @@ export function RunPage() {
         </div>
       )}
 
-      {/* A canary is drawn while its step runs and stays as its outcome;
-          a plan without one skips the step and draws nothing. */}
-      {!legacy &&
-        attempts.some(
-          (step) => step.key === "canary" && step.state !== "skipped" && step.state !== "pending",
-        ) && (
-          <RunCanary
-            projectId={projectId}
-            environmentId={run.environmentId}
-            runId={run.id}
-            active={attempts.some((step) => step.key === "canary" && step.state === "running")}
-          />
-        )}
-
-      {run.cancelRequested && active ? (
-        <Notice tone="warning" icon={Warning} title="Cancellation requested">
-          The current operation will stop safely and run its cleanup.
-        </Notice>
-      ) : runFailed(run.state) && (run.terminalReason || run.terminalCode) ? (
-        <RunFailure
-          run={run}
-          step={failedStep}
-          steps={attempts}
-          cause={cause}
-          kept={kept}
-          rows={rows}
-          deployment={deployment}
-          now={clock}
-          changedSince={changedSince}
-          fix={fix}
-          // Once the settings have moved on, the header's deploy is the way
-          // forward and the fix is a place to check, not the command.
-          fixIsCommand={!stale}
-          onShowOutput={showFailure}
-          onShowStep={showFailedStep}
-        />
-      ) : (run.state === "cancelled" || run.state === "superseded") && run.terminalReason ? (
-        // Nothing to decide, so a reading rather than a notice: why it stopped.
-        <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-          <StatusDot tone="stopped" />
-          {run.terminalReason}
-        </p>
-      ) : null}
-
-      {/* Asked for, never shown unasked: the failure above is the decision,
-          and its own fix stays the command. */}
-      {(run.state === "failed" || run.state === "rolled_back") && (
-        <RunDiagnosis
-          projectId={projectId}
-          runId={runId}
-          canAsk={canRun}
-          canSetUp={can("system.admin")}
-          rows={rows}
-          onShowLine={showLine}
-        />
-      )}
-
-      {/* project.data is a separate poll from the run snapshot; reading
-          isLiveRelease before it lands would flash "Superseded" for every
-          successful run while the project fetch is still in flight — and a
-          preview's run waits for its preview the same way. */}
-      {run.state === "succeeded" && project.data && (!forPreview || previews.data) && (
-        <RunReady
-          live={isLiveRelease}
-          stopped={stopped}
-          startedSince={startedSince}
-          stoppedAt={run.endedAt}
-          url={url}
-          release={release}
-          liveRelease={liveRelease}
-          projectId={projectId}
-          ungated={attempts.some(
-            (step) => step.key === "activate" && step.evidence?.readinessGated === false,
-          )}
-        />
-      )}
-
-      {/* A rollback that asked for a side copy of the database links it here,
-          from waiting on this run to ready; the copy is worked with on the
-          Deployments page. */}
-      {run.operation === "rollback" && (
-        <RunDataCopies
-          projectId={projectId}
-          environmentId={run.environmentId}
-          runId={run.id}
-          enabled={!forPreview}
-        />
-      )}
-
-      <Section
-        title="Build logs"
-        actions={
-          transcript.lines > 0 && (
-            <p className="numeric text-xs text-muted-foreground">
-              {transcript.lines.toLocaleString()} lines
-              {transcript.errors > 0 && (
-                <span className="text-destructive"> · {plural(transcript.errors, "error")}</span>
+      {phone ? (
+        // The whole height under the header and the release path, and a bar
+        // at its foot: the run's outcome over its steps, its logs, and the
+        // step picked. The page scrolls nowhere; each pane scrolls inside.
+        <div
+          data-slot="run-panes"
+          className="-mx-(--page-inset) flex min-h-0 flex-1 flex-col border-t border-hairline"
+        >
+          {stop === "logs" ? (
+            <div id="build-logs" className="flex min-h-0 flex-1 flex-col">
+              <BuildConsole
+                flush
+                className="min-h-0 flex-1"
+                rows={rows}
+                summary={transcript}
+                capped={stream.capped}
+                steps={attempts}
+                active={active}
+                outcome={run.state}
+                operation={stepOperation(run)}
+                connected={stream.socket === "open"}
+                startedAt={run.claimedAt ?? run.requestedAt}
+                runNumber={run.runNumber}
+                now={clock}
+                selectedStep={selectedStepId}
+                onSelectStep={setSelectedStepId}
+                focusLine={focusLine}
+                deployment={deployment}
+              />
+            </div>
+          ) : (
+            <div
+              className={cn(
+                "min-h-0 flex-1 space-y-6 overflow-y-auto px-(--page-inset) py-4",
+                // One of the two halves of Details: the steps, or the record
+                // of the one picked, in the pane's own scroll.
+                stop === "steps"
+                  ? "[&_#run-details>:not(ol)]:hidden"
+                  : "[&_#run-details>ol]:hidden",
               )}
-            </p>
-          )
-        }
-      >
-        <div id="build-logs" className="min-w-0 scroll-mt-16">
-          <BuildConsole
-            rows={rows}
-            summary={transcript}
-            capped={stream.capped}
-            steps={attempts}
-            active={active}
-            outcome={run.state}
-            operation={stepOperation(run)}
-            connected={stream.socket === "open"}
-            startedAt={run.claimedAt ?? run.requestedAt}
-            runNumber={run.runNumber}
-            now={clock}
-            selectedStep={selectedStepId}
-            onSelectStep={setSelectedStepId}
-            focusLine={focusLine}
-            deployment={deployment}
-          />
+            >
+              {stop === "steps" && outcome}
+              {attempts.length > 0 && (
+                <RunDetails
+                  projectId={projectId}
+                  deployment={deployment}
+                  steps={attempts}
+                  operation={stepOperation(run)}
+                  now={clock}
+                  rows={rows}
+                  lineCounts={transcript.perStep}
+                  selected={inspectedStepId ?? initialStep(attempts)?.id}
+                  onSelect={(id) => {
+                    setInspectedStepId(id)
+                    setStop("step")
+                  }}
+                  onShowOutput={showOutput}
+                />
+              )}
+            </div>
+          )}
+          <PaneBar label="Deployment" stops={RUN_STOPS} active={stop} onPick={setStop} />
         </div>
-      </Section>
-
-      {attempts.length > 0 && (
-        <RunDetails
-          projectId={projectId}
-          deployment={deployment}
-          steps={attempts}
-          operation={stepOperation(run)}
-          now={clock}
-          rows={rows}
-          lineCounts={transcript.perStep}
-          selected={inspectedStepId ?? initialStep(attempts)?.id}
-          onSelect={setInspectedStepId}
-          onShowOutput={showOutput}
-        />
+      ) : (
+        <>
+          {outcome}
+          <Section
+            title="Build logs"
+            actions={
+              transcript.lines > 0 && (
+                <p className="numeric text-xs text-muted-foreground">
+                  {transcript.lines.toLocaleString()} lines
+                  {transcript.errors > 0 && (
+                    <span className="text-destructive">
+                      {" "}
+                      · {plural(transcript.errors, "error")}
+                    </span>
+                  )}
+                </p>
+              )
+            }
+          >
+            <div id="build-logs" className="min-w-0 scroll-mt-16">
+              <BuildConsole
+                rows={rows}
+                summary={transcript}
+                capped={stream.capped}
+                steps={attempts}
+                active={active}
+                outcome={run.state}
+                operation={stepOperation(run)}
+                connected={stream.socket === "open"}
+                startedAt={run.claimedAt ?? run.requestedAt}
+                runNumber={run.runNumber}
+                now={clock}
+                selectedStep={selectedStepId}
+                onSelectStep={setSelectedStepId}
+                focusLine={focusLine}
+                deployment={deployment}
+              />
+            </div>
+          </Section>
+          {attempts.length > 0 && (
+            <RunDetails
+              projectId={projectId}
+              deployment={deployment}
+              steps={attempts}
+              operation={stepOperation(run)}
+              now={clock}
+              rows={rows}
+              lineCounts={transcript.perStep}
+              selected={inspectedStepId ?? initialStep(attempts)?.id}
+              onSelect={setInspectedStepId}
+              onShowOutput={showOutput}
+            />
+          )}
+        </>
       )}
 
       <RollbackDialog

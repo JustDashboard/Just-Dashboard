@@ -730,6 +730,25 @@ test("on a phone the conversation, the chats and what it did are one pane at a t
   await expect(box).toBeInViewport()
 })
 
+test("on a phone the assistant's page has one strip: its bar, edge to edge, ending in Settings", async ({
+  page,
+}) => {
+  await mockAssistant(page, [])
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/assistant")
+  const bar = page.getByRole("navigation", { name: "Assistant panes" })
+  await expect(bar.getByRole("button")).toHaveText(["Chat", "Chats", "What it did", "Settings"])
+  // Out through the page's gutter, as every other bar runs.
+  const foot = (await bar.boundingBox())!
+  expect([foot.x, foot.width]).toEqual([0, 390])
+  // No second strip over the chat saying Chat again.
+  await expect(assistantTabs(page)).toBeHidden()
+  await bar.getByRole("button", { name: "Settings", exact: true }).click()
+  await expect(page).toHaveURL(/\/assistant\?view=settings$/)
+  // Settings is a page of its own, and its tabs are the way back to the chat.
+  await expect(assistantTabs(page).getByRole("link", { name: "Chat" })).toBeVisible()
+})
+
 test("the assistant's page sets up who answers, once, for everywhere", async ({ page }) => {
   await mockAssistant(page, [])
   const saved: Record<string, unknown>[] = []
