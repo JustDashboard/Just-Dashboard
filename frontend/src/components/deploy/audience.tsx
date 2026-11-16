@@ -389,7 +389,7 @@ function VisitorRow({
       onClick={() => onFilterClient(visitor.client)}
       aria-label={`Show every request from ${visitor.client}`}
       title={`First seen ${timestamp(visitor.first)} · last seen ${timestamp(visitor.last)}`}
-      className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-sm px-2 py-2 text-left focus-ring-inset transition-colors hover:bg-row-hover lg:grid-cols-[auto_minmax(12rem,16rem)_minmax(0,1fr)_auto]"
+      className="grid w-full min-w-0 grid-cols-start-main-end items-center gap-x-3 gap-y-1 rounded-sm px-2 py-2 text-left focus-ring-inset transition-colors hover:bg-row-hover lg:grid-cols-[auto_minmax(12rem,16rem)_minmax(0,1fr)_auto]"
     >
       <BadgedLogo
         id={agent?.product ?? agent?.osProduct}
@@ -405,7 +405,7 @@ function VisitorRow({
             <>
               <device.glyph className="size-3 shrink-0" style={{ color: device.color }} />
               <span className="shrink-0">{device.label}</span>
-              <span aria-hidden className="text-muted-foreground/50">
+              <span aria-hidden className="text-faint">
                 ·
               </span>
             </>

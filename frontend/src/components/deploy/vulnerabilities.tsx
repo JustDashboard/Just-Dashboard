@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Box, ShieldOff } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { plural, relativeTime, timestamp } from "@/lib/format"
+import { plural, relativeTime, shortDigest, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import type {
@@ -39,7 +39,6 @@ import {
   scanLead,
   scanVerdict,
   severityTone,
-  shortDigest,
   vulnerable,
   type FindingGroup,
 } from "@/components/deploy/vulnerabilities-model"
@@ -151,7 +150,7 @@ export function Vulnerabilities({
             {offerRebuild && (
               <Button
                 size="sm"
-                variant={rebuildMode === "command" ? undefined : "outline"}
+                variant="outline"
                 title={
                   rebuildMode === "command"
                     ? undefined
@@ -254,9 +253,7 @@ function VulnerabilityBody({
             <WireMark tone="logo" size="md">
               <ProductGlyph id="trivy" />
             </WireMark>
-            <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-              <StatusDot tone={verdict.tone} />
-            </span>
+            <StatusDot tone={verdict.tone} corner="md" />
           </span>
         }
         title={lead.title}
@@ -402,7 +399,7 @@ function SeverityBar({ counts }: { counts: VulnerabilityCounts }) {
             <span key={part.severity} className="inline-flex items-center gap-1.5">
               <span
                 aria-hidden
-                className="size-2 rounded-[2px]"
+                className="size-2 rounded-xs"
                 style={{ background: SEVERITY_COLOR[part.severity] }}
               />
               <span className="font-medium text-foreground">{part.count}</span>

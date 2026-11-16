@@ -382,7 +382,7 @@ const Exchange = memo(function Exchange({
         <time
           dateTime={line.at}
           aria-hidden
-          className="numeric w-10 shrink-0 text-right text-muted-foreground/60 select-none"
+          className="numeric w-10 shrink-0 text-right text-faint select-none"
         >
           {clock(line.at).slice(0, 5)}
         </time>
@@ -402,13 +402,10 @@ const Exchange = memo(function Exchange({
             failed && "bg-wash-warning hover:bg-wash-warning",
           )}
         >
-          <span
-            aria-hidden
-            className="numeric w-10 shrink-0 text-right text-muted-foreground/60 select-none"
-          >
+          <span aria-hidden className="numeric w-10 shrink-0 text-right text-faint select-none">
             {index + 1}
           </span>
-          <span className={cn("min-w-0 flex-1 text-foreground/85", flow)}>
+          <span className={cn("min-w-0 flex-1 text-foreground", flow)}>
             <ReplyText text={text} pattern={pattern} />
           </span>
         </li>

@@ -289,8 +289,11 @@ test("a filter changes Insights' figures in place, and its tiles keep their line
     expect(Math.abs(bottom - lines[0][1])).toBeLessThanOrEqual(0.5)
   }
   // A list's figures end on its head's right edge.
-  const events = page.getByRole("heading", { name: "Events", exact: true }).locator("../..")
-  const head = await events.locator("h3").locator("..").boundingBox()
+  // The facet is a section under a plain section head; the head's right edge is the header's.
+  const events = page
+    .getByRole("heading", { name: "Events", exact: true })
+    .locator("xpath=ancestor::section[1]")
+  const head = await events.locator("header").first().boundingBox()
   const share = await events.locator("[data-slot=rank-share]").first().boundingBox()
   expect(Math.abs(share!.x + share!.width - (head!.x + head!.width))).toBeLessThanOrEqual(1)
 

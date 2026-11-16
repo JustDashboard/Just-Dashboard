@@ -571,7 +571,7 @@ export function DataCopyComparisonSheet({
                       <TableCell
                         className={cn(
                           "text-right",
-                          differs ? "font-medium text-(--git-modified)" : "text-muted-foreground",
+                          differs ? "font-medium text-git-modified" : "text-muted-foreground",
                         )}
                       >
                         {tableDifference(table)}

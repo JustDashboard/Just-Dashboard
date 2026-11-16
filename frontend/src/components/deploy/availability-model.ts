@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import type { AvailabilityDay, AvailabilityWindow } from "@/lib/types"
 import type { DotTone } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
@@ -87,7 +88,7 @@ export function availabilityReading(
   const parts: string[] = []
   if (window.downSeconds > 0) {
     parts.push(`${downtimeLabel(window.downSeconds)} down`)
-    parts.push(`${window.incidents} incident${window.incidents === 1 ? "" : "s"}`)
+    parts.push(plural(window.incidents, "incident"))
   } else parts.push("no downtime recorded")
   if (downNow && window.window === "24h") parts.push("down now")
   if (coverage) parts.push(coverage)

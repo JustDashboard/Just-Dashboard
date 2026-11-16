@@ -1,10 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import { ArrowLeft, Box, Clock, Database, GitHubMark, GridMasonry, Trash } from "@/components/icons"
+import { Box, Clock, Database, GitHubMark, GridMasonry, Trash } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -118,14 +117,7 @@ function expiringSoon(iso: string | undefined) {
   return !Number.isNaN(at) && at - Date.now() < 3 * 24 * 60 * 60 * 1000
 }
 
-const Eyebrow = (
-  <Link
-    href="/deploy"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Deployments
-  </Link>
-)
+const BACK = { href: "/deploy", label: "Deployments" }
 
 /**
  * One page, two states: choose a source, then configure it. The old
@@ -362,11 +354,11 @@ export function NewProject({
     else if (box.right > edge.right) row.scrollLeft += box.right - edge.right + 20
   }, [tab, choosing, resuming])
 
-  if (resuming) return <PageState eyebrow={Eyebrow} title="New project" />
+  if (resuming) return <PageState back={BACK} title="New project" />
   if (resumeError)
     return (
       <Page>
-        <PageContext eyebrow={Eyebrow} title="New project" />
+        <PageContext back={BACK} title="New project" />
         <ErrorState error={resumeError} />
       </Page>
     )
@@ -385,7 +377,7 @@ export function NewProject({
       search={false}
       rows={false}
     >
-      <Page register="flow" fill="xl" className="animate-rise">
+      <Page rise register="flow" fill="xl">
         <div className="flex shrink-0 justify-end">
           <WorkspaceHelp />
         </div>
@@ -395,7 +387,7 @@ export function NewProject({
               rank — not a sentence under a title, which is the caption §5
               removed from every page in the product. */}
             <FlowHeader
-              eyebrow={Eyebrow}
+              back={BACK}
               question="What are you deploying?"
               // Unfinished work is a way back, not a step of this one: a button
               // that says how much there is, beside the question, rather than a
@@ -465,7 +457,7 @@ export function NewProject({
               screen — and why splitting Configure into four changed the spine
               rather than adding a second one inside it. */}
             <FlowHeader
-              eyebrow={Eyebrow}
+              back={BACK}
               question={QUESTIONS[step]}
               steps={<FlowSteps steps={CREATION_STEPS} current={creationStepIndex(step)} />}
             />

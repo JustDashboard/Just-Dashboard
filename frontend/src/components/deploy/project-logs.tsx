@@ -22,7 +22,7 @@ import { agentProduct } from "@/lib/clients"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useIsMobile } from "@/hooks/use-mobile"
+import { useBelow } from "@/lib/breakpoints"
 import type {
   DeploymentLifecycle,
   DeploymentRequests,
@@ -202,7 +202,7 @@ export function ProjectLogs() {
   const [adding, setAdding] = useState(false)
   // Chosen once by width, so each reading is in the document once: above the
   // pane at a desk, behind the pane's first line on a phone.
-  const phone = useIsMobile()
+  const phone = useBelow("md")
   const [hourOpen, setHourOpen] = useState(false)
   const hourShown = phone && hourOpen
 

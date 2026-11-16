@@ -425,10 +425,7 @@ export function BuildExtras({
         />
       </div>
 
-      <FormSection
-        title="Release tasks"
-        hint="Named, timed gates run after the artifact is recorded and before activation."
-      >
+      <FormSection title="Release tasks">
         <ReleaseTaskEditor
           tasks={configuration.build.releaseTasks ?? []}
           variables={configuration.variables}
@@ -439,10 +436,7 @@ export function BuildExtras({
       </FormSection>
 
       {configuration.build.method === "recipe" && (
-        <FormSection
-          title="Build secrets"
-          hint="Reviewed recipes mount these only for the named BuildKit step; values never enter argv."
-        >
+        <FormSection title="Build secrets">
           <BuildSecretEditor
             secrets={configuration.build.secrets ?? []}
             variables={configuration.variables}

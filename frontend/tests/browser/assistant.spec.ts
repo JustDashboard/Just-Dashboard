@@ -301,7 +301,9 @@ test("Diagnose opens the deployment's own page and asks at once", async ({ page 
     ],
   ])
   await page.goto("/deploy/7")
-  await page.getByRole("link", { name: "Diagnose" }).click()
+  // The Production head keeps one verb on its line; Diagnose is in its ⋯.
+  await page.getByRole("button", { name: /^production actions$/i }).click()
+  await page.getByRole("menuitem", { name: "Diagnose" }).click()
   await expect(page).toHaveURL(/\/deploy\/7\/assistant$/)
   await expect(chat(page)).toContainText("Run #44 failed its health check.")
   await expect(chat(page)).toContainText("Read the last 10 runs")

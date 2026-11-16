@@ -37,7 +37,7 @@ import { Section } from "@/components/section"
 import { useTabTitle } from "@/components/shell/tab-title"
 import { ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
-import { StatusDot } from "@/components/status-dot"
+import { StatusDot, StatusWords } from "@/components/status-dot"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
@@ -299,7 +299,10 @@ export function RunPage() {
   if (initial.loading && !snapshot) {
     return (
       <Page>
-        <PageContext eyebrow="Deployments" title={`Deployment #${route.run}`} />
+        <PageContext
+          back={{ href: `/deploy/${route.id}/deployments`, label: "Deployments" }}
+          title={`Deployment #${route.run}`}
+        />
         <LoadingPanel rows={7} plain />
       </Page>
     )
@@ -307,7 +310,10 @@ export function RunPage() {
   if (initial.error || !snapshot) {
     return (
       <Page>
-        <PageContext eyebrow="Deployments" title="Deployment unavailable" />
+        <PageContext
+          back={{ href: `/deploy/${route.id}/deployments`, label: "Deployments" }}
+          title="Deployment unavailable"
+        />
         {initial.error && <ErrorState error={initial.error} />}
         <Button variant="outline" size="sm" asChild className="w-fit">
           <Link href={`/deploy/${projectId}`}>
@@ -588,18 +594,18 @@ export function RunPage() {
   )
 
   return (
-    <Page className="animate-rise pt-4 md:pt-5">
-      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
+    <Page rise className="pt-4 md:pt-5">
+      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-overlay size-full" />
       {/* The name is for assistive technology alone (§15): the header is the
           first thing drawn. */}
       <PageContext title={`Deployment #${run.runNumber}`} />
 
-      <p className="sr-only" aria-live="polite" aria-atomic="true">
-        Deployment state: {runLabel(run.state, run.operation)}
+      <StatusWords subject="Deployment state">
+        {runLabel(run.state, run.operation)}
         {current
           ? `. Current step: ${stepName(current.key, stepOperation(run))}, ${current.state}`
           : ""}
-      </p>
+      </StatusWords>
 
       <RunHeader
         run={run}
