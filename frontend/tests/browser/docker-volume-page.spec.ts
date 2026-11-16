@@ -70,10 +70,9 @@ test("it opens on the volume: its identity line, its picture and its files", asy
   await expect(page).toHaveURL(/\/docker\/volumes\/shop_uploads$/)
   const files = page.locator("[data-slot=pane]")
   await expect(files.getByRole("button", { name: "config.json" })).toBeVisible()
-  await expect(files.getByRole("link", { name: "Open in Files" })).toHaveAttribute(
-    "href",
-    "/files?path=%2Fvar%2Flib%2Fdocker%2Fvolumes%2Fshop_uploads%2F_data",
-  )
+  // The line's command already opens the volume in Files: the browser draws no second one.
+  await expect(files.getByRole("link", { name: "Open in Files" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Open in Files" })).toHaveCount(1)
 })
 
 test("the views are in the address, and each says what the sheet said", async ({ page }) => {
