@@ -1,14 +1,19 @@
 "use client"
 
 import { useState } from "react"
-import { Archive, Heart, RefreshClockwise, Warning } from "@/components/icons"
+import { Heart, RefreshClockwise, Warning } from "@/components/icons"
 import { commandWords, heartbeatStale, scopeName } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
 import { calendarDate, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
 import { useNow } from "@/hooks/use-now"
-import { MarkTile, type Mark } from "@/components/account-link/marks"
+import {
+  ACTIVITY_ROW as ROW,
+  COMMAND_STATUS,
+  MarkTile,
+  commandMark,
+} from "@/components/account-link/marks"
 import { Reading, ReadingList } from "@/components/account-link/reading"
 import { ScopeCards } from "@/components/account-link/scope-cards"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -20,23 +25,8 @@ import { Button } from "@/components/ui/button"
 
 type Link = NonNullable<AccountLinkStatus["link"]>
 
-/** On the section's own edge, under its title: the rows open nothing, so they take no bleed. */
-const ROW = "px-0 py-2.5"
 
-const COMMAND_STATUS = {
-  succeeded: { tone: "running", label: "Succeeded" },
-  failed: { tone: "danger", label: "Failed" },
-  refused: { tone: "warning", label: "Refused" },
-} as const
 
-/** A command drawn as what it acts on: Docker for a container or a stack, this dashboard itself. */
-function commandMark(kind: string): Mark {
-  if (kind.startsWith("dashboard.")) return { brand: true }
-  if (kind.startsWith("container.")) return { product: "docker" }
-  if (kind.startsWith("stack.")) return { product: "docker-compose" }
-  if (kind.startsWith("backup.")) return { glyph: Archive, hue: "var(--tag-violet)" }
-  return { glyph: RefreshClockwise, hue: "var(--tag-blue)" }
-}
 
 /**
  * What the link has been doing: the heartbeat this server sends, and the last thing the site
