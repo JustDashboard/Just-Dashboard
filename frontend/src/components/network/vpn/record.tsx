@@ -10,7 +10,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChartPanel } from "@/components/chart-panel"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Row, RowList } from "@/components/row-list"
-import { ErrorState, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Field } from "@/components/form"
@@ -104,8 +104,7 @@ export function Trend({ history, title }: { history: WGHistory | undefined; titl
 
 /** A tunnel's or a peer's lifecycle, newest first, each entry with its outcome. */
 export function EventList({ events, label }: { events: WGEvent[]; label: string }) {
-  if (events.length === 0)
-    return <p className="text-hint text-muted-foreground">Nothing recorded yet.</p>
+  if (events.length === 0) return <EmptyNote>Nothing recorded yet.</EmptyNote>
   return (
     <RowList aria-label={label}>
       {events.map((e) => (

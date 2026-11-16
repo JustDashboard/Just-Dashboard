@@ -92,7 +92,7 @@ function Interfaces() {
   )
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="Interfaces" />
       <HostIdentity
         label="About the interfaces"

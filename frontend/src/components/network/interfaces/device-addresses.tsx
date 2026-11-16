@@ -12,7 +12,7 @@ import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { addressProvenance } from "./device-reading"
 
 /**

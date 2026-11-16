@@ -1,13 +1,12 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import { useMemo } from "react"
 import { Globe, Layers, LockClosed, RotateClockwise, Router, Servers } from "@/components/icons"
-import { rate } from "@/lib/format"
 import type { NetworkLink } from "@/lib/types"
 import { WireMark } from "@/components/wire/wire"
 import { ProductGlyph, hasProductLogo, imageProduct } from "@/components/product-logo"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
-import { RX, TX } from "@/components/network/rate-pair"
 import {
   LinkGlyph,
   ROLE_LABEL,
@@ -130,10 +129,7 @@ export function DevicePicture({
             : `${ROLE_LABEL[link.role]} · ${kindLabel(link)}`,
         title: <span className="block truncate font-mono">{link.name}</span>,
         hint: state.up ? (
-          <span className="numeric font-mono">
-            <span style={{ color: RX }}>↓ {rate(link.rxRate)}</span>{" "}
-            <span style={{ color: TX }}>↑ {rate(link.txRate)}</span>
-          </span>
+          <InOut rx={link.rxRate} tx={link.txRate} unit="rate" />
         ) : (
           state.label.toLowerCase()
         ),

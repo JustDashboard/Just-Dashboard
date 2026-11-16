@@ -34,7 +34,7 @@ export function VPNLog({ vpn }: { vpn: VPNView }) {
           views={kindViews}
           storageKey="network.vpn.log"
           pickerLabel="VPN log"
-          paneClassName="h-[min(75vh,40rem)] min-h-80"
+          paneClassName="h-workbench min-h-80"
         />
       </PanelBody>
     </Panel>

@@ -35,7 +35,7 @@ for (const viewport of [
       await openTraffic(page)
       await page.goto("/network/traffic")
       await loaded(page)
-      const identity = page.getByRole("region", { name: "About the uplink" })
+      const identity = page.getByRole("region", { name: "About the traffic" })
       await expect(identity).toContainText("ens3")
       await expect(identity).toContainText("Uplink")
       await expect(identity).toContainText(/[\d.]+ [KM]B\/s in, [\d.]+ [KM]B\/s out/)
@@ -65,7 +65,7 @@ for (const viewport of [
       await expect(page.getByLabel("ens3 packets")).toBeVisible()
       const gate = await holdReads(page)
       await page.reload()
-      const identity = page.getByRole("region", { name: "About the uplink" })
+      const identity = page.getByRole("region", { name: "About the traffic" })
       const context = page.getByRole("group", { name: "Live context" })
       const devices = page.getByRole("region", { name: "Bandwidth by device" })
       const movers = page.getByRole("region", { name: "Who is moving them" })
@@ -321,7 +321,7 @@ test("the eBPF figures are one line, the type is in the address, and a program i
   // The rail is the list it was opened from: the two cgroup_skb programs.
   const rail = page.getByRole("navigation", { name: "Programs" })
   await expect(rail.getByRole("listitem")).toHaveCount(2)
-  await expect(rail.getByRole("button", { name: "jd_flow_egress, program 9101" })).toHaveAttribute(
+  await expect(rail.getByRole("link", { name: "jd_flow_egress, program 9101" })).toHaveAttribute(
     "aria-current",
     "page",
   )
@@ -378,7 +378,7 @@ test("a container's traffic is a page on the window the charts were set to", asy
   // The rail is the band's ranking, and Alt+↓ walks it on the same window.
   const rail = page.getByRole("navigation", { name: "Containers" })
   await expect(rail.getByRole("listitem")).toHaveCount(7)
-  await expect(rail.getByRole("button", { name: /^postgres,/ })).toHaveAttribute(
+  await expect(rail.getByRole("link", { name: /^postgres,/ })).toHaveAttribute(
     "aria-current",
     "page",
   )

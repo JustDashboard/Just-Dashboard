@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { plural } from "@/lib/format"
 import {
   egressDraftFromGroup,
@@ -33,6 +32,7 @@ import {
   egressRowLine,
 } from "@/components/network/egress/reading"
 import { useEgressLinks, useEgressView } from "@/components/network/egress/use-egress"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const TITLE = "Egress groups"
 
@@ -62,7 +62,7 @@ export function EgressListPage() {
     setForm({ draft: egressDraftFromGroup(group), editing: group, key: Date.now() })
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title={TITLE} />
       <ListIdentity
         data={data}
@@ -272,7 +272,7 @@ function EgressRow({
   onChanged: () => void
   onEdit: (group: EgressGroup) => void
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const { simulation, simulating, verbs, dialog } = useEgressVerbs({
     group,
     running,

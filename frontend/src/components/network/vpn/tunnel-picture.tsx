@@ -1,8 +1,9 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import { useMemo } from "react"
 import { DesktopDevice, Location, Plus, WarningFill } from "@/components/icons"
-import { bytes, relativeTime } from "@/lib/format"
+import { relativeTime } from "@/lib/format"
 import type { WGAlert, WGInterface, WGPeer } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph } from "@/components/product-logo"
@@ -156,11 +157,7 @@ function peerNode(tunnel: WGInterface, peer: WGPeer, onPeer: (peer: WGPeer) => v
             : peer.address}
         </span>
         {(peer.rxBytes > 0 || peer.txBytes > 0) && (
-          <span className="numeric block font-mono text-micro">
-            <span className="text-[var(--chart-5)]">↓ {bytes(peer.rxBytes)}</span>
-            <span className="mx-1.5 text-muted-foreground/50">·</span>
-            <span className="text-[var(--chart-2)]">↑ {bytes(peer.txBytes)}</span>
-          </span>
+          <InOut rx={peer.rxBytes} tx={peer.txBytes} unit="bytes" className="block text-micro" />
         )}
         {findings.length > 0 && <Findings findings={findings} label={`${name} findings`} />}
       </>

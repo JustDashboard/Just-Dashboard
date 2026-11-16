@@ -32,7 +32,7 @@ test("the page says how old its reading is, with packets and TCP's health in wor
   })
   await open(page, [])
   await visit(page, "/network/traffic")
-  const identity = page.getByRole("region", { name: "About the uplink" })
+  const identity = page.getByRole("region", { name: "About the traffic" })
   await expect(identity).toContainText(/read \ds ago/)
   await expect(identity).toContainText("sampled every 2s")
   const context = page.getByLabel("Live context")
@@ -51,7 +51,7 @@ test("a stopped sampler reads as stale, not as a quiet link", async ({ page }) =
   await open(page, [])
   await page.route("**/api/v1/network/traffic/live**", liveRoute(40))
   await visit(page, "/network/traffic")
-  const identity = page.getByRole("region", { name: "About the uplink" })
+  const identity = page.getByRole("region", { name: "About the traffic" })
   await expect(identity).toContainText(/stale, read 4\ds ago/)
   await expect(identity).toContainText("the sampler has not stepped; figures are stale")
 })
@@ -178,7 +178,7 @@ test("every container can be listed and one opens its page: chart, service and p
   await expect(identity).toContainText("registry:2")
   const talked = page.getByLabel("Who registry talked to")
   await expect(talked).toContainText("198.51.100.99")
-  await expect(talked).toContainText("47.7 MiB")
+  await expect(talked).toContainText("47.7 MB")
   await expect(talked).toContainText("192.0.2.53")
   await expect
     .poll(() =>
@@ -365,15 +365,13 @@ test("a peer opens its own page with its tuples, closes and the layers it crosse
 }) => {
   await open(page, [])
   await visit(page, "/network/connections")
-  await expect(page.getByLabel("What this read cannot see")).toContainText(
-    "Read 10s after the last",
-  )
-  await expect(page.getByLabel("What this read cannot see")).toContainText(
-    "5 connections closed since the last read",
-  )
-  await expect(page.getByLabel("What this read cannot see")).toContainText(
-    "7 unconnected UDP sockets",
-  )
+  // What the read cannot see is behind the tip at the list's foot, not a paragraph under it.
+  await page.getByRole("button", { name: "What this read cannot see" }).click()
+  const unseen = page.getByRole("dialog", { name: "What this read cannot see" })
+  await expect(unseen).toContainText("Read 10s after the last")
+  await expect(unseen).toContainText("5 connections closed since the last read")
+  await expect(unseen).toContainText("7 unconnected UDP sockets")
+  await page.keyboard.press("Escape")
   await page.getByRole("link", { name: "Open 198.51.100.23" }).click()
   await expect(page).toHaveURL(/\/network\/connections\/198\.51\.100\.23$/)
   const reached = page.getByLabel("Where it connects")

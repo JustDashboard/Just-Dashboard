@@ -622,10 +622,15 @@ test.describe("a device's page", () => {
         : json(route, links),
     )
     await page.goto("/network/interfaces/ens3")
-    await expect(page.getByText("ip link did not answer")).toBeVisible()
+    // The rail says its own failure in place of its rows, and the body says
+    // the device's: one read, failed in both places it feeds.
+    const rail = page.getByLabel("Devices to open")
+    await expect(rail.getByText("ip link did not answer")).toBeVisible()
+    const body = page.getByText("ip link did not answer").filter({ visible: true }).last()
+    await expect(body).toBeVisible()
     await expect(page.getByText("No device named ens3")).toHaveCount(0)
     fail = false
-    await page.getByRole("button", { name: "Try again" }).click()
+    await page.getByRole("button", { name: "Try again" }).last().click()
     await expect(identity(page, "ens3")).toContainText("Uplink")
   })
 })

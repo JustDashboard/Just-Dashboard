@@ -5,11 +5,11 @@ import Link from "next/link"
 import { Servers } from "@/components/icons"
 import { networkOf } from "@/lib/clients"
 import { relativeTime } from "@/lib/format"
-import { flowBytes } from "@/lib/network/flows"
 import type { HistoricalPeer } from "@/lib/network/traffic"
 import type { Peer, PortRange } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { NETWORK_GLYPH } from "@/components/client-mark"
+import { InOut } from "@/components/in-out"
 import { ChoiceRow } from "@/components/choice-row"
 import {
   ProductGlyph,
@@ -18,7 +18,6 @@ import {
   processProduct,
 } from "@/components/product-logo"
 import { chosenPort, portsHref } from "@/components/proxy/ports-list"
-import { RX, TX } from "@/components/network/rate-pair"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { addressHref, reached, shortAddress } from "@/components/network/connections/model"
 
@@ -84,23 +83,6 @@ export function PortLinks({
         </Fragment>
       ))}
     </>
-  )
-}
-
-/** What TCP carried each way, each in its direction's colour. */
-export function Carried({
-  rx,
-  tx,
-  className,
-}: {
-  rx: React.ReactNode
-  tx: React.ReactNode
-  className?: string
-}) {
-  return (
-    <span className={cn("numeric font-mono text-hint whitespace-nowrap", className)}>
-      <span style={{ color: RX }}>↓ {rx}</span> <span style={{ color: TX }}>↑ {tx}</span>
-    </span>
   )
 }
 
@@ -249,9 +231,10 @@ export function RecordedRow({ peer, hour }: { peer: HistoricalPeer; hour: string
             word={peer.sockets === 1 ? "socket" : "sockets"}
             className="w-20"
           />
-          <Carried
-            rx={flowBytes(peer.rxBytes)}
-            tx={flowBytes(peer.txBytes)}
+          <InOut
+            rx={peer.rxBytes}
+            tx={peer.txBytes}
+            unit="flow"
             className="w-36 shrink-0 text-right max-sm:hidden"
           />
         </span>
