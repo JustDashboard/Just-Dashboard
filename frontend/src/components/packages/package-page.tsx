@@ -494,8 +494,10 @@ function PackageMain({
               // 500px, which is why how it came to be installed is in About.
               <span className="flex w-full min-w-0 flex-col gap-y-1 sm:flex-row sm:items-center sm:gap-x-3">
                 <FactLine nowrap className="sm:shrink-0">
-                  <Fact>
-                    <span className="inline-flex max-w-full min-w-0 items-center gap-x-3 align-top">
+                  {/* A flex row, as the line it was: the version in mono and the
+                      update's arrow stand on one centre line. */}
+                  <Fact className="flex items-center">
+                    <span className="flex max-w-full min-w-0 items-center gap-x-3">
                       {detail ? (
                         <span
                           className="min-w-0 truncate font-mono text-foreground"
