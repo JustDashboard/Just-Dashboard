@@ -562,16 +562,21 @@ function Documents({
       <ObjectHead
         mark={<CollectionMark kind={kind} />}
         name={collection}
-        kind={<CollectionKindTag kind={kind} />}
-        facts={
-          info &&
-          (info.type === "view" || info.statsKnown) && (
-            <span className="numeric min-w-0 truncate">
-              {info.type === "view"
-                ? `on ${info.viewOn}`
-                : `${plural(info.count, "document")} · ${bytes(info.size)}`}
-            </span>
-          )
+        // What it holds stands beside its name from `md`, on the head's one
+        // line, and is the rail's row to say below that. As a second line
+        // under the name it made the head taller than the rail's head beside
+        // it, whose hairline it continues, and a row taller on a phone.
+        kind={
+          <span className="flex items-center gap-2">
+            <CollectionKindTag kind={kind} />
+            {info && (info.type === "view" || info.statsKnown) && (
+              <span className="numeric text-hint text-muted-foreground max-md:hidden">
+                {info.type === "view"
+                  ? `on ${info.viewOn}`
+                  : `${plural(info.count, "document")} · ${bytes(info.size)}`}
+              </span>
+            )}
+          </span>
         }
         verbs={<VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />}
       />

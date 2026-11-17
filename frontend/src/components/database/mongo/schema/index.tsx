@@ -64,13 +64,18 @@ function Schema(workbench: Workbench) {
       <ObjectHead
         mark={<CollectionMark kind={kind} />}
         name={collection}
-        kind={<CollectionKindTag kind={kind} />}
-        facts={
-          info?.statsKnown && (
-            <span className="numeric min-w-0 truncate">
-              {plural(info.count, "document")} · {bytes(info.size)}
-            </span>
-          )
+        // What it holds stands beside its name from `md`, on the head's one
+        // line, as on Documents: a second line under the name made the head
+        // taller than the rail's head beside it, and a row taller on a phone.
+        kind={
+          <span className="flex items-center gap-2">
+            <CollectionKindTag kind={kind} />
+            {info?.statsKnown && (
+              <span className="numeric text-hint text-muted-foreground max-md:hidden">
+                {plural(info.count, "document")} · {bytes(info.size)}
+              </span>
+            )}
+          </span>
         }
         views={
           views.length > 0 && (
