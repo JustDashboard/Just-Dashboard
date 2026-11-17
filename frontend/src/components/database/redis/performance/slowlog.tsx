@@ -26,7 +26,7 @@ import { bytesLabel } from "@/components/database/redis/bytes"
 import { micros } from "@/components/database/redis/performance/samples"
 import { argsAfterCommand } from "@/components/database/redis/performance/slowlog-line"
 import { Fig, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
 import { useBreakpoint } from "@/lib/breakpoints"
 

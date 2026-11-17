@@ -15,7 +15,7 @@ import {
 } from "@/components/database/mongo/performance/samples"
 import type { MongoServer } from "@/components/database/mongo/types"
 import { useMongo } from "@/components/database/mongo/use-mongo"
-import { worthRetrying } from "@/components/database/redis/read-error"
+import { worthRetrying } from "@/components/database/kit/read-error"
 import { useFocusTrail } from "@/hooks/use-focus-return"
 import { ViewTabs } from "@/components/tabs"
 import { TabsContent } from "@/components/ui/tabs"

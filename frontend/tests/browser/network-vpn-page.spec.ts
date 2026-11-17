@@ -615,7 +615,7 @@ test.describe("a tunnel's own page", () => {
       await json(route, {})
     })
     await page.goto("/network/vpn/wg0")
-    await expect(page.getByText("VPN needs the admin capability")).toBeVisible()
+    await expect(page.getByText("VPN needs an administrator")).toBeVisible()
     expect(reads).toBe(0)
   })
 

@@ -209,7 +209,7 @@ test("it is an administrator's, and reads nothing for anybody else", async ({ pa
   const control = await mockDNSServicePage(page, { reader: true })
   await page.goto(HOME)
   await expect(
-    page.getByText("A DNS engine's inventory needs the admin capability", { exact: true }),
+    page.getByText("A DNS engine's inventory needs an administrator", { exact: true }),
   ).toBeVisible()
   await expect(page.locator("[data-slot=page]").getByRole("button")).toHaveCount(0)
   expect(control.reads).toEqual([])

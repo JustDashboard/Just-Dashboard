@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { RX, RatePair, TX } from "@/components/network/rate-pair"
 import { membersKnown } from "@/lib/docker-networks"
 import { plural, rate as formatRate } from "@/lib/format"

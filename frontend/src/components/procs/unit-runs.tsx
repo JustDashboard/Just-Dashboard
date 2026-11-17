@@ -29,7 +29,7 @@ import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/serv
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
-import { RESULT_WORDS } from "@/components/procs/units"
+import { RESULT_WORDS, signalName } from "@/components/procs/units"
 
 /**
  * The most lifecycle lines one read returns. A unit restarting every five
@@ -427,14 +427,25 @@ function when(iso: string) {
   return dayMinuteAt(d)
 }
 
+/**
+ * How a run ended, in the words a unit's own line uses (`procs/units.ts`):
+ * "exit 1", "killed by SIGTERM", "dumped core on SIGSEGV". The run carries
+ * the signal's name where the journal gave it, and its number otherwise.
+ */
 function exitWords(run: UnitRun) {
+  const status = run.exitStatus
+  const signal = run.signal
+    ? `SIG${run.signal}`
+    : status && /^\d+$/.test(status)
+      ? signalName(Number(status))
+      : (status ?? "a signal")
   switch (run.exitCode) {
     case "exited":
       return run.exitStatus !== undefined ? `exit ${run.exitStatus}` : undefined
     case "killed":
-      return run.signal ? `SIG${run.signal}` : `signal ${run.exitStatus ?? "?"}`
+      return `killed by ${signal}`
     case "dumped":
-      return run.signal ? `core dumped, SIG${run.signal}` : "core dumped"
+      return `dumped core on ${signal}`
   }
   return undefined
 }

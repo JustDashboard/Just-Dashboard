@@ -1,8 +1,8 @@
 "use client"
 
 import { bytes, plural } from "@/lib/format"
-import { tabClasses } from "@/components/tabs"
-import { ChipCount } from "@/components/chips"
+import { ViewTabList } from "@/components/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
   CollectionKindTag,
   CollectionMark,
@@ -11,11 +11,8 @@ import {
 import { AnalysisView } from "@/components/database/mongo/schema/analysis"
 import { IndexesView } from "@/components/database/mongo/schema/indexes"
 import { ValidationView } from "@/components/database/mongo/schema/validation"
-import {
-  MongoWorkbench,
-  WorkbenchHead,
-  type Workbench,
-} from "@/components/database/mongo/workbench"
+import { MongoWorkbench, type Workbench } from "@/components/database/mongo/workbench"
+import { ObjectHead } from "@/components/database/workbench/chrome"
 
 type View = "analysis" | "indexes" | "validation"
 
@@ -44,7 +41,7 @@ export function MongoSchema() {
 }
 
 function Schema(workbench: Workbench) {
-  const { mongo, collection: info, leading } = workbench
+  const { mongo, collection: info } = workbench
   const { collection, engine, param, select } = mongo
   const views: { id: View; label: string }[] = [
     ...(engine.can("schemaAnalysis") ? [{ id: "analysis" as const, label: "Analysis" }] : []),
@@ -53,55 +50,59 @@ function Schema(workbench: Workbench) {
   ]
   const asked = param("view")
   const view = views.some((entry) => entry.id === asked) ? (asked as View) : views[0]?.id
+  // A server with no view of the schema to offer still reads its analysis.
+  const shown: View = view ?? "analysis"
   const kind = info ? collectionKind(info) : "collection"
 
   return (
-    <div data-slot="mongo-schema" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <WorkbenchHead leading={leading}>
-        <h2 className="flex min-w-0 items-center gap-1.5">
-          <CollectionMark kind={kind} />
-          <span className="min-w-0 truncate font-mono text-sm leading-6 font-medium">
-            {collection}
-          </span>
-        </h2>
-        <CollectionKindTag kind={kind} />
-        {info?.statsKnown && (
-          <span className="numeric min-w-0 truncate text-hint text-muted-foreground max-md:hidden">
-            {plural(info.count, "document")} · {bytes(info.size)}
-          </span>
+    <Tabs
+      data-slot="mongo-schema"
+      value={shown}
+      onValueChange={(next) => select({ view: next === views[0]?.id ? null : next })}
+      className="flex min-h-0 min-w-0 flex-1 flex-col gap-0"
+    >
+      <ObjectHead
+        mark={<CollectionMark kind={kind} />}
+        name={collection}
+        kind={<CollectionKindTag kind={kind} />}
+        facts={
+          info?.statsKnown && (
+            <span className="numeric min-w-0 truncate">
+              {plural(info.count, "document")} · {bytes(info.size)}
+            </span>
+          )
+        }
+        views={
+          views.length > 0 && (
+            // Three readings of one collection, as every workbench offers its views.
+            <ViewTabList
+              label="Schema views"
+              value={shown}
+              views={views.map((entry) => ({
+                key: entry.id,
+                label: entry.label,
+                count: entry.id === "indexes" && info?.statsKnown ? info.indexCount : undefined,
+              }))}
+              className="border-b-0"
+            />
+          )
+        }
+      />
+      <TabsContent value={shown} className="flex min-h-0 min-w-0 flex-col">
+        {view === "indexes" ? (
+          <IndexesView
+            mongo={mongo}
+            catalog={workbench.catalog}
+            collection={info}
+            confirm={workbench.confirm}
+            onChanged={workbench.catalog.refresh}
+          />
+        ) : view === "validation" ? (
+          <ValidationView {...workbench} />
+        ) : (
+          <AnalysisView mongo={mongo} collection={info} />
         )}
-        <span className="min-w-0 flex-1" />
-        {/* Pressed buttons, not a landmark: three readings of one collection. */}
-        <div role="group" aria-label="Schema views" className="-my-1 flex gap-1 self-stretch">
-          {views.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              aria-pressed={view === entry.id}
-              onClick={() => select({ view: entry.id === views[0].id ? null : entry.id })}
-              className={tabClasses(view === entry.id, "h-10")}
-            >
-              {entry.label}
-              {entry.id === "indexes" && info?.statsKnown && (
-                <ChipCount>{info.indexCount}</ChipCount>
-              )}
-            </button>
-          ))}
-        </div>
-      </WorkbenchHead>
-      {view === "indexes" ? (
-        <IndexesView
-          mongo={mongo}
-          catalog={workbench.catalog}
-          collection={info}
-          confirm={workbench.confirm}
-          onChanged={workbench.catalog.refresh}
-        />
-      ) : view === "validation" ? (
-        <ValidationView {...workbench} />
-      ) : (
-        <AnalysisView mongo={mongo} collection={info} />
-      )}
-    </div>
+      </TabsContent>
+    </Tabs>
   )
 }

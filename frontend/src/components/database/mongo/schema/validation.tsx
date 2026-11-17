@@ -32,7 +32,7 @@ import type {
   MongoValidationLevel,
 } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 const LEVEL_HINT: Record<MongoValidationLevel, string> = {
   strict: "Every insert and every update is checked.",

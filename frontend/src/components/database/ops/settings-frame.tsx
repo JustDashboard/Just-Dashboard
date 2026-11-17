@@ -7,7 +7,7 @@ import { SettingsColumn } from "@/components/settings/settings-column"
 import { SectionFrame } from "@/components/database/kit"
 import { BlockedState } from "@/components/database/kit/blocked-state"
 import { SettingsPending } from "@/components/database/ops/settings-pending"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { settingsPages, type SettingsPageKey } from "@/components/database/shell/settings-pages"
 
@@ -52,7 +52,7 @@ export function SettingsFrame({
   const { confirm, dialog } = useConfirm()
   // Every dialog here is opened by state: this hands the keyboard back to
   // the control that opened one.
-  useFocusReturn()
+  useFocusTrail()
   const listed = settingsPages(engine).find((one) => one.key === page)
   if (!listed) {
     return (

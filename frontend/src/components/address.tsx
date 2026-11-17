@@ -10,9 +10,9 @@ import { cn } from "@/lib/utils"
  */
 
 /**
- * An address in CIDR form with its prefix in the port hue, as the
+ * An address in CIDR form with its prefix in the muted ink, as the
  * Configuration page's allowlist draws a network: the address is read first,
- * the size of the network second. A host route's /32 or /128 is left off,
+ * the size of the network second, and a mask is no reading to colour. A host route's /32 or /128 is left off,
  * since an address alone already means one address.
  */
 export function Cidr({ cidr, className }: { cidr: string; className?: string }) {
@@ -23,8 +23,7 @@ export function Cidr({ cidr, className }: { cidr: string; className?: string }) 
       {address}
       {bits !== undefined && !host && (
         <>
-          <span className="text-muted-foreground">/</span>
-          <span className="text-tag-pink">{bits}</span>
+          <span className="text-muted-foreground">/{bits}</span>
         </>
       )}
     </span>

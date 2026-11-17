@@ -435,7 +435,10 @@ test("the picture narrows the list: the internet to its chip, a program to its c
   await openMaturity(page, [])
   await visit(page, "/network/connections")
   await page.getByRole("button", { name: "Show only the addresses from the internet" }).click()
-  await expect(page.getByRole("button", { name: /From the internet/ })).toHaveAttribute(
+  // The two chips are one named choice.
+  const scope = page.getByRole("group", { name: "Which peers to show" })
+  await expect(scope.getByRole("button")).toHaveText([/^Everything/, /^From the internet/])
+  await expect(scope.getByRole("button", { name: /From the internet/ })).toHaveAttribute(
     "aria-pressed",
     "true",
   )

@@ -8,7 +8,7 @@ import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import type { Subject } from "@/components/database/schema/change-dialog"
 import type { DdlRequest } from "@/components/database/schema/changes"
-import { useFocusReturn } from "@/components/database/schema/focus"
+import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
 import { previewChange, runChange } from "@/components/database/schema/use-ddl"
 
 export type Destruction = {
@@ -45,7 +45,7 @@ const SAY_AFTER_MS = 350
 export function useDestroy() {
   const { id, engine } = useDatabase()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn((dialog.props as { request: unknown }).request !== null)
+  useSurfaceFocusReturn((dialog.props as { request: unknown }).request !== null)
   const reading = useRef(false)
 
   const destroy = useCallback(

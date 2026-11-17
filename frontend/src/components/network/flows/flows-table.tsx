@@ -85,16 +85,8 @@ export function FlowsTable({
   return (
     <Panel id="flow-rows" aria-label="Socket hours" className="scroll-mt-6">
       <PanelHeader
-        title={
-          <>
-            Socket hours
-            {!loading && rows.length > 0 && (
-              <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                {rows.length}
-              </span>
-            )}
-          </>
-        }
+        title="Socket hours"
+        count={!loading && rows.length > 0 ? rows.length : undefined}
         actions={
           <>
             {truncated && (

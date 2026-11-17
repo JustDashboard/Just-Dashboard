@@ -36,14 +36,14 @@ import { nameHue } from "@/components/database/home/kinds"
 import { EngineMark } from "@/components/database/kit"
 import { mongoProfiler, setProfiler } from "@/components/database/mongo/api"
 import { operationColor } from "@/components/database/mongo/kinds"
-import { DatabaseMark } from "@/components/database/mongo/rail"
+import { NameMark } from "@/components/database/kit/marks"
 import type {
   MongoDatabase,
   MongoProfilerEntry,
   MongoProfilerLevel,
 } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 const LEVELS: { value: `${MongoProfilerLevel}`; label: string }[] = [
   { value: "0", label: "Off" },
@@ -119,7 +119,7 @@ export function ProfilerView({
       <SelectContent position="popper" align="end" className="max-h-72">
         {listed.map((name) => (
           <SelectItem key={name} value={name} className="font-mono text-xs">
-            <DatabaseMark name={name} />
+            <NameMark name={name} />
             {name}
           </SelectItem>
         ))}

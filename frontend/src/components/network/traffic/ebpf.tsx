@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { InstallHandoff, InstallFollowUp } from "@/components/network/install"
+import { InstallHandoff, InstallFollowUp } from "@/components/install-handoff"
 import { LinkGlyph } from "@/components/network/marks"
 import { programHref } from "./address"
 import { ebpfWords } from "./words"

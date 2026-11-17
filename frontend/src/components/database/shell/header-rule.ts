@@ -22,6 +22,10 @@ import { DATABASE_ID, databasePlace } from "@/components/database/shell/routes"
  *   identity line, and a second header above that would be two things the
  *   page is about. It keeps the one-line strip that says which database the
  *   item belongs to: `strip`.
+ * - **A flow** (Import): a sequence with an outcome opens on its own
+ *   question, with the way back to the database above it, as adding a
+ *   database (`/databases/new`) does. A header over the question would be two
+ *   titles: `none`.
  * - Everything else is `full`, an address that is no page of the database
  *   included: the statement that it is not found stands under the header of
  *   the database it was looked for in.
@@ -30,10 +34,13 @@ import { DATABASE_ID, databasePlace } from "@/components/database/shell/routes"
  * the full header as a project's are; `fills` says the page takes the height
  * the header leaves rather than scrolling with it.
  */
-export type DatabaseHead = "full" | "strip" | "head"
+export type DatabaseHead = "full" | "strip" | "head" | "none"
 
 /** The workbenches whose frame draws the database's line itself, as its head. */
 export const HEADED: readonly SectionId[] = ["data", "query", "schema", "diagram"]
+
+/** The flows, which open on their own question and the way back. */
+export const FLOW: readonly SectionId[] = ["import"]
 
 /** The sections with pages for one item under them, each with a line of its own. */
 const ITEM_PAGES: Partial<Record<string, RegExp>> = {
@@ -56,13 +63,14 @@ export function isItemPage(pathname: string): boolean {
  */
 type SectionOf = (section: SectionId) => { workbench?: boolean } | undefined
 
-/** Which of the three a path opens on, for an engine that has the pages `sectionOf` knows. */
+/** Which of the four a path opens on, for an engine that has the pages `sectionOf` knows. */
 export function databaseHead(pathname: string, sectionOf: SectionOf): DatabaseHead {
   if (isItemPage(pathname)) return "strip"
   const place = databasePlace(pathname)
   // Only where the engine has the page: the statement that it has none is a
   // reading page, under the header.
   if (place && HEADED.includes(place.section) && sectionOf(place.section)?.workbench) return "head"
+  if (place && FLOW.includes(place.section) && sectionOf(place.section)) return "none"
   return "full"
 }
 

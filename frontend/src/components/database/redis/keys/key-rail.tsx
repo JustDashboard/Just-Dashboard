@@ -238,7 +238,7 @@ export function KeyRail({
     <Pane flush data-slot="redis-key-rail" className="min-w-0 flex-1">
       <RailHead>
         {server.data ? (
-          <DbPicker server={server.data} db={db} onChange={redis.setDb} />
+          <DbPicker server={server.data} db={db} onChange={redis.setDb} fill />
         ) : (
           !server.error && <Skeleton className="h-7 w-20" />
         )}

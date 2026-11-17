@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/table"
 import { EngineMark } from "@/components/database/kit"
 import { redisClients, redisKillClient } from "@/components/database/redis/api"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { RedisClientInfo } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
 import { DbClientMark } from "@/components/database/client-mark"

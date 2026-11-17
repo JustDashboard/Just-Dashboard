@@ -28,7 +28,7 @@ import {
 import { EditorStrip, saveFrom } from "@/components/database/redis/keys/editor-parts"
 import { respaceJson } from "@/components/database/kit/json-doc"
 import type { KeyEditorProps } from "@/components/database/redis/keys/key-pane"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { RedisBytes, RedisMembers } from "@/components/database/redis/types"
 import { usePaged } from "@/components/database/redis/use-paged"
 import { useRowWindow } from "@/components/database/redis/use-row-window"

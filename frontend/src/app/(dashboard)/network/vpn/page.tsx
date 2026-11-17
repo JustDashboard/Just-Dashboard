@@ -17,7 +17,7 @@ import { Page, PageContext } from "@/components/page"
 import { ProductGlyph } from "@/components/product-logo"
 import { WireMark } from "@/components/wire/wire"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { ErrorState, NeedsAdmin, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { ViewTabList } from "@/components/tabs"
@@ -25,7 +25,7 @@ import { Tabs } from "@/components/ui/tabs"
 import { VerbMenu } from "@/components/verbs"
 import { WireFlow } from "@/components/wire/wire-flow"
 import { IdentityFacts, IdentityStateLoading } from "@/components/network/identity-facts"
-import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
+import { InstallFollowUp, InstallHandoff } from "@/components/install-handoff"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { ArchivedTunnels } from "@/components/network/vpn/archive"
 import { usePeerSheets } from "@/components/network/vpn/peers"
@@ -140,10 +140,9 @@ function NetworkVPNContent() {
     return (
       <Page>
         <PageContext eyebrow="Network" title="VPN" />
-        <EmptyState
-          icon={LockClosed}
-          title="VPN needs the admin capability"
-          description="Tunnel peers and their client configurations are visible to administrators."
+        <NeedsAdmin
+          what="VPN"
+          why="Tunnel peers and their client configurations are visible to administrators."
         />
       </Page>
     )

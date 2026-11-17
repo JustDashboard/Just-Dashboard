@@ -25,7 +25,7 @@ import { ROW_LIMITS } from "@/components/database/query/results"
 import { elapsedText, type Run } from "@/components/database/query/run-model"
 import type { Risk } from "@/components/database/query/types"
 import { useElapsed } from "@/hooks/use-elapsed"
-import { RunningCommand } from "@/components/database/query/running-command"
+import { RunningCommand } from "@/components/database/kit/running-command"
 
 const LIMITS = ROW_LIMITS.map((limit) => ({
   value: String(limit),

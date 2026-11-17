@@ -7,6 +7,7 @@ import type { FilePreview } from "@/lib/types"
 import { LoadingRows } from "@/components/loading"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
+import { CodeLines } from "@/components/code"
 import { fetchResponse } from "@/lib/api"
 
 /**
@@ -18,22 +19,7 @@ import { fetchResponse } from "@/lib/api"
 /** The head, with line numbers, because "line 42" is how errors are reported. */
 export function TextHead({ text, className }: { text: string; className?: string }) {
   const lines = useMemo(() => text.replace(/\n$/, "").split("\n"), [text])
-  return (
-    <div className={cn("grid grid-cols-[auto_1fr] gap-x-3 p-2", className)}>
-      <div className="numeric shrink-0 text-right text-faint select-none">
-        {lines.map((_, i) => (
-          <div key={i}>{i + 1}</div>
-        ))}
-      </div>
-      <div className="min-w-0">
-        {lines.map((line, i) => (
-          <div key={i} className="whitespace-pre">
-            {line || " "}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+  return <CodeLines lines={lines} wrap={false} className={cn("p-2", className)} />
 }
 
 /**
