@@ -10,7 +10,8 @@ item is one press away, Alt+↑ and Alt+↓ walk it, and the view on screen goes
 
 **Deprecated, kept until WP-39:** `DockerRail` and `DockerRailRow` (`docker/item-rail.tsx`), and
 `DetailRail`, `RailRow` and `RailGhosts` in `network/traffic/detail-shell.tsx`. They are thin
-wrappers over the parts above. A new rail never uses them.
+wrappers over the parts above. A new rail never uses them, and the network file's three have no
+caller left.
 
 ## Purpose
 

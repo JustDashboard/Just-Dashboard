@@ -2,8 +2,28 @@
 
 Each page declares one register, reading or flow, through `Page` (`data-register`), and
 `design-system.spec.ts` checks that every page declares one and only a flow page has a foreground.
-WP-41 cuts this page down to the rule and the table; until then it holds `design-system.md` §16 as
-it was, below.
+
+## The rule
+
+- **Reading** (the default): the reader arrives to find out what is true. Readings on the page,
+  not boxes on the page; nothing lifts. Its recipes are
+  [`reading-page`](../recipes/reading-page.md), [`list-page`](../recipes/list-page.md),
+  [`detail-with-rail`](../recipes/detail-with-rail.md) and
+  [`settings-page`](../recipes/settings-page.md). A workbench is a layout of this register, one
+  frame held to the window ([`workbench`](../recipes/workbench.md)), not a third register.
+- **Flow** (`<Page register="flow">`): a sequence with an outcome at the end. The `h1` is the
+  question, a spine says how far through, one surface carries depth (`FlowPanel`) and one command
+  advances. Its recipe is [`flow-page`](../recipes/flow-page.md).
+- **The test is what the reader came to do, not what the page contains.** A page with a form on it
+  is not a flow page: settings are a reading of a configuration that happens to be editable. If
+  you cannot name the sequence and its outcome in one sentence, the page is a reading page.
+- **A page picks a register; a section does not.** Making a project is a flow and reading one is
+  not.
+- **The lit edge is not the flow register's property.** A row or a card you take lights under the
+  pointer on any page (`ChoiceRow`, `ChoiceCard`).
+
+The table of which page is in which register, and the reasoning, are in §16 below, as
+`design-system.md` held it.
 
 ## 16. Two registers
 

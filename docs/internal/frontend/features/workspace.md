@@ -67,7 +67,8 @@ workbench frame held to the window (rounded and in the page's gutter from `lg`, 
 it) under a head bar: back, Excalidraw's mark, the name edited in place and the save state as a dot
 and its words, then Add server item as the one command (Reload in its place while another tab's
 change stops saving) and a menu holding Save now, Reload and Delete drawing; a failed save offers
-Try again beside its words. A drawing that is not there, or an address that is no drawing's, is an
+Try again beside its words. The page names Excalidraw's menu trigger and takes the footer role off
+its zoom strip (`board-menus.tsx`); the library offers no prop for either. A drawing that is not there, or an address that is no drawing's, is an
 empty state with Excalidraw's mark and Back to drawings. The editor embeds
 Excalidraw and autosaves to server SQLite with a revision guard, or by merging once it has joined
 the drawing's live room, where everyone with it open sees the others' changes, pointers and names as
@@ -195,8 +196,8 @@ the link's state beside the name (said once, not again among the facts), who the
 to, at which scope and when and by whom (or its own key fingerprint while it is not), and once
 linked Sync now and Unlink at its far end. The two Activity sections share their marks
 (`account-link/marks.tsx`: `commandMark`, `COMMAND_STATUS`, `ACTIVITY_ROW`); the keys, the policy
-and the shared fields are `DetailList`s. Under it the link drawn as what it is (`connect-picture.tsx`, the
-deploy overview's wiring turned to face out): System (the distribution's logo), Readings, Containers
+and the shared fields are `DetailList`s. Under it the link drawn as what it is (`connect-picture.tsx`, a `WireFlow`, its kinds stacked
+under their heading on a phone; the deploy overview's wiring turned to face out): System (the distribution's logo), Readings, Containers
 (Docker) and Backups wired into this server and out to the site's J with the account under it, each
 kind's line saying what the last heartbeat read (*Ubuntu 24.04*, *CPU 23% · memory 61%*, *12
 running*) or, before one, what the chosen scope would send (*Counts only* / *Counts and names*).
@@ -341,7 +342,8 @@ name); *Signed in as you* (`access-picture.tsx`): every session on the left as i
 in the corner, what it is doing over its name and its network and address under it, the account in
 the middle as its face in the brand's ring with a green or amber shield for what guards it, and the
 account's own usable keys on the right as the products that hold them with their role over their
-name, every node at Configuration's scale, each side counted and linking to its page; then one
+name, drawn through `WireFlow` (marks on a phone, with no line crossing the account's name), each
+side's heading counting it and linking to its page; then one
 centred column of two sections: the profile (picture cropped and shrunk in the browser before
 upload, display name and sign-in name as a draft on the floating Save bar with *Edited* in the
 section head, whose line of facts is the rail's own account card drawn from the draft, and what each
@@ -558,6 +560,10 @@ Configuration for an administrator
 `components/terminal/` is the session rail and window strip; `components/xterm-pane.tsx` is the emulator. The
 split matters — the pane is reused by the compose runner and knows nothing about sessions.
 
+- **It can be read.** Screen reader mode (xterm's `screenReaderMode`) is a switch in the settings
+  and a button that is the stop before each terminal, drawn only under the keyboard. It is off by
+  default because the mirror costs a busy terminal time, and a browser cannot tell that a screen
+  reader is running. Bright black is `--faint` and `minimumContrastRatio` is 4.5.
 - The page is **one framed workbench**. The rail, the emulator and the Files/Git column are `Pane flush`
   inside a single `rounded-xl border` wrapper, separated by a hairline each (drawn on the rail's right
   edge and the tools column's left edge). Three framed panes with a gutter between them read as three

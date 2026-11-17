@@ -48,7 +48,13 @@ machine, since no engine is in the packet's path; an engine that is not installe
 as a dashed ring, so the picture is one height in every state. Under it one engine is on screen at
 a time as a view in the address (`?tab=fail2ban|crowdsec|suricata`, the first installed engine
 without one), and the addresses every engine and the firewall refuse are the fourth view,
-`?tab=blocked`. Each engine's view opens on its own line (`engine-head.tsx`). Its tiles are
+`?tab=blocked`. Each engine's view opens on its own line (`engine-head.tsx`), one step down from the
+page's: the section head's anatomy with the engine's 32px mark, its state and facts on one line
+over a hairline (0.9.0; a full identity line there read as a second page header). The certificate,
+port and jail pages use `DetailPage`, `IdentityVerbs` and the shared `Rail`. A jail's banned
+addresses each end on one ⋯ (Unban, Never ban again). Ports is a `ChoiceList` at every width with
+sort in its `ListToolbar`, grouping by application heads a section with `GroupRule`, and the
+Firewall and Clients columns are drawn only when a socket fills them. Its tiles are
 `ReadingLine`s, a log lens's reading among them through `lens-reading-line.tsx`, which keeps the
 press that narrows the log (`ReadingLine`'s own `onPress`: a button laid over the line, named by
 `label`; `BarReading`'s line under a band has its own slot, `bar-reading-line`); Suricata's severities are one `BarReading`; repeat offenders are a
@@ -111,9 +117,12 @@ with the engine's state, and its one command at the end with the rest behind `�
 pass); then the route picture, Live traffic, the band of traffic, certificates
 and recent errors, and the routes in the main column with attention in a narrower one. Live traffic
 is the edge's hour added up from every site's access record — nginx's files and the Docker Caddy
-ingress's routes alike, so a host where the ingress holds 80 and 443 is not drawn as idle — as four
-`StatTile`s in a framed `StatGrid` (the last whole minute, the hour, the 5xx share, bytes served,
-each with its `TileTrend`) over a `ChartPanel` of requests a minute with 4xx and 5xx lines. nginx's
+ingress's routes alike, so a host where the ingress holds 80 and 443 is not drawn as idle — as a
+`ChartPanel` of requests a minute with its Min/Mean/Max/Now legend and 4xx and 5xx lines (0.9.0
+dropped the four tiles over it, which restated the legend and the band). The site and stream
+pages use `DetailPage`, `IdentityVerbs` and `useDetailTab` with `remember`; Settings is never the
+remembered view. A site's Traffic chart has the legend table and "a point a minute, every site" in
+its head. nginx's
 own stub_status counters are a one-line strip under the chart, because they count only what nginx
 answers: its switch is a `Switch` beside a `Status` rather than a button, because whether nginx is
 counting is a state of the engine; a switch in flight reads "Switching on…", readings that stop lose
@@ -400,7 +409,8 @@ said.
 
 The overview took a second pass on 2026-10-23, at the operator's request, for its quiet
 states. A host with no reverse proxy opens, under the identity line, on `EngineSetup`
-(`components/proxy/engine-setup.tsx`): the question at the 24px rung ("Put nginx in front of
+(`components/proxy/engine-setup.tsx`; since 0.9.0 it is `MissingThing size="page"` with the
+install as its step, the certbot option and the job console): the question at the 24px rung ("Put nginx in front of
 this server"), the brand command at `size="lg"` with the exact package-manager line beside it,
 certbot riding along on an `OptionRow` that is on by default, the job streaming under it, and
 a rail of what the page draws once nginx runs. It was two `xs` outline buttons over an empty
@@ -476,8 +486,8 @@ amber edge rather than a filled button carrying that no certificate was a proble
 page's all-clear and firing cards take the same size. The host's Alerts page under Metrics
 (`/metrics/alerts`, 2026-10-25) is the same page over the machine's own readings — CPU, memory
 and filesystems as their glyphs, containers as Docker, backups as an archive — and draws its
-channels, all-clear, subject cards and history from the parts the two share
-(`components/alerts/alert-parts.tsx`) rather than a second copy of them. Since 0.8.7 it opens on
+channels, all-clear, subject cards and history from the parts the two share (the alerts kit:
+`components/alerts/kit.tsx`, `kinds.ts` and `alert-parts.tsx`) rather than a second copy of them. Since 0.8.7 it opens on
 an identity line in a project's layout: what the rules are doing as the state, *Add rule* as the
 command and *Check now* behind the menu, where the two stood on two section lines; a rule's row
 keeps one height by saying why it cannot be judged on its own line; and the page is drawn in its
@@ -587,7 +597,7 @@ valid on one bar, worst first, the line naming the soonest to end in that standi
 left; and **Applications**, what the sites stand in front of drawn as itself, those refusing
 connections first, the line carrying the health check's answer. A press opens its site. Until
 0.8.5 Traffic's five and Certificates' five soonest were rows under their bars, the second on a
-`StandingBar`. What a site fronts is read off the Ports page's
+`StandingBar` (removed after 0.8.5). What a site fronts is read off the Ports page's
 sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
 else its unit — never the port alone, so an upstream nothing on the list names keeps the
 engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else"; the

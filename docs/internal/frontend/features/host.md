@@ -118,7 +118,8 @@ dialogs, the in-place one saying per source what it overwrites and what it makes
 through Docker, a directory) (`tests/browser/backup-import.spec.ts`). A job opens on its own page
 (`/backups/[job]`, `components/backups/job-detail.tsx`): its identity line, its picture narrowed to
 the one job (its middle the schedule over the next run), one reading as a sentence (what it holds
-over how much is kept, with the archive sizes as its trend), and its runs as a rail beside the run
+over how much is kept, with the archive sizes as its trend), the other jobs as a rail from `xl`
+(the shared detail frame), and its runs as a list beside the run
 they show, each run one height with its archive's size as a figure, with each run's log, archive
 and restores. Automatic overdue/attention recommendations were removed in 0.7.5
 
@@ -144,7 +145,9 @@ and volumes it keeps on the other, a line red where a project has a failing cont
 is partly up or a volume has nothing mounting it, dashed where a thing is stopped or never deployed,
 six on the left and three of each kind on the right before the rest fold into a count that opens
 their page, pointing at a project lighting what is its own; then the compose projects as one-line
-cards beside the disk. The table of every container is `/docker/containers` only: the section's
+cards beside the disk. Each Docker list page opens on `DockerIdentity page="…"` (the page's name
+as the title, "Docker 29.x" as the first fact); the container and stack pages put one command and
+`⋯` on the identity line, and Image and Volume draw their picture inside their first view. The table of every container is `/docker/containers` only: the section's
 title links to it and the verdict opens it narrowed to what is failing. The page is drawn before
 anything is read, and the picture waits at the height it had on the last visit
 (`docker.overview.picture.rows`). Stacks (`stacks-tab.tsx`) lists each stack as a one-line card
@@ -157,7 +160,7 @@ keep their list beside them from `xl` (`stack-rail.tsx`, `container-rail.tsx`, c
 `procs/process-rail.tsx`): the list's own search, chips and order from its session keys, the item
 on screen filled (and drawn first when the filter does not hold it), Alt+↑ and Alt+↓ and the two
 arrows walking it with `?tab=` carried. The column itself is one component for a container, a
-stack, an image, a volume and a network (`docker/item-rail.tsx`: `DockerRail` and `DockerRailRow`);
+stack, an image, a volume and a network (the shared `Rail` and `RailRow`, `components/rail.tsx`);
 each `*-rail.tsx` is its row and where its list comes from.
 Beside the rail the blocks that went side by side at 1280px
 and 1536px do so at 1600px and 1856px (`beside-rail.ts`)
@@ -238,7 +241,8 @@ to add one. The page has its shape while the rules are read. An account that is 
 is told the page is one's, and the server is not asked
 
 **Implementation:** `app/(dashboard)/metrics/alerts/`, `components/metrics/alerts-page.tsx` and
-`alerts-link.tsx`, `components/alerts/alert-parts.tsx` (shared with `/proxy/alerts`),
+`alerts-link.tsx`, the alerts kit, `components/alerts/` (`kit.tsx` and `kinds.ts` over this page's
+`AlertKinds`; `alert-parts.tsx`), shared with `/proxy/alerts`,
 `lib/host-alerts.ts`; backend in
 [`../backend/observability-security.md`](../../backend/observability-security.md#host-alerts-told-when-the-machine-itself-goes-wrong)
 
@@ -246,19 +250,22 @@ is told the page is one's, and the server is not asked
 
 What the Docker daemon did and who did it, over a 1h / 6h / 24h / All window: Docker's identity line
 (the one every Docker section page opens on) with the verdict beside its name (a restart loop named,
-the containers that failed, or nothing), the socket's state and, at its end, the window; four readings (failures, restarts, created or removed, external), each counting up
-with its trend across the window and narrowing the page to what it counts; the containers the record
+the containers that failed, or nothing) and the socket's state; then the band every Docker page
+opens on (`event-band.tsx`): what happened as one bar of four kinds (failures, restarts, created or
+removed, external), each a press that narrows the page, and Recent, the newest of those on the
+window's axis, with the 1h / 6h / 24h / All window on the band's line; the containers the record
 names as a table, worst first, each with its state now from Docker's listing, its window as a lane
 of outcome-coloured marks (a loop a red band), its failures, comebacks and who last acted on it, a
 row narrowing the feed and its name opening the container; and the feed, a plain section (a title,
 a hairline, rows on hairlines, scrolling with the page; framed with a scroll of its own until 0.8.7),
-restart loops and a container's events moments apart folded into one row each, every row saying who
-did it. The buffer
+restart loops and a container's events moments apart folded into one row each, whose events open in
+a popover off its button (the row keeps one height), every row saying who did it. The title counts
+events, as the All chip does. The buffer
 is read whole once and its newest hundred every fifteen seconds, so the polled copy's audit-log
 match replaces the socket's; an exit right after a kill is read as the stop it was
 
-**Implementation:** `components/docker/events-page.tsx`, `event-activity.tsx`, `event-feed.tsx`,
-`event-marks.tsx`; `lib/docker-events.ts` (unit-tested)
+**Implementation:** `components/docker/events-page.tsx`, `event-band.tsx`, `event-activity.tsx`,
+`event-feed.tsx`, `event-marks.tsx`, `words.ts` (what an exit code and a change read as); `lib/docker-events.ts` (unit-tested)
 
 ## `/docker/networks`
 
@@ -500,7 +507,7 @@ where the saved list lacks it, fixed columns from `xl` with the mode folded into
 flush, delete behind the menu; a row opens the application's own page. The line and the band are
 drawn while the list is read; a server without PM2, one where PM2 is installed and no daemon runs,
 and a PM2 that does not answer each say so under PM2's mark with the next step
-(`pm2-missing.tsx`). **An application's page** (`/processes/pm2/[app]`, `pm2-app-page.tsx`; the
+(`pm2-missing.tsx`, a `MissingThing` with the install line to copy). **An application's page** (`/processes/pm2/[app]`, `pm2-app-page.tsx`; the
 name is the address, `?account=` only where two accounts run the same name, and the old `?app=`
 address — an exact `account:id` or a bare name — redirects there): from `xl` the list folded into
 a rail beside it (`pm2-app-rail.tsx`: the list's own search, state chip and order, a cluster one
@@ -603,14 +610,17 @@ named Hourly, Daily, Weekly and Monthly scripts, and a line guarded on `/run/sys
 be "left to systemd" with the timer that does its work; and a **Cron log** (the service logs on the
 cron daemon's unit journal, else a cron file, else the journal's `CRON` lines, through the cron lens
 with its sessions hidden as a chip and its runs and lost output counted on its chips). Every
-schedule opens a sheet built from one set of parts (`procs/schedule-sheet.tsx`): the schedule in a
-sentence over the expression it was written as, its figures as tiles, **When it runs** — the next
-five runs listed beside the week drawn as seven days with a mark per run and a count per day, a
-timer's random delay a wash after each mark — then Command, Details and Runs. A job's (`?job=`) has
-its next run and runs this week, and the cron log narrowed to its command; a package line's opens
-the same sheet without verbs, and one left to systemd says so first and links the timer; a timer's
-(`?timer=`) has its next and last run and how long that took, the service it starts, and the
-service's Runs with Live and History. The job editor sheet asks what runs, then when — its frequency
+schedule opens a page of its own (`procs/schedule-page.tsx`): `/processes/scheduled/cron/[id]`
+for a cron line (the id is the account and the line, or "system", the file and the line), and
+`/processes/scheduled/timers/[unit]` for a timer. Each page sits on the shared
+detail frame with every schedule as a rail, soonest first (`schedule-rail.tsx`). Its Overview is
+built from one set of parts (`procs/schedule-sheet.tsx`): the schedule in a sentence over its
+expression, its figures, **When it runs** — the next five runs listed beside the week drawn as
+seven days with a mark per run and a count per day, a timer's random delay a wash after each mark
+— then Command and Details. Its Runs view is the cron log narrowed to the line's command, or the
+timer's service runs. A package line has Copy command as its only verb, and one left to systemd
+says so first and links the timer. The sheets' old `?job=` and `?timer=` addresses lead to the
+pages. Scheduled's line says the next run as its state and has Add job as its command. The job editor sheet asks what runs, then when — its frequency
 a grid of toggles — over a preview of the schedule in words, its week and its next three runs
 
 **Where there is no systemd** (a container, a host started by another init, or the dashboard's own
@@ -627,8 +637,9 @@ above it are drawn as usual
 `service-overview.tsx`, `service-views.tsx`, `service-facts.ts`, `service-band.tsx`, `pm2-band.tsx`,
 `pm2-shared.ts`, `pm2-facts.ts`, `pm2-app-page.tsx`, `pm2-app-rail.tsx`, `pm2-app-overview.tsx`,
 `pm2-app-views.tsx`, `pm2-app-actions.tsx`, `pm2-scale-dialog.tsx`, `pm2-start-dialog.tsx`,
-`pm2-missing.tsx`, `unit-runs.tsx`, `units.ts`, `schedule-band.tsx`, `cron-job-sheet.tsx`,
-`timer-sheet.tsx`), `components/verbs.tsx`, `lib/cron.ts`, `lib/crontab.ts`, `lib/schedule.ts`,
+`pm2-missing.tsx`, `unit-runs.tsx`, `units.ts`, `schedule-band.tsx`, `schedule-page.tsx`,
+`schedule-rail.tsx`, `schedule-data.ts`, `schedule-links.ts`, `schedule-sheet.tsx`,
+`cron-job-parts.tsx`, `timer-parts.tsx`), `components/verbs.tsx`, `lib/cron.ts`, `lib/crontab.ts`, `lib/schedule.ts`,
 `lib/unit-runs.ts` (`units.ts`, `pm2-shared.ts`, `pm2-facts.ts`, `process-facts.ts`,
 `service-facts.ts` and these unit-tested); checked by `tests/browser/processes-ui.spec.ts`,
 `tests/browser/pm2-application.spec.ts` and
@@ -740,8 +751,9 @@ tester run on the page and draw no working bar.
 
 **Docker** (`components/docker/`) is where the product's opinion about newcomers lives.
 
-- `explain.tsx` is the teaching layer — `Hint`, `Term` (a dotted underline, definition one hover away),
-  `Field`, `GLOSSARY` — written for somebody who has never run a container and phrased around the decision
+- `explain.tsx` is the teaching layer — `GLOSSARY` and `Definition` (a dotted term or a `?` on the
+  shared `Explain` toggletip, which a tap opens); the note under a field is `FormNote` and the field is
+  `Field` (`components/form.tsx`) — written for somebody who has never run a container and phrased around the decision
   rather than the mechanism. The rule it enforces is that **explanation is quiet**: a form that shouts
   every caveat is as unusable as one that explains nothing.
 - Docker has no standalone create flow. Containers are deployed from `/deploy/new`, which owns images,
@@ -922,8 +934,8 @@ that does something.
   runs, and its ports and networks as tables. From `xl` the Containers table stands beside the page
   as a rail (`container-rail.tsx`: the table's search, chips and order from its session keys, Alt+↑
   and Alt+↓ to walk it with the view carried), and a stack's page keeps the Stacks list the same
-  way (`stack-rail.tsx`); the column the five Docker item pages share is `item-rail.tsx`
-  (`DockerRail`, `DockerRailRow`), and each `*-rail.tsx` is its row and its list;
+  way (`stack-rail.tsx`); the column every detail page shares is `Rail` (`components/rail.tsx`), and each
+  `*-rail.tsx` is its row and its list;
   `beside-rail.ts` says where the two pages' blocks go side by side now that
   the rail takes its width. The tables are `container-tables.tsx`, which also draws the
   Environment tab: each name's namespace in its lane hue, each value in its kind's code hue, and

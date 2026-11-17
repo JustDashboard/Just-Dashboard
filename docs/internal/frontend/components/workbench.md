@@ -7,8 +7,9 @@ between them, the page's keys and place, the terminal, the editor and the canvas
 (`phone-panes.tsx`); `ResizeHandle` (`resize-handle.tsx`); `Workspace`, `WorkspaceHelp`,
 `useWorkspaceFocus` (`components/workspace/`); `XtermPane` (`xterm-pane.tsx`); `CodeEditor`
 (`code-editor.tsx`); `CANVAS_MOVE`, `zoomKey`, `zoomAbout`, `useCanvasPinch` (`canvas-move.ts`);
-`useIsPhone`, `useMediaQuery` (`hooks/use-mobile.ts`); `WorkbenchHeader` (`workbench-header.tsx`).
-Coming in 0.9.0: `CanvasZoom` and `useFullscreen` (WP-15), `Page fill="workspace"` (WP-09).
+`useIsPhone`, `useMediaQuery` (`hooks/use-mobile.ts`); `WorkbenchHeader` (`workbench-header.tsx`);
+`CanvasZoom` (`canvas-zoom.tsx`) and `useFullscreen` (`hooks/use-fullscreen.ts`). The page frame
+is `Page fill="workspace"` (`components/page.tsx`).
 
 **Register.** A workbench is a page the reader works in for minutes (the terminal, Files, Git, a
 database's Data and Query, the boards, the map), not one they read. Its recipe is
@@ -103,7 +104,11 @@ double-click resets. `side` says which side of the handle the column is on.
 palette's *This page* group, Ctrl/Cmd+F to the page's search, F5 and Ctrl/Cmd+R to refresh its
 reads, arrows, Home/End and typing to move between rows, Enter to open, `?` for help
 (`WorkspaceHelp`), and the row and scroll it returns to. Editors and portalled controls own their
-own keys. The rules are in [`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md).
+own keys. `WorkspaceHelp` is the `?` cap. On a page with a way back it ends the back line
+(`PageContext actions`, or `FlowHeader actions` on a flow); on a page with none it ends the
+identity line, after the `⋯`, and never has a row to itself
+([`page-header.md`](page-header.md#the-identity-lines-rules)). It is not drawn on a coarse pointer. Its sheet lists the keys
+with `ShortcutList` and ends with the single-key switch (`SingleKeySwitch`). The rules are in [`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md).
 
 ## XtermPane and CodeEditor
 

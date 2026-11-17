@@ -28,8 +28,9 @@ a list and a page a group: `/network/egress` opens on an identity line (how many
 are used, how many carry traffic, how many switch on their own, members proven) over one card a
 group (its carrying member as the state, how it switches, its verbs in a menu), and
 `/network/egress/[name]` is the group: the carrying member as its state, **Run simulation** as the
-command, a `WireFlow` picture of the selected traffic, the group and its members (the carrying wire
-moves, a failed member is dashed), then views in the address (`?tab=`): Members (state, round trip,
+command, then views in the address (`?tab=`) directly under the line: Members, which opens on a
+`WireFlow` picture of the selected traffic, the group and its members (the carrying wire moves, a
+failed member is dashed), then its measuring cadence as a line and the members' table (state, round trip,
 loss and a strip of recent samples a member, the rules' current advice, readiness, what each member
 is bound to and how the group decides), Decisions (a timeline whose evidence opens on the routes
 before and after, the measurements and the connections moved, pinned and flushed) and Simulation
@@ -41,7 +42,7 @@ Address planning joins held reservations with fresh overlap coverage and native 
 handoffs; External checks retain scoped signed source evidence; Socket history defaults off and
 separates native TCP deltas from explicitly reviewed kernel TCP/UDP payload subtotals, retained
 ownership and coverage gaps. Traffic explicitly distinguishes download policing from owned IFB/CAKE
-SQM. It opens on the uplink's identity line (what it carries in words, the newest reading's age as
+SQM. It opens on its identity line, titled Traffic, with the uplink as a fact (what it carries in words, the newest reading's age as
 its state, whether history is kept) over four views in the address (`?tab=`: Bandwidth, Budgets,
 Shaping, and the eBPF programs, each of which is a page, `/network/traffic/ebpf/[id]`, with the
 list as a rail). Uplink packets and TCP's resent share and round trip are two reading lines, the
@@ -145,10 +146,10 @@ none has a `StatGrid`:
   is one line and the chosen one is read out under the table; the totals of the rows shown are the
   table's foot, native counters and kernel payload apart; the day's twenty-four hours are a strip
   that reads one hour on a fixed line. Sampling policy is a sheet, Erase is in the menu, and the
-  kernel observer keeps its own reviewed activation. Under the picture it is three views in the
-  address (`?tab=`, `flows/views.ts`): the day's socket hours with its recorded hours (the default),
-  the kernel observer, and the latest sample with the measurement boundaries. A node of the picture
-  opens the view it stands for.
+  kernel observer keeps its own reviewed activation. Directly under the line it is three views in the
+  address (`?tab=`, `flows/views.ts`), and the picture opens each: the day's socket hours with its
+  recorded hours (the default), the kernel observer, and the latest sample with the measurement
+  boundaries. A node of the picture opens the view it stands for.
 
 Every reading these pages gave as "Unknown" is still given as "Unknown": a check that expired or was
 cancelled measured nothing, a UDP row has no byte counters, and an hour with no block was not sampled.
@@ -216,7 +217,8 @@ the complete native credential and selected custom CA again. A connected engine 
 `/network/dns/services/<id>` (`components/network/dns/engine-page.tsx`, `engine-rail.tsx`,
 `engine-views.ts`): the engine as the product it is on the identity line, Review a change as its
 command, updating the connection and disconnecting it in the menu, and its views in the address
-(`?tab=`): Overview (owner, runtime, listeners, upstreams, limitations), Clients (access, client
+(`?tab=`): Overview (owner and transport as lines, each reading's basis behind a tip; listeners;
+upstreams; limitations), Clients (access, client
 settings, native views, named networks/translations, filtering groups), Records (authoritative zones,
 local overrides), Queries (the bounded native history), Filters, DHCP and Changes. Each keeps its
 native evidence basis and unknowns. A retained native change's review is part of Changes
@@ -340,9 +342,10 @@ service state. The pages that moved keep their behaviour:
 
 - **Firewall** (`/network/firewall`): the page opens on its inbound path as a picture (`firewall-picture.tsx`, reading the
   rules through `firewall-reading.ts`): each port the rules admit, drawn as the product that answers
-  there with who may reach it, and the default for everything else. The rules are the working
-  column, and the defaults are one settings section under them, staged and saved by the page's save
-  bar (0.8.7). Each row carries its
+  there with who may reach it, and the default for everything else. The firewall turns on and off
+  from the line's `⋯` menu (Enable or Disable), and the shortcuts' `?` ends the line after the
+  `⋯`. The rules are the working column, and the defaults are one settings section under them at
+  the page's width, staged and saved by the page's save bar (0.8.7). Each row carries its
   action in a `--tag-*` hue down its edge and groups its destination service, port and comment;
   actions stay visible, and the table ends on the default as a row of its own. The rule dialog groups policy, destination and source, using source choice cards
   (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
@@ -354,15 +357,18 @@ service state. The pages that moved keep their behaviour:
 - **Connections** (`/network/connections`): opens on its identity line — the sockets, the remote
   addresses and how many are from the internet — and a picture of who is connected
   (`connections/picture.tsx`, on `WireFlow`: the callers by network, this server with what listens and
-  what never left the machine, the programs they reached). The three places are always drawn, a quiet
-  one with a still dashed wire; each node carries every read since the page opened as its trend; the
-  internet is the list's "From the internet" chip and a program narrows the list to its callers. Four
+  what never left the machine, the programs they reached), which opens the Live view. "Live" and
+  "A past hour" are a `ViewTabs` strip directly under the line (`?when=recorded`, `?hour=`). The
+  three places are always drawn, a quiet
+  one with a still dashed wire; each node carries every read since the page opened as its trend;
+  "Everything" and "From the internet" are filter chips with counts beside the search, and a
+  program narrows the list to its callers. Four
   tiles stood over the picture until 0.8.7, every figure of theirs already on the page. Under it each
   address is a one-line card of one height (`connections/rows.tsx`): its network's mark, the address
   over the network, the program it reached as that product with its ports, sockets and active ones as
   figures in columns of their own, and its verbs — the block among them — in the `⋯` menu. The footer
-  says what the read could not see (time since the last read, closes noticed, unconnected UDP). "Live"
-  and "A past hour" are the section's tab strip (`?when=recorded`, `?hour=`); the past hour reads the
+  is a count of the addresses shown, and what the read could not see (time since the last read,
+  closes noticed, unconnected UDP) is behind its tip, "What this read cannot see". The past hour reads the
   socket history for a chosen UTC hour in the same cards (`connections/recorded.tsx`), and with the
   history off it offers the page that turns it on.
   **An address is a page of its own** (`/network/connections/[address]`, `connections/address-page.tsx`),

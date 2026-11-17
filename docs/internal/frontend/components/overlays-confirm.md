@@ -69,7 +69,9 @@ A sheet is a column the height of the window, so each of its steps is the wider 
   press outside it is not an answer (Cancel, the cross and Escape are), and its sentence is drawn in
   the body through `ModalDescription`, which is the dialog's accessible description.
 - **Focus.** It opens on its first field, and on close the keyboard goes back to what opened it
-  (`useFocusReturn`), trigger or not.
+  (`useFocusReturn`), trigger or not. A page that removes the opener with the dialog's own act (a
+  key's Delete) also runs `useFocusTrail`, which acts only when nothing holds the keyboard after
+  the dialog leaves.
 - **The phone.** The box is the window less a 1rem gutter, capped at the window's height, and the
   body scrolls inside the frame, so the footer's buttons are always reachable.
 

@@ -27,18 +27,28 @@ a wire. `animate-pulse` is a skeleton's and nothing else's.
 **Reduced motion and the pause.** One rule at the root of `globals.css` stops every animation and
 transition under `prefers-reduced-motion: reduce`, and the same rule applies under
 `:root[data-motion="paused"]` (T2, adopted 15 Nov 2026). That one attribute on `<html>` pauses
-every beam, breathe, sweep and shimmer for anyone, and the shell carries the control that sets it
-(WP-31). Components that animate in JavaScript read the same two answers. Tailwind's
-`motion-reduce:` and `motion-safe:` variants and motion's `useReducedMotion` answer only to the
-media query today; WP-31 makes them follow the attribute when it adds the control. `Sweep` owns the one
-reduced-motion face of an indeterminate bar once it lands: a still track in the faint ink.
+every beam, breathe, sweep and shimmer for anyone. The control is **Pause animations** in the
+account menu (`components/shell/motion-pause.ts`: `useMotionPaused`, `setMotionPaused`). It is kept
+per browser under `just-dashboard.motion` (`lib/themes.ts`), and the document's bootstrap script
+puts the attribute back before the first paint, so a paused page never starts moving. Everything
+that asks about reduced motion gets the same answer from it: Tailwind's `motion-reduce:` and
+`motion-safe:` are custom variants in `globals.css` that answer to the media query and to the
+attribute; a picture reads `useMotionHeld`; and the motion library's `useReducedMotion` is written
+from `motion-pause.ts` (paused, or the system setting). Like the system setting, a motion
+component already on screen keeps the answer it read when it mounted. Script that scrolls or
+animates asks `lib/motion.ts`: `reducedMotion()` is both answers,
+`scrollIntoViewRespectingMotion(el, { block, focus })` is the one way to scroll to a section, and
+`motionMs(ms)` is a canvas duration. An explicit `behavior: "smooth"` overrides the CSS rule, so
+it is never written by hand. `Sweep` owns the one reduced-motion face of an indeterminate bar: a
+still track in the faint ink.
 
 | Rule | Held by |
 | --- | --- |
 | Reduced motion is honoured globally. | spec `design-system.spec.ts` (*reduced motion is honoured globally*) |
 | A wire pulses as the browser's animation, and its page asks for no frames. | spec `design-system.spec.ts` (*a wire pulses …*) |
 | No hand-written `ease-[cubic-bezier(…)]` or `duration-[…]`. | convention; coming: WP-39 |
-| `data-motion="paused"` pauses what reduced motion pauses. | `globals.css` (the rule, beside the reduced-motion one); coming: the control (WP-31) |
+| `data-motion="paused"` pauses what reduced motion pauses, from before the first paint. | `globals.css` (the rule and the two variants); spec `shell-phone.spec.ts` (*Pause animations*); unit `components/shell/motion-pause.test.js` |
+| `behavior: "smooth"` only in `lib/motion.ts`. | unit `motion.test.js`; coming: WP-39 |
 
 ## 11. Motion says one of four things
 
@@ -108,7 +118,7 @@ above:
   the fleet's live and build-slot figures, the
   Overview's requests, the delivery insights, Automation's
   revisions awaiting review and alerts firing, the live usage tiles, the readings on
-  Packages, and every lens's readings (`ReadingTile`) — the logs
+  Packages, and every lens's readings (`LensReadingLine`) — the logs
   page's, a service page's and Security's alike. A figure that follows a
   draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
   count again on every keystroke; it rises once when it lands instead;
@@ -197,7 +207,7 @@ holds on a timer, which is an arrival made up — its real meaning is `useArriva
 needs shiki and next-themes, and there is no theme to switch (§1); a release comparison keeps its
 field list in the git hues, and a text diff is the file manager's `diff-view`. `file-tree` brings
 Radix's accordion and lucide into a product that already draws a file as what it is
-(`files/file-icon.tsx`). `terminal` types scripted lines that claim a liveness they do not have,
+(`components/file-icon.tsx`). `terminal` types scripted lines that claim a liveness they do not have,
 beside a real console. `animated-circular-progress-bar` stays out for the reason above, and every
 proportion in the section is already a figure and a `Meter`. `progressive-blur` is stacked
 `backdrop-filter`, which is glass (§15), where `.scroll-affordance` already says "more past here"
