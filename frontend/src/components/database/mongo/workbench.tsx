@@ -43,7 +43,6 @@ import {
 } from "@/components/database/mongo/use-mongo"
 import { useFocusTrail } from "@/hooks/use-focus-return"
 import {
-  OBJECT_HEAD,
   WORKBENCH_PAGE,
   WorkbenchFrame,
   WorkbenchSide,
@@ -382,22 +381,4 @@ export function MongoWorkbench({
       />
     </SectionFrame>
   )
-}
-
-/**
- * The strip at the top of a workbench's own column: the collection's name,
- * then the page's controls. On `ObjectHead`'s ground and height.
- *
- * @deprecated use `ObjectHead` (`workbench/chrome.tsx`), which draws the
- * collection's mark, name and kind itself and takes the views as a tablist.
- * `leading` is ignored: it was always nothing.
- */
-export function WorkbenchHead({
-  children,
-}: {
-  /** @deprecated ignored. */
-  leading?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return <div className={OBJECT_HEAD}>{children}</div>
 }

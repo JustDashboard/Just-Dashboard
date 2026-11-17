@@ -9,7 +9,6 @@ import { Stale } from "@/components/stale"
 import type { Verb } from "@/components/verbs"
 import type { SectionId } from "@/components/database/engine"
 import { ContainerPicker } from "@/components/database/kit/container-picker"
-import { NameMark } from "@/components/database/kit/marks"
 import {
   RAIL_ACTION,
   RailFind,
@@ -332,10 +331,3 @@ const EMPTY_DATABASE: MongoDatabase = {
   empty: true,
   statsKnown: true,
 }
-
-/**
- * A database's own colour, stable for its name, as a small square before it.
- *
- * @deprecated use `NameMark` from `database/kit/marks`.
- */
-export const DatabaseMark = NameMark

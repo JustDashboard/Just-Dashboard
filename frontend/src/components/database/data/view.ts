@@ -220,4 +220,4 @@ export function pageFacts(
  * @deprecated use `grouped` and `compactCount` from lib/format, which now hold
  * the count style every page writes (en-US grouping, a lower-case k).
  */
-export { compactCount, grouped } from "@/lib/format"
+export { grouped } from "@/lib/format"

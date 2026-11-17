@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Bug, DesktopDevice, Globe, Terminal, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes, clock, percent as formatPercent, plural } from "@/lib/format"
+import { bytes, clock, percent as formatPercent, plural, sharePercent } from "@/lib/format"
 import type { RequestEntry, RequestFacet, RequestSummary } from "@/lib/types"
 import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
 import { latencyWords } from "@/lib/latency-words"
@@ -11,7 +11,7 @@ import { latency, latencyTone, statusClass, type StatusClass } from "@/lib/reque
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { DimActions } from "@/components/icon-action"
 import { ProductGlyph } from "@/components/product-logo"
-import { RankList, SplitBar, percent } from "@/components/rank-list"
+import { RankList, SplitBar } from "@/components/rank-list"
 import { Fact, FactLine } from "@/components/fact-line"
 import { PanelHeader } from "@/components/panel"
 import { Notice } from "@/components/state"
@@ -372,7 +372,7 @@ export function TrafficFacets({
                   color: FAMILY_HUE[statusClass(Number(s.value))],
                 }))}
                 label={summary.statuses
-                  .map((s) => `${percent(ofTotal(s.count))} answered ${s.value}`)
+                  .map((s) => `${sharePercent(ofTotal(s.count))} answered ${s.value}`)
                   .join(", ")}
               />
             )}

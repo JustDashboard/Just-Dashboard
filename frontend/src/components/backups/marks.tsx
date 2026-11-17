@@ -181,9 +181,6 @@ export function ResourceMark({
   return <ProjectMarkOf projectId={project} size="sm" fallback={tile} />
 }
 
-/** @deprecated use `DashboardMark` from `components/logo`. */
-export { DashboardMark }
-
 /**
  * Where a job's archives go, where that is a product: Backblaze as itself, and
  * an S3 bucket as the provider its endpoint names. S3 is a protocol a dozen

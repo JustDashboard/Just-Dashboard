@@ -151,9 +151,6 @@ export function RankSkeleton({ rows = 5, className }: { rows?: number; className
   )
 }
 
-/** @deprecated import `sharePercent` from `@/lib/format` */
-export const percent = sharePercent
-
 export type SplitPart = {
   key: string
   count: number

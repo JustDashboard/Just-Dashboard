@@ -16,7 +16,6 @@ import type {
   TLSScan,
 } from "@/lib/proxy/types-tls"
 import { targetLabel, tlsReportHref } from "@/lib/scan-target"
-import { timeLeftWords } from "@/lib/certificates"
 
 const PLAIN_ERRORS: Record<NonNullable<HTTPScan["plainErrorKind"]>, string> = {
   refused: "port 80 refused the connection",
@@ -215,20 +214,6 @@ export function termText(scan: Pick<TLSScan, "lifetimeHours" | "renewalWindowHou
   return window
     ? `${span(term, term)}, renewal due in the last ${span(window, term)}`
     : span(term, term)
-}
-
-/**
- * The figure for how long a certificate has left: whole days, as the
- * Certificates page counts them, and hours for its last two days, which "1d"
- * and "0d" would hide.
- *
- * @deprecated use `timeLeftWords(cert, { form: "short", now })` from lib/certificates.
- */
-export function certificateLeft(
-  cert: { notAfter?: string; daysLeft: number },
-  now: number,
-): string {
-  return timeLeftWords(cert, { form: "short", now })
 }
 
 /** The share of a certificate's term still to run, 0–100, for the meter under the figure. */

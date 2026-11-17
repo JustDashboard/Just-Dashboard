@@ -1,4 +1,3 @@
-import { ago } from "@/lib/format"
 import type { Tone } from "@/components/tone"
 import type { DotTone } from "@/components/status-dot"
 import type { ProxyConfigEntry, ProxyEffectiveConfig, ProxyPlacedDirective } from "@/lib/types"
@@ -306,15 +305,6 @@ export function diffStat(diff: string): { added: number; removed: number } {
     else if (line.startsWith("-")) removed++
   }
   return { added, removed }
-}
-
-/**
- * "read 12s ago": lib/format's `ago`, in its largest unit.
- *
- * @deprecated use `<Ago at verb="read" />` (components/ago), or `ago` for the words.
- */
-export function readLabel(at: number, now: number): string {
-  return `read ${ago(at, now)}`
 }
 
 /** The main file's place in the include map: the root every lane starts from. */
