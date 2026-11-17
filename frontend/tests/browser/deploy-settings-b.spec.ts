@@ -1519,7 +1519,7 @@ test.describe("Automation", () => {
       sheet.getByRole("group", { name: "Provider" }).getByRole("button", { name: /^GitHub/ }),
     ).toHaveAttribute("aria-pressed", "true")
     await sheet.getByRole("textbox", { name: "Name" }).fill("Deploy hook")
-    await sheet.getByRole("textbox", { name: "Repository" }).fill("Wayy01/storefront")
+    await sheet.getByRole("textbox", { name: "Repository" }).fill("operator/storefront")
     await sheet.getByRole("textbox", { name: "Branch" }).fill("main")
     await sheet.getByRole("button", { name: "Add webhook" }).click()
 
@@ -1645,8 +1645,8 @@ test.describe("Automation", () => {
       triggerId: 31,
       providerRef: "43",
       revision: "deadbeefcafefeed0000",
-      repository: "Wayy01/storefront",
-      headRepository: "Wayy01/storefront",
+      repository: "operator/storefront",
+      headRepository: "operator/storefront",
       author: "octocat",
       state: "pending",
       configured: false,
@@ -1758,7 +1758,7 @@ test.describe("Automation", () => {
       name: "Deploy hook",
       kind: "github",
       provider: "github",
-      config: { repository: "Wayy01/storefront", ref: "main" },
+      config: { repository: "operator/storefront", ref: "main" },
       hookId: "provider-hook",
       enabled: true,
       lastStatus: "accepted",
@@ -1841,8 +1841,8 @@ test.describe("Automation", () => {
       triggerId: 31,
       providerRef: "43",
       revision: "deadbeefcafefeed0000",
-      repository: "Wayy01/storefront",
-      headRepository: "Wayy01/storefront",
+      repository: "operator/storefront",
+      headRepository: "operator/storefront",
       author: "octocat",
       state: "pending",
       configured: false,

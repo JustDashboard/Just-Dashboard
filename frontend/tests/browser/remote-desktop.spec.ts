@@ -57,7 +57,7 @@ test("the overview draws the computers as the picture and one-line rows, without
   await expect(rows).toHaveCount(4)
   const office = rows.filter({ hasText: "office-pc" })
   await expect(office.getByRole("img", { name: "Windows" })).toBeVisible()
-  await expect(office).toContainText("Remote Desktop · wayy@office-pc:3389")
+  await expect(office).toContainText("Remote Desktop · operator@office-pc:3389")
   await expect(office.locator("[data-slot=computer-state]")).toHaveAttribute("data-state", "live")
   // The fixture's clock is read when its worker starts, so "ten minutes ago"
   // is older by however long the worker has run.
@@ -333,7 +333,7 @@ test("adding a tailnet PC says where Remote Desktop is, waits for the port and s
   await page.getByRole("radio", { name: "Pro or Enterprise" }).click()
   await page.getByRole("button", { name: "Continue" }).click()
 
-  await page.getByLabel("Username").fill("wayy@outlook.com")
+  await page.getByLabel("Username").fill("operator@outlook.com")
   await page.getByLabel("Password").fill("correct horse")
   await page.getByRole("button", { name: "Save and connect" }).click()
   await expect(page).toHaveURL(/\/remote-desktop\/0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e$/)
@@ -344,7 +344,7 @@ test("adding a tailnet PC says where Remote Desktop is, waits for the port and s
       host: "workshop-pc",
       protocol: "rdp",
       port: 3389,
-      username: "wayy@outlook.com",
+      username: "operator@outlook.com",
       domain: "",
       password: "correct horse",
       security: "",

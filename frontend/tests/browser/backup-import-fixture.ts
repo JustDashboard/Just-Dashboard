@@ -59,7 +59,7 @@ export function catalogue({ keyHeld = false, imported = false } = {}) {
     },
   )
   return {
-    destination: "wayy-backups/db",
+    destination: "operator-backups/db",
     archives: 4,
     ours: 12,
     origins: [
@@ -117,7 +117,7 @@ const importedJob = {
   excludes: [],
   targetKind: "b2",
   // Where it was imported from: the same place job 2 writes, read with its keys.
-  target: { bucket: "wayy-backups", prefix: "db/" },
+  target: { bucket: "operator-backups", prefix: "db/" },
   schedule: "",
   retention: 0,
   retentionDays: 0,
@@ -137,7 +137,7 @@ const importedRun = (id: number, runId: number, ago: number) => ({
   status: "success",
   artifact: `db/App-files-job3-run${runId}-x.tar.gz`,
   sizeBytes: 412_000_000,
-  log: `imported from wayy-backups/db\noriginally run ${runId} of job "App files" on old-vps\nproved the archive against its manifest`,
+  log: `imported from operator-backups/db\noriginally run ${runId} of job "App files" on old-vps\nproved the archive against its manifest`,
   trigger: "import",
   imported: true,
   manifest: {
@@ -194,7 +194,7 @@ export async function mockImport(page: Page) {
       state.importBodies.push(route.request().postDataJSON())
       state.imported = true
       return json(route, {
-        destination: "wayy-backups/db",
+        destination: "operator-backups/db",
         jobs: [importedJob],
         runs: importedRuns,
         skipped: [],

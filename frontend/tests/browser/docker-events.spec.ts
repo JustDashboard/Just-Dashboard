@@ -53,7 +53,7 @@ test("the containers table reads each container's state, failures and who", asyn
     row("uptime-kuma").getByRole("button", { name: "Where this event came from" }),
   ).toHaveText("External")
   // The polled copy, laid against the audit log, wins over the socket's.
-  await expect(row("shop-api-1").getByText("wayy")).toBeVisible()
+  await expect(row("shop-api-1").getByText("operator")).toBeVisible()
   // A container Docker still lists is a link to its own page.
   await expect(row("shop-api-1").getByRole("link", { name: /shop-api-1/ })).toHaveAttribute(
     "href",

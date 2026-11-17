@@ -100,7 +100,7 @@ const update = {
   check: {
     enabled: true,
     checkedAt: earlier,
-    repo: "wayy/just-dashboard",
+    repo: "operator/just-dashboard",
     ref: "main",
     tagsOnly: true,
   },

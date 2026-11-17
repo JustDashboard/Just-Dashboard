@@ -124,7 +124,7 @@ test("the picture draws each kind by its products and each destination as its se
 
   const goes = picture(page, "Where the archives go")
   await expect(goes).toContainText("Backblaze B2")
-  await expect(goes).toContainText("wayy-backups")
+  await expect(goes).toContainText("operator-backups")
   await expect(goes).toContainText("This server's disk")
   // An S3 job with no endpoint is Amazon's, because that is where it writes.
   await expect(goes).toContainText("Amazon S3")
@@ -556,14 +556,14 @@ test("a job's page opens on its identity, its picture and the run it last took",
   await expect(page.getByRole("heading", { name: "Databases nightly" })).toBeAttached()
   const identity = page.locator("[data-slot=host-identity]")
   await expect(identity).toContainText("2 database dumps")
-  await expect(identity).toContainText("Backblaze B2 · wayy-backups")
+  await expect(identity).toContainText("Backblaze B2 · operator-backups")
   await expect(identity).toContainText("failed")
 
   const takes = picture(page, "What Databases nightly takes")
   await expect(takes).toContainText("LOL")
   await expect(takes).toContainText("Main")
   await expect(takes.locator('img[src="/logos/postgresql.svg"]')).toHaveCount(2)
-  await expect(picture(page, "Where its archives go")).toContainText("wayy-backups")
+  await expect(picture(page, "Where its archives go")).toContainText("operator-backups")
 
   // What it holds is one sentence with its trend, not four tiles. How the
   // last run went is the identity line's end, and when it runs next is the

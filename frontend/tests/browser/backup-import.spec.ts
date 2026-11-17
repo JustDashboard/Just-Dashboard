@@ -31,10 +31,10 @@ test("a fresh server reads a destination's catalogue, grouped by server and job,
   await expect(dialog).toBeVisible()
   // This server's own destinations are the choices, a bucket's prefix apart.
   await expect(
-    dialog.getByRole("button", { name: "Read Backblaze B2 wayy-backups/db" }),
+    dialog.getByRole("button", { name: "Read Backblaze B2 operator-backups/db" }),
   ).toBeVisible()
   await expect(dialog.getByRole("button", { name: "Read Amazon S3 offsite" })).toBeVisible()
-  await dialog.getByRole("button", { name: "Read Backblaze B2 wayy-backups/db" }).click()
+  await dialog.getByRole("button", { name: "Read Backblaze B2 operator-backups/db" }).click()
 
   const view = dialog.getByTestId("backup-catalogue")
   await expect(view).toContainText(
@@ -79,7 +79,7 @@ test("a sealed archive names the key it needs, and imports once that key is brou
   await page.goto("/backups")
   await openImport(page)
   const dialog = importDialog(page)
-  await dialog.getByRole("button", { name: "Read Backblaze B2 wayy-backups/db" }).click()
+  await dialog.getByRole("button", { name: "Read Backblaze B2 operator-backups/db" }).click()
   const view = dialog.getByTestId("backup-catalogue")
   await view.getByRole("button", { name: "Import a key…" }).click()
   await expect(view).toContainText(OLD_KEY)
