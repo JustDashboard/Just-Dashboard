@@ -112,7 +112,7 @@ One mark, one model. The strips that looked like tabs once had four.
 | A dialog or a sheet | `dialog`; `alertdialog` for a question | focus trapped inside, Escape closes, focus returns to what opened it | `Modal`, `SidePanel`, `ConfirmDialog` |
 | An explanation | a button; `tooltip` on hover or focus, `dialog` when pinned | focus opens it, Enter or Space pins it, Escape closes | `Explain` |
 | A side column's edge | `separator` with a value | arrows nudge, Home resets | `ResizeHandle` |
-| A canvas | the library's own, plus the page's keys | arrows pan and move a selected thing (T10); zoom is buttons too | `CanvasZoom`, `CANVAS_MOVE` |
+| A canvas | the library's own, plus the page's keys | arrows slide it; Enter picks the box or frame the focus ring is on, and the arrows then move it (T10); zoom is buttons too | `CanvasZoom`, `CANVAS_MOVE` |
 | A terminal, an editor | theirs | they own their keys; Escape leaves where the page says so; a terminal has a screen reader mode | `XtermPane`, `CodeEditor` |
 
 - **Single keys can be turned off** (2.1.4). One-character shortcuts (`?`, `n`, a name's first
@@ -120,7 +120,9 @@ One mark, one model. The strips that looked like tabs once had four.
   help sheet). Chords with Ctrl, ⌘ or Alt, and a list's letters while focus is in the list, keep
   working. Page keys go through `useShortcuts`, which skips them while the reader types or a
   dialog or menu owns the keyboard.
-- **Focus is always visible, and one ring draws it** (`focus-ring`). Selection never borrows the
+- **Focus is always visible, and one ring draws it** (`focus-ring`). On a canvas the ring is drawn
+  on the box or frame itself (`globals.css`, `[data-slot="server-map"] .react-flow__node:focus-visible`),
+  so a keyboard reader sees what Enter would pick. Selection never borrows the
   ring's colour, and hover, selection and focus are three different marks
   ([`../foundations/states.md`](../foundations/states.md)).
 - **Focus goes somewhere on purpose.** A dialog returns it to its opener; a removed row hands it to
@@ -170,7 +172,7 @@ stays while the pointer moves onto it (1.4.13), and Escape closes it.
 | `tests/browser/touch-targets.spec.ts`, `touch-targets-pages.spec.ts` | press boxes, and that none is cut or leaves its scroller |
 | `tests/browser/design-system.spec.ts` | the inks' contrast, hover, selection and focus as three marks, row actions without a pointer, reduced motion, one register a page, a settings page's heading levels |
 | unit tests of the components | `SortHead`'s `aria-sort`, `PaneBar`'s roles, the single-key guard (`lib/keys`) |
-| the axe gate, which arrives with this release's browser gates | no serious or critical violation on the fixture routes |
+| `tests/browser/axe-gate.spec.ts` | no serious or critical axe violation on every fixture route, at 1440 and on a touch phone, less the routes its `KNOWN` lists with their finding. Its rule set is axe's defaults with AAA contrast and 2.5.8 target size off: target size is held as the 44px press box by the touch-target specs. A route fixed while still in `KNOWN` fails until its line comes out. |
 
 What no check sees is review: whether a name says what the control does, whether a change is worth
 announcing, and whether the order a keyboard meets things in is the order they are read in.

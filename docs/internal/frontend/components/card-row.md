@@ -29,7 +29,11 @@ pull requests, a drawing with its preview.
 - `leading`: the thing drawn as itself (`ProductLogo size="sm"`, a `ProjectMark`, a `KindTile`, an
   avatar).
 - `title` with `verb`: the title is the `<button>` (or the `Link` with `href`) and `verb` is its
-  accessible name, "Edit api-production" (§12).
+  accessible name, "Edit api-production" (§12). The verb holds every word the title shows (WCAG
+  2.5.3, label in name; `axe-gate.spec.ts` reads it): "Open ens3" over a title that reads "ens3"
+  passes, and the same verb over "ens3 Ethernet" fails, because a voice user says what they see. A
+  word that says more about the thing (its kind as a `Tag`, its stack, its protocol) goes in
+  `description` or `trailing`, outside the control, or into the verb as well.
 - `description`: one line under the title; `columns` sets them side by side for a list read down its
   columns.
 - `trailing`: readings and inline controls (a `Status`, a meter, a `Switch`), then the arrow, then

@@ -201,9 +201,9 @@ shape while it loads and nothing under the line moves when the words land (D11).
   it fits.
 - `tests/browser/deploy-header.spec.ts`, `deploy-run.spec.ts`, `network-vpn-page.spec.ts`,
   `network-device-page.spec.ts`, `account-ui.spec.ts`: the headers as pages draw them.
-- `tests/browser/design-system.spec.ts` gains the identity line's rules with this release's browser
-  gates: no destructive verb in the brand face, and on a phone a command that is its icon with a
-  name.
+- `tests/browser/design-system.spec.ts` (*… keeps the identity line's rules*, at 1440 and on a touch
+  phone): no destructive verb in the brand face, and on a phone a command that is its icon with a
+  name. `tests/browser/axe-gate.spec.ts` reads every route's header with the rest of the page.
 - WP-39 adds the lint rules that ban `HostIdentity`, `HostFact`, `FactDot` and string eyebrows.
 
 ## Related

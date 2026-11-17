@@ -78,6 +78,7 @@ export default function ThingsPage() {
         ) : (
           <ChoiceList>
             {shown.map((thing, index) => (
+              {/* The verb holds every word the title shows (label in name, A11Y-05). */}
               <ChoiceRow key={thing.id} index={index} href={`/things/${thing.id}`} verb={`Open ${thing.name}`}
                 workspaceItem={{ id: thing.id, name: thing.name }} leading={<ThingMark thing={thing} />}
                 title={thing.name} description={thing.address} trailing={<ThingState thing={thing} />} />

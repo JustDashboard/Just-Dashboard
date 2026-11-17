@@ -130,6 +130,12 @@ takes Safari's pinch, so the map and a database's Diagram answer one gesture the
   the real size, Shift+1 fits every system and Shift+2 what is chosen. The zoom buttons show the
   percentage, which goes back to 100% when pressed. A database's Diagram has the three zoom keys
   too (`zoomKey`), heard like its other keys only while the keyboard is in the diagram.
+- **Arrows**, while the keyboard is on the canvas (a click on open ground, or Tab): they slide it 48px,
+  240 with Shift, never past where 48px of the picture is left on screen, and the place is kept as a
+  slide by the pointer is. A box or a system's frame reached by Tab shows the focus ring and is not
+  picked: the arrows go on sliding until Enter picks it, as on a database's Diagram. A chosen box, or a
+  frame Enter picked, moves 8px, 40 with Shift, saved as a drag is. Escape lets it go and leaves the
+  keyboard on the canvas (`components/canvas-move.ts`).
 - **Nothing changes size but by the zoom.** Every word, box and line is drawn once at its own size and
   the zoom scales the picture; from far out the boxes and their names are smaller, never re-lettered,
   faded or swapped for a title.
@@ -151,7 +157,8 @@ sits in the zoom controls and appears only once something has been moved.
 ## What is on the canvas
 
 Nothing runs over the canvas: no toolbar, no search, no minimap. On a desk the rail starts at the top
-of the frame, the zoom controls float at the bottom left (with *Fit*, *All* and *Tidy up*), and the
+of the frame, under the map's mark and its name (`MapBoard.rail.head`, which the databases map
+shares, so both maps' rails are headed level with the inspector's head), the zoom controls float at the bottom left (with *Fit*, *All* and *Tidy up*), and the
 inspector's toggle and full screen float at the top right. A failed save still says so in a toast.
 
 Below `lg` (1024 px) the map is the canvas alone, edge to edge, with no rail, inspector, zoom controls
@@ -203,7 +210,7 @@ asks for it; `/map` does not.
   the fold. They were one pill per kind over the canvas, each with the daemon's whole error. The
   databases map (`MapBoard.unread` unset) keeps a line per kind over its canvas.
 - **Keys**: `f` fit the system being read (or every system), `i` the inspector, Enter
-  opens the chosen box's page, Escape lets it go; the zoom keys are under *Moving it*.
+  picks the box the keyboard is on and opens a chosen box's page, Shift makes an arrow's step longer, Escape lets it go; the zoom keys are under *Moving it*.
 
 ## What keeps it light
 
@@ -332,7 +339,9 @@ could not be read said over the canvas; both failing is the page's error state.
 Below `lg` it is one pane at a time, *Databases*, *Map* and *Inspector*, picked from a bar at the
 foot. A database picked from the rail is shown on the canvas, and so is a link or a kind picked in
 the inspector; the canvas stays drawn under the other two, so it is where it was left. Like the
-server map's, a phone's view keeps nothing against the account.
+server map's, a phone's view keeps nothing against the account, and it arrives by the server map's
+phone rule: open at a readable size and slid to explore, never fitted to the phone's width (17 Nov,
+PGB-13: one rule for both maps, so `MapBoard` has no arrival option).
 
 What differs from `/map` is a `MapBoard` (`components/map/board.ts`): the rail grouped by engine and
 named *Databases*, a diagram summed up as what it feeds, the sessions open and where it runs, and the
@@ -375,7 +384,8 @@ center's own copy of that picture went at the same time.
   canvas; no bar or minimap over the desk's canvas, and its two floating buttons; a phone's bare map,
   its one *Open* button and a finger sliding the canvas across a box; a drag saved by node id, kept across a reload and
   tidied away; a version-1 arrangement read as fresh; every word the same size far out; a trackpad's
-  slide, its pinch and the zoom keys; a mouse sliding the canvas from inside a frame; a system carried
+  slide, its pinch and the zoom keys; a mouse sliding the canvas from inside a frame; the arrows sliding the canvas, moving a chosen box
+  and a frame Enter picked (with its focus ring), and doing nothing from elsewhere on the page; a system carried
   by its head with everything in it, not taken for a click, kept across a reload and tidied away; no
   box's words running out of it with every name and state stretched; thirty checkouts nothing claims
   drawn in rows inside their frame, none over another; a fresh server's offer to deploy with

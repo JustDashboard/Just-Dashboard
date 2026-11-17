@@ -124,7 +124,8 @@ Every canvas moves as a whiteboard (Excalidraw) does: two fingers on a trackpad 
 zooms about the fingers, a mouse drags it by open ground or its middle button, Ctrl or ⌘ with the
 wheel zooms, Space held makes any drag a slide, and nothing on it changes size but by the zoom. Each
 `<ReactFlow>` spreads `CANVAS_MOVE` and calls `useCanvasPinch`; `canvas-move.test.js` fails for one
-that does neither. Arrow keys pan and move on the map, the ER diagram and the boards (T10, WP-44).
+that does neither. Arrow keys slide the map, the ER diagram and the boards, and move what Enter picked (T10; the
+row in [`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md)).
 
 ## Related
 
