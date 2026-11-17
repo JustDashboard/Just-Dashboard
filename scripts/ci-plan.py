@@ -31,8 +31,19 @@ differ is said below.
     request, as that script does; the merge's run follows it to all of them.
     A public asset is followed from the modules that name it. The UI docs
     (`docs/internal/frontend/`) run the unit tests, one of which holds them
-    to the code. A pull request deals its specs into smaller jobs, which
-    finish sooner.
+    to the code.
+  - Browser jobs: the specs are dealt into jobs by what each runs, read from
+    its source: a test written once in a loop counts once for each item of
+    the loop's list, and a test that an unset environment variable switches
+    off (the screenshot tests) counts for nothing. A spec whose source does
+    not say, or whose tests cost more than most, says so itself in a comment
+    on a line of its own:
+
+        // ci-plan: 190 tests
+        // ci-plan: each weighs 2.5
+        // ci-plan: 190 tests, each weighs 2.5
+
+    A pull request deals its specs into smaller jobs, which finish sooner.
   - Live Docker fixtures: when one of the six deployment packages changed
     itself (they are the packages of the race gate), those of the packages
     being checked — in a pull request, those of the packages that import the
@@ -155,6 +166,21 @@ SHELL = {DESIGN_SYSTEM, SPECS + "navigation.spec.ts"}
 # A module of one section that the shell reads as well keeps that section's
 # specs beside those two: its own pages are what it breaks first.
 HOME_SECTIONS = {"frontend/src/components/database/": "databases"}
+
+# A spec is weighed by reading it, since the job that plans has no Bun and no
+# Playwright to list its tests with. What is not code in one: a comment, a
+# string, a template, a pattern.
+QUIET = re.compile(r"""//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`|/""", re.S)
+PATTERN = re.compile(r"/(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n\[])+/[a-z]*")
+PATTERN_AFTER = ("", "(", ",", "=", ":", "[", "!", "&", "|", "?", "{", "}", ";", "+", "-", "*", "%", "<", ">", "~", "^")
+PATTERN_AFTER_WORD = re.compile(r"\b(return|typeof|case|of|in)\s*$")
+TEMPLATE = re.compile(r"\\.|`|\$\{", re.S)
+TEMPLATE_CODE = re.compile(r"""//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|[`{}]""", re.S)
+NAME = re.compile(r"[A-Za-z_$][\w$]*")
+# What a spec says of itself on a line of its own: how many tests it runs,
+# where a loop's list is not in its source, and how many ordinary tests one of
+# its own costs.
+SAID = re.compile(r"^[ \t]*//[ \t]*ci-plan:[ \t]*(?:(\d+) tests?)?[, \t]*(?:each weighs (\d+(?:\.\d+)?))?[ \t]*$", re.M)
 
 TESTS_PER_SHARD = 200
 # Smaller in a pull request, which somebody waits on: a job's setup is about a
@@ -342,19 +368,275 @@ def browser_specs(root, imports, changed, pull_request=False):
     return specs & every
 
 
+def blanked(text):
+    """A spec's source with its comments, strings and patterns blanked, everything else where it was."""
+    out, at, last = [], 0, ""
+    while True:
+        found = QUIET.search(text, at)
+        if not found:
+            break
+        start, end, token = found.start(), found.end(), found.group()
+        out.append(text[at:start])
+        last = text[at:start].rstrip()[-1:] or last
+        if token == "`":
+            end = template_end(text, end)
+        elif token == "/":
+            # A pattern where a value may begin, and a division anywhere else.
+            begins = last in PATTERN_AFTER or PATTERN_AFTER_WORD.search(text, max(0, start - 12), start)
+            pattern = PATTERN.match(text, start) if begins else None
+            if not pattern:
+                out.append(token)
+                at, last = end, token
+                continue
+            end = pattern.end()
+        hidden = text[start:end]
+        hidden = re.sub(r"[^\n]", " ", hidden) if "\n" in hidden else " " * len(hidden)
+        if token.startswith(("//", "/*")):
+            out.append(hidden)
+        else:
+            out.append('"' + hidden[1:-1] + '"')
+            last = '"'
+        at = end
+    out.append(text[at:])
+    return "".join(out)
+
+
+def template_end(text, at):
+    """Where the template string that opened just before `at` closes, past whatever its `${}` hold."""
+    while True:
+        found = TEMPLATE.search(text, at)
+        if not found:
+            return len(text)
+        at = found.end()
+        if found.group() == "`":
+            return at
+        depth = 1 if found.group() == "${" else 0
+        while depth:
+            inner = TEMPLATE_CODE.search(text, at)
+            if not inner:
+                return len(text)
+            at = inner.end()
+            if inner.group() == "`":
+                at = template_end(text, at)
+            elif inner.group() in ("{", "}"):
+                depth += 1 if inner.group() == "{" else -1
+
+
+def outermost(code, pattern):
+    """The matches of a pattern that no bracket of a piece of blanked source encloses."""
+    depth, found = 0, []
+    for match in re.finditer(r"[(\[{]|[)\]}]|" + pattern, code):
+        token = match.group()
+        if token in ("(", "[", "{"):
+            depth += 1
+        elif token in (")", "]", "}"):
+            depth -= 1
+        elif depth == 0:
+            found.append(match)
+    return found
+
+
+def pieces(code):
+    """What the commas no bracket encloses separate."""
+    cuts = [match.start() for match in outermost(code, ",")]
+    return [code[start:end].strip() for start, end in zip([0] + [cut + 1 for cut in cuts], cuts + [len(code)])]
+
+
+def last_bracket(code):
+    """Where the bracket that closes a piece of blanked source at its last character opened."""
+    stack = []
+    for match in re.finditer(r"[(\[{]|[)\]}]", code):
+        if match.group() in ("(", "[", "{"):
+            stack.append(match.start())
+        elif stack:
+            opened = stack.pop()
+            if match.start() == len(code) - 1:
+                return opened
+    return None
+
+
+def statement(code, at):
+    """The rest of the statement at `at`, as Prettier breaks one: after an operator, or before a `.` or one."""
+    depth = 0
+    for match in re.finditer(r"[(\[{]|[)\]}]|[;\n]", code[at:]):
+        token, so_far = match.group(), code[at:at + match.start()]
+        if token in ("(", "[", "{"):
+            depth += 1
+        elif token in (")", "]", "}"):
+            depth -= 1
+            if depth < 0:
+                return so_far
+        elif depth == 0 and (
+            token == ";"
+            or so_far.strip()
+            and not re.search(r"[=(\[{,:?|&+*/<>-]\s*$", so_far)
+            and not re.match(r"\s*[.?:|&+*/<>-]", code[at + match.end():])
+        ):
+            return so_far
+    return code[at:]
+
+
+def length(code, text, seen=frozenset(), elsewhere=None):
+    """How many items an expression of a blanked source holds, and None where the source does not say.
+
+    `elsewhere` gives, for a name the source imports, the blanked module it
+    comes from and what it is called there.
+    """
+    text = text.strip()
+    cast = outermost(text, r"\s(?:as|satisfies)\s")
+    if cast:
+        text = text[:cast[0].start()].rstrip()
+    if not text:
+        return None
+    opened = last_bracket(text)
+    if opened == 0 and text[0] == "(":
+        return length(code, text[1:-1], seen, elsewhere)
+    if opened == 0:
+        # A literal: one for each item, and a `...spread` for what it holds.
+        return sum(
+            (length(code, item[3:], seen, elsewhere) or 1) if item.startswith("...") else 1
+            for item in pieces(text[1:-1]) if item
+        )
+    if NAME.fullmatch(text):
+        if text in seen:
+            return None
+        declared = re.search(r"\b(?:const|let|var)\s+" + re.escape(text) + r"\b", code)
+        if not declared:
+            other = elsewhere(text) if elsewhere else None
+            return length(*other) if other else None
+        rest = statement(code, declared.end())
+        assigned = outermost(rest, r"(?<![=!<>])=(?![=>])")
+        return length(code, rest[assigned[0].end():], seen | {text}, elsewhere) if assigned else None
+    if opened is None or text[opened] != "(":
+        return None
+    called, arguments = text[:opened].rstrip(), pieces(text[opened + 1:-1])
+    argument = arguments[0]
+    if re.fullmatch(r"Object\.(keys|values|entries)", called):
+        return length(code, argument, seen, elsewhere)
+    method = re.search(r"\.(\w+)$", called)
+    held = length(code, called[:method.start()], seen, elsewhere) if method else None
+    # What returns an item for every item of what it is called on.
+    if held is None or method.group(1) in ("map", "entries"):
+        return held
+    # A run of them: `.slice(2, 8)`.
+    if method.group(1) == "slice" and all(bound.isdigit() for bound in arguments if bound):
+        bounds = [int(bound) for bound in arguments if bound]
+        return max(0, min([held] + bounds[1:2]) - min([held] + bounds[:1])) if bounds else held
+    # And a list for every item: `.flatMap((page) => [390, 1440].map(…))`.
+    arrow = outermost(argument, r"=>")
+    if method.group(1) == "flatMap" and arrow and not argument[arrow[0].end():].lstrip().startswith("{"):
+        each = length(code, argument[arrow[0].end():], seen, elsewhere)
+        return None if each is None else held * each
+    return None
+
+
+def spec_tests(text, read=None):
+    """How many tests a spec declares, which is what `playwright test --list` counts, and how many CI runs.
+
+    A test written once in a loop is as many as the loop's list is long: a
+    literal, a constant of the spec, or one it imports from a module `read`
+    returns the source of.
+    """
+    code = blanked(text)
+    closes, stack = {}, []
+    for match in re.finditer(r"[(\[{]|[)\]}]", code):
+        if match.group() in ("(", "[", "{"):
+            stack.append(match.start())
+        elif stack:
+            closes[stack.pop()] = match.start()
+
+    def elsewhere(name):
+        found = re.search(
+            r'\bimport\s*\{[^}]*?\b(?:(\w+)\s+as\s+)?%s\s*[,}][^;]*?from\s*"(\.[^"]+)"' % re.escape(name), text
+        )
+        source = read(found.group(2)) if found and read else None
+        return (blanked(source), found.group(1) or name) if source else None
+
+    # A loop's body, with the header that says how often it runs.
+    loops = []
+    for loop in re.finditer(r"\bfor\s*\(", code):
+        opened = loop.end() - 1
+        closed = closes.get(opened)
+        body = closed is not None and re.search(r"\S", code[closed + 1:closed + 200])
+        if not body:
+            continue
+        start = closed + 1 + body.start()
+        end = closes.get(start) if body.group() == "{" else closed + 1 + len(statement(code, closed + 1))
+        if end:
+            loops.append((closed, end, code[opened + 1:closed]))
+
+    # A block that a missing environment variable switches off, as the
+    # screenshot tests are: `test.skip(!process.env.JD_SHOTS, …)`.
+    off = []
+    for skip in re.finditer(r"(?<![\w.$])test\.skip\s*\(\s*!", code):
+        around = [(opened, closed) for opened, closed in closes.items() if opened < skip.start() < closed]
+        off.append(max((block for block in around if code[block[0]] == "{"), default=(0, len(code))))
+
+    declared = run = 0
+    for test in re.finditer(r"(?<![\w.$])test(\.(?:skip|fixme|fail))?\s*\(", code):
+        at, opened = test.start(), test.end() - 1
+        # `test.skip("a title", …)` is a test; `test.skip(isMobile, "why")` is said inside one.
+        if test.group(1) and not re.match(r'\s*"', code[opened + 1:opened + 200]):
+            continue
+        times = 1
+        for start, end, header in loops:
+            of = start <= at < end and outermost(header, r"\bof\b")
+            if of:
+                # Once, where the source does not say how long the list is.
+                times *= length(code, header[of[0].end():], elsewhere=elsewhere) or 1
+        declared += times
+        closed = closes.get(opened, opened)
+        # Switched off around the test, or inside it.
+        if test.group(1) in (None, ".fail") and not any(
+            start < at < end or opened < start and end < closed for start, end in off
+        ):
+            run += times
+    return declared, run
+
+
+def spec_weight(text, read=None):
+    """What a spec costs a job, in ordinary tests: those CI runs of it, or what its own comment says."""
+    _, tests = spec_tests(text, read)
+    each = 1.0
+    for said in SAID.finditer(text):
+        tests = int(said.group(1)) if said.group(1) else tests
+        each = float(said.group(2)) if said.group(2) else each
+    return max(1, round(tests * each))
+
+
 def shards(root, specs, per_shard=TESTS_PER_SHARD):
-    """The specs dealt into jobs of about `per_shard` tests each."""
-    tests = {spec: len(re.findall(r"(?<![\w.])test\(", (root / spec).read_text(errors="replace"))) for spec in specs}
-    jobs = [[] for _ in range(max(1, min(MOST_SHARDS, math.ceil(sum(tests.values()) / per_shard))))]
-    # In name order, each spec to the job with the fewest tests so far. The
-    # specs of one section sit together by name and cost alike — a database
-    # test takes twice what a deployment test does — so this spreads a slow
-    # section over the jobs, where Playwright's own --shard cuts the list into
-    # consecutive runs and handed one job most of it.
-    for spec in sorted(specs):
-        lightest = min(jobs, key=lambda job: sum(tests[name] for name in job))
-        lightest.append(spec)
-    return jobs
+    """The specs dealt into jobs of about `per_shard` tests each, none of them empty."""
+    weights = {}
+    for spec in specs:
+        def read(module, directory=os.path.dirname(spec)):
+            path = root / os.path.normpath(os.path.join(directory, module + ".ts"))
+            return path.read_text(errors="replace") if path.is_file() else None
+
+        text = (root / spec).read_text(errors="replace")
+        weights[spec] = spec_weight(text, read)
+        if "ci-plan:" in text and not any(said.group(1) or said.group(2) for said in SAID.finditer(text)):
+            print(f"{spec}: its `ci-plan:` comment says neither `N tests` nor `each weighs N`", file=sys.stderr)
+    jobs = [[] for _ in range(max(1, min(MOST_SHARDS, math.ceil(sum(weights.values()) / per_shard))))]
+    loads, held = [0] * len(jobs), [{} for _ in jobs]
+    # The heaviest spec first, each to the job that is lightest when what it
+    # already holds of the spec's own section is counted twice. The heaviest
+    # first is what evens the jobs out, the small specs filling what the large
+    # ones left. Counting the section again is what spreads a slow one: the
+    # specs of a section cost alike and not what another's do — a database
+    # test took 1.5 seconds on 15 Nov 2026 where the others took 1.1 — and
+    # dealt by weight alone one job of twelve held 205 database tests and
+    # another 14. Playwright's own --shard cuts the list into consecutive
+    # runs instead, which handed one job most of a section.
+    for spec in sorted(specs, key=lambda spec: (-weights[spec], spec)):
+        section = re.split(r"[-.]", spec.rsplit("/", 1)[-1])[0]
+        job = min(range(len(jobs)), key=lambda job: loads[job] + held[job].get(section, 0))
+        jobs[job].append(spec)
+        loads[job] += weights[spec]
+        held[job][section] = held[job].get(section, 0) + weights[spec]
+    # A spec heavier than a job is a job to itself, and the jobs it was
+    # counted as are left with nothing. They are not started: a job with no
+    # spec to name would run every one.
+    return [sorted(job) for job in jobs if job]
 
 
 def go_paths(packages):
