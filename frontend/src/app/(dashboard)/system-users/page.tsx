@@ -628,7 +628,9 @@ function AccountRow({
     <ChoiceRow
       href={href}
       verb={`Open ${user.username}`}
-      className={cn(user.disabled && "opacity-60", selected && "bg-accent/40")}
+      // A disabled account is said in words (its sign-in reading) and in the
+      // muted ink of its name, never by fading the row (FND-07).
+      className={cn(selected && "bg-accent/40")}
       leading={
         <span className="flex items-center gap-3">
           {selecting && (
@@ -645,7 +647,11 @@ function AccountRow({
           <AccountMark user={user} />
         </span>
       }
-      title={<span className="font-mono">{user.username}</span>}
+      title={
+        <span className={cn("font-mono", user.disabled && "text-muted-foreground")}>
+          {user.username}
+        </span>
+      }
       description={
         <>
           <span className="numeric font-mono">uid {user.uid}</span>

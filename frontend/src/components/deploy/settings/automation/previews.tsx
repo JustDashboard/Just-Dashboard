@@ -504,7 +504,7 @@ function ApprovalCard({
       index={index}
       onSelect={onReview}
       disabled={rejected || !canReview}
-      className={cn(rejected && "opacity-80")}
+      // Rejected is said by its status and the muted ink (FND-07).
       leading={
         <AuthorFace
           login={approval.author}
@@ -512,7 +512,9 @@ function ApprovalCard({
           className={cn(rejected && "grayscale")}
         />
       }
-      title={`PR ${approval.providerRef}`}
+      title={
+        <span className={cn(rejected && "text-muted-foreground")}>PR {approval.providerRef}</span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           {approval.author || "unknown author"} ·{" "}
@@ -779,9 +781,13 @@ function PreviewCard({
       index={index}
       onSelect={onOpen}
       busy={deploying || Boolean(active)}
-      className={cn(!open && "opacity-80")}
+      // A closed preview is said by its state and the name's muted ink (FND-07).
       leading={<AuthorFace login={author} trigger={trigger} />}
-      title={<span className="font-mono">{preview.environmentSlug}</span>}
+      title={
+        <span className={cn("font-mono", !open && "text-muted-foreground")}>
+          {preview.environmentSlug}
+        </span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           PR #{preview.providerRef}

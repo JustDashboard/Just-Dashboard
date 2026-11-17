@@ -711,9 +711,12 @@ function ScheduleCard({
       index={index}
       onSelect={onOpen}
       busy={running}
-      className={cn(!schedule.enabled && "opacity-80")}
+      // Paused is said by its status and the name's muted ink, never by
+      // fading the row (FND-07).
       leading={<ScheduleMark schedule={schedule} />}
-      title={schedule.name}
+      title={
+        <span className={cn(!schedule.enabled && "text-muted-foreground")}>{schedule.name}</span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           {describeCron(schedule.expression)} · {schedule.timezone} ·{" "}

@@ -1554,12 +1554,7 @@ for (const [label, viewport] of [
  * it (FND-07, which the `ink-opacity` lint closes): an entry must still fade,
  * so the list is taken down as the fixes land, and every other page must not.
  */
-const FADED_TODAY: Record<string, string> = {
-  // A disabled account's row is drawn at 60% (`app/(dashboard)/system-users/page.tsx`).
-  "/system-users": "FND-07",
-  // A paused schedule, webhook or preview rule is drawn at 80% (`deploy/settings/automation/`).
-  "/deploy/7/settings/automation": "FND-07",
-}
+const FADED_TODAY: Record<string, string> = {}
 
 test("no page fades its words with opacity", async ({ page }) => {
   test.setTimeout((SURFACES.length + PROJECT_SURFACES.length) * 10_000)
