@@ -565,8 +565,12 @@ export function IdentityVerbs({ verbs, name }: { verbs: Verb[]; name: string }):
   command?: React.ReactNode
   menu?: React.ReactNode
 } {
-  const safe = verbs.filter((verb) => !verb.danger)
-  const lead = safe.find((verb) => verb.inline) ?? safe[0]
+  // The command is the thing's first inline verb, or its first verb when it
+  // marks none inline. A destructive one is never promoted, and nothing takes
+  // its place: a menu verb drawn in the brand face because the inline verb
+  // was destructive would be a command the page never chose.
+  const inline = verbs.filter((verb) => verb.inline)
+  const lead = (inline.length > 0 ? inline : verbs.slice(0, 1)).find((verb) => !verb.danger)
   const rest = verbs.filter((verb) => verb !== lead)
   return {
     command: lead && (
