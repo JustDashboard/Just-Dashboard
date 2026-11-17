@@ -512,7 +512,6 @@ const KNOWN: Record<string, { rule: string; finding: string }[]> = Object.fromEn
   [
     "overview",
     "backups__job",
-    "git",
     "logs--insights",
     "metrics",
     "databases__id",
