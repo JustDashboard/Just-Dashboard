@@ -12,7 +12,6 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
-  ChevronUp,
   Clipboard,
   CloudUpload,
   Cross,
@@ -133,6 +132,8 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
+  ROW_NAME,
+  SortHead,
   stickyTableHeader,
   Table,
   TableBody,
@@ -220,6 +221,12 @@ export default function FilesPage() {
   const [showSidebar, setShowSidebar] = useViewState("files.sidebar", true)
   const [showInspector, setShowInspector] = useViewState("files.inspector", true)
   const [sort, setSort] = useViewState<Sort>("files.sort", { key: "name", dir: "asc" })
+  // A column's head: the first press orders by it from the top, the next turns it round.
+  const sortBy = (key: SortKey) => ({
+    active: sort.key === key,
+    descending: sort.key === key && sort.dir === "desc",
+    onSort: () => setSort({ key, dir: sort.key === key && sort.dir === "asc" ? "desc" : "asc" }),
+  })
   // Where you have just been. Kept in the browser rather than on the server:
   // unlike a starred folder, which is a fact about the machine, this is a
   // property of the last ten minutes at this screen.
@@ -1966,42 +1973,20 @@ export default function FilesPage() {
                                 }
                               />
                             </TableHead>
-                            <SortHead
-                              label="Name"
-                              k="name"
-                              sort={sort}
-                              setSort={setSort}
-                              className="w-full"
-                            />
-                            <SortHead
-                              label="Size"
-                              k="size"
-                              sort={sort}
-                              setSort={setSort}
-                              align="right"
-                            />
+                            <SortHead label="Name" {...sortBy("name")} className="w-full" />
+                            <SortHead label="Size" {...sortBy("size")} align="right" />
                             <SortHead
                               label="Modified"
-                              k="modified"
-                              sort={sort}
-                              setSort={setSort}
+                              {...sortBy("modified")}
                               className={COLUMN.modified}
                             />
-                            <SortHead
-                              label="Owner"
-                              k="owner"
-                              sort={sort}
-                              setSort={setSort}
-                              className={COLUMN.owner}
-                            />
+                            <SortHead label="Owner" {...sortBy("owner")} className={COLUMN.owner} />
                             <SortHead
                               label="Mode"
-                              k="mode"
-                              sort={sort}
-                              setSort={setSort}
+                              {...sortBy("mode")}
                               className={cn("w-20", COLUMN.mode)}
                             />
-                            <TableHead className="w-px" />
+                            <TableHead label="Actions" className="w-px" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2009,10 +1994,17 @@ export default function FilesPage() {
                             <TableRow className="select-none" onActivate={() => navigate(parent)}>
                               <TableCell />
                               <TableCell colSpan={6}>
-                                <span className="flex items-center gap-2 text-body text-muted-foreground">
-                                  <ArrowUp className="size-3.5" />
+                                {/* The row's one control, so the keyboard reaches it by
+                                    name, and the row is no second stop beside it. */}
+                                <button
+                                  type="button"
+                                  {...ROW_NAME}
+                                  onClick={() => navigate(parent)}
+                                  className="flex items-center gap-2 rounded-sm text-body text-muted-foreground focus-ring hover:text-foreground"
+                                >
+                                  <ArrowUp aria-hidden className="size-3.5" />
                                   Parent folder
-                                </span>
+                                </button>
                               </TableCell>
                             </TableRow>
                           )}
@@ -2304,44 +2296,6 @@ function ArrangeMenu({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-function SortHead({
-  label,
-  k,
-  sort,
-  setSort,
-  align,
-  className,
-}: {
-  label: string
-  k: SortKey
-  sort: Sort
-  setSort: (s: Sort) => void
-  align?: "right"
-  className?: string
-}) {
-  const active = sort.key === k
-  return (
-    <TableHead className={cn(align === "right" && "text-right", className)}>
-      <button
-        className={cn(
-          "inline-flex items-center gap-1 hover:text-foreground",
-          active && "text-foreground",
-          align === "right" && "flex-row-reverse",
-        )}
-        onClick={() => setSort({ key: k, dir: active && sort.dir === "asc" ? "desc" : "asc" })}
-      >
-        {label}
-        {active &&
-          (sort.dir === "asc" ? (
-            <ChevronUp className="size-3" />
-          ) : (
-            <ChevronDown className="size-3" />
-          ))}
-      </button>
-    </TableHead>
   )
 }
 
