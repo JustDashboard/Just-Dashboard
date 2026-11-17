@@ -336,7 +336,15 @@ export function RailRow({
         </span>
       )}
       <span className="min-w-0 flex-1">{children}</span>
-      {label !== undefined && end ? <span aria-hidden>{end}</span> : end}
+      {label !== undefined && end ? (
+        // A flex item of the row's own, so what it holds stays on the row's
+        // centre line as it did unwrapped.
+        <span aria-hidden className="flex shrink-0 items-center">
+          {end}
+        </span>
+      ) : (
+        end
+      )}
     </>
   )
   const shared = {
