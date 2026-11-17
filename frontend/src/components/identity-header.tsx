@@ -195,7 +195,7 @@ export function IdentityHeader({
           word wide, one fact to a line, where the aside should go under. */}
       <div
         className={cn(
-          "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-y-3 sm:flex sm:flex-[1_1_18rem]",
+          "grid min-w-0 grid-cols-start-main items-center gap-y-3 sm:flex sm:flex-[1_1_18rem]",
           bar ? "gap-x-3" : "gap-x-4",
         )}
       >
@@ -328,7 +328,7 @@ function ProjectLine({
       data-slot={slot}
       data-layout="project"
       className={cn(
-        "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5",
+        "grid min-w-0 grid-cols-start-main-end items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5",
         className,
       )}
     >

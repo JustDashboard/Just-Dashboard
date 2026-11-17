@@ -261,7 +261,7 @@ function DockFrame({
       transition={{ duration: 0.22, ease: EASE }}
       style={{ bottom }}
       className={cn(
-        "fixed right-4 z-float flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-border-strong bg-popover/95 p-2 text-popover-foreground shadow-lg backdrop-blur transition-[bottom] duration-base ease-arrive",
+        "fixed right-4 z-float flex w-inspector max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-border-strong bg-popover/95 p-2 text-popover-foreground shadow-lg backdrop-blur transition-[bottom] duration-base ease-arrive",
         className,
       )}
     >
