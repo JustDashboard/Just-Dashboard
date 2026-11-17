@@ -47,6 +47,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useBelow } from "@/lib/breakpoints"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
+import { IconAction } from "@/components/icon-action"
 import { Page } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { XtermPane, type XtermActions } from "@/components/xterm-pane"
@@ -809,22 +810,19 @@ export default function TerminalPage() {
       )}
       <div className="flex shrink-0 items-center gap-0.5">
         {(Object.keys(AGENTS) as (keyof typeof AGENTS)[]).map((agent) => (
-          <Tooltip key={agent}>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={AGENTS[agent].name}
-                disabled={!activeWindow || creating}
-                onClick={() => launchAgent(agent)}
-              >
-                <ProductGlyph id={AGENTS[agent].logo} className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Run <span className="font-mono">{AGENTS[agent].command}</span> in this terminal
-            </TooltipContent>
-          </Tooltip>
+          <IconAction
+            key={agent}
+            label={AGENTS[agent].name}
+            tooltip={
+              <>
+                Run <span className="font-mono">{AGENTS[agent].command}</span> in this terminal
+              </>
+            }
+            disabled={!activeWindow || creating}
+            onClick={() => launchAgent(agent)}
+          >
+            <ProductGlyph id={AGENTS[agent].logo} className="size-4" />
+          </IconAction>
         ))}
         <DropdownMenu>
           <Tooltip>
@@ -937,10 +935,10 @@ export default function TerminalPage() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
+        <IconAction
           variant="ghost"
           size="icon-sm"
-          aria-label={immersive ? "Leave fullscreen (Esc)" : "Fullscreen"}
+          label={immersive ? "Leave fullscreen (Esc)" : "Fullscreen"}
           onClick={toggleImmersive}
         >
           {immersive ? (
@@ -948,7 +946,7 @@ export default function TerminalPage() {
           ) : (
             <Fullscreen className="size-3.5" />
           )}
-        </Button>
+        </IconAction>
       </div>
       <WorkspaceToggle
         active={showTools}
@@ -1150,23 +1148,22 @@ export default function TerminalPage() {
                                 disconnected={disconnectedWindows.has(window.id)}
                               />
                             </button>
-                            <Button
+                            <IconAction
                               variant="ghost"
                               size="icon-sm"
-                              aria-label={`Open pane ${label} as separate window`}
-                              title="Open as separate window"
+                              label={`Open pane ${label} as separate window`}
                               onClick={() => detachPane(window.id)}
                             >
                               <External className="size-3.5" />
-                            </Button>
-                            <Button
+                            </IconAction>
+                            <IconAction
                               variant="ghost"
                               size="icon-sm"
-                              aria-label={`Close pane ${label}`}
+                              label={`Close pane ${label}`}
                               onClick={() => closeWindow(window.id)}
                             >
                               <Cross className="size-3" />
-                            </Button>
+                            </IconAction>
                           </>
                         ) : undefined
                       }

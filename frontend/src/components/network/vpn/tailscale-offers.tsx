@@ -299,15 +299,16 @@ export function TailscaleOffers({
               aria-label="A network to offer"
               className="h-9 min-w-0 flex-1 font-mono sm:max-w-xs"
             />
-            <Button
+            <IconAction
               size="icon"
               variant="outline"
               type="submit"
               disabled={busy || !draft.route.trim() || Boolean(problem)}
-              aria-label="Offer it"
+              className="[&_svg:not([class*='size-'])]:size-4"
+              label="Offer it"
             >
               <Plus aria-hidden />
-            </Button>
+            </IconAction>
           </div>
           {problem && (
             <p id="tailscale-route-problem" className="text-hint text-destructive">

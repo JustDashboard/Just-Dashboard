@@ -1,10 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { ChevronLeft, ChevronRight, Download, External } from "@/components/icons"
 import { Spinner } from "@/components/loading"
 import { STAGE_CONTROL, StageModal } from "@/components/modal"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 /** One picture the lightbox can show. */
@@ -154,28 +154,28 @@ export function ImageLightbox({
         )}
         {many && (
           <>
-            <Button
+            <IconAction
               type="button"
               size="icon"
               variant="ghost"
-              aria-label="Previous image"
+              label="Previous image"
               disabled={index === 0}
               onClick={() => step(-1)}
-              className="absolute top-1/2 left-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white disabled:opacity-0"
+              className="absolute top-1/2 left-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white disabled:opacity-0 [&_svg:not([class*='size-'])]:size-4"
             >
               <ChevronLeft className="size-5" />
-            </Button>
-            <Button
+            </IconAction>
+            <IconAction
               type="button"
               size="icon"
               variant="ghost"
-              aria-label="Next image"
+              label="Next image"
               disabled={index === images.length - 1}
               onClick={() => step(1)}
-              className="absolute top-1/2 right-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white disabled:opacity-0"
+              className="absolute top-1/2 right-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white disabled:opacity-0 [&_svg:not([class*='size-'])]:size-4"
             >
               <ChevronRight className="size-5" />
-            </Button>
+            </IconAction>
           </>
         )}
       </div>

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { post, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
+import { IconAction } from "@/components/icon-action"
 import { noteProblem, preferredSourceProblem } from "@/components/network/draft-input"
 import type {
   NetworkLink,
@@ -373,15 +374,15 @@ function RouteForm({
                       }
                     />
                   </Field>
-                  <Button
+                  <IconAction
                     size="icon-sm"
                     variant="ghost"
-                    aria-label={`Remove hop ${index + 1}`}
+                    label={`Remove hop ${index + 1}`}
                     disabled={legs.length <= 2}
                     onClick={() => setLegs(legs.filter((_, i) => i !== index))}
                   >
                     <Trash aria-hidden />
-                  </Button>
+                  </IconAction>
                 </li>
               ))}
             </ol>

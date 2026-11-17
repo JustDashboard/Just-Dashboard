@@ -11,6 +11,7 @@ import {
   type EgressThresholds,
 } from "@/lib/network/egress"
 import type { NetworkLink } from "@/lib/types"
+import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { Notice } from "@/components/state"
@@ -285,15 +286,15 @@ export function EgressGroupForm({
                   onChange={(e) => setMember(i, { weight: e.target.value })}
                 />
               </Field>
-              <Button
+              <IconAction
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Remove member ${m.name || i + 1}`}
+                label={`Remove member ${m.name || i + 1}`}
                 disabled={draft.members.length <= 2}
                 onClick={() => set({ members: draft.members.filter((_, j) => j !== i) })}
               >
                 <Trash aria-hidden />
-              </Button>
+              </IconAction>
               <div className="sm:col-span-7">
                 <Field
                   label="Probe source"
@@ -389,15 +390,15 @@ export function EgressGroupForm({
                   onChange={(e) => setProbe(i, { name: e.target.value })}
                 />
               </Field>
-              <Button
+              <IconAction
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Remove probe ${i + 1}`}
+                label={`Remove probe ${i + 1}`}
                 disabled={draft.probes.length <= 1}
                 onClick={() => set({ probes: draft.probes.filter((_, j) => j !== i) })}
               >
                 <Trash aria-hidden />
-              </Button>
+              </IconAction>
             </div>
           ))}
           <Button

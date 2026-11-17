@@ -127,18 +127,25 @@ export function RowActions({
  * button before finding out it deletes something. It also becomes the button's
  * accessible name, which a `title` only weakly provides.
  *
+ * `tooltip` says more than the name where the name alone would leave the
+ * reader guessing ("See every branch and where it forked" for "Branch
+ * graph"); the label stays the accessible name.
+ *
  * It cannot be a `DropdownMenuTrigger asChild`: this renders a tooltip root
  * rather than an element, so there is nothing for the trigger to hand its props
  * to. A menu button is an ordinary `Button` carrying an `aria-label`.
  */
 export function IconAction({
   label,
+  tooltip,
   reveal,
   revealGroup,
   className,
   ...props
 }: React.ComponentProps<typeof Button> & {
   label: string
+  /** What the tooltip says, when it says more than the label. */
+  tooltip?: React.ReactNode
   /**
    * For the lone action that stands in a row without a `RowActions` around it:
    * the same appear-on-hover rule, so one button and a cluster of them behave
@@ -163,7 +170,7 @@ export function IconAction({
           {...props}
         />
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>{tooltip ?? label}</TooltipContent>
     </Tooltip>
   )
 }

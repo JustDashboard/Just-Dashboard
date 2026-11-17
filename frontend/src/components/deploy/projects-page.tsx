@@ -263,26 +263,26 @@ function Fleet() {
         </span>
       )}
       <div className="flex items-center gap-0.5" role="group" aria-label="Deployment layout">
-        <Button
+        <IconAction
           variant="ghost"
           size="icon-sm"
-          aria-label="Grid view"
+          label="Grid view"
           aria-pressed={layout === "grid"}
           className={cn(layout === "grid" && "bg-accent text-accent-foreground")}
           onClick={() => setLayout("grid")}
         >
           <GridSquare className="size-4" />
-        </Button>
-        <Button
+        </IconAction>
+        <IconAction
           variant="ghost"
           size="icon-sm"
-          aria-label="List view"
+          label="List view"
           aria-pressed={layout === "list"}
           className={cn(layout === "list" && "bg-accent text-accent-foreground")}
           onClick={() => setLayout("list")}
         >
           <ListUnordered className="size-4" />
-        </Button>
+        </IconAction>
       </div>
     </div>
   )

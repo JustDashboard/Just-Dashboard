@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { IconAction } from "@/components/icon-action"
 import { Workspace } from "@/components/workspace/workspace"
 import {
   Archive,
@@ -748,26 +749,21 @@ export function RepoWorkspace({
                 repository's branches, not a view of the middle column, and
                 on that column's strip it pushed the last of the four views
                 out of sight. Below `lg` it is in the menu. */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="icon-sm"
-                        variant="outline"
-                        aria-pressed={graphOpen}
-                        aria-label="Branch graph"
-                        className={cn(
-                          "shrink-0 max-lg:hidden",
-                          graphOpen
-                            ? "bg-accent text-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        onClick={() => setGraphOpen((v) => !v)}
-                      >
-                        <SourceFork className="size-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>See every branch and where it forked</TooltipContent>
-                  </Tooltip>
+                  <IconAction
+                    variant="outline"
+                    aria-pressed={graphOpen}
+                    label="Branch graph"
+                    tooltip="See every branch and where it forked"
+                    className={cn(
+                      "shrink-0 max-lg:hidden",
+                      graphOpen
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setGraphOpen((v) => !v)}
+                  >
+                    <SourceFork className="size-3.5" />
+                  </IconAction>
 
                   {/* Fetch, pull and push as one control: three verbs on one
                 remote, read as a set. Push keeps the command face — it is

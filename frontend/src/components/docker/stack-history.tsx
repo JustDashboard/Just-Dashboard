@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import type { StackDeployment } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { IconAction } from "@/components/icon-action"
 import { WIDE_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { useNow } from "@/hooks/use-now"
 import { AuthorMark } from "@/components/git/marks"
@@ -535,14 +536,15 @@ function Detail({
                           )}
                           {short.hash}
                         </span>
-                        <Button
+                        <IconAction
                           size="icon-xs"
                           variant="ghost"
-                          aria-label={`Copy ${service} digest`}
+                          className="[&_svg:not([class*='size-'])]:size-3"
+                          label={`Copy ${service} digest`}
                           onClick={() => void copyText(digest, "Digest copied")}
                         >
                           <Copy />
-                        </Button>
+                        </IconAction>
                       </li>
                     )
                   })}

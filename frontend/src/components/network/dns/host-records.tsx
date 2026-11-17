@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { Plus, Trash } from "@/components/icons"
 import { ApiError, get, post, put, refusedIndex } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -273,15 +274,16 @@ export function HostRecordsEditor({
                     onChange={(event) => change(row.key, { names: event.target.value })}
                   />
                   {!locked && (
-                    <Button
+                    <IconAction
                       type="button"
                       size="icon"
                       variant="ghost"
-                      aria-label={`Remove record ${index + 1}`}
+                      className="[&_svg:not([class*='size-'])]:size-4"
+                      label={`Remove record ${index + 1}`}
                       onClick={() => update(rows.filter((r) => r.key !== row.key))}
                     >
                       <Trash aria-hidden />
-                    </Button>
+                    </IconAction>
                   )}
                   {bad && (
                     <p

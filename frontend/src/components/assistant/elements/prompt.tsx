@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
+import { IconAction } from "@/components/icon-action"
 import { ArrowUp, Cross, Image as ImageGlyph } from "@/components/icons"
 import { Spinner } from "@/components/loading"
 import { BorderBeam } from "@/components/ui/border-beam"
@@ -321,14 +322,13 @@ export function PromptInput({
  */
 function AskButton({ busy, ready, onStop }: { busy: boolean; ready: boolean; onStop: () => void }) {
   return (
-    <Button
+    <IconAction
       type={busy ? "button" : "submit"}
       size="icon-sm"
       variant="default"
       data-slot="prompt-send"
       data-state={busy ? "stop" : "ask"}
-      aria-label={busy ? "Stop" : "Ask"}
-      title={busy ? "Stop" : "Ask"}
+      label={busy ? "Stop" : "Ask"}
       className={cn(
         "relative shrink-0 overflow-hidden rounded-full transition-[background-color,color,opacity] duration-200 disabled:opacity-40",
         busy && "bg-foreground text-background hover:bg-foreground/85",
@@ -360,6 +360,6 @@ function AskButton({ busy, ready, onStop }: { busy: boolean; ready: boolean; onS
           )}
         </motion.span>
       </AnimatePresence>
-    </Button>
+    </IconAction>
   )
 }

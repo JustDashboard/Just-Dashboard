@@ -1,6 +1,7 @@
 "use client"
 
 import { useId, useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { ArrowDown, ArrowUp, Cross, Filter as FilterIcon, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Segments } from "@/components/segments"
@@ -167,15 +168,15 @@ export function FilterBar({
                   Sort
                 </Button>
               ) : (
-                <Button
+                <IconAction
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label="Then sort by another column"
-                  className="shrink-0 text-muted-foreground max-sm:size-8"
+                  label="Then sort by another column"
+                  className="shrink-0 text-muted-foreground max-sm:size-8 [&_svg:not([class*='size-'])]:size-3"
                 >
                   <Plus />
-                </Button>
+                </IconAction>
               )}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="max-h-72 w-56">

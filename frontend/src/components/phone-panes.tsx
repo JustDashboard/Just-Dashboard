@@ -1,10 +1,10 @@
 "use client"
 
 import { useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { ArrowLeft } from "@/components/icons"
 import { useStackOccupant } from "@/components/dock"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 
 /**
  * One pane at a time on a phone.
@@ -170,7 +170,7 @@ export function PaneBack({
   className?: string
 }) {
   return (
-    <Button
+    <IconAction
       size="icon-sm"
       variant="ghost"
       className={cn(
@@ -178,10 +178,10 @@ export function PaneBack({
         FROM[until],
         className,
       )}
-      aria-label={label}
+      label={label}
       onClick={onClick}
     >
       <ArrowLeft className="size-4" />
-    </Button>
+    </IconAction>
   )
 }

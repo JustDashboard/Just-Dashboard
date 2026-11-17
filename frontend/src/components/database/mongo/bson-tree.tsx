@@ -15,6 +15,7 @@ import {
 } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -868,15 +869,15 @@ function ValueForm({
           <Check />
           {creating ? "Add" : "Set"}
         </Button>
-        <Button
+        <IconAction
           size="icon-xs"
           variant="ghost"
-          aria-label="Cancel"
-          className="size-7"
+          label="Cancel"
+          className="size-7 [&_svg:not([class*='size-'])]:size-3"
           onClick={onCancel}
         >
           <Cross />
-        </Button>
+        </IconAction>
       </div>
       {tried && problem && (
         <p role="alert" className="pt-1 pl-5 font-sans text-hint text-destructive">

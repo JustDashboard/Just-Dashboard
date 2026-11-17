@@ -2,13 +2,13 @@
 
 import { forwardRef, useEffect, useId, useRef, useState } from "react"
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react"
+import { IconAction } from "@/components/icon-action"
 import { CornerDownLeft, Cross, FolderOpen, MagnifyingGlass } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, grouped, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry, FileFindResult, FilePlaces } from "@/lib/types"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorState } from "@/components/state"
 import { Spinner } from "@/components/loading"
@@ -228,17 +228,18 @@ function SearchBody({
         </span>
         <span className="size-6 shrink-0">
           {query && (
-            <Button
+            <IconAction
               variant="ghost"
               size="icon-xs"
-              aria-label="Clear search"
+              className="[&_svg:not([class*='size-'])]:size-3"
+              label="Clear search"
               onClick={() => {
                 setQuery("")
                 input.current?.focus()
               }}
             >
               <Cross />
-            </Button>
+            </IconAction>
           )}
         </span>
       </div>
@@ -263,24 +264,26 @@ function SearchBody({
         </div>
         {mode === "content" && (
           <div className="flex items-center gap-1">
-            <Button
+            <IconAction
               size="icon-xs"
               variant={matchCase ? "secondary" : "ghost"}
-              aria-label="Match case"
+              className="[&_svg:not([class*='size-'])]:size-3"
+              label="Match case"
               aria-pressed={matchCase}
               onClick={() => setMatchCase((v) => !v)}
             >
               Aa
-            </Button>
-            <Button
+            </IconAction>
+            <IconAction
               size="icon-xs"
               variant={regex ? "secondary" : "ghost"}
-              aria-label="Regular expression"
+              className="[&_svg:not([class*='size-'])]:size-3"
+              label="Regular expression"
               aria-pressed={regex}
               onClick={() => setRegex((v) => !v)}
             >
               .*
-            </Button>
+            </IconAction>
           </div>
         )}
       </div>
