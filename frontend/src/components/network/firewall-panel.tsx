@@ -205,16 +205,16 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
       ? rules.find((r) => r.number === handoffEdit.number && r.port === handoffEdit.port)
       : undefined
 
-  // The shortcuts' `?` stands where a detail page keeps it, on the row above
-  // the line, not beside the page's command; a phone has no keyboard for it.
-  // The row holds the button's height before the workspace that draws it is
-  // up, so the line under it does not move when the firewall is read.
-  const header = (
-    <PageContext
-      title="Firewall"
-      actions={<WorkspaceHelp compact />}
-      className="min-h-6 justify-end max-sm:hidden"
-    />
+  // The page has no way back, so nothing else would share a row above the
+  // line: a row of its own for the shortcuts' `?` set Firewall's header 50px
+  // lower than its sibling pages'. The `?` closes the identity line instead,
+  // after the `⋯` (`help` below).
+  const header = <PageContext title="Firewall" />
+  // A touch screen has no keyboard for the shortcuts, so it is never drawn there.
+  const help = (
+    <span className="flex max-sm:hidden pointer-coarse:hidden">
+      <WorkspaceHelp compact />
+    </span>
   )
   const refreshVerb: Verb = {
     key: "refresh",
@@ -243,7 +243,14 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
             )
           }
           facts={failed ? <Fact>The firewall could not be read.</Fact> : undefined}
-          menu={<VerbMenu verbs={[refreshVerb]} label="Firewall actions" />}
+          menu={
+            <>
+              <VerbMenu verbs={[refreshVerb]} label="Firewall actions" />
+              {/* The `?`'s place, held until the workspace that draws it is
+                  up, so the `⋯` does not move when the firewall is read. */}
+              <span aria-hidden className="size-6 shrink-0 max-sm:hidden pointer-coarse:hidden" />
+            </>
+          }
         />
         {failed && error ? (
           <ErrorState error={error} onRetry={refresh} />
@@ -429,7 +436,12 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
             )}
           </>
         }
-        menu={<VerbMenu verbs={verbs} label="Firewall actions" />}
+        menu={
+          <>
+            <VerbMenu verbs={verbs} label="Firewall actions" />
+            {help}
+          </>
+        }
       />
 
       {/* The rules folded by where they lead, before the rules in the order
