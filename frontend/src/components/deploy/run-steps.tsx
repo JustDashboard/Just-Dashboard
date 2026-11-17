@@ -49,6 +49,7 @@ import type { ConsoleRow } from "@/components/deploy/build-console"
 import { CodeBlock, JsonCode } from "@/components/code"
 import { EvidenceView, StepTile, stepSummary } from "@/components/deploy/run-evidence"
 import { useBreakpoint } from "@/lib/breakpoints"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /** Where a step sits in the run's time, as start and end in milliseconds. */
 function stepSpan(step: DeploymentStep, now: number) {
@@ -212,7 +213,14 @@ export function RunDetails({
   selected,
   onSelect,
   onShowOutput,
+  pane,
 }: {
+  /**
+   * One half alone, as a phone's pane draws it: the steps, or the record of
+   * the one picked, with no "Details" head and no frame, since the pane is
+   * the frame and its bar names it.
+   */
+  pane?: "steps" | "step"
   /** The project, so a preflight finding can open the settings page holding its field. */
   projectId?: number
   /** What the project is, for the marks of the steps that work with its source and build. */
@@ -277,8 +285,68 @@ export function RunDetails({
 
   const pick = (id: number) => {
     onSelect(id)
-    if (!wide) inspector.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    // A pane's step is another stop, which the page moves to.
+    if (!wide && !pane) scrollIntoViewRespectingMotion(inspector.current)
   }
+
+  const railList = (
+    <ol
+      ref={rail}
+      aria-label="Deployment steps"
+      className={cn(
+        "min-h-0 space-y-1 overflow-y-auto",
+        pane ? "-mx-2" : "p-2 max-lg:border-b lg:border-r",
+      )}
+    >
+      {stages.map((stage) => (
+        <li key={stage.label} className="min-w-0">
+          <StageHead label={stage.label} state={stage.state} steps={stage.steps} now={now} />
+          <ol aria-label={stage.label} className="min-w-0">
+            {stage.steps.map((step, index) => {
+              const span = spans.get(step.id)
+              return (
+                <StepRow
+                  key={step.id}
+                  step={step}
+                  deployment={deployment}
+                  operation={operation}
+                  now={now}
+                  lines={lineCounts.get(step.id) ?? 0}
+                  selected={step.id === current?.id}
+                  above={index > 0 ? stage.steps[index - 1].state : undefined}
+                  last={index === stage.steps.length - 1}
+                  left={span ? ((span.start - from) / length) * 100 : undefined}
+                  width={span ? ((span.end - span.start) / length) * 100 : undefined}
+                  onSelect={() => pick(step.id)}
+                />
+              )
+            })}
+          </ol>
+        </li>
+      ))}
+    </ol>
+  )
+  const record = current && (
+    <Inspector
+      key={current.id}
+      projectId={projectId}
+      deployment={deployment}
+      step={current}
+      operation={operation}
+      now={now}
+      rows={rows}
+      lines={lineCounts.get(current.id) ?? 0}
+      onShowOutput={() => onShowOutput(current.id)}
+      bare={pane !== undefined}
+    />
+  )
+
+  if (pane)
+    return (
+      <div id="run-details" className="min-w-0">
+        {pane === "steps" ? railList : record}
+      </div>
+    )
 
   return (
     <Section
@@ -300,52 +368,9 @@ export function RunDetails({
         id="run-details"
         className="grid min-w-0 scroll-mt-16 overflow-hidden rounded-xl border bg-card lg:h-[min(80svh,48rem)] lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]"
       >
-        <ol
-          ref={rail}
-          aria-label="Deployment steps"
-          className="min-h-0 space-y-1 overflow-y-auto p-2 max-lg:border-b lg:border-r"
-        >
-          {stages.map((stage) => (
-            <li key={stage.label} className="min-w-0">
-              <StageHead label={stage.label} state={stage.state} steps={stage.steps} now={now} />
-              <ol aria-label={stage.label} className="min-w-0">
-                {stage.steps.map((step, index) => {
-                  const span = spans.get(step.id)
-                  return (
-                    <StepRow
-                      key={step.id}
-                      step={step}
-                      deployment={deployment}
-                      operation={operation}
-                      now={now}
-                      lines={lineCounts.get(step.id) ?? 0}
-                      selected={step.id === current?.id}
-                      above={index > 0 ? stage.steps[index - 1].state : undefined}
-                      last={index === stage.steps.length - 1}
-                      left={span ? ((span.start - from) / length) * 100 : undefined}
-                      width={span ? ((span.end - span.start) / length) * 100 : undefined}
-                      onSelect={() => pick(step.id)}
-                    />
-                  )
-                })}
-              </ol>
-            </li>
-          ))}
-        </ol>
+        {railList}
         <div ref={inspector} className="min-h-0 min-w-0 scroll-mt-16 overflow-y-auto">
-          {current && (
-            <Inspector
-              key={current.id}
-              projectId={projectId}
-              deployment={deployment}
-              step={current}
-              operation={operation}
-              now={now}
-              rows={rows}
-              lines={lineCounts.get(current.id) ?? 0}
-              onShowOutput={() => onShowOutput(current.id)}
-            />
-          )}
+          {record}
         </div>
       </div>
     </Section>
@@ -515,6 +540,7 @@ function Inspector({
   rows,
   lines,
   onShowOutput,
+  bare,
 }: {
   projectId?: number
   deployment?: DeploymentSummary
@@ -524,6 +550,8 @@ function Inspector({
   rows: ConsoleRow[]
   lines: number
   onShowOutput: () => void
+  /** Alone in a phone's pane: the pane's inset, and no "Details" head above its name. */
+  bare?: boolean
 }) {
   const seconds = stepSeconds(step, now)
   const evidence = step.evidence ?? {}
@@ -536,13 +564,17 @@ function Inspector({
   const tail = rows.filter((row) => row.stepId === step.id).slice(-TAIL)
   const recorded = Object.keys(evidence).length > 0
   const name = stepName(step.key, operation)
+  const Heading = bare ? "h2" : "h3"
   return (
-    <section aria-label={name} className="min-w-0 animate-rise space-y-6 p-4 sm:p-5">
+    <section
+      aria-label={name}
+      className={cn("min-w-0 animate-rise space-y-6", !bare && "p-4 sm:p-5")}
+    >
       <header className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <StepTile step={step} state={step.state} deployment={deployment} size="md" />
           <div className="min-w-0 space-y-1">
-            <h3 className="truncate text-title font-semibold tracking-tight">{name}</h3>
+            <Heading className="truncate text-title font-semibold tracking-tight">{name}</Heading>
             <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <Status
                 tone={STEP_TONE[step.state] ?? "stopped"}

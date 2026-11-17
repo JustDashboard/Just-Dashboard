@@ -39,6 +39,7 @@ import { Page, PageContext } from "@/components/page"
 import { PaneBar, type PaneStop } from "@/components/phone-panes"
 import { useBelow } from "@/lib/breakpoints"
 import { cn } from "@/lib/utils"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 import { Section } from "@/components/section"
 import { useTabTitle } from "@/components/shell/tab-title"
 import { ErrorState, Notice } from "@/components/state"
@@ -120,17 +121,6 @@ const RUN_STOPS: PaneStop<RunStop>[] = [
   { key: "steps", label: "Steps", icon: <ListUnordered /> },
   { key: "step", label: "Step", icon: <Information /> },
 ]
-
-/**
- * How a press that brings a part of the page into view moves there: glided,
- * or at once when the reader asked for less motion, in the system or with the
- * product's pause. An explicit `smooth` overrides the stylesheet's
- * `scroll-behavior: auto`, so the root rule cannot reach it.
- */
-function glide(): ScrollBehavior {
-  if (document.documentElement.dataset.motion === "paused") return "instant"
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
-}
 
 export function RunPage() {
   const route = useParams<{ id: string; run: string }>()
@@ -493,8 +483,7 @@ export function RunPage() {
   const showOutput = (stepId: number) => {
     setSelectedStepId(stepId)
     if (phone) setStop("logs")
-    else
-      document.getElementById("build-logs")?.scrollIntoView({ behavior: glide(), block: "start" })
+    else scrollIntoViewRespectingMotion(document.getElementById("build-logs"))
   }
 
   const showFailure = () => {
@@ -517,8 +506,7 @@ export function RunPage() {
     if (!failedStep) return
     setInspectedStepId(failedStep.id)
     if (phone) setStop("step")
-    else
-      document.getElementById("run-details")?.scrollIntoView({ behavior: glide(), block: "start" })
+    else scrollIntoViewRespectingMotion(document.getElementById("run-details"))
   }
 
   // The header's buttons are the run's own verbs; the menu is the release's,
@@ -787,41 +775,38 @@ export function RunPage() {
           data-slot="run-panes"
           className="-mx-(--page-inset) flex min-h-0 flex-1 flex-col border-t border-hairline"
         >
-          {stop === "logs" ? (
-            <div id="build-logs" className="flex min-h-0 flex-1 flex-col">
-              <BuildConsole
-                flush
-                className="min-h-0 flex-1"
-                rows={rows}
-                summary={transcript}
-                capped={stream.capped}
-                steps={attempts}
-                active={active}
-                outcome={run.state}
-                operation={stepOperation(run)}
-                connected={stream.socket === "open"}
-                startedAt={run.claimedAt ?? run.requestedAt}
-                runNumber={run.runNumber}
-                now={clock}
-                selectedStep={selectedStepId}
-                onSelectStep={setSelectedStepId}
-                focusLine={focusLine}
-                deployment={deployment}
-              />
-            </div>
-          ) : (
-            <div
-              className={cn(
-                "min-h-0 flex-1 space-y-6 overflow-y-auto px-(--page-inset) py-4",
-                // One of the two halves of Details: the steps, or the record
-                // of the one picked, in the pane's own scroll. Alone in the
-                // frame, the steps drop the rule that parted them from the
-                // record: it lay on the frame's own edge as a second line.
-                stop === "steps"
-                  ? "[&_#run-details>:not(ol)]:hidden [&_#run-details>ol]:border-b-0"
-                  : "[&_#run-details>ol]:hidden",
-              )}
-            >
+          {/* The console stays mounted while another stop is read, as a
+              hidden pane does on the other pane pages, so its search, stage
+              and Wrap are where the reader left them on the way back. */}
+          <div
+            id="build-logs"
+            className={cn("flex min-h-0 flex-1 flex-col", stop !== "logs" && "hidden")}
+          >
+            <BuildConsole
+              flush
+              className="min-h-0 flex-1"
+              rows={rows}
+              summary={transcript}
+              capped={stream.capped}
+              steps={attempts}
+              active={active}
+              outcome={run.state}
+              operation={stepOperation(run)}
+              connected={stream.socket === "open"}
+              startedAt={run.claimedAt ?? run.requestedAt}
+              runNumber={run.runNumber}
+              now={clock}
+              selectedStep={selectedStepId}
+              onSelectStep={setSelectedStepId}
+              focusLine={focusLine}
+              deployment={deployment}
+            />
+          </div>
+          {stop !== "logs" && (
+            // One of the two halves of Details, in the pane's own scroll:
+            // the steps, or the record of the one picked, with no head or
+            // frame of the desk's, since the pane is the frame.
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-(--page-inset) py-4">
               {stop === "steps" && outcome}
               {attempts.length > 0 && (
                 <RunDetails
@@ -838,6 +823,7 @@ export function RunPage() {
                     setStop("step")
                   }}
                   onShowOutput={showOutput}
+                  pane={stop === "step" ? "step" : "steps"}
                 />
               )}
             </div>

@@ -912,6 +912,53 @@ test("is responsive from 390 to 1280 wide with no sideways scroll", async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
+test("on a phone the console keeps its place and its following while another stop is read", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const lines = (from: number, count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      seq: from + index,
+      type: "step.log",
+      runId: 84,
+      stepId: 105,
+      ts: now,
+      data: { stream: "stdout", text: `build line ${from + index}\n`, truncated: false },
+    }))
+  let send: (count: number) => void = () => {}
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
+    socket.send(JSON.stringify({ type: "events", data: lines(100, 80), ts: Date.now() }))
+    let next = 180
+    send = (count) => {
+      socket.send(JSON.stringify({ type: "events", data: lines(next, count), ts: Date.now() }))
+      next += count
+    }
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/deploy/7/runs/84")
+
+  const transcript = page.getByRole("group", { name: "Deployment transcript" })
+  await expect(transcript.getByText("build line 179", { exact: true })).toBeInViewport()
+  const bar = page.getByRole("navigation", { name: "Deployment" })
+  const search = page.getByRole("textbox", { name: "Search build logs" })
+  await search.fill("line")
+
+  // Read the steps while the build writes on.
+  await bar.getByRole("button", { name: "Steps" }).click()
+  await expect(page.getByRole("list", { name: "Deployment steps" })).toBeVisible()
+  // The steps stand alone in the pane: no desk "Details" head over them.
+  await expect(page.getByRole("heading", { name: "Details" })).toHaveCount(0)
+  send(20)
+  await expect(transcript).toBeHidden()
+
+  // Back on the logs: the search is still the reader's, and the console,
+  // which was following, is at the line written while it was hidden.
+  await bar.getByRole("button", { name: "Logs" }).click()
+  await expect(search).toHaveValue("line")
+  await expect(transcript.getByText("build line 199", { exact: true })).toBeInViewport()
+})
+
 test("a Railpack prepare step reads as what Railpack decided", async ({ page }, testInfo) => {
   await mockProject(page)
   const railpack = {
