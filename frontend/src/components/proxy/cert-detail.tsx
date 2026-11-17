@@ -53,7 +53,7 @@ function CopyValue({ value, label }: { value: string; label: string }) {
   )
 }
 
-function CopyList({ values, label }: { values: string[]; label: string }) {
+function CopyValues({ values, label }: { values: string[]; label: string }) {
   if (values.length === 0) return <>—</>
   return (
     <div className="flex flex-col gap-1">
@@ -75,7 +75,7 @@ export function IdentityFacts({ facts }: { facts: CertificateFacts }) {
         <CopyValue value={facts.issuer} label="issuer" />
       </Detail>
       <Detail label="Alternative names">
-        <CopyList values={names} label="name" />
+        <CopyValues values={names} label="name" />
       </Detail>
       <Detail label="Serial">
         <CopyValue value={facts.serial} label="serial" />
@@ -95,13 +95,13 @@ export function IdentityFacts({ facts }: { facts: CertificateFacts }) {
       </Detail>
       <Detail label="Signature">{facts.signature}</Detail>
       <Detail label="OCSP">
-        <CopyList values={facts.ocsp} label="OCSP address" />
+        <CopyValues values={facts.ocsp} label="OCSP address" />
       </Detail>
       <Detail label="Issuer certificate">
-        <CopyList values={facts.issuerUrls} label="issuer address" />
+        <CopyValues values={facts.issuerUrls} label="issuer address" />
       </Detail>
       <Detail label="CRL">
-        <CopyList values={facts.crl} label="CRL address" />
+        <CopyValues values={facts.crl} label="CRL address" />
       </Detail>
       <Detail label="SCTs">
         <span className="numeric">{facts.scts}</span>
@@ -495,7 +495,7 @@ export function PemDecoder({
                 <CopyValue value={csr.subject || "—"} label="subject" />
               </Detail>
               <Detail label="Alternative names">
-                <CopyList
+                <CopyValues
                   values={[...csr.dnsNames, ...csr.ipAddresses, ...csr.emails]}
                   label="name"
                 />

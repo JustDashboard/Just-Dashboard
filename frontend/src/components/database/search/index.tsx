@@ -8,7 +8,7 @@ import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemoryState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/search-input"
@@ -621,9 +621,7 @@ function Searching({ word, progress }: { word: string; progress?: { done: number
       </p>
       <div aria-hidden className="space-y-2">
         <Skeleton className="h-3 w-40" />
-        {[0, 1, 2].map((row) => (
-          <Skeleton key={row} className="h-14 w-full rounded-xl" />
-        ))}
+        <ChoiceListSkeleton rows={3} mark={false} aside={false} />
       </div>
     </div>
   )
@@ -759,8 +757,8 @@ function instantText(text: string): string {
 }
 
 const CELL_HUE: Record<OtherCell["kind"], string> = {
-  text: "text-foreground/85",
-  number: cn("text-foreground/85", KIND_HUE.number),
+  text: "text-foreground",
+  number: cn("text-foreground", KIND_HUE.number),
   instant: KIND_HUE.datetime,
   flag: KIND_HUE.boolean,
   token: KIND_HUE.uuid,

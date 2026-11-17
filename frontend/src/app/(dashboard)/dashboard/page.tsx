@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 
 /**
  * The dashboard's own version, and everything it has ever been.
@@ -102,7 +103,7 @@ export default function DashboardVersionPage() {
         error={error}
         skeleton={
           <>
-            <Skeleton className="h-14 rounded-xl" />
+            <ChoiceListSkeleton rows={1} mark={false} aside={false} />
             <Skeleton className="h-96 rounded-xl" />
           </>
         }

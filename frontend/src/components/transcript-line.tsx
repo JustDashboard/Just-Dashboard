@@ -243,14 +243,14 @@ export function TranscriptRow({
             <span className="numeric mr-2 text-faint select-none">{line.time}</span>
           )}
           {tokens && line.kind === "output" ? (
-            <LogText text={rest} hits={hitRanges(rest, needle)} className="text-foreground/85" />
+            <LogText text={rest} hits={hitRanges(rest, needle)} className="text-foreground" />
           ) : (
             <span
               className={cn(
                 line.kind === "error" && "text-destructive",
                 line.kind === "warning" && "text-warning",
                 line.kind === "progress" && "text-muted-foreground",
-                line.kind === "output" && "text-foreground/85",
+                line.kind === "output" && "text-foreground",
               )}
             >
               {text(rest)}

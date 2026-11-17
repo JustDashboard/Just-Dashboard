@@ -32,6 +32,7 @@ import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { ComposeDiff, ServiceLabel } from "@/components/docker/stack-diff"
 import { DiffCount } from "@/components/diff-count"
+import { StatusDot } from "@/components/status-dot"
 import {
   configHues,
   diffCounts,
@@ -309,9 +310,10 @@ function Rail({
                       <span className="text-faint">·</span>
                       <span className="truncate font-mono">{record.gitCommit.slice(0, 7)}</span>
                       {record.gitDirty && (
-                        <span
+                        <StatusDot
+                          tone="warning"
                           title="The checkout had uncommitted changes"
-                          className="size-1.5 shrink-0 rounded-full bg-warning"
+                          label="uncommitted changes"
                         />
                       )}
                     </>

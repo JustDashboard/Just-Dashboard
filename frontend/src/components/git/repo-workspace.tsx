@@ -1208,4 +1208,4 @@ function TabGlyph({ children }: { children: React.ReactNode }) {
 }
 
 /** A view of the middle column, filling it as the list it holds did. */
-const PANEL = "flex min-h-0 flex-1 flex-col outline-none"
+const PANEL = "flex min-h-0 flex-1 flex-col focus-ring-inset"

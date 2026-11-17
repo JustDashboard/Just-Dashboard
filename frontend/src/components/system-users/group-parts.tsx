@@ -14,6 +14,7 @@ import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { SystemGroup } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /** The host's groups, read the way the list and a group's page both read them. */
 export function useGroups() {
@@ -125,10 +126,10 @@ export function ChoiceRowsWaiting({ rows = 4 }: { rows?: number }) {
           key={index}
           className="flex h-[58px] min-w-0 items-center gap-3 rounded-xl border bg-choice-surface px-3"
         >
-          <span className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
+          <Skeleton className="size-9 shrink-0 rounded-lg" />
           <span className="min-w-0 flex-1 space-y-2">
-            <span className="block h-2.5 w-32 max-w-full animate-pulse rounded-md bg-muted" />
-            <span className="block h-2 w-20 max-w-full animate-pulse rounded-md bg-muted" />
+            <Skeleton className="h-2.5 w-32 max-w-full" />
+            <Skeleton className="h-2 w-20 max-w-full" />
           </span>
         </li>
       ))}

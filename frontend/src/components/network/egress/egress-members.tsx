@@ -242,7 +242,7 @@ function SampleStrip({ points }: { points: EgressPoint[] }) {
         <span
           key={p.at}
           title={`${new Date(p.at).toLocaleTimeString()} · ${p.good ? "good" : "bad"}${p.latencyMillis !== undefined ? ` · ${p.latencyMillis.toFixed(1)} ms` : ""} · loss ${Math.round(p.loss)}%`}
-          className={cn("h-full w-1 rounded-[1px]", p.good ? "bg-success/70" : "bg-destructive/80")}
+          className={cn("h-full w-1 rounded-xs", p.good ? "bg-success/70" : "bg-destructive/80")}
         />
       ))}
     </span>

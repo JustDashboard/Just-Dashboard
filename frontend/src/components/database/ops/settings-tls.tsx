@@ -2,8 +2,6 @@
 
 import { useRef, useState } from "react"
 import {
-  Check,
-  Copy,
   Download,
   LockClosed,
   LockOpen,
@@ -16,9 +14,8 @@ import { calendarDate } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { DbTLS } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { useCopy } from "@/hooks/use-copy"
+import { CopyValue } from "@/components/copy"
 import { usePoll } from "@/hooks/use-poll"
-import { cn } from "@/lib/utils"
 import { Segments } from "@/components/segments"
 import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { SettingPicture } from "@/components/settings/setting-picture"
@@ -309,8 +306,8 @@ export function TransportSecuritySection() {
                   <span className="font-mono">{data.client.caFile}</span> and replace the password.
                 </InfoTip>
               </p>
-              {data.client.url && <CopyLine label="Connection string" text={data.client.url} />}
-              <CopyLine label="Command" text={data.client.command} />
+              {data.client.url && <PasteLine label="Connection string" text={data.client.url} />}
+              <PasteLine label="Command" text={data.client.command} />
             </div>
           )}
         </>
@@ -471,20 +468,6 @@ function TlsPicture({
 }
 
 /** A string to paste, with the tick that says it was copied. */
-function CopyLine({ label, text }: { label: string; text: string }) {
-  const { copy, copied } = useCopy()
-  return (
-    <div className="flex min-w-0 items-start gap-2 rounded-md border border-hairline bg-card px-3 py-2">
-      <code className={cn("min-w-0 flex-1 font-mono text-xs wrap-anywhere")}>{text}</code>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        aria-label={`Copy ${label.toLowerCase()}`}
-        onClick={() => void copy(text)}
-      >
-        {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-      </Button>
-    </div>
-  )
+function PasteLine({ label, text }: { label: string; text: string }) {
+  return <CopyValue framed wrap="anywhere" value={text} label={`Copy ${label.toLowerCase()}`} />
 }

@@ -36,11 +36,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import {
-  BlocklistList,
-  BlocklistModal,
-  CardRowsSkeleton,
-} from "@/components/network/protection/blocklists"
+import { BlocklistList, BlocklistModal } from "@/components/network/protection/blocklists"
 import {
   ExceptionList,
   ExceptionModal,
@@ -61,6 +57,7 @@ import {
   stagedChanges,
 } from "@/components/network/protection/reading"
 import { TrustedList } from "@/components/network/protection/trusted"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 
 type Editor =
   | { kind: "list"; list?: ProtectionBlocklist }
@@ -554,7 +551,7 @@ const EMPTY_HEIGHT = "h-[10.5rem]"
  */
 function SectionSkeleton({ rows, card }: { rows: number; card?: boolean }) {
   if (rows === 0) return <Skeleton aria-hidden className={`${EMPTY_HEIGHT} w-full rounded-xl`} />
-  if (card) return <CardRowsSkeleton rows={rows} />
+  if (card) return <ChoiceListSkeleton rows={rows} mark={false} />
   return (
     <ul aria-hidden className="divide-y divide-hairline">
       {Array.from({ length: rows }, (_, i) => (

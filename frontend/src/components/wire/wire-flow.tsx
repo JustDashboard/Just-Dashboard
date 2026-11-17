@@ -22,6 +22,7 @@ import {
   type WireLine,
 } from "@/components/wire/wire-flow-model"
 import { useBreakpoint } from "@/lib/breakpoints"
+import { Bone } from "@/components/bone"
 
 export type { WaitingHint, WireLine, WireState } from "@/components/wire/wire-flow-model"
 
@@ -616,15 +617,7 @@ function waitingDetail(shape: WireFlowWaiting, widths: string[]) {
  * lines it stands in are paragraphs.
  */
 function WaitingWords({ className }: { className?: string }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn(
-        "inline-block h-[0.7em] max-w-full animate-pulse rounded-md bg-muted align-middle",
-        className,
-      )}
-    />
-  )
+  return <Bone className={className} />
 }
 
 /** A node's mark as the link or button it is, or as itself. */

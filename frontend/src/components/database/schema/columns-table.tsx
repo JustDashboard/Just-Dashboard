@@ -151,9 +151,7 @@ export function ColumnsTable({
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className={cn(HEAD, "w-10 pr-0 text-right @max-[52rem]:hidden")}>
-                #
-              </TableHead>
+              <TableHead className={cn(HEAD, "w-10 pr-0 text-right @max-4xl:hidden")}>#</TableHead>
               <TableHead className={HEAD}>Name</TableHead>
               <TableHead className={HEAD}>Type</TableHead>
               <TableHead className={HEAD}>NULL</TableHead>
@@ -178,7 +176,7 @@ export function ColumnsTable({
                   <TableCell
                     className={cn(
                       CELL,
-                      "numeric pr-0 text-right text-muted-foreground @max-[52rem]:hidden",
+                      "numeric pr-0 text-right text-muted-foreground @max-4xl:hidden",
                     )}
                   >
                     {column.position}

@@ -521,6 +521,8 @@ function SetupPath({ stage, deploying }: { stage: GitHubAppStage; deploying: boo
                   aria-hidden
                   className="mt-px flex size-3.5 shrink-0 items-center justify-center"
                 >
+                  {/* The step being done, in the brand hue a step list draws. */}
+                  {/* eslint-disable-next-line retired-apis/retired */}
                   <span className="size-1.5 rounded-full bg-brand" />
                 </span>
               ) : (

@@ -49,3 +49,29 @@ export async function copyTextQuietly(text: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * Text that is still being made (a request's answer), promised to the
+ * clipboard inside the gesture: a write made after the request came back is
+ * one Safari refuses. Throws when the browser refuses, for the caller to say
+ * what was not copied.
+ */
+export async function copyPending(text: Promise<string>): Promise<void> {
+  if (!navigator.clipboard?.write) throw new Error("no clipboard")
+  await navigator.clipboard.write([
+    new ClipboardItem({
+      "text/plain": text.then((value) => new Blob([value], { type: "text/plain" })),
+    }),
+  ])
+}
+
+/** Whether the page may read the clipboard at all (a secure context that offers it). */
+export function canPaste(): boolean {
+  return typeof navigator !== "undefined" && navigator.clipboard?.readText !== undefined
+}
+
+/** The clipboard's text. Throws when the browser will not let the page read it. */
+export async function pasteText(): Promise<string> {
+  if (!canPaste()) throw new Error("no clipboard")
+  return navigator.clipboard.readText()
+}

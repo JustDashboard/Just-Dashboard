@@ -40,6 +40,7 @@ import {
 import { GatewayPicture, GatewayPictureLoading } from "@/components/network/gateway/picture"
 import { compact } from "@/components/network/gateway/reading"
 import { useGrowth } from "@/components/network/gateway/use-growth"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 
 type Sheet = { kind: "forward"; forward?: GatewayForward } | { kind: "nat"; entry?: GatewayNAT }
 
@@ -404,13 +405,5 @@ function Carried({
 /** A section's rows while the first read is out: as many as it held last time, at their height. */
 function Rows({ count }: { count: number }) {
   if (count === 0) return <Skeleton aria-hidden className="h-9 w-full rounded-lg" />
-  return (
-    <ul aria-hidden className="space-y-2">
-      {Array.from({ length: count }, (_, i) => (
-        <li key={i}>
-          <Skeleton className="h-14 w-full rounded-xl" />
-        </li>
-      ))}
-    </ul>
-  )
+  return <ChoiceListSkeleton rows={count} />
 }

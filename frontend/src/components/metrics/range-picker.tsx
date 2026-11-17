@@ -7,6 +7,7 @@ import {
   MagnifyingGlassMinus,
 } from "@/components/icons"
 import { timestamp } from "@/lib/format"
+import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import {
   RANGES,
@@ -122,12 +123,8 @@ export function RangePicker({
 }
 
 async function copyWindowLink() {
-  try {
-    await navigator.clipboard.writeText(globalThis.location.href)
+  if (await copyText(globalThis.location.href))
     notify.success("Link copied", { description: "It opens the charts on this exact span." })
-  } catch (err) {
-    notify.error("Could not copy the link", err)
-  }
 }
 
 /** The exact span on screen, for the caption under a zoomed set of charts. */

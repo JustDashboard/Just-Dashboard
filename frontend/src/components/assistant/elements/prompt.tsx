@@ -233,6 +233,9 @@ export function PromptInput({
           value={question}
           maxLength={maxLength}
           rows={rows}
+          // The frame is the field and the caret its focus mark: a ring inside
+          // the frame would box the words being typed.
+          // eslint-disable-next-line design-system/tokens
           className="block field-sizing-content max-h-48 min-h-14 w-full resize-none border-0 bg-transparent px-3.5 pt-3 pb-1 text-base leading-relaxed caret-foreground outline-none placeholder:text-muted-foreground sm:text-body"
           onChange={(event) => setQuestion(event.target.value)}
           onPaste={(event) => {

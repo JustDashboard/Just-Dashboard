@@ -20,7 +20,7 @@ import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Toolbar } from "@/components/toolbar"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { IdentityHeader } from "@/components/identity-header"
 import { facts } from "@/components/fact-line"
 import { ProductLogo } from "@/components/product-logo"
@@ -32,7 +32,6 @@ import { JobConsole, useJobConsole } from "@/components/job-console"
 import { VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import { TLSTools } from "@/components/proxy/request-tester"
 import { TLSReportPage } from "@/components/proxy/tls-report"
@@ -343,13 +342,7 @@ function TLSFleetPage() {
         <PanelBody className="pt-3">
           {loading ? (
             // The list's own rows, held while the reports are read.
-            <ChoiceList aria-busy>
-              {[0, 1, 2].map((index) => (
-                <li key={index}>
-                  <Skeleton className="h-14 w-full rounded-xl" />
-                </li>
-              ))}
-            </ChoiceList>
+            <ChoiceListSkeleton rows={3} />
           ) : fleet.error && !fleet.data ? (
             <ErrorState error={fleet.error} onRetry={fleet.refresh} />
           ) : all.length === 0 ? (

@@ -32,6 +32,7 @@ import {
 import type { DbMaintenanceResult } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { agree } from "@/components/database/kit/figures"
+import { Sweep } from "@/components/loading"
 
 type Run = {
   verb: MaintenanceVerb
@@ -357,12 +358,7 @@ function MaintenanceRun({
                 <TextShimmer>Running…</TextShimmer>
                 <Elapsed since={run.since} />
               </p>
-              <div
-                aria-hidden
-                className="relative h-0.5 overflow-hidden rounded-full bg-meter-track"
-              >
-                <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep rounded-full bg-brand" />
-              </div>
+              <Sweep rounded className="h-0.5" />
             </div>
           ) : run.state === "stopped" ? (
             <Notice title="Stopped">

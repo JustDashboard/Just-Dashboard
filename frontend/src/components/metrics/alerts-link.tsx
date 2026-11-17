@@ -7,6 +7,7 @@ import { hostAlertCounts, type HostAlerts } from "@/lib/host-alerts"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
+import { StatusDot } from "@/components/status-dot"
 
 /**
  * The way from Metrics to its Alerts, with what is firing counted in its
@@ -36,12 +37,12 @@ export function HostAlertsLink() {
         Alerts
         {firing > 0 ? (
           <span className="numeric flex items-center gap-1 text-hint font-medium text-destructive">
-            <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-destructive" />
+            <StatusDot tone="danger" live />
             {firing}
           </span>
         ) : holding > 0 ? (
           <span className="numeric flex items-center gap-1 text-hint font-medium text-warning">
-            <span aria-hidden className="size-1.5 rounded-full bg-warning" />
+            <StatusDot tone="warning" />
             {holding}
           </span>
         ) : null}

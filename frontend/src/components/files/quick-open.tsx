@@ -218,6 +218,9 @@ function SearchBody({
           }}
           placeholder={mode === "names" ? "Find a file or folder…" : "Find text inside files…"}
           spellCheck={false}
+          // The palette's search box: the caret is its focus mark, as in every
+          // palette, and the results under it say where the arrows are.
+          // eslint-disable-next-line design-system/tokens
           className="h-12 min-w-0 flex-1 border-0 bg-transparent text-body shadow-none outline-none placeholder:text-muted-foreground"
         />
         <span className="flex size-4 shrink-0 items-center justify-center">

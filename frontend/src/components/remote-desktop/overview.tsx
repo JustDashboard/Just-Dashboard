@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useMemo, useState } from "react"
 import { Modal } from "@/components/modal"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton } from "@/components/choice-row"
 import { ArrowRight, Plus, RefreshClockwise, TerminalWindow } from "@/components/icons"
 import { IdentityHeader } from "@/components/identity-header"
 import { facts } from "@/components/fact-line"
@@ -137,10 +137,7 @@ export function RemoteDesktopOverview() {
             {identity}
             <div role="status" aria-label="Loading Remote Desktop" className="flex flex-col gap-8">
               <Skeleton className="h-64 rounded-xl" />
-              <div className="flex flex-col gap-2">
-                <Skeleton className="h-14 rounded-xl" />
-                <Skeleton className="h-14 rounded-xl" />
-              </div>
+              <ChoiceListSkeleton rows={2} />
             </div>
           </>
         )}

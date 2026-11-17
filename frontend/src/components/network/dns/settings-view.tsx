@@ -10,6 +10,7 @@ import { SaveBarProvider } from "@/components/settings/save-bar"
 import { Bar } from "@/components/network/dns/ghost"
 import { HostRecordsEditor } from "@/components/network/dns/host-records"
 import { OwnerHandoff } from "@/components/network/dns/resolver-owner"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   ResolverOutcomeNote,
   ResolverSettings,
@@ -51,10 +52,7 @@ export function SettingsView({
         <FormSections>
           {SECTIONS.map((title) => (
             <FormSection key={title} aside title={title} hint={<Bar className="w-40" />}>
-              <div
-                data-slot="skeleton"
-                className="h-9 w-full animate-pulse rounded-md bg-muted sm:max-w-md"
-              />
+              <Skeleton className="h-9 w-full sm:max-w-md" />
             </FormSection>
           ))}
         </FormSections>
@@ -110,10 +108,7 @@ export function SettingsView({
               {hosts.error ? (
                 <ErrorState error={hosts.error} onRetry={hosts.refresh} />
               ) : (
-                <div
-                  data-slot="skeleton"
-                  className="h-9 w-full animate-pulse rounded-md bg-muted"
-                />
+                <Skeleton className="h-9 w-full" />
               )}
             </FormSection>
           )}

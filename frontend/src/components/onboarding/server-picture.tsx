@@ -48,7 +48,11 @@ export function ServerPicture({
 
   const server = (
     <div ref={hub} className="relative z-raised flex flex-col items-center">
+      {/* The large tile's two radii are concentric with its 4px of padding,
+          past the ladder's tile steps. */}
+      {/* eslint-disable-next-line design-system/tokens */}
       <span className="flex rounded-[1.375rem] border border-rule-brand bg-background p-1">
+        {/* eslint-disable-next-line design-system/tokens */}
         <span className="flex size-20 items-center justify-center rounded-[1.125rem] bg-wash-brand text-brand">
           <Servers aria-hidden className="size-9" />
         </span>

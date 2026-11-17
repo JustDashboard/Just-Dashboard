@@ -12,14 +12,13 @@ import {
 } from "@/lib/network/egress"
 import { cn } from "@/lib/utils"
 import { Fact } from "@/components/fact-line"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Lifebuoy, Plus } from "@/components/icons"
 import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbActions } from "@/components/verbs"
 import { NetworkReadWarning } from "@/components/network/read-warning"
@@ -244,13 +243,9 @@ function ListIdentity({
 /** Two cards' worth of ground while the first read is out, at a card's height. */
 function LoadingCards() {
   return (
-    <ul aria-busy className="space-y-2" aria-label="Reading the egress groups">
-      {[0, 1].map((i) => (
-        <li key={i}>
-          <Skeleton className="h-14 w-full rounded-xl" />
-        </li>
-      ))}
-    </ul>
+    <div role="status" aria-label="Reading the egress groups">
+      <ChoiceListSkeleton rows={2} />
+    </div>
   )
 }
 

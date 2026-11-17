@@ -14,12 +14,11 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
 import { toldBy } from "@/components/deploy/settings/traffic-alerts"
-import { ChoiceList } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton } from "@/components/choice-row"
 import { Panel, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import type { Verb } from "@/components/verbs"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { AlertForm } from "@/components/database/ops/alerts-form"
@@ -249,9 +248,7 @@ export function Alerts() {
             // Three cards' worth of the list it will be, so what lands takes
             // the place that was held for it.
             <div role="status" aria-label="Reading the alerts" className="space-y-2 pt-3">
-              {[0, 1, 2].map((row) => (
-                <Skeleton key={row} className="h-14 rounded-xl" />
-              ))}
+              <ChoiceListSkeleton rows={3} />
             </div>
           )
         ) : rules.length === 0 ? (

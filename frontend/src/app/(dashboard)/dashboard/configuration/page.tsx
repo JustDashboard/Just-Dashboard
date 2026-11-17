@@ -50,6 +50,7 @@ import { MenuItemText } from "@/components/ui/menu-item-text"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 
 /**
  * The dashboard's own configuration: where it listens, how it is trusted, who
@@ -257,7 +258,7 @@ function Configuration() {
         // The identity line, the path and the column, at about their heights.
         skeleton={
           <>
-            <Skeleton className="h-14 rounded-xl" />
+            <ChoiceListSkeleton rows={1} mark={false} aside={false} />
             <Skeleton className="h-64 rounded-xl" />
             <Skeleton className="mx-auto h-96 w-full max-w-3xl rounded-xl" />
           </>

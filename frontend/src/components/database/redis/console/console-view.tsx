@@ -433,6 +433,8 @@ export function ConsoleView({
             }}
             onKeyDown={onKeyDown}
             onBlur={() => setTyping(false)}
+            // The console's line is the field and the caret its focus mark.
+            // eslint-disable-next-line design-system/tokens
             className="h-7 min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-faint max-sm:text-base"
           />
           <Button size="xs" pending={busy} disabled={!line.trim()} onClick={() => void run()}>

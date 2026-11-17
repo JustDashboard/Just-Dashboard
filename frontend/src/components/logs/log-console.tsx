@@ -835,7 +835,7 @@ export const LogRow = memo(function LogRow({
           return (
             <span
               key={key}
-              className={cn("hidden shrink-0 overflow-hidden @min-[900px]:flex", width)}
+              className={cn("hidden shrink-0 overflow-hidden @4xl:flex", width)}
               style={width ? undefined : { width: `${columnWidths?.[key] || 6}ch` }}
             >
               {value && <FieldValue name={key} value={value} compact lens={lens} />}

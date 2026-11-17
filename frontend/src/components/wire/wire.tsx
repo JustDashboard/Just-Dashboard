@@ -179,6 +179,9 @@ export function WireHost({
     <span
       className={cn(
         "flex shrink-0 border border-rule-brand bg-background",
+        // The large frame is concentric with the tile-lg mark inside its 3px
+        // and so a step past the ladder.
+        // eslint-disable-next-line design-system/tokens
         size === "lg" && "rounded-[1.125rem] p-[3px]",
         size === "md" && "rounded-tile-lg p-[2px]",
         size === "sm" && "rounded-xl p-[2px]",
