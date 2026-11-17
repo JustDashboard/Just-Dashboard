@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { STACK_EDGE, STACK_GAP, stackOffsets } from "./dock"
+import { STACK_EDGE, STACK_GAP, stackOffsets, watchOccupant } from "./dock"
 
 // Where the bottom stack puts each thing. Measuring the elements needs a
 // document; the sum it is fed is held here.
@@ -63,5 +63,93 @@ describe("the bottom stack", () => {
       ["save", { layer: "bar", order: 0, extent: 80 }],
     ])
     expect(occupied).toBe(80)
+  })
+})
+
+describe("watching an occupant", () => {
+  // A stand-in for the browser's observers: each records what it watches and
+  // can be fired by hand.
+  function fakeBrowser() {
+    const fired = { resize: [], mutation: [] }
+    const listeners = new Map()
+    class FakeResizeObserver {
+      constructor(callback) {
+        this.callback = callback
+        fired.resize.push(this)
+      }
+      observe() {}
+      disconnect() {
+        this.gone = true
+      }
+    }
+    class FakeMutationObserver {
+      constructor(callback) {
+        this.callback = callback
+        fired.mutation.push(this)
+      }
+      observe(target, options) {
+        this.options = options
+      }
+      disconnect() {
+        this.gone = true
+      }
+    }
+    const saved = {
+      ResizeObserver: globalThis.ResizeObserver,
+      MutationObserver: globalThis.MutationObserver,
+      window: globalThis.window,
+    }
+    globalThis.ResizeObserver = FakeResizeObserver
+    globalThis.MutationObserver = FakeMutationObserver
+    globalThis.window = {
+      addEventListener: (name, fn) => listeners.set(name, fn),
+      removeEventListener: (name) => listeners.delete(name),
+    }
+    const restore = () => Object.assign(globalThis, saved)
+    return { fired, listeners, restore }
+  }
+
+  test("a bar is measured again when it is lifted, which changes its reach and not its size", () => {
+    const browser = fakeBrowser()
+    try {
+      let measured = 0
+      const stop = watchOccupant({}, "bar", () => measured++)
+      const [styled] = browser.fired.mutation
+      expect(styled.options).toEqual({ attributes: true, attributeFilter: ["style"] })
+      // The save bar's `bottom` is set to its lift: no resize, one mutation.
+      styled.callback([])
+      expect(measured).toBe(1)
+      stop()
+      expect(styled.gone).toBe(true)
+      expect(browser.listeners.size).toBe(0)
+    } finally {
+      browser.restore()
+    }
+  })
+
+  test("a dock is placed by the stack, so its style is not watched", () => {
+    const browser = fakeBrowser()
+    try {
+      const stop = watchOccupant({}, "dock", () => {})
+      expect(browser.fired.mutation).toHaveLength(0)
+      expect(browser.fired.resize).toHaveLength(1)
+      stop()
+    } finally {
+      browser.restore()
+    }
+  })
+
+  test("the stack's top follows the upper bar once its lifted reach is measured", () => {
+    // Before the lift is measured the save bar reports 72 and the top is 16px
+    // over the bottom bar; measured again, the top is the save bar's.
+    const before = stack([
+      ["pane", { layer: "bar", order: 0, extent: 56 }],
+      ["save", { layer: "bar", order: 1, extent: 72 }],
+    ])
+    const after = stack([
+      ["pane", { layer: "bar", order: 0, extent: 56 }],
+      ["save", { layer: "bar", order: 1, extent: before.bars.save + 72 }],
+    ])
+    expect(after.top).toBe(56 + 72)
   })
 })

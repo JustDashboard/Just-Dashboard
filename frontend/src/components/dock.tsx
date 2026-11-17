@@ -146,10 +146,31 @@ function extentOf(element: HTMLElement, layer: StackLayer) {
 }
 
 /**
- * Puts an element in the stack while `active`: measured as it changes size,
- * and taken out when it goes. A bar passes the element that is positioned at
- * the foot (the one with `bottom`); a dock passes itself. Returns the stack's
- * id for it, which a dock reads its place under and a bar its lift.
+ * Calls `measure` whenever what an occupant reaches can change: its size, the
+ * window's, and for a bar its own `style`. A bar is lifted by setting its
+ * `bottom`, which changes its reach without changing its size, so a size
+ * watch alone kept the reach it had before the lift and the stack's top fell
+ * short by the bar under it. Returns the way to stop watching.
+ */
+export function watchOccupant(element: HTMLElement, layer: StackLayer, measure: () => void) {
+  const sized = new ResizeObserver(measure)
+  sized.observe(element)
+  const styled = layer === "bar" ? new MutationObserver(measure) : null
+  styled?.observe(element, { attributes: true, attributeFilter: ["style"] })
+  window.addEventListener("resize", measure)
+  return () => {
+    sized.disconnect()
+    styled?.disconnect()
+    window.removeEventListener("resize", measure)
+  }
+}
+
+/**
+ * Puts an element in the stack while `active`: measured as it changes size or
+ * is lifted, and taken out when it goes. A bar passes the element that is
+ * positioned at the foot (the one with `bottom`); a dock passes itself.
+ * Returns the stack's id for it, which a dock reads its place under and a bar
+ * its lift.
  */
 export function useStackOccupant(
   element: HTMLElement | null,
@@ -161,12 +182,9 @@ export function useStackOccupant(
     if (!element || !active) return
     const measure = () => setOccupant(id, { layer, order, extent: extentOf(element, layer) })
     measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    window.addEventListener("resize", measure)
+    const stop = watchOccupant(element, layer, measure)
     return () => {
-      observer.disconnect()
-      window.removeEventListener("resize", measure)
+      stop()
       setOccupant(id, null)
     }
   }, [element, layer, order, active, id])
