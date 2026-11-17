@@ -814,9 +814,11 @@ export function RunPage() {
               className={cn(
                 "min-h-0 flex-1 space-y-6 overflow-y-auto px-(--page-inset) py-4",
                 // One of the two halves of Details: the steps, or the record
-                // of the one picked, in the pane's own scroll.
+                // of the one picked, in the pane's own scroll. Alone in the
+                // frame, the steps drop the rule that parted them from the
+                // record: it lay on the frame's own edge as a second line.
                 stop === "steps"
-                  ? "[&_#run-details>:not(ol)]:hidden"
+                  ? "[&_#run-details>:not(ol)]:hidden [&_#run-details>ol]:border-b-0"
                   : "[&_#run-details>ol]:hidden",
               )}
             >
