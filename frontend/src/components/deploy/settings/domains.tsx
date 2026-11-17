@@ -860,6 +860,8 @@ function DomainRow({
   // The sign-in's fields open by themselves when Password is turned on, since
   // that press is a request to set them; after that the row's fact opens them.
   const [asking, setAsking] = useState(false)
+  // Where a redirecting name sends visitors, and with which answer, opened from its fact.
+  const [routing, setRouting] = useState(false)
   const signInIncomplete = Boolean(
     protection &&
     (!protection.username ||
@@ -899,79 +901,38 @@ function DomainRow({
             <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
           </a>
         )}
-        {/* One size along the line: the days left and who renews it were
-            11px beside 12px readings, two baselines for one row of facts. */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {/* One line, one size, in every state: a fact that does not fit is
+            cut at the line's end rather than wrapped onto a second, so the row
+            keeps its height with a password on or a redirect set (PGD-26).
+            What wants a press comes first, as marks that never clip: the
+            sign-in's key, then where a redirecting name sends its visitors.
+            The days left and who renews it were 11px beside 12px readings,
+            two baselines for one row of facts. */}
+        <div className="flex h-4.5 min-w-0 items-center gap-x-3 overflow-x-clip text-xs whitespace-nowrap">
           <Status key={routeLabel} tone={routeTone} label={routeLabel} className="animate-rise" />
-          {/* Each name is served on its own scheme, so a plain one says so
-              whatever the others do. An HTTPS name is the expected answer, and
-              what it does for plain visitors is the switch's tooltip. */}
-          {tunnel && (
-            <span key="tunnel" className="animate-rise text-muted-foreground">
-              Through Cloudflare Tunnel
-            </span>
-          )}
-          {!tunnel && !domain.https && !domain.redirectTo && (
-            <span key="plain" className="animate-rise text-muted-foreground">
-              Plain HTTP, no redirect
-            </span>
-          )}
-          {/* The issuer is the row's mark, so the line carries the state and the
-              days left and not the issuer's glyph a second time. */}
-          {route && !unsaved && httpsChanging && (
-            <Status key={nextScheme} tone="notice" label={nextScheme} className="animate-rise" />
-          )}
-          {/* One group, so turning HTTPS back on brings the live certificate's
-              readings back together rather than popping in one by one. */}
-          {certificateRead && (
-            <span className="flex min-w-0 animate-rise flex-wrap items-center gap-x-3 gap-y-1">
-              {renewal ? (
-                <Explain face="wrap" tip={renewal}>
-                  {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
-                  <span tabIndex={0} className="rounded-sm focus-ring">
-                    <CertificateStatus domain={certificateRead} named />
-                  </span>
-                </Explain>
-              ) : (
-                <CertificateStatus domain={certificateRead} named />
-              )}
-              {typeof certificateRead.certificateDaysLeft === "number" &&
-                certificateRead.certificateDaysLeft > 0 && (
-                  <span
-                    className={cn(
-                      "numeric",
-                      certificateRead.certificate === "expiring"
-                        ? "text-warning"
-                        : "text-muted-foreground",
-                    )}
-                  >
-                    {plural(certificateRead.certificateDaysLeft, "day")} left
-                  </span>
-                )}
-            </span>
-          )}
-          {/* The sign-in is a fact of the row and its two fields a layer over
-              it, so the list never grows under a row (PGD-26). */}
+          {/* The sign-in is a mark on the row and its two fields a layer over
+              it, so the list never grows under a row (PGD-26). The mark takes
+              the warning ink while the sign-in is incomplete. */}
           {protection && (
             <Popover open={asking} onOpenChange={setAsking}>
               <PopoverTrigger asChild>
                 <button
                   type="button"
+                  title={`Password · ${protection.username || "no user name"}`}
                   className={cn(
-                    "inline-flex min-w-0 animate-rise items-center gap-1 rounded-sm focus-ring hover:underline",
+                    "-m-1 inline-flex shrink-0 animate-rise items-center rounded-sm p-1 focus-ring hover:bg-row-hover",
                     // A user name shared with another password is said in
-                    // the popover; the fact carries its ink, or the row
+                    // the popover; the mark carries its ink, or the row
                     // showed nothing of it until the fact was pressed.
                     signInIncomplete || sharedWith.length > 0
                       ? "text-warning"
                       : "text-muted-foreground",
                   )}
                 >
-                  <Key aria-hidden className="size-3 shrink-0" />
-                  <span className="truncate">
-                    Password · {protection.username || "no user name"}
+                  <Key aria-hidden className="size-3.5 shrink-0" />
+                  <span className="sr-only">
+                    Password · {protection.username || "no user name"} on {host}
                   </span>
-                  <span className="sr-only"> on {host}</span>
                 </button>
               </PopoverTrigger>
               <PopoverContent align="start" className="w-80 space-y-4">
@@ -1028,6 +989,125 @@ function DomainRow({
                 )}
               </PopoverContent>
             </Popover>
+          )}
+          {/* A redirecting name says where it sends visitors, and the two
+              choices are a layer over the row: they were a band under it,
+              which made the row taller than its siblings. */}
+          {domain.redirectTo && (
+            <Popover open={routing} onOpenChange={setRouting}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Sends visitors from ${host} to ${domain.redirectTo}`}
+                  title={`Sends visitors to ${domain.redirectTo} · ${domain.redirectCode ?? 308}`}
+                  className="inline-flex max-w-48 min-w-0 shrink-0 animate-rise items-center gap-1 rounded-sm text-muted-foreground focus-ring hover:underline"
+                >
+                  <CornerUpRight aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate font-mono">{domain.redirectTo}</span>
+                  <span className="numeric shrink-0">· {domain.redirectCode ?? 308}</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 space-y-4">
+                <Field
+                  label="Sends visitors to"
+                  htmlFor={`domain-redirect-${index}`}
+                  info="Every path and query on this name is answered with a redirect to the same path on the other. It serves no application of its own."
+                >
+                  <Select
+                    value={domain.redirectTo}
+                    onValueChange={(redirectTo) => onChange({ redirectTo })}
+                    disabled={!canAdmin}
+                  >
+                    <SelectTrigger id={`domain-redirect-${index}`} className="w-full font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* The saved target stays listed even once it has stopped
+                          serving, so the field shows what the server refused. */}
+                      {[...new Set([domain.redirectTo, ...targets])].map((name) => (
+                        <SelectItem key={name} value={name} className="font-mono">
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field
+                  label="Answer"
+                  htmlFor={`domain-redirect-code-${index}`}
+                  info="Browsers remember a permanent redirect, so use a temporary one while trying it out."
+                >
+                  <Select
+                    value={String(domain.redirectCode ?? 308)}
+                    onValueChange={(code) =>
+                      onChange({
+                        redirectCode:
+                          code === "308" ? undefined : (Number(code) as DeploymentRedirectCode),
+                      })
+                    }
+                    disabled={!canAdmin}
+                  >
+                    <SelectTrigger id={`domain-redirect-code-${index}`} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REDIRECT_CODES.map(([code, label]) => (
+                        <SelectItem key={code} value={String(code)}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </PopoverContent>
+            </Popover>
+          )}
+          {/* Each name is served on its own scheme, so a plain one says so
+              whatever the others do. An HTTPS name is the expected answer, and
+              what it does for plain visitors is the switch's tooltip. */}
+          {tunnel && (
+            <span key="tunnel" className="animate-rise text-muted-foreground">
+              Through Cloudflare Tunnel
+            </span>
+          )}
+          {!tunnel && !domain.https && !domain.redirectTo && (
+            <span key="plain" className="animate-rise text-muted-foreground">
+              Plain HTTP, no redirect
+            </span>
+          )}
+          {/* The issuer is the row's mark, so the line carries the state and the
+              days left and not the issuer's glyph a second time. */}
+          {route && !unsaved && httpsChanging && (
+            <Status key={nextScheme} tone="notice" label={nextScheme} className="animate-rise" />
+          )}
+          {/* One group, so turning HTTPS back on brings the live certificate's
+              readings back together rather than popping in one by one. */}
+          {certificateRead && (
+            <span className="flex min-w-0 animate-rise items-center gap-x-3 overflow-hidden">
+              {renewal ? (
+                <Explain face="wrap" tip={renewal}>
+                  {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
+                  <span tabIndex={0} className="rounded-sm focus-ring">
+                    <CertificateStatus domain={certificateRead} named />
+                  </span>
+                </Explain>
+              ) : (
+                <CertificateStatus domain={certificateRead} named />
+              )}
+              {typeof certificateRead.certificateDaysLeft === "number" &&
+                certificateRead.certificateDaysLeft > 0 && (
+                  <span
+                    className={cn(
+                      "numeric",
+                      certificateRead.certificate === "expiring"
+                        ? "text-warning"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {plural(certificateRead.certificateDaysLeft, "day")} left
+                  </span>
+                )}
+            </span>
           )}
         </div>
       </div>
@@ -1130,65 +1210,6 @@ function DomainRow({
       <div className="col-start-3 row-start-1 flex justify-end @min-[44rem]:col-start-5">
         {verbs.length > 0 && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${host}`} />}
       </div>
-      {domain.redirectTo && (
-        <div className="col-span-full min-w-0 animate-rise pl-11">
-          <div className="ml-1 border-l border-hairline pl-4">
-            <FieldRow>
-              <Field
-                label="Sends visitors to"
-                htmlFor={`domain-redirect-${index}`}
-                info="Every path and query on this name is answered with a redirect to the same path on the other. It serves no application of its own."
-              >
-                <Select
-                  value={domain.redirectTo}
-                  onValueChange={(redirectTo) => onChange({ redirectTo })}
-                  disabled={!canAdmin}
-                >
-                  <SelectTrigger id={`domain-redirect-${index}`} className="w-full font-mono">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* The saved target stays listed even once it has stopped
-                        serving, so the field shows what the server refused. */}
-                    {[...new Set([domain.redirectTo, ...targets])].map((name) => (
-                      <SelectItem key={name} value={name} className="font-mono">
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field
-                label="Answer"
-                htmlFor={`domain-redirect-code-${index}`}
-                info="Browsers remember a permanent redirect, so use a temporary one while trying it out."
-              >
-                <Select
-                  value={String(domain.redirectCode ?? 308)}
-                  onValueChange={(code) =>
-                    onChange({
-                      redirectCode:
-                        code === "308" ? undefined : (Number(code) as DeploymentRedirectCode),
-                    })
-                  }
-                  disabled={!canAdmin}
-                >
-                  <SelectTrigger id={`domain-redirect-code-${index}`} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REDIRECT_CODES.map(([code, label]) => (
-                      <SelectItem key={code} value={String(code)}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            </FieldRow>
-          </div>
-        </div>
-      )}
       {error && (
         <p role="alert" className="col-span-full animate-rise pl-11 text-hint text-destructive">
           {error}

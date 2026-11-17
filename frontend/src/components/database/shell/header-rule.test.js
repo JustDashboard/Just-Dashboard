@@ -16,7 +16,6 @@ describe("what a page under a database opens on", () => {
       "/access",
       "/alerts",
       "/backups",
-      "/import",
       "/generate",
       "/search",
       "/settings",
@@ -25,6 +24,14 @@ describe("what a page under a database opens on", () => {
     ]) {
       expect(databaseHead(`/databases/1${page}`, sql)).toBe("full")
     }
+  })
+
+  test("a flow opens on its own question, with no header over it", () => {
+    expect(databaseHead("/databases/1/import", sql)).toBe("none")
+    expect(fillsUnderHeader("/databases/1/import", sql)).toBe(false)
+    // An engine with no import has the statement that it has none, under the header.
+    const none = (section) => (section === "import" ? undefined : sql(section))
+    expect(databaseHead("/databases/1/import", none)).toBe("full")
   })
 
   test("the assistant and Logs are under it too, and take the height it leaves", () => {

@@ -1,5 +1,5 @@
 import type { DroppedLine, SiteSpec } from "@/lib/types"
-import { unifiedDiff } from "@/components/files/diff"
+import { unifiedDiff } from "@/lib/diff"
 import { BLANK } from "@/components/proxy/site-presets"
 import { sendableSpec } from "@/components/proxy/site-save"
 

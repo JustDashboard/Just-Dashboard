@@ -23,12 +23,19 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { DetailPage, type Step } from "@/components/detail-page"
 import { IconAction } from "@/components/icon-action"
-import { ArrowLeft, Globe, LockClosed, Pencil, RefreshClockwise, Trash } from "@/components/icons"
+import {
+  ArrowLeft,
+  Globe,
+  Pencil,
+  PreviewDocument,
+  RefreshClockwise,
+  Trash,
+} from "@/components/icons"
 import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, NeedsAdmin, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { ViewTabList } from "@/components/tabs"
@@ -93,10 +100,9 @@ export function DNSEnginePage() {
     return (
       <Page>
         <PageContext back={BACK} title="DNS engine" />
-        <EmptyState
-          icon={LockClosed}
-          title="A DNS engine's inventory needs the admin capability"
-          description="Its queries, clients and records are private to administrators."
+        <NeedsAdmin
+          what="A DNS engine's inventory"
+          why="Its queries, clients and records are private to administrators."
         />
       </Page>
     )
@@ -309,7 +315,9 @@ function Engine({ account, id }: { account: number; id: string }) {
                   // On Changes the form is the page: the command that leads to it steps aside.
                   connection?.management &&
                   tab !== "changes" && (
+                    // Its icon alone on a phone, its words from `sm`.
                     <Button size="sm" onClick={() => show("changes")}>
+                      <PreviewDocument className="size-3.5" />
                       Review a change
                     </Button>
                   )

@@ -33,7 +33,7 @@ import { CreateIndexDialog } from "@/components/database/mongo/schema/index-dial
 import type { MongoIndex } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
 import { ShareCell } from "@/components/database/ops/performance-words"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 const KEY_MARK: Record<string, string> = { asc: "↑", desc: "↓" }
 

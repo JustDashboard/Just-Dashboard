@@ -62,6 +62,8 @@ export function VolumeFiles({ volume }: { volume: VolumeDetail }) {
         root={volume.mountpoint}
         label={volume.name}
         emptyNote="Nothing has been written to this volume yet."
+        // The volume's header already opens it in Files.
+        openInFiles={false}
       />
     </div>
   )

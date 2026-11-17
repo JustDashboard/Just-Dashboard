@@ -25,7 +25,7 @@ import {
   perSecond,
   type StatRow,
 } from "@/components/database/redis/performance/samples"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
 
 // Module constants: `ChartPanel` is memoised on its props, and a series or a

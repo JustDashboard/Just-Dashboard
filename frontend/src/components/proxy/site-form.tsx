@@ -74,7 +74,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
 import { CodeEditor } from "@/components/code-editor"
-import { DiffView } from "@/components/files/diff-view"
+import { DiffView } from "@/components/diff-view"
 import {
   Disclosure,
   Field as FormField,

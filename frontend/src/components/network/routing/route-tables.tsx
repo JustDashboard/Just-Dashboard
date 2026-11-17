@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { routeRows, routeVia, ruleSelectors, ruleThen, type RouteRow } from "./route-reading"
 
 const OWNER_PRODUCT: Partial<Record<NetworkRoute["owner"], string>> = {

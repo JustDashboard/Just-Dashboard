@@ -8,7 +8,7 @@ import { get, post } from "@/lib/api"
 import { timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { PortsExternal } from "@/lib/types"
-import { FormSection } from "@/components/form"
+import { FormNote, FormSection } from "@/components/form"
 import { PublishedPathReport, bindingFamily } from "@/components/docker/published-path"
 import type { Socket } from "@/components/proxy/ports"
 import {
@@ -17,7 +17,6 @@ import {
   pendingCheck,
   scopesFor,
 } from "@/components/proxy/ports-reachability"
-import { Hint } from "@/components/docker/explain"
 import { Button } from "@/components/ui/button"
 
 const PLACEMENT: Record<string, string> = {
@@ -86,7 +85,7 @@ export function ExternalProof({ socket }: { socket: Socket }) {
       )}
       {external?.error && <p className="text-hint text-muted-foreground">{external.error}</p>}
       {socket.protocol !== "tcp" ? (
-        <Hint>External checks measure TCP; a UDP port is not measured from outside.</Hint>
+        <FormNote>External checks measure TCP; a UDP port is not measured from outside.</FormNote>
       ) : (
         external && (
           <div className="space-y-3">
@@ -111,10 +110,10 @@ export function ExternalProof({ socket }: { socket: Socket }) {
               </ul>
             )}
             {scopes.length === 0 ? (
-              <Hint>
+              <FormNote>
                 No enrolled source may check port {socket.port}. Enroll one with this port in its
                 scope on External checks.
-              </Hint>
+              </FormNote>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {scopes.map(({ scope, family }) => {

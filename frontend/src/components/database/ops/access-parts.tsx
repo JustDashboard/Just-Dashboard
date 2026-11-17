@@ -10,13 +10,12 @@ import { SettingPicture } from "@/components/settings/setting-picture"
 import { WireMark, WireNode } from "@/components/wire/wire"
 import { FormNote } from "@/components/form"
 import { SecretField as SharedSecretField } from "@/components/secret-field"
-import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
-import { ChipStrip, FilterChip } from "@/components/chips"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { nameHue } from "@/components/database/home/kinds"
 import { EngineGlyph } from "@/components/database/kit/engine-mark"
+import { ConnectionString } from "@/components/database/kit/connection-string"
 import { connectFormats, connectSnippet } from "@/components/database/shell/connection-string"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -219,27 +218,8 @@ export function AccountSnippet({
     format,
   )
   return (
-    <div className="space-y-2" data-slot="account-snippet">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-        <ChipStrip role="group" aria-label="The shape of the connection string">
-          {formats.map((one) => (
-            <FilterChip key={one.id} selected={format === one.id} onClick={() => setFormat(one.id)}>
-              {one.label}
-            </FilterChip>
-          ))}
-        </ChipStrip>
-        <Button
-          size="xs"
-          variant="ghost"
-          onClick={() => void copyText(snippet, "Connection string copied")}
-        >
-          <Copy />
-          Copy
-        </Button>
-      </div>
-      <Well className="max-h-48 overflow-auto text-hint leading-relaxed break-all whitespace-pre-wrap">
-        {snippet}
-      </Well>
+    <div data-slot="account-snippet">
+      <ConnectionString formats={formats} shape={format} onShape={setFormat} text={snippet} />
     </div>
   )
 }

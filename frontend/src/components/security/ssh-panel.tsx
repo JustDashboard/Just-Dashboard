@@ -52,7 +52,7 @@ import {
   JumpHostSection,
   jumpProfiled,
 } from "@/components/security/bastion"
-import { LensReadingLine, type ReadingLook } from "@/components/security/lens-reading-line"
+import { LensReadingLine, type ReadingLook } from "@/components/logs/lens-reading-line"
 import { SSHPicture } from "@/components/security/ssh-picture"
 import { sshReading } from "@/components/security/ssh-reading"
 import { boundaryVerdict } from "@/components/security/boundary"

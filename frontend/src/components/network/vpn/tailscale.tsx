@@ -7,11 +7,13 @@ import { ChoiceList } from "@/components/choice-row"
 import { InfoTip } from "@/components/form"
 import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
-import { EmptyState, Notice } from "@/components/state"
+import { MissingThing } from "@/components/missing-thing"
+import { Notice } from "@/components/state"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { InstallHandoff, usePackageKnown } from "@/components/network/install"
+import { InstallHandoff, usePackageKnown } from "@/components/install-handoff"
 import { keyExpiry, keyExpiryTip } from "./record-logic"
 import { MachineRow, TailnetMachines } from "./tailnet-machines"
 import { TailscaleOffers } from "./tailscale-offers"
@@ -41,37 +43,32 @@ export function TailscaleMissing({ onInstalled }: { onInstalled: () => void }) {
       />
     )
   }
+  // The same designed absence the install hand-off draws, so the block does
+  // not change shape when the package manager answers; the link's place is
+  // held by its skeleton while it is asked.
   return (
-    <EmptyState
-      title="Tailscale is not installed"
+    <MissingThing
+      size="block"
+      reason="not-installed"
       mark={<ProductLogos ids={["tailscale", "headscale"]} />}
-      description={
-        known === "unknown"
-          ? `${TAILSCALE_PITCH} This server's package manager does not carry it: add Tailscale's repository, install it, then sign in once; its peers, exit node and subnet routes appear here.`
-          : `${TAILSCALE_PITCH} Install it, then sign in once; its peers, exit node and subnet routes appear here.`
+      title="Tailscale is not installed"
+      step={
+        known === "asking" ? (
+          <Skeleton className="h-(--control-compact) w-44 rounded-md" />
+        ) : (
+          <Button size="sm" variant="outline" asChild>
+            <a href="https://tailscale.com/download/linux" target="_blank" rel="noreferrer">
+              <External className="size-4" />
+              tailscale.com/download
+            </a>
+          </Button>
+        )
       }
-      action={
-        // Held in place, unseen, until the package manager has answered:
-        // the block keeps its height whichever way the answer goes.
-        <Button
-          size="sm"
-          variant="outline"
-          asChild
-          className={known === "asking" ? "invisible" : undefined}
-        >
-          <a
-            href="https://tailscale.com/download/linux"
-            target="_blank"
-            rel="noreferrer"
-            aria-hidden={known === "asking" || undefined}
-            tabIndex={known === "asking" ? -1 : undefined}
-          >
-            <External className="size-4" />
-            tailscale.com/download
-          </a>
-        </Button>
-      }
-    />
+    >
+      {known === "unknown"
+        ? `${TAILSCALE_PITCH} This server's package manager does not carry it: add Tailscale's repository, install it, then sign in once; its peers, exit node and subnet routes appear here.`
+        : `${TAILSCALE_PITCH} Install it, then sign in once; its peers, exit node and subnet routes appear here.`}
+    </MissingThing>
   )
 }
 

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { RailNoMatch } from "@/components/database/workbench/rail"
 
 /**
  * Which tables a read covers: all of them, or the ones ticked.
@@ -97,11 +98,7 @@ export function TablePicker({
               </li>
             )
           })}
-          {listed.length === 0 && (
-            <li className="px-2 py-3 text-center text-hint text-muted-foreground">
-              Nothing here is called that.
-            </li>
-          )}
+          {listed.length === 0 && <RailNoMatch as="li" onClear={() => setFind("")} />}
         </ul>
         <div className="flex items-center justify-between gap-2 border-t border-hairline p-1.5">
           <span className="px-1 text-hint text-muted-foreground">

@@ -13,7 +13,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { ClassTag } from "@/components/database/redis/console/console-view"
 import { groupCommands } from "@/components/database/redis/console/complete"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { RedisCommandRef, RedisCommandReference } from "@/components/database/redis/types"
 
 /**

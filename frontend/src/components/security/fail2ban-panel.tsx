@@ -19,14 +19,14 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useLensReadings } from "@/components/logs/lens-readings"
 import { FactDot } from "@/components/identity-header"
-import { InstallHandoff } from "@/components/network/install"
+import { InstallHandoff } from "@/components/install-handoff"
 import { ProductLogos } from "@/components/product-logo"
 import { ReadingLines } from "@/components/reading-line"
 import { EngineHead, EngineWaiting } from "@/components/security/engine-head"
 import { FAIL2BAN_LOG } from "@/components/security/host-logs"
 import { fail2banFault, type Fail2banStatus } from "@/components/security/intrusion-model"
 import { JailsPanel } from "@/components/security/jail-panel"
-import { LensReadingLine, type ReadingLook } from "@/components/security/lens-reading-line"
+import { LensReadingLine, type ReadingLook } from "@/components/logs/lens-reading-line"
 import {
   HostLogSection,
   useAddressLineVerbs,

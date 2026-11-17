@@ -1,4 +1,4 @@
-import { del, downloadUrl, get, getText, post, type Query } from "@/lib/api"
+import { del, downloadUrl, get, getText, post, shaped, type Query } from "@/lib/api"
 import { keyQuery, prefixQuery } from "@/components/database/redis/bytes"
 import {
   nodeAt,
@@ -42,17 +42,6 @@ import type {
 export type RedisTarget = { id: number; db: number | undefined }
 
 const at = (id: number) => `/databases/${id}`
-
-/**
- * An answer held to the one field the page cannot do without. A server that
- * answers one of these routes with something else — an older backend, a
- * proxy's page — is a failed read with a sentence, not a page that throws
- * half-way through drawing it.
- */
-function shaped<T>(value: unknown, field: string, what: string): T {
-  if (typeof value === "object" && value !== null && field in value) return value as T
-  throw new Error(`The server's answer for ${what} could not be read.`)
-}
 
 export function redisServer(id: number, signal?: AbortSignal) {
   return get<unknown>(`${at(id)}/redis/server`, undefined, signal).then((answer) =>

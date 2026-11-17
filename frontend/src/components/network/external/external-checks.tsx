@@ -76,16 +76,8 @@ export function ExternalChecks({
   return (
     <Panel aria-label="Checks">
       <PanelHeader
-        title={
-          <>
-            Checks
-            {checks.length > 0 && (
-              <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
-                {checks.length}
-              </span>
-            )}
-          </>
-        }
+        title="Checks"
+        count={checks.length > 0 ? checks.length : undefined}
         actions={
           onCompare && (
             <Button size="sm" variant="outline" disabled={retained < 2} onClick={onCompare}>

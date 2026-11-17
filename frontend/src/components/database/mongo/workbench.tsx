@@ -41,7 +41,7 @@ import {
   type Catalog,
   type Mongo,
 } from "@/components/database/mongo/use-mongo"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import {
   OBJECT_HEAD,
   WORKBENCH_PAGE,
@@ -123,7 +123,7 @@ export function MongoWorkbench({
   const { id, engine, database, collection, goto, select, param, canWrite, canDestroy } = mongo
   const catalog = useCatalog(mongo)
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const exporter = useMongoExport()
 
   // New collection is a state of the address (`?new=collection`), the way the

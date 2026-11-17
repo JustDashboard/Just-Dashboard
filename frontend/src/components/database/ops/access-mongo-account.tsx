@@ -39,7 +39,7 @@ import {
   type AccountList,
 } from "@/components/database/ops/account-frame"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { ErrorState } from "@/components/state"
 
@@ -63,7 +63,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const [password, setPassword] = useState(false)
   const [busy, setBusy] = useState<string>()

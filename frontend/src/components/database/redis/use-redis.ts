@@ -1,10 +1,9 @@
 "use client"
 
 import { useCallback, useMemo } from "react"
-import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { redisServer, type RedisTarget } from "@/components/database/redis/api"
-import { useDatabase } from "@/components/database/shell/database-context"
+import { useDatabase, useDatabaseRole } from "@/components/database/shell/database-context"
 
 /** A logical database as an address writes it: a small whole number. */
 const DATABASE = /^\d{1,5}$/
@@ -27,7 +26,7 @@ const DATABASE = /^\d{1,5}$/
  */
 export function useRedis() {
   const ctx = useDatabase()
-  const { can } = useAuth()
+  const role = useDatabaseRole()
   const { id, selection, select } = ctx
 
   const server = usePoll((signal) => redisServer(id, signal), 15_000, [id])
@@ -61,20 +60,9 @@ export function useRedis() {
     /** What a held listing is keyed by; `undefined` until the database is known. */
     scope,
     setDb,
-    /**
-     * The console's own route: any command needs `service.control`, and a
-     * protected connection still runs the ones that only read.
-     */
-    canRun: can("service.control"),
-    canWrite: !ctx.readOnly && can("service.control"),
-    canDestroy: !ctx.readOnly && can("destructive"),
-    /**
-     * Disconnecting a client is a removal the server asks the destructive
-     * capability for, and lets through on a protected connection: it stops
-     * work and changes no data.
-     */
-    canKill: can("destructive"),
-    admin: can("system.admin"),
+    // A protected connection still runs the commands that only read, and
+    // disconnecting a client changes no data.
+    ...role,
   }
 }
 

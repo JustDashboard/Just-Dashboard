@@ -14,7 +14,7 @@ import {
   type StatSample,
 } from "@/components/database/redis/performance/samples"
 import { SlowlogView } from "@/components/database/redis/performance/slowlog"
-import { worthRetrying } from "@/components/database/redis/read-error"
+import { worthRetrying } from "@/components/database/kit/read-error"
 import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 import { Notice } from "@/components/state"

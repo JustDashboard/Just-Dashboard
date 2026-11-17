@@ -1430,8 +1430,9 @@ test("a blocked session names the one it is behind, whole, and each opens the ot
   await expect(blocker).toContainText("Session 12,3301")
   await expect(blocker).toContainText("checkout-api")
   await expect(detailView(page).getByText("Transaction open for")).toBeVisible()
-  // It is idle inside a transaction: there is no statement to cancel.
-  await expect(blocker.getByRole("button", { name: "Terminate session" })).toBeVisible()
+  // It is idle inside a transaction: there is no statement to cancel, and
+  // ending the session is in the menu.
+  await expect(blocker.getByRole("button", { name: "More for session 12,3301" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Cancel statement" })).toHaveCount(0)
   // And from the blocker to the one it holds, on the view that says who waits on whom.
   await tab(page, /^Waits/).click()
@@ -3436,14 +3437,15 @@ test("a session that ends while its page is open is said to have ended, and offe
   await expect(rail(page, "Sessions").locator("[aria-current=page]")).toContainText("ended")
 })
 
-test("terminating is the page's command where there is nothing to cancel, and in its menu where there is", async ({
-  page,
-}) => {
+test("terminating is in the page's menu, never its command, and asks first", async ({ page }) => {
   const ops = await mockOps(page)
   await visit(page, "/databases/1/performance/sessions/12~2C3301")
-  await about(page, "About session 12,3301")
-    .getByRole("button", { name: "Terminate session" })
-    .click()
+  // Nothing to cancel, and the one verb left is destructive: no command.
+  await expect(
+    page.getByRole("button", { name: /^(Cancel statement|Terminate session)$/ }),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "More for session 12,3301" }).click()
+  await page.getByRole("menuitem", { name: "Terminate session" }).click()
   await expect(dialog(page)).toContainText("its open transaction is rolled back")
   await dialog(page).getByRole("button", { name: "Terminate session" }).click()
   await expect

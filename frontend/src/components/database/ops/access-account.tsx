@@ -61,7 +61,7 @@ import {
   type AccountView,
 } from "@/components/database/ops/account-frame"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { ErrorState } from "@/components/state"
 
@@ -109,7 +109,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
   const { confirm, dialog } = useConfirm()
   // Every dialog here is opened by state: this hands the keyboard back to
   // the control that opened one.
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const filter = useAccessFilter(id)
   const show = filter.show as AccountShow

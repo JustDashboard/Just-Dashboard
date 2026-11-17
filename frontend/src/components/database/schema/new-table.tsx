@@ -24,7 +24,7 @@ import {
   type TableDraft,
 } from "@/components/database/schema/changes"
 import { TypeField, useColumnTypes } from "@/components/database/schema/fields"
-import { useFocusReturn } from "@/components/database/schema/focus"
+import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
 import { SchemaSelect } from "@/components/database/schema/object-forms"
 import type { DbCatalogSchema, DdlAnswer } from "@/components/database/schema/types"
 import { runChange, usePreview } from "@/components/database/schema/use-ddl"
@@ -69,7 +69,7 @@ export function NewTablePanel({
 }) {
   const ids = useId()
   const { id, engine } = useDatabase()
-  useFocusReturn(open)
+  useSurfaceFocusReturn(open)
   const [kept, setKept] = useSessionState<TableDraft>(`databases.${id}.schema.newTable`, START)
   // A draft with no rows yet is the form's first sight: one empty row to type in.
   const draft: TableDraft = kept.columns.length > 0 ? kept : { ...kept, columns: [FIRST_ROW] }
