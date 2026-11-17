@@ -2356,7 +2356,17 @@ test("the diagram is zoomed and fitted from one bar at its foot, as the maps are
 
   // The keys are said as caps at the foot of the inspector.
   await page.getByRole("button", { name: "Show the inspector (I)" }).click()
-  await expect(page.locator("[data-slot=diagram-keys] kbd")).toHaveText(["F", "/", "I", "H", "Esc"])
+  await expect(page.locator("[data-slot=diagram-keys] kbd")).toHaveText([
+    "F",
+    "/",
+    "I",
+    "H",
+    "Esc",
+    "←",
+    "↑",
+    "↓",
+    "→",
+  ])
 
   // Which way the layout runs is a word in the head's menu.
   await headMenu(page, "Lay out top to bottom")
