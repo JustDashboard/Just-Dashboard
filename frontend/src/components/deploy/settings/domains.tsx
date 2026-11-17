@@ -1081,9 +1081,12 @@ function DomainRow({
             <Status key={nextScheme} tone="notice" label={nextScheme} className="animate-rise" />
           )}
           {/* One group, so turning HTTPS back on brings the live certificate's
-              readings back together rather than popping in one by one. */}
+              readings back together rather than popping in one by one. It
+              gives way without clipping itself: the line cuts what does not
+              fit, and a clip on the group cut the focus ring of its status
+              on three sides. */}
           {certificateRead && (
-            <span className="flex min-w-0 animate-rise items-center gap-x-3 overflow-hidden">
+            <span className="flex min-w-0 animate-rise items-center gap-x-3">
               {renewal ? (
                 <Explain face="wrap" tip={renewal}>
                   {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
