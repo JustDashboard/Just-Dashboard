@@ -672,6 +672,24 @@ export function MapCanvas({
   )
 
   /**
+   * The box or the frame the keyboard itself walked onto, asked when the
+   * focus lands. Asked at an arrow's press, `:focus-visible` is true of
+   * whatever has the focus: a browser turns it on at the first key. Open
+   * ground inside a system is its frame, which a click focuses, so a click
+   * there and an arrow moved that system and saved the move, where the arrow
+   * was meant to slide the canvas. A press of the pointer takes it back: what
+   * a mouse picks is `chosen`.
+   */
+  const keyedRef = useRef<string | null>(null)
+  const noteKeyed = (e: React.FocusEvent) => {
+    const on = e.target as HTMLElement
+    keyedRef.current =
+      on.matches(".react-flow__node") && on.matches(":focus-visible")
+        ? (on.dataset.id ?? null)
+        : null
+  }
+
+  /**
    * The arrows, while the keyboard is on the canvas (T10): what is chosen
    * moves by a step, kept as a drag keeps it — the chosen box, or a box or a
    * system's frame the keyboard itself is on — and with nothing chosen the
@@ -686,8 +704,10 @@ export function MapCanvas({
     if (target !== canvas && !target.closest(".react-flow")) return false
     e.preventDefault()
     const shift = e.shiftKey
-    const keyed = target.closest<HTMLElement>(".react-flow__node")
-    const keyedId = keyed?.matches(":focus-visible") ? keyed.dataset.id : undefined
+    const keyedId =
+      keyedRef.current !== null && target.dataset.id === keyedRef.current
+        ? keyedRef.current
+        : undefined
     const subject = [keyedId, chosen].find(
       (id) => id && (seats.has(id) || (id.startsWith("frame:") && bySystem.has(id.slice(6)))),
     )
@@ -794,6 +814,10 @@ export function MapCanvas({
         <div
           ref={canvasRef}
           data-slot="server-map"
+          onFocus={noteKeyed}
+          onPointerDownCapture={() => {
+            keyedRef.current = null
+          }}
           onPointerDown={bare ? undefined : carry}
           className="group/map relative min-h-0 min-w-0"
         >

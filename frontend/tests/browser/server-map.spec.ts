@@ -550,6 +550,54 @@ test("a system's frame the keyboard is on moves with the arrows, everything in i
     .toEqual([s])
 })
 
+test("a click on open ground inside a system leaves the arrows sliding the canvas", async ({
+  page,
+}) => {
+  // Open ground inside a system is its frame, and a click there puts the
+  // keyboard on the frame. A browser calls anything focused `:focus-visible`
+  // from the first key on, so the arrows took a clicked frame for one the
+  // keyboard had walked onto: they moved the system and saved the move.
+  const mock = await open(page, "/map?system=system:stack:monitoring")
+  await still(page)
+  const s = "system:stack:monitoring"
+  const f = await at(page, `frame:${s}`)
+  // Inside the frame, under its head, where no box is.
+  const ground = { x: f.x + 12, y: f.y + f.height - 12 }
+  const seen = async () => {
+    const v = await view(page)
+    return { x: Math.round(v.x), y: Math.round(v.y) }
+  }
+  const placed = async () => {
+    const [frameAt, v] = [await at(page, `frame:${s}`), await view(page)]
+    return { x: Math.round((frameAt.x - v.x) / v.zoom), y: Math.round((frameAt.y - v.y) / v.zoom) }
+  }
+
+  await page.mouse.click(ground.x, ground.y)
+  await expect(frame(page, s)).toBeFocused()
+  const start = await seen()
+  const was = await placed()
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(seen).toEqual({ x: start.x - 48, y: start.y })
+  expect(await placed()).toEqual(was)
+
+  // By its head too, which a click answers by showing the system.
+  await frame(page, s).locator(".map-frame-grip").click()
+  await page.keyboard.press("ArrowLeft")
+  await expect.poll(seen).toEqual(start)
+  expect(await placed()).toEqual(was)
+
+  // And after keys have been pressed: a click is still a click.
+  await page.mouse.click(ground.x, ground.y)
+  await page.keyboard.press("Shift+ArrowDown")
+  await expect.poll(seen).toEqual({ x: start.x, y: start.y - 240 })
+  expect(await placed()).toEqual(was)
+  // Where the canvas was left is kept, and no system was moved.
+  await expect
+    .poll(() => (mock.saved.layout as { viewport?: unknown } | null)?.viewport)
+    .toBeTruthy()
+  expect(Object.keys((mock.saved.layout as { frames?: object }).frames ?? {})).toEqual([])
+})
+
 test("a system is carried by its head, everything in it with it, and stays where it was put", async ({
   page,
 }) => {
