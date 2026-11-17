@@ -247,9 +247,11 @@ function factRun(facts: React.ReactNode) {
   // phone it takes what the line leaves, so a state leading it keeps its place.
   // A fact that is a link ("3 sites, 2 on TLS") is a 16px line of words: it
   // takes `hit-area`, a press box of 24px under a mouse and 44px under a
-  // finger, without growing the line (PGP-19).
+  // finger, without growing the line (PGP-19). On a phone a fact is one line
+  // of words: one wider than the room the state leaves is cut at the line's
+  // end, where its words wrapped inside it and the clip showed half of each.
   return (
-    <FactLine className="w-full max-sm:w-auto max-sm:flex-1 [&_a]:hit-area [&>span]:gap-y-1">
+    <FactLine className="w-full max-sm:w-auto max-sm:flex-1 max-sm:[&_[data-slot=fact]]:whitespace-nowrap [&_a]:hit-area [&>span]:gap-y-1">
       {facts}
     </FactLine>
   )
