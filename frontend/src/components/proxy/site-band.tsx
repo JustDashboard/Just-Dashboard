@@ -244,6 +244,15 @@ function daysLeft(cert: Certificate) {
   return cert.daysLeft === 0 ? "ends today" : `${cert.daysLeft} d left`
 }
 
+/**
+ * A press in a band's note, which narrows the list to what it names. The note
+ * cuts what leaves its box, so a press box grown past the words would be cut
+ * with it: the button is the full 28px of the strip's line instead, and the
+ * words sit where they did.
+ */
+const NOTE_BUTTON =
+  "inline-flex h-7 shrink-0 items-center rounded-sm focus-ring hover:underline hover:underline-offset-2"
+
 function CertificatesBlock({
   hosts,
   certs,
@@ -258,15 +267,23 @@ function CertificatesBlock({
   const { rows, plain, unknown, tls } = certRows(hosts, certs)
   const counts = certCounts(rows)
   const enabled = hosts.filter((v) => v.enabled).length
-  const plainButton = plain.length > 0 && (
-    <button
-      type="button"
-      onClick={() => onChip("plain")}
-      className="shrink-0 rounded-sm text-warning focus-ring hover:underline hover:underline-offset-2"
-    >
-      {plural(plain.length, "site")} on plain HTTP
-    </button>
-  )
+  // In the note it is the line's full height; in the message it is words in a
+  // sentence, which keep the sentence's own line.
+  const plainButton = (inNote: boolean) =>
+    plain.length > 0 && (
+      <button
+        type="button"
+        onClick={() => onChip("plain")}
+        className={cn(
+          inNote
+            ? NOTE_BUTTON
+            : "shrink-0 rounded-sm focus-ring hover:underline hover:underline-offset-2",
+          "text-warning",
+        )}
+      >
+        {plural(plain.length, "site")} on plain HTTP
+      </button>
+    )
   return (
     <BarReading
       title="Certificates"
@@ -276,7 +293,7 @@ function CertificatesBlock({
       figure={<HeadFigure value={tls} word={`of ${enabled} on TLS`} />}
       message={
         rows.length > 0 ? undefined : tls === 0 ? (
-          <>No enabled site is on TLS. {plainButton}</>
+          <>No enabled site is on TLS. {plainButton(false)}</>
         ) : !certs && loading ? (
           <TextShimmer>Reading the certificate inventory…</TextShimmer>
         ) : !certs ? (
@@ -287,7 +304,7 @@ function CertificatesBlock({
       }
       note={
         <>
-          {plainButton}
+          {plainButton(true)}
           <Note
             parts={[unknown > 0 && `${unknown} with a certificate the inventory does not read`]}
           />
@@ -387,7 +404,7 @@ function ApplicationsBlock({
             <button
               type="button"
               onClick={() => onChip("down")}
-              className="shrink-0 rounded-sm text-destructive focus-ring hover:underline hover:underline-offset-2"
+              className={cn(NOTE_BUTTON, "text-destructive")}
             >
               {down === 1 ? "1 refuses connections" : `${down} refuse connections`}
             </button>

@@ -232,21 +232,30 @@ export function ToolPanel({
         {def.key === "wol" && active && <WakeDevices run={t} />}
 
         {t.past.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
+          // Each earlier run is a command — it brings that run back — so it is
+          // the shared xs button rather than a chip drawn by hand: 24px under a
+          // mouse, 32 drawn and 44 pressed under a finger, with the shared
+          // focus ring. Under a finger the wrapped lines stand 12px apart, so
+          // no two press boxes overlap.
+          <div
+            data-slot="tool-earlier"
+            className="flex flex-wrap items-center gap-1.5 pointer-coarse:gap-y-3"
+          >
             <span className="eyebrow">earlier</span>
             {/* By position: two runs of one target can take the same time. */}
             {t.past.map((p, index) => (
-              <button
+              <Button
                 key={index}
-                type="button"
+                size="xs"
+                variant="outline"
                 onClick={() => t.restore(p)}
-                className="rounded-sm border border-hairline px-1.5 py-px font-mono text-micro text-muted-foreground focus-ring transition-colors hover:border-rule-primary hover:text-foreground"
+                className="gap-1 font-mono font-normal text-muted-foreground hover:text-foreground"
               >
-                <span className={cn("mr-1", p.ok ? "text-success" : "text-destructive")}>
+                <span className={p.ok ? "text-success" : "text-destructive"}>
                   {p.ok ? "✓" : "✗"}
                 </span>
                 {p.target} · {p.duration}
-              </button>
+              </Button>
             ))}
           </div>
         )}
