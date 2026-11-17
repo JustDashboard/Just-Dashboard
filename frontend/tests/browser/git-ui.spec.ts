@@ -762,10 +762,15 @@ test("the four views fit the strip at 1440 with the default column", async ({ pa
     expect(shown.last, `${name}: ${JSON.stringify(shown)}`).toBeLessThanOrEqual(shown.right)
     expect(shown.scroll).toBeLessThanOrEqual(0)
   }
+  // The graph's toggle is in the head, on the branch's row; git-features.spec.ts opens it.
   const graph = page.getByRole("button", { name: "Branch graph", exact: true })
+  await expect(graph).toHaveAttribute("aria-pressed", "false")
   await expect(strip.locator("..").getByRole("button", { name: "Branch graph" })).toHaveCount(0)
-  await graph.click()
-  await expect(graph).toHaveAttribute("aria-pressed", "true")
+  const toggle = (await graph.boundingBox())!
+  const branch = (await page.getByRole("button", { name: /main/ }).first().boundingBox())!
+  expect(
+    Math.abs(toggle.y + toggle.height / 2 - (branch.y + branch.height / 2)),
+  ).toBeLessThanOrEqual(1)
 })
 
 /**
