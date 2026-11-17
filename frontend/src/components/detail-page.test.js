@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { BackLink, siblingSteps, stepCommands } from "./detail-page"
-import { BackLink as PageBackLink } from "./page"
+import { siblingSteps, stepCommands } from "./detail-page"
+import { BackLink } from "./page"
 
 // The keys a detail page walks its rail with. The Workspace runs the command
 // whose chord matches the press (`workspace/workspace.tsx`), spelled the way
@@ -54,8 +54,7 @@ describe("the sibling steps", () => {
 })
 
 describe("the way back", () => {
-  test("is the page frame's one BackLink, whichever file it is imported from", () => {
-    expect(BackLink).toBe(PageBackLink)
+  test("is the page frame's one BackLink", () => {
     const html = renderToStaticMarkup(
       createElement(BackLink, { href: "/docker/containers" }, "Containers"),
     )

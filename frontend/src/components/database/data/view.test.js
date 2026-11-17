@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   browseQuery,
-  compactCount,
   countKey,
   pageFacts,
   readView,
@@ -9,6 +8,7 @@ import {
   sameRows,
   viewParams,
 } from "./view"
+import { compactCount } from "@/lib/format"
 
 const reader = (query) => (name) => new URLSearchParams(query).get(name) ?? ""
 
