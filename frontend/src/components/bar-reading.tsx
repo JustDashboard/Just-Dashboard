@@ -383,10 +383,11 @@ export function BarReading({
                   // not scaled. A scale of the whole mark grew it past its box
                   // about its centre, so a mark with words ("2 stack is down")
                   // ate more of the gap after it than a glyph did, and the
-                  // strip's gaps went uneven. (CSS zoom kept the box honest but
-                  // moved a mark drawn `absolute` out of its cell.)
+                  // strip's gaps went uneven. The face stays the containing
+                  // block a whole-mark transform made it, so a mark drawn
+                  // `absolute inset-0` (Docker's disk kinds) still fills it.
                   const face = (
-                    <span className="flex min-w-3.5 items-center justify-center [&_[aria-hidden]:empty]:scale-115 [&_img]:scale-115 [&_svg]:scale-115">
+                    <span className="relative flex min-w-3.5 items-center justify-center [&_[aria-hidden]:empty]:scale-115 [&_img]:scale-115 [&_svg]:scale-115">
                       {part.mark}
                     </span>
                   )
