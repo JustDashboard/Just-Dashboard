@@ -232,8 +232,10 @@ export function ChoiceRow({
           // A literal in mono inside the line (an address, a URL) is set
           // at its own size's height: the other face's taller ascent grew
           // the line a pixel, and the row past the 58px every card and its
-          // ghost keep.
-          <span className="block truncate text-hint text-muted-foreground [&_.font-mono]:leading-none">
+          // ghost keep. An inline box the line opens with (a key beside a
+          // face) is held to the line's top for the same reason: at the
+          // baseline, the shorter mono inside it lifted it 1.5px.
+          <span className="block truncate text-hint text-muted-foreground [&_.font-mono]:leading-none [&>.inline-flex]:align-top">
             {description}
           </span>
         )}
