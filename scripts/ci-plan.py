@@ -29,8 +29,10 @@ differ is said below.
     module reaching more than one section, or the shell, runs the two specs
     that check the shell and the design system across the sections in a pull
     request, as that script does; the merge's run follows it to all of them.
-    A public asset is followed from the modules that name it. A pull request
-    deals its specs into smaller jobs, which finish sooner.
+    A public asset is followed from the modules that name it. The UI docs
+    (`docs/internal/frontend/`) run the unit tests, one of which holds them
+    to the code. A pull request deals its specs into smaller jobs, which
+    finish sooner.
   - Live Docker fixtures: when one of the six deployment packages changed
     itself (they are the packages of the race gate), those of the packages
     being checked — in a pull request, those of the packages that import the
@@ -134,6 +136,12 @@ BUILD = re.compile(
 NEXT_FILES = re.compile(r"^frontend/src/app/(.*/)?(error|global-error|loading|not-found|template|default)\.tsx$")
 PUBLIC = "frontend/public/"
 UNSEEN = re.compile(r"^frontend/(public/|src/(?!.*\.(ts|tsx|js|mjs|css|md)$))")
+
+# What the frontend's unit tests read outside frontend/ and no module
+# imports: the UI docs, which `src/docs-catalogue.test.js` holds to the
+# components and the tokens. A change to them alone starts the frontend job,
+# which runs the unit tests and has no file to lint.
+FRONTEND_READS = ("docs/internal/frontend/",)
 
 PAGE = re.compile(r"^frontend/src/app/(.*/)?(page|layout)\.tsx$")
 ROOT_LAYOUT = re.compile(r"^frontend/src/app/(\([^)]*\)/)?layout\.tsx$")
@@ -406,7 +414,7 @@ def plan(root, changed, pull_request=False):
         specs = {name for name in imports if name.startswith(SPECS) and name.endswith(".spec.ts")}
     imported = {module for modules in imports.values() for module in modules}
     out["frontend"] = str(everything or any(
-        name.startswith("frontend/") or module_of(name) in imported for name in changed
+        name.startswith(("frontend/",) + FRONTEND_READS) or module_of(name) in imported for name in changed
     )).lower()
     if everything or any(LINT_ALL.match(name) for name in changed):
         out["lint"] = "."

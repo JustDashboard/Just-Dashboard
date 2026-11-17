@@ -212,6 +212,18 @@ class PlanTest(unittest.TestCase):
             ("false", "false", "[]", "[]", "[]"),
         )
 
+    def test_the_ui_docs_run_the_unit_tests_that_hold_them_to_the_code(self):
+        # `src/docs-catalogue.test.js` reads them, and it is one of the unit
+        # tests the frontend job runs. Nothing is linted and no page is opened.
+        for pull_request in (True, False):
+            for changed in ["docs/internal/frontend/components/README.md", "docs/internal/frontend/foundations/tokens.md"]:
+                with self.subTest(changed=changed, pull_request=pull_request):
+                    out = self.plan(changed, "README.md", pull_request=pull_request)
+                    self.assertEqual(
+                        (out["frontend"], out["lint"], out["browser"], out["backend"], out["race"], out["live"]),
+                        ("true", "", "[]", "false", "[]", "[]"),
+                    )
+
     def test_no_base_or_a_change_to_the_workflow_runs_everything(self):
         for changed in [(None,), (".github/workflows/verify.yml",), ("scripts/ci-plan.py",)]:
             with self.subTest(changed=changed):
