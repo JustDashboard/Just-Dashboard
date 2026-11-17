@@ -1000,7 +1000,7 @@ function DomainRow({
                   type="button"
                   aria-label={`Sends visitors from ${host} to ${domain.redirectTo}`}
                   title={`Sends visitors to ${domain.redirectTo} · ${domain.redirectCode ?? 308}`}
-                  className="inline-flex max-w-full min-w-0 shrink animate-rise items-center gap-1 rounded-sm text-muted-foreground focus-ring hover:underline"
+                  className="inline-flex max-w-48 min-w-0 shrink-0 animate-rise items-center gap-1 rounded-sm text-muted-foreground focus-ring hover:underline"
                 >
                   <CornerUpRight aria-hidden className="size-3 shrink-0" />
                   <span className="truncate font-mono">{domain.redirectTo}</span>

@@ -2242,7 +2242,13 @@ test.describe("A domain row", () => {
     hostname,
     certificateName: hostname,
   })
-  const names = ["api.example.test", "plain.example.test", "www.example.test", "team.example.test"]
+  const names = [
+    "api.example.test",
+    "plain.example.test",
+    "www.example.test",
+    "team.example.test",
+    "last.example.test",
+  ]
 
   for (const width of [1440, 390]) {
     test(`is one height with a password on, a redirect set, or neither, at ${width}`, async ({
@@ -2270,10 +2276,12 @@ test.describe("A domain row", () => {
           ownership: "managed",
           protection: { username: "a-rather-long-user-name", hash: "fixture-sealed" },
         },
+        // The last row has no hairline under it, so it is not one of those compared.
+        { hostname: "last.example.test", https: true, ownership: "managed" },
       ]
       await page.goto("/deploy/7/settings/domains")
       const list = page.getByRole("list", { name: "Domains" })
-      await expect(list.getByRole("listitem")).toHaveCount(4)
+      await expect(list.getByRole("listitem")).toHaveCount(5)
       await expect(
         page.getByRole("button", {
           name: "Password · a-rather-long-user-name on team.example.test",
