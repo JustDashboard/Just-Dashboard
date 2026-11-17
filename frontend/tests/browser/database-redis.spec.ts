@@ -823,6 +823,15 @@ test.describe("keys", () => {
     // The old browser showed db0 selected over the keys of whichever database
     // the connection was made to.
     await expect(page.getByRole("button", { name: "database: db3" })).toHaveText("db3")
+    // Whole, beside the rail's other controls: it was cut to its first letter.
+    await expect
+      .poll(() =>
+        page
+          .getByRole("button", { name: "database: db3" })
+          .getByText("db3", { exact: true })
+          .evaluate((name) => name.scrollWidth <= name.clientWidth),
+      )
+      .toBe(true)
     await expect(rail(page).getByRole("button", { name: /^session/ })).toBeVisible()
     for (const call of redis.asked("/keys/tree")) expect(call.query.has("db")).toBe(false)
 
