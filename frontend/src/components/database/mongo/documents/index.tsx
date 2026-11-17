@@ -98,6 +98,7 @@ import type { MongoDoc, MongoFindResult } from "@/components/database/mongo/type
 import { MongoWorkbench, type Workbench } from "@/components/database/mongo/workbench"
 import { ReadError } from "@/components/database/kit/read-error"
 import { HeadVerbs, ObjectHead, useHeadMenu } from "@/components/database/workbench/chrome"
+import { Sweep } from "@/components/loading"
 
 /** The documents before they land: a few of them, each a short run of fields. */
 function DocumentsSkeleton() {
@@ -728,14 +729,7 @@ function Documents({
 
       {/* The sweep over a page that is being replaced: the old documents stay under it. */}
       <div className="relative min-h-0 flex-1">
-        {poll.loading && result && (
-          <div
-            aria-hidden
-            className="absolute inset-x-0 top-0 z-raised h-0.5 overflow-hidden bg-meter-track"
-          >
-            <div className="h-full w-1/3 animate-sweep bg-brand" />
-          </div>
-        )}
+        {poll.loading && result && <Sweep className="absolute inset-x-0 top-0 z-raised h-0.5" />}
         {view === "table" && result && !empty ? (
           <div className="absolute inset-0 flex min-h-0 min-w-0 flex-col">
             <TableView

@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils"
 import { FormNote, FormSection, FormSections } from "@/components/form"
 import { Status } from "@/components/status-dot"
 import { useSaveBarEntry, type SettingApplies } from "@/components/settings/save-bar"
-import { SettingsPage as DeploymentSettingsPage } from "@/components/settings/settings-page"
 
 /**
  * The shape every deployment settings page is drawn in.
@@ -35,9 +34,6 @@ import { SettingsPage as DeploymentSettingsPage } from "@/components/settings/se
  * under a form rather than in one of its sections.
  */
 const FIELDS_COLUMN = "mx-auto w-full max-w-3xl"
-
-/** @deprecated use `SettingsPage` from `@/components/settings/settings-page`. */
-export const SettingsPage = DeploymentSettingsPage
 
 /**
  * One form of a settings page: its sections, and the refusal when the server

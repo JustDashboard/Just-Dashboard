@@ -2,7 +2,7 @@
 
 import { ArrowRight, DesktopDevice, Globe, PhoneDevice, TabletDevice } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { plural, relativeTime, timestamp } from "@/lib/format"
+import { plural, relativeTime, sharePercent, timestamp } from "@/lib/format"
 import type { RequestAudience, RequestFacet, RequestSummary, RequestVisitor } from "@/lib/types"
 import { agentProduct, networkOf, parseAgent, refererProduct, systemProduct } from "@/lib/clients"
 import { hueFor, LANES } from "@/lib/hue"
@@ -10,7 +10,7 @@ import { BadgedLogo, NETWORK_GLYPH } from "@/components/client-mark"
 import { Meter } from "@/components/meter"
 import { TileTrend } from "@/components/sparkline"
 import { ProductGlyph } from "@/components/product-logo"
-import { RankList, SplitBar, percent } from "@/components/rank-list"
+import { RankList, SplitBar } from "@/components/rank-list"
 import { StatButton, StatGrid, StatTile, TileBand as Band } from "@/components/stat-tile"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Address, RequestPath } from "@/components/deploy/request-marks"
@@ -342,7 +342,7 @@ function Breakdown({
             color: drawn.color ?? "var(--tag-slate)",
           }))}
           label={rows
-            .map(({ facet, drawn }) => `${percent(facet.count / total)} ${drawn.label}`)
+            .map(({ facet, drawn }) => `${sharePercent(facet.count / total)} ${drawn.label}`)
             .join(", ")}
         />
       )}
@@ -353,7 +353,7 @@ function Breakdown({
           mark: drawn.mark,
           mono: false,
           label: drawn.label,
-          value: total ? percent(facet.count / total) : facet.count.toLocaleString(),
+          value: total ? sharePercent(facet.count / total) : facet.count.toLocaleString(),
           hint: plural(facet.count, "person", "people"),
         }))}
         emptyLabel="Not recorded."

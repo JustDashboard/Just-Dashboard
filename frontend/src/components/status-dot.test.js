@@ -8,7 +8,6 @@ import { StateCorner, StateMark } from "./product-logo"
 import { Tag } from "./tag"
 import { LanguageMark } from "./language-icon"
 import { DashboardMark } from "./logo"
-import { DashboardMark as BackupsDashboardMark } from "./backups/marks"
 import { Box } from "./icons"
 
 const draw = (component, props = {}) => renderToStaticMarkup(createElement(component, props))
@@ -213,9 +212,5 @@ describe("DashboardMark", () => {
     expect(html).toContain("size-8")
     expect(html).toContain("text-brand")
     expect(draw(DashboardMark, { size: "md" })).toContain("size-10")
-  })
-
-  test("the backups name still draws it", () => {
-    expect(BackupsDashboardMark).toBe(DashboardMark)
   })
 })

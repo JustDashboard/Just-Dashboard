@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   Bug,
   ChevronDown,
@@ -36,7 +37,6 @@ import { useSocket, type Envelope, type SocketState } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { NETWORK_GLYPH } from "@/components/client-mark"
-import { FactDot } from "@/components/identity-header"
 import { ProductGlyph } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -991,23 +991,18 @@ function WindowNotes({
   const spread = data.summary.latency
   if (percentiles && spread) {
     notes.push(
-      <span key="p" className="numeric flex items-center gap-2 whitespace-nowrap max-sm:basis-full">
+      <FactLine key="p" nowrap className="numeric whitespace-nowrap max-sm:basis-full">
         {(["p50", "p95", "p99"] as const).map((name, i) => (
-          <span key={name} className="flex items-center gap-2" title={latencyTerm(name)}>
-            {i > 0 && <FactDot />}
-            <span>
-              {i === 0 ? "Half inside" : LATENCY_SHARE[name]}{" "}
-              <span
-                className={cn(
-                  latencyTone(spread[name]) === "warning" && "font-medium text-warning",
-                )}
-              >
-                {latency(spread[name])}
-              </span>
+          <Fact key={name} title={latencyTerm(name)}>
+            {i === 0 ? "Half inside" : LATENCY_SHARE[name]}{" "}
+            <span
+              className={cn(latencyTone(spread[name]) === "warning" && "font-medium text-warning")}
+            >
+              {latency(spread[name])}
             </span>
-          </span>
+          </Fact>
         ))}
-      </span>,
+      </FactLine>,
     )
   }
   if (notes.length === 0) return null

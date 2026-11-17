@@ -481,8 +481,8 @@ export function TableView({
                         >
                           <Plus />
                           {/* The strip is one line: the verb goes before the tabs do. */}
-                          <span className="@max-[50rem]/strip:hidden">Add constraint</span>
-                          <span className="@min-[50rem]/strip:hidden">Constraint</span>
+                          <span className="@max-4xl/strip:hidden">Add constraint</span>
+                          <span className="@4xl/strip:hidden">Constraint</span>
                         </Button>
                       )}
                       {has("foreignKeys") && (
@@ -493,8 +493,8 @@ export function TableView({
                           onClick={() => setForm({ type: "add-foreign-key" })}
                         >
                           <Plus />
-                          <span className="@max-[50rem]/strip:hidden">Add foreign key</span>
-                          <span className="@min-[50rem]/strip:hidden">Foreign key</span>
+                          <span className="@max-4xl/strip:hidden">Add foreign key</span>
+                          <span className="@4xl/strip:hidden">Foreign key</span>
                         </Button>
                       )}
                     </>

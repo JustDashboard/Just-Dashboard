@@ -373,14 +373,7 @@ function ChecksSection({
                 key={`${check.app ?? ""}:${check.name}:${i}`}
                 className="group flex min-w-0 items-center gap-2 px-4 py-1.5"
               >
-                <mark.Glyph
-                  aria-hidden
-                  className={cn(
-                    "size-4 shrink-0",
-                    mark.tone,
-                    check.status !== "completed" && "animate-pulse",
-                  )}
-                />
+                <mark.Glyph aria-hidden className={cn("size-4 shrink-0", mark.tone)} />
                 <span className="min-w-0 flex-1 truncate text-xs">{check.name}</span>
                 <span className={cn("shrink-0 text-micro", mark.tone)}>{mark.word}</span>
                 {check.app && (

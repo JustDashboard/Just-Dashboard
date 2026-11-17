@@ -1,5 +1,5 @@
+import { sharePercent } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { percent } from "@/components/rank-list"
 import { TableCell, TableHead } from "@/components/ui/table"
 
 /**
@@ -111,7 +111,7 @@ export function ShareCell({
       data-slot="share"
       className={cn("numeric w-14 px-2 py-2 text-right text-muted-foreground", className)}
     >
-      {whole > 0 && part >= 0 ? percent(part / whole) : ""}
+      {whole > 0 && part >= 0 ? sharePercent(part / whole) : ""}
     </TableCell>
   )
 }

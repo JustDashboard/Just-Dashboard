@@ -2,6 +2,7 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   BlendMode,
   Bug,
@@ -38,7 +39,6 @@ import {
 } from "@/lib/requests"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { ClientMark, NETWORK_GLYPH, NetworkFact } from "@/components/client-mark"
-import { FactDot } from "@/components/identity-header"
 import { PaneFooter } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Tag } from "@/components/tag"
@@ -369,23 +369,27 @@ export function RequestConsole({
                             <Took entry={entry} summary={summary} className="w-16" />
                           )}
                         </span>
-                        <span className="flex min-w-0 items-center gap-1.5 pl-12 font-sans text-hint text-muted-foreground">
-                          <span className="numeric shrink-0">{clock(entry.time)}</span>
-                          <FactDot />
-                          <MethodWord method={entry.method} plain={plain} className="shrink-0" />
-                          <FactDot />
-                          <span className="numeric shrink-0">
+                        <FactLine
+                          nowrap
+                          className="pl-12 font-sans text-hint text-muted-foreground"
+                        >
+                          <Fact className="numeric shrink-0">{clock(entry.time)}</Fact>
+                          <Fact>
+                            <MethodWord method={entry.method} plain={plain} className="shrink-0" />
+                          </Fact>
+                          <Fact className="numeric shrink-0">
                             {entry.size ? bytes(entry.size, 0) : "—"}
-                          </span>
-                          <FactDot />
-                          <ClientCell
-                            ip={entry.remoteIp}
-                            userAgent={entry.userAgent}
-                            user={entry.user}
-                            plain={plain}
-                            className="min-w-0"
-                          />
-                        </span>
+                          </Fact>
+                          <Fact>
+                            <ClientCell
+                              ip={entry.remoteIp}
+                              userAgent={entry.userAgent}
+                              user={entry.user}
+                              plain={plain}
+                              className="min-w-0"
+                            />
+                          </Fact>
+                        </FactLine>
                       </span>
                     </button>
                   )}
@@ -428,11 +432,10 @@ export function RequestConsole({
       )}
 
       <PaneFooter className="gap-x-4 gap-y-1 px-3 text-hint text-muted-foreground">
-        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          {status}
-          {status && <FactDot />}
-          <span className="numeric whitespace-nowrap">{entries.length.toLocaleString()} shown</span>
-        </span>
+        <FactLine>
+          {status && <Fact>{status}</Fact>}
+          <Fact className="numeric whitespace-nowrap">{entries.length.toLocaleString()} shown</Fact>
+        </FactLine>
         {footer}
       </PaneFooter>
     </div>
@@ -699,19 +702,24 @@ function RequestDetail({
     // logs page's workbench it stands beside the source rail, and three
     // columns chosen by the viewport cut every value there.
     <div className="@container animate-rise border-y border-hairline bg-background px-4 py-3 pl-[1.125rem]">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline pb-2 font-sans text-xs">
-        {mark}
-        <span className="text-body font-medium">
-          {entry.userAgent ? clientName(entry.userAgent) : "No user agent"}
-        </span>
-        {ip && (
-          <>
-            <FactDot />
-            <NetworkFact ip={ip} glyph address={<Address ip={ip} plain={plain} />} />
-          </>
-        )}
+      <div className="flex items-center gap-x-2 border-b border-hairline pb-2 font-sans text-xs">
+        <FactLine className="flex-1">
+          <Fact>
+            <span className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-2 align-top">
+              {mark}
+              <span className="text-body font-medium">
+                {entry.userAgent ? clientName(entry.userAgent) : "No user agent"}
+              </span>
+            </span>
+          </Fact>
+          {ip && (
+            <Fact>
+              <NetworkFact ip={ip} glyph address={<Address ip={ip} plain={plain} />} />
+            </Fact>
+          )}
+        </FactLine>
         {scanner && (
-          <Tag tone="warning" className="ml-auto">
+          <Tag tone="warning" className="shrink-0">
             scanner
           </Tag>
         )}

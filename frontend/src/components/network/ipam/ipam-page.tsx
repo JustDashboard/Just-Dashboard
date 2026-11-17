@@ -2,9 +2,10 @@
 
 import Link from "next/link"
 import { useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { Hash, Plus, RefreshClockwise } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { ErrorState, NeedsAdmin } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -125,7 +126,7 @@ export function AddressPlanningPage() {
   return (
     <Page rise>
       <PageContext title="Address planning" />
-      <HostIdentity
+      <IdentityHeader
         fallback={Hash}
         title="Address planning"
         label="About address planning"
@@ -151,18 +152,15 @@ export function AddressPlanningPage() {
               <span>the plan could not be read</span>
             ) : (
               <>
-                <span className="numeric">{plural(counts.pools, "pool")}</span>
-                <FactDot />
-                <span className="numeric">{plural(counts.reservations, "reservation")} held</span>
-                <FactDot />
-                <span className="numeric">{plural(counts.observed, "native range")} observed</span>
-                <FactDot />
-                <span>
+                <Fact className="numeric">{plural(counts.pools, "pool")}</Fact>
+                <Fact className="numeric">{plural(counts.reservations, "reservation")} held</Fact>
+                <Fact className="numeric">{plural(counts.observed, "native range")} observed</Fact>
+                <Fact>
                   read{" "}
                   <time dateTime={data.inventory.checkedAt}>
                     {relativeTime(data.inventory.checkedAt)}
                   </time>
-                </span>
+                </Fact>
               </>
             )}
           </IdentityFacts>

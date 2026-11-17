@@ -17,7 +17,13 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { readReplication } from "@/components/database/ops/performance-api"
-import { FIT_COLUMN, Named, NoFigure, NotAvailable, Notes } from "@/components/database/ops/performance-parts"
+import {
+  FIT_COLUMN,
+  Named,
+  NoFigure,
+  NotAvailable,
+  Notes,
+} from "@/components/database/ops/performance-parts"
 import type {
   DbReplicaSource,
   DbReplicationSlot,
@@ -104,7 +110,7 @@ export function ReplicationView() {
                         <TableHead>Replica</TableHead>
                         <TableHead className="px-2">State</TableHead>
                         <TableHead className="px-2">Behind</TableHead>
-                        <TableHead className="px-2 @max-[46rem]:hidden">Replayed to</TableHead>
+                        <TableHead className="px-2 @max-3xl:hidden">Replayed to</TableHead>
                         <TableHead className="@max-stack:hidden">Connected</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -133,7 +139,7 @@ export function ReplicationView() {
                           <TableCell className="px-2 py-2">
                             <Lag seconds={replica.lagSeconds} size={replica.lagBytes} />
                           </TableCell>
-                          <TableCell className="px-2 py-2 font-mono text-muted-foreground @max-[46rem]:hidden">
+                          <TableCell className="px-2 py-2 font-mono text-muted-foreground @max-3xl:hidden">
                             {replica.replayLsn || <NoFigure />}
                           </TableCell>
                           <TableCell

@@ -13,9 +13,10 @@ import {
 import type { PollState } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
+import { Fact } from "@/components/fact-line"
 import { Lifebuoy } from "@/components/icons"
 import { DetailPage, useDetailTab, type Step } from "@/components/detail-page"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
@@ -170,7 +171,7 @@ export function EgressGroupPage() {
 /** The line before the read lands, with the verbs' place held. */
 function LoadingIdentity({ name }: { name: string }) {
   return (
-    <HostIdentity
+    <IdentityHeader
       slot="egress-group-header"
       fallback={Lifebuoy}
       title={name}
@@ -235,7 +236,7 @@ function GroupIdentity({
 
   return (
     <>
-      <HostIdentity
+      <IdentityHeader
         label={`About ${group.name}`}
         slot="egress-group-header"
         logo={<EgressMark group={group} size="lg" />}
@@ -271,22 +272,16 @@ function GroupIdentity({
         menu={verbs.length > 0 && <VerbMenu verbs={verbs} label="Group actions" />}
         facts={
           <>
-            {group.enabled && (
-              <>
-                <span>{group.automation ? "automatic" : "switches by hand"}</span>
-                <FactDot />
-              </>
-            )}
-            <span className={cn(sim.tone === "danger" && "text-destructive")} title={sim.label}>
-              {egressSimulationFact(group.lastSimulation, group.fingerprint)}
-            </span>
+            {group.enabled && <Fact>{group.automation ? "automatic" : "switches by hand"}</Fact>}
+            <Fact>
+              <span className={cn(sim.tone === "danger" && "text-destructive")} title={sim.label}>
+                {egressSimulationFact(group.lastSimulation, group.fingerprint)}
+              </span>
+            </Fact>
             {group.runtime?.status === "verified" && (
-              <>
-                <FactDot />
-                <span className="text-success" title={group.runtime.route}>
-                  route verified
-                </span>
-              </>
+              <Fact className="text-success" title={group.runtime.route}>
+                route verified
+              </Fact>
             )}
           </>
         }

@@ -23,7 +23,6 @@ import { Status } from "@/components/status-dot"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -302,23 +301,6 @@ const STATE_INK = {
   warning: "text-warning",
   danger: "text-destructive",
 } as const
-
-/**
- * Grey rows at a card's height, for a list whose first read is still out: as
- * many as it held at the last visit, so the sections under it start where
- * they will.
- */
-export function CardRowsSkeleton({ rows }: { rows: number }) {
-  return (
-    <ul className="flex min-w-0 flex-col gap-2" aria-hidden>
-      {Array.from({ length: rows }, (_, i) => (
-        <li key={i}>
-          <Skeleton className="h-[3.625rem] w-full rounded-xl" />
-        </li>
-      ))}
-    </ul>
-  )
-}
 
 const KINDS: { kind: Kind; title: string; hint: string }[] = [
   {

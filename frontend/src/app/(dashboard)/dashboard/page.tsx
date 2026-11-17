@@ -2,6 +2,7 @@
 
 import { useMemo } from "react"
 import { useSessionState } from "@/lib/view-state"
+import { Fact } from "@/components/fact-line"
 import { ArrowCircleUp, ClockRewind, External, RefreshClockwise } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
@@ -12,7 +13,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import { useUpdateHistory } from "@/hooks/use-update-history"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { ProductGlyph } from "@/components/product-logo"
 import { NoticeLine, NoticeLines } from "@/components/settings/settings-column"
 import { ReleaseTimeline } from "@/components/update/release-timeline"
@@ -27,6 +28,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 
 /**
  * The dashboard's own version, and everything it has ever been.
@@ -101,7 +103,7 @@ export default function DashboardVersionPage() {
         error={error}
         skeleton={
           <>
-            <Skeleton className="h-14 rounded-xl" />
+            <ChoiceListSkeleton rows={1} mark={false} aside={false} />
             <Skeleton className="h-96 rounded-xl" />
           </>
         }
@@ -307,7 +309,7 @@ function Identity({ report, command }: { report: SelfUpdateReport; command: Reac
       : "turn them on in Configuration"
 
   return (
-    <HostIdentity
+    <IdentityHeader
       logo={
         <span
           aria-hidden
@@ -353,46 +355,43 @@ function Identity({ report, command }: { report: SelfUpdateReport; command: Reac
       }
       facts={
         <>
-          <a
-            href={`https://github.com/${report.check.repo}/tree/${report.check.ref}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground"
-          >
-            <ProductGlyph id="github" />
-            <span className="truncate font-mono text-foreground">{report.check.repo}</span>
-            <External aria-hidden className="size-3 shrink-0" />
-          </a>
-          <FactDot />
-          <span>
+          <Fact>
+            <a
+              href={`https://github.com/${report.check.repo}/tree/${report.check.ref}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground"
+            >
+              <ProductGlyph id="github" />
+              <span className="truncate font-mono text-foreground">{report.check.repo}</span>
+              <External aria-hidden className="size-3 shrink-0" />
+            </a>
+          </Fact>
+          <Fact>
             tracking <span className="font-mono text-foreground">{report.check.ref}</span>
-          </span>
-          <FactDot />
-          {report.install.supported ? (
-            <span>updates in place</span>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer
-                  tabIndex={0}
-                  className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-ring"
-                >
-                  updated by hand
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs">
-                {report.install.reason}. Everything else on this page still works; only the
-                one-click update does not.
-              </TooltipContent>
-            </Tooltip>
-          )}
-          {hint && (
-            <>
-              <FactDot />
-              <span>{hint}</span>
-            </>
-          )}
+          </Fact>
+          <Fact>
+            {report.install.supported ? (
+              <span>updates in place</span>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer
+                    tabIndex={0}
+                    className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-ring"
+                  >
+                    updated by hand
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  {report.install.reason}. Everything else on this page still works; only the
+                  one-click update does not.
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </Fact>
+          {hint && <Fact>{hint}</Fact>}
         </>
       }
       command={command}

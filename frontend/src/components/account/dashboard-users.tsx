@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { Fingerprint, Pencil, Trash, UserPlus, Users } from "@/components/icons"
 import { del, get, patch, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -38,7 +39,7 @@ import {
   peopleVerdict,
   type UserScope,
 } from "@/components/account/access"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
@@ -226,30 +227,28 @@ function PeopleIdentity({
     .sort((a, b) => (b.lastLoginAt ?? "").localeCompare(a.lastLoginAt ?? ""))[0]
   const verdict = peopleVerdict(users, require2fa)
   return (
-    <HostIdentity
+    <IdentityHeader
       logo={<FaceStack users={[...admins, ...active.filter((u) => u.role !== "admin")]} />}
       title={plural(users.length, "account")}
       facts={
         <>
-          <span>
+          <Fact>
             {require2fa
               ? plural(active.length, "enabled account")
               : active.length === users.length
                 ? "every one can sign in"
                 : `${active.length} can sign in`}
-          </span>
-          <FactDot />
-          <span className="inline-flex items-center gap-1.5">
-            <AvatarRun users={admins} />
-            {plural(admins.length, "administrator")}
-          </span>
+          </Fact>
+          <Fact>
+            <span className="inline-flex items-center gap-1.5 align-top">
+              <AvatarRun users={admins} />
+              {plural(admins.length, "administrator")}
+            </span>
+          </Fact>
           {latest && (
-            <>
-              <FactDot />
-              <span>
-                last sign-in {displayNameOf(latest)} {relativeTime(latest.lastLoginAt)}
-              </span>
-            </>
+            <Fact>
+              last sign-in {displayNameOf(latest)} {relativeTime(latest.lastLoginAt)}
+            </Fact>
           )}
         </>
       }

@@ -6,7 +6,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { del, get, post } from "@/lib/api"
 import { dnsEvidenceLabel, type SavedDNSEvidence } from "@/lib/network/dns-evidence"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field } from "@/components/form"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -14,7 +14,6 @@ import { EmptyNote, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { GhostRows } from "@/components/network/dns/ghost"
 import { Question } from "@/components/network/dns/lookup-question"
 
 const STATUS_TONE: Record<SavedDNSEvidence["status"], DotTone> = {
@@ -371,7 +370,7 @@ export function DNSPolicyEvidence({
           {!records.data ? (
             // Only while it is in front: behind another lookup nothing is read, and a
             // grey row that never lands is what a spec waiting on the page would wait for.
-            !records.error && active && <GhostRows rows={1} />
+            !records.error && active && <ChoiceListSkeleton rows={1} />
           ) : records.data.length === 0 ? (
             <EmptyNote>No retained policy investigations.</EmptyNote>
           ) : (

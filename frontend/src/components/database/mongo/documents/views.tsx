@@ -155,7 +155,7 @@ export function ListView({
         aria-label="Documents"
         // The cells' own right and bottom edges are the rules between them;
         // the last column's falls just outside the list.
-        className="-mr-px grid @5xl:grid-cols-2 @min-[96rem]:grid-cols-3"
+        className="-mr-px grid @5xl:grid-cols-2 @7xl:grid-cols-3"
         onKeyDown={(event) => {
           run.onKeyDown(event)
           if (event.defaultPrevented) return
@@ -387,7 +387,7 @@ export function JsonView({
 }) {
   return (
     <div className="@container">
-      <ol aria-label="Documents" className="-mr-px grid @5xl:grid-cols-2 @min-[96rem]:grid-cols-3">
+      <ol aria-label="Documents" className="-mr-px grid @5xl:grid-cols-2 @7xl:grid-cols-3">
         {listed.map(({ doc, root }, index) => (
           <li
             key={doc.id || `at:${index}`}

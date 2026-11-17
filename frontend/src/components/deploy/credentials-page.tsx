@@ -35,7 +35,7 @@ import type {
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, Notice } from "@/components/state"
-import { Hold } from "@/components/loading"
+import { Hold, Sweep } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
@@ -1293,11 +1293,7 @@ function TestCredentialDialog({
         </>
       }
     >
-      {busy && (
-        <div aria-hidden className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-meter-track">
-          <div className="h-full w-1/3 animate-sweep bg-brand" />
-        </div>
-      )}
+      {busy && <Sweep className="absolute inset-x-0 top-0 h-0.5" />}
       {credential && (
         <div className="space-y-4">
           <div className="flex min-w-0 items-center gap-3">

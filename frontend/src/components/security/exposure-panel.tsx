@@ -1,8 +1,9 @@
 "use client"
 
+import { Fact } from "@/components/fact-line"
 import { Connection, Globe, Router, type Icon } from "@/components/icons"
 import type { Exposure } from "@/lib/types"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Bone } from "@/components/bone"
 import { NetworkFact } from "@/components/client-mark"
 import { Status, type Verdict } from "@/components/status-dot"
@@ -59,7 +60,7 @@ export function ExposureIdentity({
   // down when the exposure landed.
   if (!exposure) {
     return (
-      <HostIdentity
+      <IdentityHeader
         logo={<Skeleton className="size-12 rounded-xl" />}
         title={<Bone className="w-36" />}
         facts={
@@ -77,7 +78,7 @@ export function ExposureIdentity({
   }
   const grade = EXPOSURE_GRADE[exposure.grade]
   return (
-    <HostIdentity
+    <IdentityHeader
       mark={exposure.grade === "tailscale" ? "tailscale" : undefined}
       fallback={GRADE_GLYPH[exposure.grade]}
       title={
@@ -87,18 +88,19 @@ export function ExposureIdentity({
       }
       facts={
         <>
-          <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
-            <span>allowed</span>
-            {exposure.allowlist.length === 0 ? (
-              <span className="font-medium text-warning">every address</span>
-            ) : (
-              exposure.allowlist.map((cidr) => <Cidr key={cidr} cidr={cidr} />)
-            )}
-          </span>
+          <Fact>
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-1 align-top">
+              <span>allowed</span>
+              {exposure.allowlist.length === 0 ? (
+                <span className="font-medium text-warning">every address</span>
+              ) : (
+                exposure.allowlist.map((cidr) => <Cidr key={cidr} cidr={cidr} />)
+              )}
+            </span>
+          </Fact>
           {exposure.interfaces.length > 0 && (
-            <>
-              <FactDot />
-              <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+            <Fact>
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-1 align-top">
                 <span>via</span>
                 {exposure.interfaces.map((name) => (
                   <Tag key={name} mono>
@@ -106,23 +108,21 @@ export function ExposureIdentity({
                   </Tag>
                 ))}
               </span>
-            </>
+            </Fact>
           )}
           {exposure.tailscaleIp && (
-            <>
-              <FactDot />
-              <span className="inline-flex items-center gap-1">
+            <Fact>
+              <span className="inline-flex items-center gap-1 align-top">
                 <span>this host</span>
                 <span className="font-mono text-foreground" title="This host's tailnet address">
                   {exposure.tailscaleIp}
                 </span>
               </span>
-            </>
+            </Fact>
           )}
           {exposure.client && (
-            <>
-              <FactDot />
-              <span className="inline-flex min-w-0 items-center gap-1">
+            <Fact>
+              <span className="inline-flex min-w-0 items-center gap-1 align-top">
                 <span>you</span>
                 <NetworkFact
                   ip={exposure.client}
@@ -136,7 +136,7 @@ export function ExposureIdentity({
                   }
                 />
               </span>
-            </>
+            </Fact>
           )}
         </>
       }

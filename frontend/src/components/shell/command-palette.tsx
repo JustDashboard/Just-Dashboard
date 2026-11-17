@@ -45,7 +45,7 @@ import {
   type PreviewItem,
 } from "@/components/command-search/preview"
 import { Status } from "@/components/status-dot"
-import { Spinner } from "@/components/loading"
+import { Spinner, Sweep } from "@/components/loading"
 import { tabClasses } from "@/components/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useArrivals } from "@/hooks/use-arrivals"
@@ -643,11 +643,7 @@ function Palette({
         {/* Ten inventories arrive one by one over a second or two. A sweep
             along the input's own edge says the list is still growing without
             a spinner competing with the results for the eye. */}
-        {loading.length > 0 && (
-          <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
-            <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep bg-brand" />
-          </span>
-        )}
+        {loading.length > 0 && <Sweep track={false} className="absolute inset-x-0 bottom-0 h-px" />}
       </div>
       {/* The scopes as the Files search's underlined strip of words rather
           than chips: fourteen chips each led by a glyph in its own hue were a

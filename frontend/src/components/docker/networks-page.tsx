@@ -15,7 +15,7 @@ import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/comp
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Workspace } from "@/components/workspace/workspace"
 import { NetworkReadWarning } from "@/components/network/read-warning"
@@ -412,7 +412,7 @@ export function Networks() {
                       title="Nothing attached: each holds a block of the address pool"
                       onClick={() => setShelf(shelf === "unused" ? "" : "unused")}
                     >
-                      <span aria-hidden className="size-1.5 rounded-full bg-warning" />
+                      <StatusDot tone="warning" />
                       Unused
                       <ChipCount className="text-warning opacity-100">{counts.unused}</ChipCount>
                     </FilterChip>
@@ -515,7 +515,7 @@ export function Networks() {
                         title={title}
                         onClick={() => setLens(lens === value ? "" : value)}
                       >
-                        {tone && <span aria-hidden className="size-1.5 rounded-full bg-warning" />}
+                        {tone && <StatusDot tone="warning" />}
                         {label}
                         <ChipCount className={cn(tone && "text-warning opacity-100")}>
                           {count}

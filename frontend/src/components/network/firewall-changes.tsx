@@ -357,14 +357,15 @@ export function FirewallPlanTray({
                 {change.op === "delete" ? "remove" : "add"}
               </Tag>
               <span className="min-w-0 flex-1 font-mono text-xs break-all">{change.label}</span>
-              <Button
+              <IconAction
                 size="icon-xs"
                 variant="ghost"
-                aria-label={`Unstage ${change.label}`}
+                className="[&_svg:not([class*='size-'])]:size-3"
+                label={`Unstage ${change.label}`}
                 onClick={() => onUnstage(index)}
               >
                 <Trash aria-hidden />
-              </Button>
+              </IconAction>
             </li>
           ))}
         </ol>

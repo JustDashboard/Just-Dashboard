@@ -122,11 +122,11 @@ export function PartsView() {
                         <TableHead className="px-2 text-right">Parts</TableHead>
                         <TableHead className="px-2 text-right">Rows</TableHead>
                         <TableHead className="px-2 text-right">On disk</TableHead>
-                        <ShareHead className="@max-[30rem]:hidden" />
+                        <ShareHead className="@max-lg:hidden" />
                         <TableHead className="px-2 text-right @max-stack:hidden">
                           Compressed
                         </TableHead>
-                        <TableHead className="@max-[46rem]:hidden">Last written</TableHead>
+                        <TableHead className="@max-3xl:hidden">Last written</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -150,13 +150,13 @@ export function PartsView() {
                           <ShareCell
                             part={partition.bytes}
                             whole={whole}
-                            className="@max-[30rem]:hidden"
+                            className="@max-lg:hidden"
                           />
                           <TableCell className="numeric px-2 py-2 text-right text-muted-foreground @max-stack:hidden">
                             {ratio(partition) ?? <NoFigure />}
                           </TableCell>
                           <TableCell
-                            className="py-2 text-muted-foreground @max-[46rem]:hidden"
+                            className="py-2 text-muted-foreground @max-3xl:hidden"
                             title={timestamp(partition.modified)}
                           >
                             {partition.modified ? relativeTime(partition.modified) : <NoFigure />}
@@ -186,7 +186,7 @@ export function PartsView() {
                             <TableHead className="px-2 text-right @max-stack:hidden">
                               Merged
                             </TableHead>
-                            <TableHead className="@max-[46rem]:hidden">Stored as</TableHead>
+                            <TableHead className="@max-3xl:hidden">Stored as</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -208,7 +208,7 @@ export function PartsView() {
                               >
                                 {part.level === 0 ? "not yet" : `${part.level}×`}
                               </TableCell>
-                              <TableCell className="py-2 @max-[46rem]:hidden">
+                              <TableCell className="py-2 @max-3xl:hidden">
                                 <span className="flex items-center gap-2.5">
                                   <Tag>{part.type}</Tag>
                                   <Tag mono>{part.disk}</Tag>
@@ -261,7 +261,7 @@ export function MergesView() {
                       <TableHead className="px-2 text-right">For</TableHead>
                       <TableHead className="px-2 text-right">Parts</TableHead>
                       <TableHead className="px-2 text-right @max-stack:hidden">Size</TableHead>
-                      <TableHead className="text-right @max-[46rem]:hidden">Memory</TableHead>
+                      <TableHead className="text-right @max-3xl:hidden">Memory</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -300,7 +300,7 @@ export function MergesView() {
                         <TableCell className="numeric px-2 py-2 text-right @max-stack:hidden">
                           {bytes(merge.bytes)}
                         </TableCell>
-                        <TableCell className="numeric py-2 text-right text-muted-foreground @max-[46rem]:hidden">
+                        <TableCell className="numeric py-2 text-right text-muted-foreground @max-3xl:hidden">
                           {bytes(merge.memory)}
                         </TableCell>
                       </TableRow>

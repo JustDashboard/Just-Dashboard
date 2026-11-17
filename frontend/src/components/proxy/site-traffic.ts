@@ -2,9 +2,6 @@ import { compactCount, percent } from "@/lib/format"
 import type { Tone } from "@/components/tone"
 import type { SiteTrafficReading, SiteTrafficSummary, TrafficPoint } from "@/lib/types"
 
-/** @deprecated use `compactCount` from lib/format: "1.2k", the product's one compact count. */
-export { compactCount }
-
 /** A share of 0–1 as the percentage the readings print. */
 export function share(rate: number): string {
   return percent(rate * 100, rate > 0 && rate < 0.001 ? 2 : 1)

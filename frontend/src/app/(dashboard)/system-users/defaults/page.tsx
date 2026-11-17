@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { ArrowRight, FileText, FolderOpen, SettingsSliders, Trash } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { SaveBarProvider } from "@/components/settings/save-bar"
@@ -9,7 +10,7 @@ import { Segments } from "@/components/segments"
 import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Field, FieldRow, FormSections } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { platformProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
@@ -90,7 +91,7 @@ function Defaults() {
         title="Account defaults"
       />
       <SaveBarProvider>
-        <HostIdentity
+        <IdentityHeader
           mark={platformProduct(host?.platform)}
           fallback={SettingsSliders}
           title="Account defaults"
@@ -111,24 +112,22 @@ function Defaults() {
               <>
                 {/* Held to the line's height: a mono word in a sans line
                       makes the line a pixel taller than it is while waiting. */}
-                <span className="inline-flex h-4 min-w-0 items-center gap-1.5">
-                  <ShellGlyph shell={data.shell} />
-                  <span className="truncate font-mono leading-4">{data.shell}</span>
-                </span>
+                <Fact>
+                  <span className="inline-flex h-4 min-w-0 items-center gap-1.5 align-top">
+                    <ShellGlyph shell={data.shell} />
+                    <span className="truncate font-mono leading-4">{data.shell}</span>
+                  </span>
+                </Fact>
                 {data.quality.available && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">
-                      at least {plural(data.quality.minLength, "character")}
-                    </span>
-                  </>
+                  <Fact className="numeric">
+                    at least {plural(data.quality.minLength, "character")}
+                  </Fact>
                 )}
-                <FactDot />
-                <span className="numeric">
+                <Fact className="numeric">
                   {data.skel.length === 0
                     ? "a new home starts empty"
                     : `${plural(data.skel.length, "file")} in a new home`}
-                </span>
+                </Fact>
               </>
             ) : error ? (
               <span>Not read</span>

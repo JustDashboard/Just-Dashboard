@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { IconAction } from "@/components/icon-action"
 import { Pencil, Plus, Trash } from "@/components/icons"
 import { del } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -147,7 +148,7 @@ export function RoutesTable({
   )
 
   return (
-    <Panel aria-label="Routes" data-routing="routes">
+    <Panel framed aria-label="Routes" data-routing="routes">
       <PanelHeader
         title="Routes"
         count={target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
@@ -374,14 +375,26 @@ function RowVerbs({
   return (
     <span className="flex h-6 items-center justify-end gap-0.5">
       {edit && (
-        <Button size="icon-xs" variant="ghost" aria-label={edit.label} onClick={edit.run}>
+        <IconAction
+          size="icon-xs"
+          variant="ghost"
+          className="[&_svg:not([class*='size-'])]:size-3"
+          label={edit.label}
+          onClick={edit.run}
+        >
           <Pencil aria-hidden />
-        </Button>
+        </IconAction>
       )}
       {remove && (
-        <Button size="icon-xs" variant="ghost" aria-label={remove.label} onClick={remove.run}>
+        <IconAction
+          size="icon-xs"
+          variant="ghost"
+          className="[&_svg:not([class*='size-'])]:size-3"
+          label={remove.label}
+          onClick={remove.run}
+        >
           <Trash aria-hidden />
-        </Button>
+        </IconAction>
       )}
       {guard && !edit && !remove && (
         <span className="flex size-6 items-center justify-center">
@@ -435,7 +448,7 @@ export function RulesTable({
     />
   )
   return (
-    <Panel aria-label="Policy rules" data-routing="rules">
+    <Panel framed aria-label="Policy rules" data-routing="rules">
       <PanelHeader
         title="Policy rules"
         count={rules.length}
@@ -574,7 +587,7 @@ export function TableWaiting({
 }) {
   const wide = useMediaQuery(`(min-width: ${wideFrom})`)
   return (
-    <Panel aria-label={title} aria-busy>
+    <Panel framed aria-label={title} aria-busy>
       <PanelHeader title={title}>
         {/* The line's own height: the chips or the verb that will stand on it. */}
         <span aria-hidden className={cn("h-7", chips && "max-sm:basis-full")} />

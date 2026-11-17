@@ -323,9 +323,6 @@ export function toJson(graph: DbSchemaGraph, doc: DiagramDocument): string {
   )
 }
 
-/** @deprecated use `saveBlob` from lib/download. */
-export const downloadBlob = saveBlob
-
 /**
  * The SVG rasterised through an `<img>` and a canvas, at twice the size so
  * the text survives being pasted into a document and scaled.

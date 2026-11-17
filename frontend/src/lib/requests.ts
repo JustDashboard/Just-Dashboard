@@ -72,7 +72,7 @@ export const CLASS_TONE: Record<StatusClass, Tone> = {
 export const CLASS_TEXT: Record<StatusClass, string> = {
   "5xx": "text-destructive",
   "4xx": "text-warning",
-  "3xx": "text-[var(--tag-cyan)]",
+  "3xx": "text-tag-cyan",
   "2xx": "text-success",
   "1xx": "text-muted-foreground",
   other: "text-muted-foreground",
@@ -86,7 +86,7 @@ export const CLASS_TEXT: Record<StatusClass, string> = {
 export const CLASS_DOT: Record<StatusClass, string> = {
   "5xx": "bg-destructive",
   "4xx": "bg-warning",
-  "3xx": "bg-[var(--tag-cyan)]",
+  "3xx": "bg-tag-cyan",
   "2xx": "bg-success",
   "1xx": "bg-muted-foreground/60",
   other: "bg-muted-foreground/40",
@@ -126,7 +126,7 @@ export function methodEmphasis(method: string): string {
     case "PUT":
     case "PATCH":
     case "DELETE":
-      return "font-semibold text-[var(--tag-blue)]"
+      return "font-semibold text-tag-blue"
     default:
       return "text-foreground font-medium"
   }

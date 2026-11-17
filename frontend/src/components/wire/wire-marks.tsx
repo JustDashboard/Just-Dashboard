@@ -186,7 +186,7 @@ function Hub({
 }) {
   return (
     <>
-      <div ref={markRef} className={cn("relative z-10 flex", className)}>
+      <div ref={markRef} className={cn("relative z-raised flex", className)}>
         {hub.mark}
       </div>
       {/* The hub's words under its mark: the lines to the tier below leave
@@ -227,7 +227,7 @@ function Row({
         <ol className="flex flex-wrap justify-center gap-4">
           {row.nodes.map((node) => (
             <li key={node.id} data-node={node.anonymous ? undefined : node.id} className="min-w-0">
-              <div ref={refs.get(node.id)} className="relative z-10 flex">
+              <div ref={refs.get(node.id)} className="relative z-raised flex">
                 <Pressable node={node} />
               </div>
               {node.name && <span className="sr-only">{node.name}</span>}

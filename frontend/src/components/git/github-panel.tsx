@@ -958,13 +958,7 @@ function CreatePullDialog({
  */
 function RunMark({ run }: { run: GitHubWorkflowRun }) {
   if (run.status !== "completed") {
-    return (
-      <Clock
-        role="img"
-        aria-label="running"
-        className="mt-px size-4 shrink-0 animate-pulse text-warning"
-      />
-    )
+    return <Clock role="img" aria-label="running" className="mt-px size-4 shrink-0 text-warning" />
   }
   switch (run.conclusion) {
     case "success":

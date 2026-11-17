@@ -16,6 +16,7 @@ import {
   Wrench,
 } from "@/components/icons"
 import { ApiError, post } from "@/lib/api"
+import { copyPending } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
@@ -515,11 +516,7 @@ export function TableWorkbench({
       try {
         // The clipboard is promised the text inside the gesture; a write made
         // after the request came back is one Safari refuses.
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            "text/plain": text.then((sql) => new Blob([sql], { type: "text/plain" })),
-          }),
-        ])
+        await copyPending(text)
         notify.success(rows.length === 1 ? "Copied 1 INSERT" : `Copied ${rows.length} INSERTs`)
       } catch {
         try {
@@ -727,7 +724,7 @@ export function TableWorkbench({
       prefix={schema || undefined}
       name={table}
       kind={kind !== "table" ? <Tag>{word}</Tag> : undefined}
-      identityClassName="@max-[34rem]/object:max-w-[calc(100%-13.5rem)]"
+      identityClassName="@max-stack/object:max-w-[calc(100%-13.5rem)]"
       views={
         !missing && (
           <ViewTabList

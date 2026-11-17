@@ -31,6 +31,8 @@ import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
 import { staleOf } from "@/components/database/kit/read"
 import { ErrorState } from "@/components/state"
 import { SectionLink } from "@/components/section-link"
+import { Bone } from "@/components/bone"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /** One thing the database holds, as the right lane draws it: a schema, a keyspace, a collection. */
 export type Holding = {
@@ -512,7 +514,7 @@ export function WaitingNodes({
     <li key={index} aria-hidden className="min-w-0">
       <WireNode
         align={align}
-        mark={<span className="size-11 animate-pulse rounded-xl bg-muted" />}
+        mark={<Skeleton className="size-11 rounded-xl" />}
         eyebrow={<WaitingLine className="w-16" />}
         title={<WaitingLine className={index % 2 ? "w-24" : "w-32"} />}
         hint={<WaitingLine className={index % 2 ? "w-36" : "w-28"} />}
@@ -523,15 +525,7 @@ export function WaitingNodes({
 
 /** A grey bar where a line of words will be, inline so the line keeps the height its words give it. */
 export function WaitingLine({ className }: { className?: string }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn(
-        "inline-block h-[0.7em] max-w-full animate-pulse rounded-md bg-muted align-middle",
-        className,
-      )}
-    />
-  )
+  return <Bone className={className} />
 }
 
 /** One lane of a picture: its name and count over its nodes. Performance's picture draws its lanes with it too. */

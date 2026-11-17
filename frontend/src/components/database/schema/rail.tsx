@@ -13,7 +13,6 @@ import { Stale } from "@/components/stale"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { ContainerPicker } from "@/components/database/kit/container-picker"
-import { NameMark } from "@/components/database/kit/marks"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
   RAIL_ACTION,
@@ -366,10 +365,3 @@ function RailGroup({
     </section>
   )
 }
-
-/**
- * A schema's own colour, stable for its name, as a small square before it.
- *
- * @deprecated use `NameMark` from `database/kit/marks`.
- */
-export const SchemaMark = NameMark

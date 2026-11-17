@@ -87,7 +87,13 @@ export function Fact({
       <span
         title={title}
         className={
-          product ? "inline-flex max-w-full min-w-0 items-center gap-1.5 align-top" : undefined
+          product
+            ? "inline-flex max-w-full min-w-0 items-center gap-1.5 align-top"
+            : // A fact's words are held to the line, as a product's are above: an
+              // inline box it opens with (a link, an address, a tag) sat on the
+              // baseline, and a span in the mono face brought its taller ascent,
+              // and either grew the line past the 16px its loading line keeps.
+              "[&_.font-mono:not(.inline-flex,.inline-flex>*)]:leading-none [&>.inline-flex]:align-top"
         }
       >
         {product && <ProductGlyph id={product} />}

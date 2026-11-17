@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import {
   ArrowUpRight,
   ChevronDown,
@@ -26,7 +27,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -404,7 +405,7 @@ function NetworkMain({
             onRemove={() => setRemoving(network)}
           />
         ) : (
-          <HostIdentity
+          <IdentityHeader
             slot="network-identity"
             className="border-b-0 pb-0"
             mark="docker"
@@ -626,7 +627,7 @@ function NetworkIdentity({
   }
 
   return (
-    <HostIdentity
+    <IdentityHeader
       slot="network-identity"
       label={`About ${network.name}`}
       className="animate-rise border-b-0 pb-0"
@@ -654,36 +655,40 @@ function NetworkIdentity({
       }
       facts={
         <>
-          {owner.kind === "compose" && owner.project ? (
-            <Link
-              href={`/docker/stacks/${encodeURIComponent(owner.project)}`}
-              className="inline-flex min-w-0 items-center gap-1 rounded-sm text-foreground focus-ring hover:underline"
-            >
-              <span className="truncate">{owner.label}</span>
-              <ArrowUpRight aria-hidden className="size-3 shrink-0" />
-            </Link>
-          ) : (
-            <span>{owner.label}</span>
-          )}
-          <FactDot />
-          <span>{network.driver === "null" ? "no network" : network.driver}</span>
-          <FactDot />
-          {first ? (
-            <span className="inline-flex items-center gap-1.5" title={network.subnets.join(", ")}>
-              <Cidr cidr={first} className="text-foreground" />
-              {more.length > 0 && <span className="numeric">+{more.length}</span>}
-            </span>
-          ) : (
-            <span>{network.driver === "host" ? "the server's own addresses" : "no subnet"}</span>
-          )}
-          <FactDot />
-          <span className="numeric">
+          <Fact>
+            {owner.kind === "compose" && owner.project ? (
+              <Link
+                href={`/docker/stacks/${encodeURIComponent(owner.project)}`}
+                className="inline-flex min-w-0 items-center gap-1 rounded-sm align-top text-foreground focus-ring hover:underline"
+              >
+                <span className="truncate">{owner.label}</span>
+                <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+              </Link>
+            ) : (
+              <span>{owner.label}</span>
+            )}
+          </Fact>
+          <Fact>{network.driver === "null" ? "no network" : network.driver}</Fact>
+          <Fact>
+            {first ? (
+              <span
+                className="inline-flex items-center gap-1.5 align-top"
+                title={network.subnets.join(", ")}
+              >
+                <Cidr cidr={first} className="text-foreground" />
+                {more.length > 0 && <span className="numeric">+{more.length}</span>}
+              </span>
+            ) : (
+              <span>{network.driver === "host" ? "the server's own addresses" : "no subnet"}</span>
+            )}
+          </Fact>
+          <Fact className="numeric">
             {!membersKnown(network)
               ? "members unread"
               : count === 0
                 ? "nothing attached"
                 : plural(count, "container")}
-          </span>
+          </Fact>
         </>
       }
       command={

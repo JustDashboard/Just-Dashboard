@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { FloatingBar, SaveKey, saveShortcut, useFloatingBarHost } from "@/components/floating-bar"
+import { FloatingBar, SaveKey } from "@/components/floating-bar"
 import { Button } from "@/components/ui/button"
 import { appliesLine, pendingLine, type SettingApplies } from "@/components/settings/save-bar-words"
 
@@ -107,16 +107,6 @@ function sameEntry(a: EntryState | undefined, b: EntryState) {
     a.note === b.note
   )
 }
-
-/**
- * Where a floating save bar is drawn: the content area, once in the browser.
- *
- * @deprecated use `useFloatingBarHost` from `@/components/floating-bar`.
- */
-export const useSaveBarHost = useFloatingBarHost
-
-/** @deprecated import `saveShortcut` from `@/components/floating-bar`. */
-export { saveShortcut }
 
 export function SaveBarProvider({
   children,
@@ -308,14 +298,7 @@ function SaveBar({
       actions={
         !done && (
           <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={saving}
-              onClick={onDiscard}
-              className="max-sm:h-10"
-            >
+            <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={onDiscard}>
               Discard
             </Button>
             <Button
@@ -325,7 +308,6 @@ function SaveBar({
               disabled={invalid}
               onClick={onSave}
               aria-keyshortcuts="Control+S Meta+S"
-              className="max-sm:h-10"
             >
               {verb}
               <SaveKey hidden={saving} />

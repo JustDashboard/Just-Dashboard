@@ -14,12 +14,11 @@ import { engineFor, sectionHref } from "@/components/database/engine"
 import { objectNouns, sortFleet } from "@/components/database/fleet/fleet"
 import { EngineMark, EnvironmentTag } from "@/components/database/kit"
 import { DatabaseStatusMark, fleetStatus } from "@/components/database/shell/status"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { EmptyState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { backupOrder, failedBackups } from "./order"
 import { SectionLink } from "@/components/section-link"
@@ -59,7 +58,7 @@ export function DatabasesPanel({ read }: { read: PollState<DbFleet> }) {
       />
       <PanelBody flush>
         {loading && !data ? (
-          <LoadingRows rows={3} className="[&>*]:h-14 [&>*]:rounded-xl" />
+          <ChoiceListSkeleton rows={3} />
         ) : !data ? (
           <p className="py-2 text-body text-muted-foreground">
             {error ? "The databases could not be read." : "Nothing to show."}
@@ -157,7 +156,7 @@ export function BackupsPanel({ read }: { read: PollState<BackupJob[]> }) {
       />
       <PanelBody flush>
         {loading && !data ? (
-          <LoadingRows rows={3} className="[&>*]:h-14 [&>*]:rounded-xl" />
+          <ChoiceListSkeleton rows={3} />
         ) : !data ? (
           <p className="py-2 text-body text-muted-foreground">
             {error ? "The backup jobs could not be read." : "Nothing to show."}

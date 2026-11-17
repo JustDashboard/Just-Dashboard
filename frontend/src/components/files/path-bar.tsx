@@ -6,7 +6,6 @@ import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
 import { InputGroupInput } from "@/components/ui/input-group"
-import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
@@ -14,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { rowReveal } from "@/components/icon-action"
+import { IconAction } from "@/components/icon-action"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
 import { filesOwnKeyboard, isTypingTarget } from "@/components/files/keyboard"
 
@@ -147,20 +146,17 @@ export function PathBar({
         ))}
       </div>
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            className={cn("size-7 shrink-0 text-muted-foreground", rowReveal("path"))}
-            onClick={() => setEditing(true)}
-            aria-label="Type a path"
-          >
-            <Pencil />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Type a path (Ctrl+L)</TooltipContent>
-      </Tooltip>
+      <IconAction
+        size="icon-xs"
+        label="Type a path"
+        tooltip="Type a path (Ctrl+L)"
+        className="size-7 shrink-0 text-muted-foreground [&_svg:not([class*='size-'])]:size-3"
+        reveal
+        revealGroup="path"
+        onClick={() => setEditing(true)}
+      >
+        <Pencil />
+      </IconAction>
     </div>
   )
 }

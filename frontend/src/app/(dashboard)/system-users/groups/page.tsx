@@ -2,12 +2,13 @@
 
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useMemo, useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { Plus, Trash, Users } from "@/components/icons"
 import { InitialsMark } from "@/components/user-avatar"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { DimActions } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
@@ -117,7 +118,7 @@ function SystemGroups() {
     <Page rise>
       <PageContext back={BACK} title="Groups" />
 
-      <HostIdentity
+      <IdentityHeader
         fallback={Users}
         title="Groups"
         state={
@@ -145,17 +146,13 @@ function SystemGroups() {
         facts={
           data ? (
             <>
-              <span className="numeric">{plural(figures.total, "group")}</span>
+              <Fact className="numeric">{plural(figures.total, "group")}</Fact>
               {figures.rootMembers > 0 && (
-                <>
-                  <FactDot />
-                  <span className="numeric">
-                    {plural(figures.rootMembers, "account")} in one of those
-                  </span>
-                </>
+                <Fact className="numeric">
+                  {plural(figures.rootMembers, "account")} in one of those
+                </Fact>
               )}
-              <FactDot />
-              <span className="numeric">{figures.system} made by packages</span>
+              <Fact className="numeric">{figures.system} made by packages</Fact>
             </>
           ) : error ? (
             <span>Not read</span>

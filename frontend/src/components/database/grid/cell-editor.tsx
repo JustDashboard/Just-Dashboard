@@ -640,6 +640,8 @@ function ListEditor({
           tabIndex={0}
           aria-label={`Set ${column.name}`}
           aria-activedescendant={`${baseId}-${highlight}`}
+          // The highlighted option is the focus mark (aria-activedescendant).
+          // eslint-disable-next-line design-system/tokens
           className="max-h-64 overflow-y-auto outline-none"
           onKeyDown={(event) => {
             const last = options.length - 1

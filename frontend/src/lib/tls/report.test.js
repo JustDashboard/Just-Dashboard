@@ -1,12 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import {
-  certificateLeft,
-  diagnosisLinks,
-  failureSteps,
-  plainVerdict,
-  termLeft,
-  termText,
-} from "./report"
+import { diagnosisLinks, failureSteps, plainVerdict, termLeft, termText } from "./report"
+import { timeLeftWords } from "../certificates"
+
+const certificateLeft = (cert, now) => timeLeftWords(cert, { form: "short", now })
 
 const http = (over) => ({
   service: "http",

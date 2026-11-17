@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { Check, ChevronDown, Cross, MagnifyingGlass, SettingsSliders } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes, grouped } from "@/lib/format"
@@ -222,18 +223,19 @@ export function FilterBar({
           />
           {filter.q && (
             <InputGroupAddon align="inline-end" className="border-l-0 px-1">
-              <Button
+              <IconAction
                 type="button"
                 size="icon-xs"
                 variant="ghost"
-                aria-label="Clear the search"
+                className="[&_svg:not([class*='size-'])]:size-3"
+                label="Clear the search"
                 onClick={() => {
                   set({ q: "" })
                   queryRef.current?.focus()
                 }}
               >
                 <Cross />
-              </Button>
+              </IconAction>
             </InputGroupAddon>
           )}
           <InputGroupAddon align="inline-end" className="gap-0 p-0">

@@ -58,7 +58,7 @@ export function FirewallAccessPanel() {
   if (checks.length === 0) return hold
   return (
     <>
-      <Panel>
+      <Panel framed>
         <PanelHeader title="Preserved access" />
         <PanelBody flush>
           <AccessTable checks={checks} />

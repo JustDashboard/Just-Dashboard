@@ -17,7 +17,7 @@ import { notify } from "@/lib/toast"
 import type { NetworkLink } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
-import { IdentityHeader as HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Fact, FactLine } from "@/components/fact-line"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -126,7 +126,7 @@ export function DeviceIdentity({
 
   return (
     <>
-      <HostIdentity
+      <IdentityHeader
         slot="device-identity"
         label={`About ${link.name}`}
         className="border-b-0 pb-0"
@@ -243,7 +243,7 @@ export function DeviceIdentity({
 /** The line while the devices are being read: the same line, its name known, "Reading…" for its state, the rest bones. */
 export function DeviceIdentityLoading({ name }: { name: string }) {
   return (
-    <HostIdentity
+    <IdentityHeader
       loading
       slot="device-identity"
       className="border-b-0 pb-0"

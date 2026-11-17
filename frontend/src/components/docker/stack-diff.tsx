@@ -44,9 +44,6 @@ export function ServiceLabel({
   )
 }
 
-/** @deprecated import `DiffCount` from `@/components/diff-count`, where it moved in 0.9.0. */
-export { DiffCount }
-
 /**
  * A compose file's changes as hunks, each headed by the service it changes —
  * so a diff of six services reads as which of them moved before a line of it

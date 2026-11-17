@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { sharePercent } from "@/lib/format"
-import { RankList, SplitBar, percent, splitWidths } from "./rank-list"
+import { RankList, SplitBar, splitWidths } from "./rank-list"
 
 const PARTS = [
   { key: "string", count: 600, color: "var(--chart-1)", label: "String", figure: "600" },
@@ -98,6 +97,5 @@ describe("RankList", () => {
     )
     const shares = [...html.matchAll(/data-slot="rank-share"[^>]*>([^<]*)</g)].map((m) => m[1])
     expect(shares).toEqual(["&gt;99%", "&lt;1%", ""])
-    expect(percent).toBe(sharePercent)
   })
 })

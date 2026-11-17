@@ -3,15 +3,16 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { CodeBracket, GridSquare } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { bytes, relativeTime, sharePercent, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { SplitBar, percent as share } from "@/components/rank-list"
+import { SplitBar } from "@/components/rank-list"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
@@ -147,7 +148,7 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
       ),
       sub: entry.rows < 0 ? "rows not counted" : `${compact(entry.rows)} rows`,
       figure: bytes(entry.totalBytes),
-      figureSub: whole > 0 ? share(entry.totalBytes / whole) : undefined,
+      figureSub: whole > 0 ? sharePercent(entry.totalBytes / whole) : undefined,
     }))
     // `carried` is two strings: held by what they are.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -206,7 +207,7 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
           named && !stats.data && !stats.error ? (
             // The loaded line's form, with a place for its command and verbs
             // (empty until they are known), so nothing under it moves when it is read.
-            <HostIdentity
+            <IdentityHeader
               loading
               className="border-b-0 pb-0"
               logo={<TableTile />}
@@ -284,7 +285,7 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
       rail={rail}
       head={head}
       identity={
-        <HostIdentity
+        <IdentityHeader
           label={`About ${qualified(table.schema, table.table)}`}
           className="animate-rise border-b-0 pb-0"
           logo={<TableTile kind={table.kind} />}
@@ -300,33 +301,19 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
           }
           facts={
             <>
-              <span>
+              <Fact>
                 <Fig>{bytes(table.totalBytes)}</Fig>
-                {whole > 0 && ` · ${share(table.totalBytes / whole)} of the database`}
-              </span>
-              <FactDot />
-              <span className="numeric">
+                {whole > 0 && ` · ${sharePercent(table.totalBytes / whole)} of the database`}
+              </Fact>
+              <Fact className="numeric">
                 {table.rows < 0 ? "rows not counted" : `${compact(table.rows)} rows`}
-              </span>
-              {table.engine && (
-                <>
-                  <FactDot />
-                  <span className="font-mono">{table.engine}</span>
-                </>
-              )}
-              {table.kind && table.kind !== "table" && (
-                <>
-                  <FactDot />
-                  <span>{table.kind}</span>
-                </>
-              )}
+              </Fact>
+              {table.engine && <Fact className="font-mono">{table.engine}</Fact>}
+              {table.kind && table.kind !== "table" && <Fact>{table.kind}</Fact>}
               {every.has("vacuum") && (
-                <>
-                  <FactDot />
-                  <span title={vacuumed ? timestamp(vacuumed.at) : undefined}>
-                    {vacuumed ? `vacuumed ${relativeTime(vacuumed.at)}` : "never vacuumed"}
-                  </span>
-                </>
+                <Fact title={vacuumed ? timestamp(vacuumed.at) : undefined}>
+                  {vacuumed ? `vacuumed ${relativeTime(vacuumed.at)}` : "never vacuumed"}
+                </Fact>
               )}
             </>
           }
@@ -482,7 +469,7 @@ function Figures({ table, columns }: { table: DbTableStat; columns: ReadonlySet<
                     <span className={cn("numeric", needsVacuum(table) && "text-warning")}>
                       {dead.toLocaleString()}
                       {dead > 0 && deadOf !== undefined && (
-                        <span className="text-muted-foreground"> · {share(deadOf)}</span>
+                        <span className="text-muted-foreground"> · {sharePercent(deadOf)}</span>
                       )}
                     </span>
                   )}
@@ -511,7 +498,7 @@ function Figures({ table, columns }: { table: DbTableStat; columns: ReadonlySet<
             title="How it is read"
             actions={
               seq !== undefined && (
-                <span className="numeric text-hint">{share(seq)} sequential</span>
+                <span className="numeric text-hint">{sharePercent(seq)} sequential</span>
               )
             }
           />

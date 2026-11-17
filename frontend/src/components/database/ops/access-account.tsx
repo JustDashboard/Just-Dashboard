@@ -12,7 +12,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { SaveBarProvider } from "@/components/settings/save-bar"
 import { SettingForm, SettingSection } from "@/components/settings/setting-card"
 import { Field, FieldRow, FormNote, FormSections, OptionList, OptionRow } from "@/components/form"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -249,7 +249,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
   const title = <AccountName name={name} host={host} className="text-title" />
   const summary = data ? grantSummary(data, data.grants) : ""
   const identity = data ? (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${key}`}
       slot="account-identity"
       className="animate-rise border-b-0 pb-0"
@@ -288,7 +288,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       menu={verbs.length > 0 ? <VerbMenu verbs={verbs} label={`Actions for ${key}`} /> : false}
     />
   ) : (
-    <HostIdentity
+    <IdentityHeader
       slot="account-identity"
       className="border-b-0 pb-0"
       logo={mark}

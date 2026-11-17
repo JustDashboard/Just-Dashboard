@@ -4,7 +4,7 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { SearchInput } from "@/components/search-input"
 import { ProductGlyph } from "@/components/product-logo"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
@@ -106,7 +106,7 @@ export function DriftTable({
     onClick: () => onScope(scope === value && value !== "all" ? "all" : value),
   })
   return (
-    <Panel aria-label="Comparisons">
+    <Panel framed aria-label="Comparisons">
       <PanelHeader title="Comparisons" count={rows.length}>
         {/* On a phone the chips take a row of their own, so the count stays
             at the end of the title's row. */}
@@ -136,12 +136,12 @@ export function DriftTable({
           )}
           {(counts.unknown > 0 || scope === "incomplete") && (
             <FilterChip {...chip("incomplete")}>
-              <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground" />
+              <StatusDot tone="stopped" />
               Incomplete <ChipCount>{counts.unknown}</ChipCount>
             </FilterChip>
           )}
           <FilterChip {...chip("matching")}>
-            <span aria-hidden className="size-1.5 rounded-full bg-success" />
+            <StatusDot tone="running" />
             Matching <ChipCount>{counts.matching}</ChipCount>
           </FilterChip>
         </ChipStrip>

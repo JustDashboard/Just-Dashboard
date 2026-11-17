@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { Bell, Check, Slash, Warning } from "@/components/icons"
 import { del } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
@@ -11,7 +12,6 @@ import type { PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { WireMark } from "@/components/wire/wire"
-import { FactDot } from "@/components/identity-header"
 import { InstallFollowUp, InstallHandoff } from "@/components/install-handoff"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
@@ -107,21 +107,16 @@ export function CrowdSecPanel({
         state={<Status verdict={words.verdict} label={words.label} />}
         facts={
           <>
-            <span className="numeric">{plural(data.decisions.length, "decision")} in force</span>
-            <FactDot />
-            <span className="numeric">{community} from the community list</span>
-            <FactDot />
-            <span className="numeric">{plural(data.bouncers.length, "bouncer")}</span>
+            <Fact className="numeric">{plural(data.decisions.length, "decision")} in force</Fact>
+            <Fact className="numeric">{community} from the community list</Fact>
+            <Fact className="numeric">{plural(data.bouncers.length, "bouncer")}</Fact>
             {words.protects && enforcement && enforcement.enforcedBy.length > 0 && (
-              <>
-                <FactDot />
-                <span>
-                  enforced by{" "}
-                  <span className="font-mono text-foreground">
-                    {enforcement.enforcedBy.join(", ")}
-                  </span>
+              <Fact>
+                enforced by{" "}
+                <span className="font-mono text-foreground">
+                  {enforcement.enforcedBy.join(", ")}
                 </span>
-              </>
+              </Fact>
             )}
           </>
         }

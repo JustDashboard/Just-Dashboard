@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { ChevronDown, ChevronUp } from "@/components/icons"
 import { useViewState } from "@/lib/view-state"
 import { IconAction } from "@/components/icon-action"
-import { BackLink as PageBackLink, Page, PageContext, type Back } from "@/components/page"
+import { Page, PageContext, type Back } from "@/components/page"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import type { WorkspaceCommand } from "@/components/workspace/commands"
 
@@ -127,14 +127,6 @@ export function useDetailTab<T extends string>(
   )
   return [tab, setTab, visited]
 }
-
-/**
- * The way back to the list, which this file drew a second time beside the
- * page frame's own. There is one now, in `components/page.tsx`.
- *
- * @deprecated import `BackLink` from `@/components/page`
- */
-export const BackLink = PageBackLink
 
 /** The two arrows a phone walks the list with, and the shortcuts' help. */
 export function StepArrows({

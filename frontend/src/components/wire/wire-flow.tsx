@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { createRef, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { WireNode } from "@/components/wire/wire"
 import { WireLaneTitle } from "@/components/wire/wire-lane"
@@ -22,6 +21,8 @@ import {
   type WaitingHint,
   type WireLine,
 } from "@/components/wire/wire-flow-model"
+import { useBreakpoint } from "@/lib/breakpoints"
+import { Bone } from "@/components/bone"
 
 export type { WaitingHint, WireLine, WireState } from "@/components/wire/wire-flow-model"
 
@@ -182,7 +183,7 @@ export function WireFlow({
   loading?: boolean
   className?: string
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const hubRef = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
@@ -616,15 +617,7 @@ function waitingDetail(shape: WireFlowWaiting, widths: string[]) {
  * lines it stands in are paragraphs.
  */
 function WaitingWords({ className }: { className?: string }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn(
-        "inline-block h-[0.7em] max-w-full animate-pulse rounded-md bg-muted align-middle",
-        className,
-      )}
-    />
-  )
+  return <Bone className={className} />
 }
 
 /** A node's mark as the link or button it is, or as itself. */

@@ -1,6 +1,15 @@
 {
-  "about": "Misses the doc checks in docs-catalogue.test.js accept, by name. It listed what was missed when the checks arrived (0.9.0, WP-40) and was emptied when the docs were finished (WP-41). Keep it empty: write the catalogue row, fix the name, or mark a gone one \"(removed)\" in decisions/.",
+  "about": "Misses the doc checks in docs-catalogue.test.js accept, by name. It listed what was missed when the checks arrived (0.9.0, WP-40) and was emptied when the docs were finished (WP-41). Keep it empty: write the catalogue row, fix the name, or mark a gone one \"(removed)\" in decisions/. `inFlight` holds names WP-39 (0.9.0, wave 5) deleted whose remaining mentions are in pages WP-45 owns in the same wave (card-row.md, rail.md, status-tag.md); empty it when those land.",
   "noRow": [],
   "rowNotExport": [],
-  "unknownName": []
+  "unknownName": [],
+  "inFlight": {
+    "unknownName": [
+      "CardRowsSkeleton",
+      "DockerRail",
+      "DockerRailRow",
+      "GhostRows",
+      "StateTile"
+    ]
+  }
 }

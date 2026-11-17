@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { Check, Copy, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { useCopy } from "@/hooks/use-copy"
@@ -406,15 +407,15 @@ function Snippet({ label, caption, text }: { label: string; caption?: string; te
         <pre data-slot="snippet" className="break-all whitespace-pre-wrap">
           {text}
         </pre>
-        <Button
+        <IconAction
           variant="ghost"
           size="icon-xs"
-          className="absolute top-2 right-2"
-          aria-label={`Copy the ${label}`}
+          className="absolute top-2 right-2 [&_svg:not([class*='size-'])]:size-3"
+          label={`Copy the ${label}`}
           onClick={() => void copy(text)}
         >
           {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-        </Button>
+        </IconAction>
       </Well>
     </div>
   )

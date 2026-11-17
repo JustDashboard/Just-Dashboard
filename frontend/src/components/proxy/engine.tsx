@@ -33,7 +33,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Status, type DotTone } from "@/components/status-dot"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { Fact } from "@/components/fact-line"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { engineProduct } from "@/components/proxy/marks"
 import type { Verb } from "@/components/verbs"
 import { useNow } from "@/hooks/use-now"
@@ -217,7 +217,7 @@ export function EngineIdentity({
     status.nginx ? status.nginxVersion : status.caddy ? status.caddyVersion : undefined
   )?.replace(/^(nginx|caddy)\//i, "")
   return (
-    <HostIdentity
+    <IdentityHeader
       mark={engineProduct(status)}
       fallback={Globe}
       title={

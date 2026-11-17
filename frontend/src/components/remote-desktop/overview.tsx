@@ -4,9 +4,11 @@ import Link from "next/link"
 import { useMemo, useState } from "react"
 import { Modal } from "@/components/modal"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton } from "@/components/choice-row"
 import { ArrowRight, Plus, RefreshClockwise, TerminalWindow } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact, facts } from "@/components/fact-line"
+import { Bone } from "@/components/bone"
 import { MissingThing } from "@/components/missing-thing"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -82,7 +84,7 @@ export function RemoteDesktopOverview() {
   )
 
   const identity = (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise"
       logo={data ? <Marks overview={data} /> : <Skeleton className="size-10 rounded-lg" />}
       fallback={TerminalWindow}
@@ -100,7 +102,16 @@ export function RemoteDesktopOverview() {
         </span>
       }
       state={data ? <Verdict overview={data} /> : null}
-      facts={data ? <Facts overview={data} /> : <Skeleton className="h-4 w-72 max-w-full" />}
+      // The placeholder is a fact too, so it waits in the line the facts land in.
+      facts={
+        data ? (
+          overviewFacts(data)
+        ) : (
+          <Fact>
+            <Bone className="w-72 max-w-full" />
+          </Fact>
+        )
+      }
       command={
         <Button size="sm" asChild>
           <Link href={NEW_HREF} aria-label="Add a computer">
@@ -136,10 +147,7 @@ export function RemoteDesktopOverview() {
             {identity}
             <div role="status" aria-label="Loading Remote Desktop" className="flex flex-col gap-8">
               <Skeleton className="h-64 rounded-xl" />
-              <div className="flex flex-col gap-2">
-                <Skeleton className="h-14 rounded-xl" />
-                <Skeleton className="h-14 rounded-xl" />
-              </div>
+              <ChoiceListSkeleton rows={2} />
             </div>
           </>
         )}
@@ -252,11 +260,12 @@ function Marks({ overview }: { overview: RdOverview }) {
   )
 }
 
-function Facts({ overview }: { overview: RdOverview }) {
+/** The overview's facts as `Fact`s, called for rather than rendered, so the header's line sees each one. */
+function overviewFacts(overview: RdOverview) {
   const { computers, tailnet, sessions } = overview
   const ready = computers.filter((computer) => computer.reach.state === "open").length
   const last = sessions.find((session) => session.endedAt > 0)
-  const facts = [
+  return facts([
     <span key="count" className="numeric">
       {plural(computers.length, "computer")}
     </span>,
@@ -269,7 +278,7 @@ function Facts({ overview }: { overview: RdOverview }) {
       <Link
         key="tailnet"
         href="/network/vpn"
-        className="inline-flex items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground hover:underline"
+        className="inline-flex items-center gap-1.5 rounded-sm align-top focus-ring transition-colors hover:text-foreground hover:underline"
       >
         <ProductGlyph id="tailscale" className="size-3.5" />
         over Tailscale
@@ -289,10 +298,7 @@ function Facts({ overview }: { overview: RdOverview }) {
         last session {relativeTime(isoOf(last.endedAt))}
       </span>
     ),
-  ]
-    .filter(Boolean)
-    .flatMap((fact, index) => (index === 0 ? [fact] : [<FactDot key={`dot-${index}`} />, fact]))
-  return <>{facts}</>
+  ])
 }
 
 function Verdict({ overview }: { overview: RdOverview }) {

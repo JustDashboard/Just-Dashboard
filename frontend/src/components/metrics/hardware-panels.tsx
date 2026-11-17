@@ -636,6 +636,3 @@ export function ScaledPair({
     />
   )
 }
-
-/** @deprecated use `ScaledPair`, or `SplitBar` from `rank-list` with `total`; the name was rank-list's. */
-export const SplitBar = ScaledPair

@@ -75,11 +75,11 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `PurposeCard`, `ExperimentalMark` | [Choice card](choice-card.md) | `components/onboarding/purpose-card.tsx` | One purpose the server is for, as a card pressed to take or leave it, and what an experimental one says on it. | keep |
 | `OpenCard` | [Card row](card-row.md) | `components/open-card.tsx` | The press-anywhere card shell under a repository, a drawing or a fleet card. | keep |
 | `DetailPage`, `StepArrows`, `useSiblingSteps`, `siblingSteps`, `stepCommands`, `useDetailTab`, `Step` (type) | [Rail](rail.md) | `components/detail-page.tsx` | An item's detail page: the rail, the way back, the steps to its neighbours (Alt+↑ and Alt+↓, the arrows on a phone) and the `?tab=` views. | keep |
-| `BackLink` | [Page header](page-header.md) | `components/detail-page.tsx` | `BackLink` from `components/page.tsx`, re-exported where a copy was drawn. | deprecated (use `BackLink` from `components/page.tsx`) |
+| `BackLink` | [Page header](page-header.md) | `components/detail-page.tsx` | The re-export where a copy was drawn; `BackLink` from `components/page.tsx` is the one. | retired (0.9.0) |
 | `Rail`, `RailColumn`, `RailRow`, `RailName`, `RailLine`, `RailFigures`, `RailFigure`, `RailAction`, `RailNote`, `RailGhosts` | [Rail](rail.md) | `components/rail.tsx` | The sibling list beside a detail page from `xl`: its column, a row and its two lines and readings, the caption line's action, the line in place of rows, and the rows it waits on. | keep |
 | `railRowClass`, `railInk` | [Rail](rail.md) | `components/rail.tsx` | A rail row's one 48px class, and a reading's tone as its ink, for a row drawn by hand. | keep |
-| `DockerRail`, `DockerRailRow` | [Rail](rail.md) | `components/docker/item-rail.tsx` | The Docker item pages' rail, drawn through `Rail` now. | deprecated (use `Rail`, `RailRow`) |
-| `DetailShell`, `DetailRail`, `RailRow`, `steps` | [Rail](rail.md) | `components/network/traffic/detail-shell.tsx` | The network detail pages' frame, rail, row and steps, drawn through the shared ones now. | deprecated (use `DetailPage`, `Rail`, `RailRow`, `useSiblingSteps`) |
+| `DockerRail`, `DockerRailRow` | [Rail](rail.md) | `components/docker/item-rail.tsx` | The Docker item pages' rail; `Rail` and `RailRow` draw it. | retired (0.9.0) |
+| `DetailShell`, `DetailRail`, `RailRow`, `steps` | [Rail](rail.md) | `components/network/traffic/detail-shell.tsx` | The network detail pages' old frame; `DetailPage`, `Rail`, `RailRow` and `useSiblingSteps` do its job. | retired (0.9.0) |
 | `FilterChip`, `ChipStrip`, `ChipCount` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/chips.tsx` | A filter chip, the run chips sit in (scrolling on a phone), and a count beside a label. | keep |
 | `Segments`, `SegmentOption` (type), `SegmentsSize` (type) | [Tabs, chips, segments](tabs-chips-segments.md) | `components/segments.tsx` | A closed choice of two to five short words as one segmented control. | keep |
 | `tabClasses` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The underlined tab's look; the query editor's tabs keep it for a control of their own. | deprecated (use `ViewTabs`) |
@@ -119,7 +119,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `Tag` | [Status and tags](status-tag.md) | `components/tag.tsx` | Small caps for a fixed property of a row; no chip, no border; `hue` colours it. | keep |
 | `Tone` | [Status and tags](status-tag.md) | `components/tone.ts` | The four signal tones (default, success, warning, danger) a coloured state is said in. | keep |
 | `DotTone` (type), `Verdict` (type), `OutcomeTone` (type), `toneFor`, `DOT_TONE`, `DOT_COLOR`, `TEXT_TONE`, `ICON_TONE`, `TONE_DOT`, `VERDICT_TONE`, `OUTCOME_FILL` | [Status and tags](status-tag.md) | `components/tone.ts` | Every state's dot, word, icon and outcome colour, and the maps between tones and states, in one file; `status-dot.tsx` and `outcome-strip.tsx` re-export theirs. | keep |
-| `StateTile` | [Status and tags](status-tag.md) | `components/network/diagnostic-marks.tsx` | A network tile with its state in the corner, moved to `product-logo.tsx`. | deprecated (use `StateMark`) |
+| `StateTile` | [Status and tags](status-tag.md) | `components/network/diagnostic-marks.tsx` | A network tile with its state in the corner; `StateMark` in `product-logo.tsx` is it. | retired (0.9.0) |
 | `DOT` | [Status and tags](status-tag.md) | `components/network/egress/marks.tsx` | The egress marks' tone-to-dot map. | deprecated (use `TONE_DOT`) |
 | `Ago` | [Values](values.md) | `components/ago.tsx` | A relative time that keeps itself current ("checked 4 min ago"). | keep |
 | `ClientMark`, `BadgedLogo` | [Values](values.md) | `components/client-mark.tsx` | What signed a session in as the product it is, and a tile with a second product in its corner. | keep |
@@ -129,7 +129,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `DOCKERFILE_HUE`, `dockerfileLines`, `tokenDockerfile`, `DockerfilePieces` | [Values](values.md) | `components/code.tsx` | A Dockerfile as lines of pieces (the one tokeniser, which keeps a continued line in its instruction), and a line's pieces drawn in the code palette. | keep |
 | `Digest` | [Values](values.md) | `components/code.tsx` | An image or content digest as twelve hex characters in mono, the whole of it on hover and a press away. | keep |
 | `Cidr`, `AddressLine` | [Values](values.md) | `components/address.tsx` | An address in CIDR form with its prefix in the port hue (a host route's /32 left off), and a device's addresses on one line, global ones first. | keep |
-| `Cidr`, `AddressLine` | [Values](values.md) | `components/network/address.tsx` | The same two, re-exported from where they were written. | deprecated (use `components/address.tsx`) |
+| `Cidr`, `AddressLine` | [Values](values.md) | `components/network/address.tsx` | The re-export from where they were written; they live in `components/address.tsx`. | retired (0.9.0) |
 | `DiffView`, `DIFF_WASH` | [Values](values.md) | `components/diff-view.tsx` | A unified diff in git's colours, the one renderer for the git page, the terminal's companion and the editor's review; `lineNumbers` adds the two gutters, `selection` ticks lines to stage. `DIFF_WASH` is the faint wash behind an added or a removed line, for anything else that shows a change as a diff does (a release's changed settings). | keep |
 | `FileIcon`, `FolderIcon`, `fileKind`, `folderKind`, `kindOfEntry`, `FileKind` (type) | [Values](values.md) | `components/file-icon.tsx` | A file or a folder drawn as what it is: the icon for one entry, a folder alone, and the kind a name reads as (the whole name, then the extension, then the extension under a backup suffix). | keep |
 | `FolderColourProvider`, `useFolderColour`, `FolderSwatch`, `folderColourOf`, `defaultFolderColour`, `validFolderColour`, `FOLDER_COLOURS`, `FOLDER_COLOUR_NAMES`, `FolderColour` (type) | [Values](values.md) | `components/file-icon.tsx` | A folder's label colour: the labels a tree is drawn under, the colour one folder takes (its own, else the global choice, its kind, then blue), and the swatch a colour menu offers. | keep |
@@ -210,11 +210,11 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `DangerRow`, `DangerRows` | [Forms and settings](forms.md) | `components/settings/danger-row.tsx` | One destructive verb in a settings page's danger zone, with its sentence, and the one edge around them all. | keep |
 | `PendingStrip`, `PendingItem` (type) | [Forms and settings](forms.md) | `components/settings/pending-strip.tsx` | What is saved and not in force yet, at the head of a settings column. | keep |
 | `appliesLine`, `namesLine`, `pendingLine`, `SettingApplies` (type) | [Forms and settings](forms.md) | `components/settings/save-bar-words.ts` | The save bar's second line in words. | keep |
-| `SaveBarProvider`, `useSaveBarEntry`, `saveShortcut`, `SettingApplies` (type) | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | The page's one floating save bar, the forms on it, and its shortcut (re-exported from `floating-bar.tsx`). | keep |
-| `useSaveBarHost` | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | Where the save bar is drawn. | deprecated (use `useFloatingBarHost`) |
+| `SaveBarProvider`, `useSaveBarEntry`, `SettingApplies` (type) | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | The page's one floating save bar and the forms on it; its shortcut's words are `saveShortcut` in `floating-bar.tsx`. | keep |
+| `useSaveBarHost` | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | Where the save bar is drawn; `useFloatingBarHost` is. | retired (0.9.0) |
 | `SettingsPage` | [Forms and settings](forms.md) | `components/settings/settings-page.tsx` | A deployment's settings page: its configuration read, what is saved but not live, and its forms, in the one settings column. | keep |
 | `SettingForm`, `SettingSection`, `settingStatus` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | One form of a settings page, one section, and where a section stands against what is live. | keep |
-| `SettingsPage` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | The settings page's old home, re-exported. | deprecated (use `SettingsPage` from `settings/settings-page.tsx`) |
+| `SettingsPage` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | The settings page's old home, re-exported; `SettingsPage` from `settings/settings-page.tsx` is the one. | retired (0.9.0) |
 | `SettingsColumn` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | The one centred settings column for a page that is not a deployment's. | keep |
 | `SwitchRows`, `SwitchRow` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | A switch as a full-width row, in a run ruled apart. | keep |
 | `EditedTag` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | A section holding a change not applied yet, in git's modified colour. | keep |
@@ -239,7 +239,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `utilisationTone` | [Readings](readings.md) | `components/meter.tsx` | The thresholds that colour a utilisation figure and its bar alike. | keep |
 | `Meter` | [Readings](readings.md) | `components/meter.tsx` | A bar for a figure between 0 and 100, with a threshold mark; `color`, `size="cell"` and `decorative`. | keep |
 | `RankList`, `RankSkeleton`, `RankItem` (type), `SplitPart` (type) | [Readings](readings.md) | `components/rank-list.tsx` | A ranked list read in columns (a name, a figure, its share), and its rows waiting. | keep |
-| `percent` | [Readings](readings.md) | `components/rank-list.tsx` | A share in whole percent; `RankList` says its shares with `sharePercent`. | deprecated (use `sharePercent` from `lib/format.ts`) |
+| `percent` | [Readings](readings.md) | `components/rank-list.tsx` | A share in whole percent; `sharePercent` from `lib/format.ts` is it. | retired (0.9.0) |
 | `SplitBar`, `splitWidths` | [Readings](readings.md) | `components/rank-list.tsx` | One whole as one strip of coloured parts, with an optional legend that names or narrows. | keep |
 | `ReadingLine`, `ReadingLines`, `readingLineHeight` | [Readings](readings.md) | `components/reading-line.tsx` | One reading as a sentence on a mark with its last hour at the end; two columns from `xl`; and the one height every state of a line keeps, for a line drawn by hand. | keep |
 | `ReadingMark` | [Readings](readings.md) | `components/reading-line.tsx` | A reading's glyph on its measure's hue, or on the tone of what is wrong with it. | keep |
@@ -265,7 +265,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `WireNode`, `WireMark`, `WireHost`, `WirePlaceholder`, `WireLink`, `WireLabel` | [Wiring pictures](wiring.md) | `components/wire/wire.tsx` | A picture's parts: a node, a filled mark, this server, a mark not there yet, a linked mark, a caption on a line. | keep |
 | `CANVAS_MOVE`, `zoomKey`, `zoomAbout`, `useCanvasPinch` | [Workbench](workbench.md) | `components/canvas-move.ts` | How a canvas moves, Excalidraw's way: trackpad pans, pinch and keys zoom about a point. | keep |
 | `CanvasZoom`, `CanvasZoomWord`, `FLOAT` | [Workbench](workbench.md) | `components/canvas-zoom.tsx` | A canvas's zoom out, percent, in, Fit and Tidy, a word beside Fit, and the ground of a control floating on a canvas. | keep |
-| `ZoomBar`, `FLOAT` | [Workbench](workbench.md) | `components/database/diagram/chrome.tsx` | The ER diagram's own zoom bar and its ground. | deprecated (use `CanvasZoom`, `FLOAT` from `canvas-zoom.tsx`) |
+| `ZoomBar`, `FLOAT` | [Workbench](workbench.md) | `components/database/diagram/chrome.tsx` | The ER diagram's own zoom bar and its ground; `CanvasZoom` and `FLOAT` from `canvas-zoom.tsx` draw them. | retired (0.9.0) |
 | `CodeEditor`, `EditorCommands` (type) | [Workbench](workbench.md) | `components/code-editor.tsx` | Monaco, wired to the dashboard's palette and keys. | keep |
 | `PaneBar`, `PaneBack`, `paneShown`, `PaneBreak` (type), `PaneStop` (type) | [Workbench](workbench.md) | `components/phone-panes.tsx` | One pane at a time on a phone: the bar at the foot (a bar in the bottom stack), the way back, and which pane shows. | keep |
 | `ResizeHandle` | [Workbench](workbench.md) | `components/resize-handle.tsx` | The grab strip between a side column and the work, by pointer or by keys. | keep |
@@ -368,7 +368,7 @@ where they are used); a page in that area takes them instead of drawing a copy.
 | `RoleTag`, `ROLE_NAME` | [Workspace](../features/workspace.md) | `components/account/role.tsx` | An account's role as a tag, and the name each role is said by. | keep |
 | `LensReadingLine` | [Readings](readings.md) | `components/logs/lens-reading-line.tsx` | A log lens's reading as a `ReadingLine` whose press narrows the log to the lines it counts. | keep |
 | `lineDiff`, `diffCounts`, `unifiedBody` | [Values](values.md) | `lib/line-diff.ts` | Two texts as a line diff, its added and removed counts, and a unified body `DiffView` can draw. | keep |
-| `useAddressTab`, `ViewTabs`, `StepArrows`, `View` (type) | [Rail](rail.md) | `components/system-users/detail-shell.tsx` | System users' first copy of the detail frame's parts. | deprecated (use `useDetailTab`, `ViewTabList`, `StepArrows` from `detail-page.tsx`, `TabView`) |
+| `useAddressTab`, `ViewTabs`, `StepArrows`, `View` (type) | [Rail](rail.md) | `components/system-users/detail-shell.tsx` | System users' first copy of the detail frame's parts; `useDetailTab`, `ViewTabList`, `StepArrows` from `detail-page.tsx` and `TabView` are them. | retired (0.9.0) |
 
 ## Families
 

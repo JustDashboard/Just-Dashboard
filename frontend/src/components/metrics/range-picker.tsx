@@ -7,6 +7,7 @@ import {
   MagnifyingGlassMinus,
 } from "@/components/icons"
 import { timestamp } from "@/lib/format"
+import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import {
   RANGES,
@@ -16,9 +17,8 @@ import {
   type RangeSpec,
 } from "@/lib/metrics/range"
 import type { WindowControls } from "@/hooks/use-metrics-window"
-import { Button } from "@/components/ui/button"
+import { IconAction } from "@/components/icon-action"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /**
  * Chooses the window the charts cover.
@@ -49,54 +49,42 @@ export function RangePicker({
           <span className="numeric rounded-md border border-rule-primary bg-wash-primary px-2 py-1 text-hint font-medium text-primary">
             {windowLabel(win)} window
           </span>
-          <Button
+          <IconAction
             size="icon-sm"
             variant="ghost"
-            aria-label="Earlier"
+            label="Earlier"
             className="text-muted-foreground"
             onClick={() => pan(-0.5)}
           >
             <ChevronLeft className="size-4" />
-          </Button>
-          <Button
+          </IconAction>
+          <IconAction
             size="icon-sm"
             variant="ghost"
-            aria-label="Later"
+            label="Later"
             className="text-muted-foreground"
             onClick={() => pan(0.5)}
           >
             <ChevronRight className="size-4" />
-          </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Zoom out"
-                className="text-muted-foreground"
-                onClick={zoomOut}
-              >
-                <MagnifyingGlassMinus className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Back to the previous window</TooltipContent>
-          </Tooltip>
+          </IconAction>
+          <IconAction
+            label="Zoom out"
+            tooltip="Back to the previous window"
+            className="text-muted-foreground"
+            onClick={zoomOut}
+          >
+            <MagnifyingGlassMinus className="size-4" />
+          </IconAction>
           {/* The span is already in the address bar (see `useMetricsWindow`);
               this is the affordance that says so. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Copy link to this window"
-                className="text-muted-foreground"
-                onClick={() => copyWindowLink()}
-              >
-                <LinkIcon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Copy a link to exactly this span</TooltipContent>
-          </Tooltip>
+          <IconAction
+            label="Copy link to this window"
+            tooltip="Copy a link to exactly this span"
+            className="text-muted-foreground"
+            onClick={() => copyWindowLink()}
+          >
+            <LinkIcon className="size-4" />
+          </IconAction>
         </>
       )}
       <ToggleGroup
@@ -122,12 +110,8 @@ export function RangePicker({
 }
 
 async function copyWindowLink() {
-  try {
-    await navigator.clipboard.writeText(globalThis.location.href)
+  if (await copyText(globalThis.location.href))
     notify.success("Link copied", { description: "It opens the charts on this exact span." })
-  } catch (err) {
-    notify.error("Could not copy the link", err)
-  }
 }
 
 /** The exact span on screen, for the caption under a zoomed set of charts. */

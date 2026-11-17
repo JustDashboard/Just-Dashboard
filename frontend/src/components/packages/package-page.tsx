@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
+import { Fact, FactLine } from "@/components/fact-line"
 import { ArrowCircleUp, ArrowRight, Download, Puzzle, Trash } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
@@ -13,7 +14,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { DetailPage, useDetailTab, useSiblingSteps, type Step } from "@/components/detail-page"
-import { FactDot, IdentityHeader } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { ProductLogo, platformProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -492,43 +493,46 @@ function PackageMain({
               // under the figures. Beside the rail at 1280 the line has under
               // 500px, which is why how it came to be installed is in About.
               <span className="flex w-full min-w-0 flex-col gap-y-1 sm:flex-row sm:items-center sm:gap-x-3">
-                <span className="flex min-w-0 items-center gap-x-3 whitespace-nowrap sm:shrink-0">
-                  {detail ? (
-                    <span
-                      className="min-w-0 truncate font-mono text-foreground"
-                      title={detail.installedVersion ?? detail.version}
-                    >
-                      {detail.installedVersion ?? detail.version ?? "—"}
+                <FactLine nowrap className="sm:shrink-0">
+                  {/* A flex row, as the line it was: the version in mono and the
+                      update's arrow stand on one centre line. */}
+                  <Fact className="flex items-center">
+                    <span className="flex max-w-full min-w-0 items-center gap-x-3">
+                      {detail ? (
+                        <span
+                          className="min-w-0 truncate font-mono text-foreground"
+                          title={detail.installedVersion ?? detail.version}
+                        >
+                          {detail.installedVersion ?? detail.version ?? "—"}
+                        </span>
+                      ) : (
+                        <span>&nbsp;</span>
+                      )}
+                      {upgradable && (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-1.5"
+                          title={`${security ? "A security update" : "An update"} to ${upgradable} is waiting`}
+                        >
+                          <ArrowRight aria-hidden className="size-3" />
+                          <span className="sr-only">update to</span>
+                          <VersionTo
+                            from={detail?.installedVersion}
+                            to={upgradable}
+                            security={security}
+                          />
+                        </span>
+                      )}
                     </span>
-                  ) : (
-                    <span>&nbsp;</span>
-                  )}
-                  {upgradable && (
-                    <span
-                      className="inline-flex shrink-0 items-center gap-1.5"
-                      title={`${security ? "A security update" : "An update"} to ${upgradable} is waiting`}
-                    >
-                      <ArrowRight aria-hidden className="size-3" />
-                      <span className="sr-only">update to</span>
-                      <VersionTo
-                        from={detail?.installedVersion}
-                        to={upgradable}
-                        security={security}
-                      />
-                    </span>
-                  )}
+                  </Fact>
                   {detail?.size ? (
-                    <>
-                      <FactDot />
-                      <span className="numeric shrink-0">
-                        {bytes(detail.size)} {detail.installed ? "on disk" : "once installed"}
-                      </span>
-                    </>
+                    <Fact className="numeric shrink-0">
+                      {bytes(detail.size)} {detail.installed ? "on disk" : "once installed"}
+                    </Fact>
                   ) : null}
-                </span>
+                </FactLine>
                 {detail?.summary && (
-                  <span className="max-sm:hidden">
-                    <FactDot />
+                  <span aria-hidden className="text-faint max-sm:hidden">
+                    ·
                   </span>
                 )}
                 <span className="min-w-0 truncate" title={detail?.summary}>

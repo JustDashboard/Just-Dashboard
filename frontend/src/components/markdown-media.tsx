@@ -60,6 +60,8 @@ export function MediaImage({ src, alt, fill }: Media & { fill?: boolean }) {
       onClick={() => open?.(src)}
       className={cn(
         "inline-block max-w-full cursor-zoom-in overflow-hidden rounded-lg border border-hairline align-top focus-ring",
+        // The image's own frame is its placeholder until it loads.
+        // eslint-disable-next-line design-system/tokens
         !loaded && "min-h-32 w-full animate-pulse bg-surface-sunken",
         fill && "w-full",
       )}

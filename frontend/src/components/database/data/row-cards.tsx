@@ -1,9 +1,9 @@
 "use client"
 
-import { Fragment, useMemo } from "react"
+import { useMemo } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import { ChevronRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { FactDot } from "@/components/identity-header"
 import { PaneFooter, PaneHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -179,15 +179,12 @@ function RowCard({
       )}
     >
       <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "flex min-w-0 items-center gap-1.5",
-            row.state === "deleted" && "line-through decoration-git-deleted",
-          )}
+        <FactLine
+          nowrap
+          className={cn(row.state === "deleted" && "line-through decoration-git-deleted")}
         >
           {title.map((cell, index) => (
-            <Fragment key={cell.column.key}>
-              {index > 0 && <FactDot />}
+            <Fact key={cell.column.key}>
               <CardValue
                 cell={cell}
                 className={cn(
@@ -195,27 +192,28 @@ function RowCard({
                   index === 0 ? "shrink-0 font-medium" : "min-w-0",
                 )}
               />
-            </Fragment>
+            </Fact>
           ))}
-        </span>
+        </FactLine>
         {refusal ? (
           <span role="alert" className="block truncate text-hint text-destructive" title={refusal}>
             {refusal}
           </span>
         ) : (
-          <span className="flex min-w-0 items-center gap-1.5 overflow-hidden font-mono text-hint whitespace-nowrap text-muted-foreground">
+          <FactLine nowrap className="font-mono text-hint text-muted-foreground">
             {rest.length === 0 ? (
               <span>{number !== null ? `row ${grouped(number)}` : "not yet stored"}</span>
             ) : (
-              rest.map((cell, index) => (
-                <Fragment key={cell.column.key}>
-                  {index > 0 && <FactDot />}
-                  <span className="shrink-0">{cell.column.name}</span>
-                  <CardValue cell={cell} className="shrink-0 text-hint" />
-                </Fragment>
+              rest.map((cell) => (
+                <Fact key={cell.column.key}>
+                  <span className="inline-flex max-w-full min-w-0 items-center gap-x-1.5 align-top">
+                    <span className="shrink-0">{cell.column.name}</span>
+                    <CardValue cell={cell} className="shrink-0 text-hint" />
+                  </span>
+                </Fact>
               ))
             )}
-          </span>
+          </FactLine>
         )}
       </span>
       {row.state !== "clean" && (

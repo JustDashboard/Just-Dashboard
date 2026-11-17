@@ -6,7 +6,6 @@ import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Keycaps } from "@/components/keycaps"
 import { ARROW_CAPS } from "@/components/map/canvas-keys"
-import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
 import { Field } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
@@ -52,29 +51,6 @@ export function Saved({
     >
       {text}
     </span>
-  )
-}
-
-/**
- * A control floating on the canvas, drawn as the server map draws its own.
- *
- * @deprecated import `FLOAT` from `@/components/canvas-zoom`.
- */
-export { FLOAT }
-
-/**
- * The bar at the foot of the canvas, as the server's map has it.
- *
- * @deprecated use `CanvasZoom` from `@/components/canvas-zoom`.
- */
-export function ZoomBar({ onFit, onTidy }: { onFit: () => void; onTidy?: () => void }) {
-  return (
-    <CanvasZoom
-      slot="diagram-zoom"
-      onFit={onFit}
-      onTidy={onTidy}
-      tidyLabel="Tidy: lay every table out again"
-    />
   )
 }
 

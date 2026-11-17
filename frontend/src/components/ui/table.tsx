@@ -80,7 +80,7 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
 /** Header classes for a table inside a capped-height container: the column
  *  names stay put while the rows scroll under them. The background comes from
  *  the rule in globals.css, so a sticky header and a static one match. */
-const stickyTableHeader = "sticky top-0 z-10 [&_tr]:border-b"
+const stickyTableHeader = "sticky top-0 z-raised [&_tr]:border-b"
 
 function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
   return (

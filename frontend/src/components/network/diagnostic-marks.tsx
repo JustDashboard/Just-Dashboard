@@ -20,7 +20,6 @@ import {
   type Icon,
 } from "@/components/icons"
 import { linkGlyph, linkProduct } from "@/components/network/marks"
-import { StateMark } from "@/components/product-logo"
 import { TEXT_TONE, type DotTone } from "@/components/tone"
 import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -63,12 +62,6 @@ export function toolGlyph(run: { kind?: string; request: { tool: string } }): Ic
   if (run.kind === "investigation") return Inspect
   return TOOL_GLYPHS[run.request.tool] ?? Wrench
 }
-
-/**
- * @deprecated use `StateMark` from `components/product-logo`, which this was
- * moved to so every tile with a state in its corner takes one size ladder.
- */
-export const StateTile = StateMark
 
 /**
  * What a capture is drawn as: the interface it listens on, as the Network

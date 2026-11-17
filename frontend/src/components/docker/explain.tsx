@@ -1,7 +1,6 @@
 "use client"
 
 import { Explain } from "@/components/explain"
-import { FormNote } from "@/components/form"
 
 /**
  * The teaching layer.
@@ -61,9 +60,6 @@ export function Definition({
     </Explain>
   )
 }
-
-/** @deprecated use `FormNote` from `@/components/form`; the class was its copy. */
-export const Hint = FormNote
 
 /**
  * The definitions, in one place.

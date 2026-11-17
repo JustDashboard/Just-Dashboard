@@ -68,7 +68,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ShortcutsDialog } from "@/components/terminal/shortcuts-dialog"
 import { Modal } from "@/components/modal"
 import { Pane } from "@/components/panel"
-import { copyText, copyTextQuietly } from "@/lib/clipboard"
+import { copyText, copyTextQuietly, pasteText } from "@/lib/clipboard"
 
 export type XtermActions = {
   copy: () => void
@@ -2148,7 +2148,7 @@ async function requestPaste(
 ) {
   if (socket.readyState !== WebSocket.OPEN) return
   try {
-    const text = await navigator.clipboard.readText()
+    const text = await pasteText()
     if (!text) return
     if (terminalSettings().confirmMultilinePaste && isMultilinePaste(text)) {
       ask({ raw: text, text: readablePaste(text) })

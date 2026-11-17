@@ -20,8 +20,9 @@ import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Toolbar } from "@/components/toolbar"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact, facts } from "@/components/fact-line"
 import { ProductLogo } from "@/components/product-logo"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -31,7 +32,6 @@ import { JobConsole, useJobConsole } from "@/components/job-console"
 import { VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import { TLSTools } from "@/components/proxy/request-tester"
 import { TLSReportPage } from "@/components/proxy/tls-report"
@@ -227,7 +227,7 @@ function TLSFleetPage() {
   return (
     <Page rise>
       <PageContext eyebrow="Proxy" title="TLS report" />
-      <HostIdentity
+      <IdentityHeader
         // The view strip under the line draws the rule: the line's own under
         // it made two.
         className="border-b-0 pb-0"
@@ -238,14 +238,17 @@ function TLSFleetPage() {
           </span>
         }
         facts={
+          // Every state is a fact, so each stands in the line the facts land in.
           loading ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Spinner className="size-3" /> reading the stored reports
-            </span>
+            <Fact>
+              <span className="inline-flex items-center gap-1.5 align-top">
+                <Spinner className="size-3" /> reading the stored reports
+              </span>
+            </Fact>
           ) : fleet.error && !fleet.data ? (
-            <span className="text-destructive">the stored reports could not be read</span>
+            <Fact className="text-destructive">the stored reports could not be read</Fact>
           ) : (
-            <FleetFacts targets={all} />
+            fleetFactLine(all)
           )
         }
         // Laid out as a project's header: the worst of what the reports
@@ -342,13 +345,7 @@ function TLSFleetPage() {
         <PanelBody className="pt-3">
           {loading ? (
             // The list's own rows, held while the reports are read.
-            <ChoiceList aria-busy>
-              {[0, 1, 2].map((index) => (
-                <li key={index}>
-                  <Skeleton className="h-14 w-full rounded-xl" />
-                </li>
-              ))}
-            </ChoiceList>
+            <ChoiceListSkeleton rows={3} />
           ) : fleet.error && !fleet.data ? (
             <ErrorState error={fleet.error} onRetry={fleet.refresh} />
           ) : all.length === 0 ? (
@@ -413,21 +410,17 @@ function FleetState({ targets }: { targets: FleetTarget[] }) {
   return <Status tone="running" label="Nothing below A" />
 }
 
-function FleetFacts({ targets }: { targets: FleetTarget[] }) {
-  const facts = fleetFacts(targets)
+/** The fleet's facts as `Fact`s, called for rather than rendered, so the header's line sees each one. */
+function fleetFactLine(targets: FleetTarget[]) {
+  const fleet = fleetFacts(targets)
   // The state beside the name says the worst of the reports. How many are
   // below A, expiring or unreachable are the chips over the list, where a
   // press narrows to them; they were counted here as well.
-  const parts: React.ReactNode[] = [
-    <span key="total">{plural(facts.total, "name")}</span>,
-    <span key="scanned">
-      {facts.scanned === facts.total ? "all scanned" : `${facts.scanned} scanned`}
-    </span>,
-  ]
-  if (facts.newest) parts.push(<span key="newest">last report {relativeTime(facts.newest)}</span>)
-  return parts.flatMap((part, index) =>
-    index === 0 ? [part] : [<FactDot key={`dot-${index}`} />, part],
-  )
+  return facts([
+    plural(fleet.total, "name"),
+    fleet.scanned === fleet.total ? "all scanned" : `${fleet.scanned} scanned`,
+    fleet.newest && `last report ${relativeTime(fleet.newest)}`,
+  ])
 }
 
 /**

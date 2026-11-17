@@ -8,6 +8,8 @@ import { ProductGlyph } from "@/components/product-logo"
 import { WireMark, WireNode } from "@/components/wire/wire"
 import { ChipStrip, FilterChip } from "@/components/chips"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { Bone } from "@/components/bone"
+import { Skeleton } from "@/components/ui/skeleton"
 import { addressFamily, decisionRules, decisionTables, type RouteFamily } from "./decision-reading"
 import { parseTarget, replyHighlight, ruleSelectors, ruleThen } from "./route-reading"
 import { AnswerLine, TargetField, type RouteLookup, type RouteQuestion } from "./route-lookup"
@@ -305,24 +307,11 @@ export function DecisionMapWaiting({ rules, tables }: { rules: number; tables: n
 
 /** A grey bar inside a line of text: a span, so it may stand in a paragraph. */
 function Bar({ className }: { className?: string }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn("inline-block animate-pulse rounded-sm bg-muted align-middle", className)}
-    />
-  )
+  return <Bone className={className} />
 }
 
 function Ghost({ size }: { size: "sm" | "md" }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn(
-        "block animate-pulse rounded-xl bg-muted",
-        size === "sm" ? "size-9" : "size-11",
-      )}
-    />
-  )
+  return <Skeleton className={cn("block rounded-xl", size === "sm" ? "size-9" : "size-11")} />
 }
 
 // A node's three lines, each a bar on the line the words will take.

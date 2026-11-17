@@ -23,6 +23,6 @@ test("a mark takes a column of its own; without one there is none", () => {
     h(DangerRow, { title: "Delete", mark: h("span", { "data-mark": "" }) }),
   )
   const bare = renderToStaticMarkup(h(DangerRow, { title: "Delete" }))
-  expect(marked).toContain("grid-cols-[auto_minmax(0,1fr)]")
-  expect(bare).not.toContain("grid-cols-[auto_minmax(0,1fr)]")
+  expect(marked).toContain("grid-cols-start-main")
+  expect(bare).not.toContain("grid-cols-start-main")
 })

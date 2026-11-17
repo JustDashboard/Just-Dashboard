@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import {
   ClockRewind,
   Play,
@@ -12,7 +13,7 @@ import {
   Trash,
 } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { ErrorState, NeedsAdmin, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -288,7 +289,7 @@ export function SocketHistoryPage() {
   return (
     <Page rise>
       <PageContext eyebrow="Network" title="Socket history" />
-      <HostIdentity
+      <IdentityHeader
         fallback={ClockRewind}
         title="Socket history"
         label="About socket history"
@@ -310,7 +311,7 @@ export function SocketHistoryPage() {
               <span>the recorder could not be read</span>
             ) : (
               <>
-                <span>
+                <Fact>
                   {data.recordingSince ? (
                     <>
                       recording since <UTCTime value={data.recordingSince} form="short" />
@@ -318,17 +319,13 @@ export function SocketHistoryPage() {
                   ) : (
                     "recording has not been enabled"
                   )}
-                </span>
-                <FactDot />
-                <span className="numeric">every {data.settings.intervalSeconds}s</span>
-                <FactDot />
-                <span className="numeric">keeps {plural(data.settings.retentionDays, "day")}</span>
-                <FactDot />
-                <span className="numeric">{plural(data.retainedRows, "row")} kept</span>
-                <FactDot />
-                <span>
+                </Fact>
+                <Fact className="numeric">every {data.settings.intervalSeconds}s</Fact>
+                <Fact className="numeric">keeps {plural(data.settings.retentionDays, "day")}</Fact>
+                <Fact className="numeric">{plural(data.retainedRows, "row")} kept</Fact>
+                <Fact>
                   read <UTCTime value={data.checkedAt} form="clock" /> UTC
-                </span>
+                </Fact>
               </>
             )}
           </IdentityFacts>

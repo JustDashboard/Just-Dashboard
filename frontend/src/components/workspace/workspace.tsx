@@ -11,8 +11,8 @@ import {
 } from "react"
 import { usePathname } from "next/navigation"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
+import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
-import { Button } from "@/components/ui/button"
 import { KEYCAP, ShortcutList, SingleKeySwitch } from "@/components/keycaps"
 import { useSingleKeyShortcuts } from "@/hooks/use-shortcuts"
 import { isTypingTarget } from "@/lib/keys"
@@ -46,7 +46,7 @@ export function WorkspaceHelp(
 ) {
   const help = useContext(Help)
   return help ? (
-    <Button
+    <IconAction
       // A single cap is as square as an icon's button: 23px wide as text, its
       // 24px press box reached past the end of the identity line it closes
       // and gave the page half a pixel to scroll. In a caller's plain wrapper
@@ -54,15 +54,14 @@ export function WorkspaceHelp(
       // 1.5px low on the line; `align-middle` centres the box instead.
       size="icon-xs"
       variant="ghost"
-      aria-label={`${help.name} shortcuts`}
-      title={`${help.name} shortcuts`}
+      label={`${help.name} shortcuts`}
       onClick={help.show}
-      className="align-middle pointer-coarse:hidden"
+      className="align-middle pointer-coarse:hidden [&_svg:not([class*='size-'])]:size-3"
     >
       <kbd aria-hidden className={KEYCAP}>
         ?
       </kbd>
-    </Button>
+    </IconAction>
   ) : null
 }
 

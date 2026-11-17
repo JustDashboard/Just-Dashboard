@@ -191,6 +191,8 @@ export function Modal({
         <div
           ref={body}
           tabIndex={initialFocus === "body" ? -1 : undefined}
+          // Focus is only ever sent here (tabIndex -1), which a ring would box whole.
+          // eslint-disable-next-line design-system/tokens
           className={cn("min-h-0 flex-1 overflow-y-auto outline-none", bodyClassName ?? "p-4")}
         >
           {children}

@@ -5,7 +5,7 @@ import Link from "next/link"
 import { ArrowLeftRight, ChartActivity, Clock, ShieldOff, Users, Warning } from "@/components/icons"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { bytes, plural } from "@/lib/format"
+import { bytes, plural, sharePercent } from "@/lib/format"
 import type {
   StreamEntry,
   StreamResult,
@@ -23,7 +23,7 @@ import {
   withClientRule,
 } from "@/lib/streams"
 import type { PollState } from "@/hooks/use-poll"
-import { RankList, RankSkeleton, SplitBar, percent, type RankItem } from "@/components/rank-list"
+import { RankList, RankSkeleton, SplitBar, type RankItem } from "@/components/rank-list"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChartPanel } from "@/components/chart-panel"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
@@ -158,7 +158,7 @@ export function StreamReadings({
   const series = (key: "sessions" | "denied" | "failed") =>
     traffic?.buckets.map((b) => b[key]) ?? []
   const share = (n: number) =>
-    traffic && traffic.sessions > 0 ? `${percent(n / traffic.sessions)} of sessions` : words
+    traffic && traffic.sessions > 0 ? `${sharePercent(n / traffic.sessions)} of sessions` : words
   const length = traffic && traffic.sessions > 0 ? lengthWords(traffic.duration) : undefined
   return (
     // Two columns from `xl`, as every other page's readings, so each line's

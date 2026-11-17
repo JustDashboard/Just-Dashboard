@@ -10,7 +10,7 @@ import {
   sameSpec,
   withMovedLines,
 } from "./site-draft"
-import { diffRows } from "../files/diff-rows"
+import { diffRows } from "@/lib/diff-rows"
 
 const spec = (overrides) => ({
   name: "app.example.com",

@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { useConfirm } from "@/components/confirm-dialog"
 import { SaveBarProvider } from "@/components/settings/save-bar"
 import { SettingForm, SettingSection } from "@/components/settings/setting-card"
 import { FormSections } from "@/components/form"
 import { Trash } from "@/components/icons"
 import { Detail, DetailList } from "@/components/detail-list"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -162,7 +163,7 @@ export function RedisAccount({ name }: { name: string }) {
   const mark = <AccountMark name={name} />
   const title = <AccountName name={name} className="text-title" />
   const identity = user ? (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${user.name}`}
       slot="account-identity"
       className="animate-rise border-b-0 pb-0"
@@ -182,11 +183,10 @@ export function RedisAccount({ name }: { name: string }) {
       }
       facts={
         <AccountFacts>
-          <span className="min-w-0 truncate font-mono text-foreground" title={aclSummary(user)}>
+          <Fact className="min-w-0 truncate font-mono text-foreground" title={aclSummary(user)}>
             {aclSummary(user)}
-          </span>
-          <FactDot />
-          <span className="numeric shrink-0">{passwordWords(user)}</span>
+          </Fact>
+          <Fact className="numeric shrink-0">{passwordWords(user)}</Fact>
         </AccountFacts>
       }
       menu={
@@ -194,7 +194,7 @@ export function RedisAccount({ name }: { name: string }) {
       }
     />
   ) : (
-    <HostIdentity
+    <IdentityHeader
       slot="account-identity"
       className="border-b-0 pb-0"
       logo={mark}

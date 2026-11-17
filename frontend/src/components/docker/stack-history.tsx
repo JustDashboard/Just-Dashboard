@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import type { StackDeployment } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { IconAction } from "@/components/icon-action"
 import { WIDE_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { useNow } from "@/hooks/use-now"
 import { AuthorMark } from "@/components/git/marks"
@@ -32,6 +33,7 @@ import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { ComposeDiff, ServiceLabel } from "@/components/docker/stack-diff"
 import { DiffCount } from "@/components/diff-count"
+import { StatusDot } from "@/components/status-dot"
 import {
   configHues,
   diffCounts,
@@ -309,9 +311,10 @@ function Rail({
                       <span className="text-faint">·</span>
                       <span className="truncate font-mono">{record.gitCommit.slice(0, 7)}</span>
                       {record.gitDirty && (
-                        <span
+                        <StatusDot
+                          tone="warning"
                           title="The checkout had uncommitted changes"
-                          className="size-1.5 shrink-0 rounded-full bg-warning"
+                          label="uncommitted changes"
                         />
                       )}
                     </>
@@ -533,14 +536,15 @@ function Detail({
                           )}
                           {short.hash}
                         </span>
-                        <Button
+                        <IconAction
                           size="icon-xs"
                           variant="ghost"
-                          aria-label={`Copy ${service} digest`}
+                          className="[&_svg:not([class*='size-'])]:size-3"
+                          label={`Copy ${service} digest`}
                           onClick={() => void copyText(digest, "Digest copied")}
                         >
                           <Copy />
-                        </Button>
+                        </IconAction>
                       </li>
                     )
                   })}

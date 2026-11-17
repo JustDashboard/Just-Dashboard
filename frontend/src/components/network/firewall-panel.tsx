@@ -484,7 +484,7 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
         />
       )}
 
-      <Panel id="rules" className="scroll-mt-6">
+      <Panel framed id="rules" className="scroll-mt-6">
         <PanelHeader
           title={
             <span className="inline-flex items-center gap-1.5">

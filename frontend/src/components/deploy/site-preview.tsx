@@ -8,6 +8,7 @@ import type { DeploymentDomainRoute, DeploymentSummary } from "@/lib/types"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ProjectMark, projectFavicon } from "@/components/project-mark"
 import { WorkloadMark, deploymentURL, hostOf } from "@/components/deploy/vocabulary"
+import { Sweep } from "@/components/loading"
 
 /**
  * The widths the site is laid out at before it is shrunk into the tile: a
@@ -112,10 +113,12 @@ export function SitePreview({
       )}
       {url && (
         <div className="relative flex h-9 items-center gap-3 border-b border-hairline bg-surface-header px-3">
+          {/* A browser window's three buttons, drawn: not a state. */}
           <span aria-hidden="true" className="flex shrink-0 gap-1">
-            <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-            <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-            <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+            {[0, 1, 2].map((dot) => (
+              // eslint-disable-next-line retired-apis/retired
+              <span key={dot} className="size-1.5 rounded-full bg-muted-foreground/40" />
+            ))}
           </span>
           <span className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
             <ProjectMark deployment={deployment} product={product} size="xs" />
@@ -154,14 +157,7 @@ export function SitePreview({
         className="relative w-full overflow-hidden bg-background"
         style={{ aspectRatio: `${ASPECT}` }}
       >
-        {live && !loaded && (
-          <div
-            aria-hidden="true"
-            className="absolute inset-x-0 top-0 z-raised h-0.5 overflow-hidden bg-meter-track"
-          >
-            <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep bg-brand" />
-          </div>
-        )}
+        {live && !loaded && <Sweep className="absolute inset-x-0 top-0 z-raised h-0.5" />}
         {live ? (
           scale > 0 && (
             // The rise is on a wrapper: its keyframe ends on `transform: none`,

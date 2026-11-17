@@ -166,15 +166,23 @@ export function DuplicateProjectDialog({
         </Field>
 
         <FieldRow>
-          <CopyList title="Copied" items={COPIED} copied />
-          <CopyList title="Starts fresh" items={FRESH} />
+          <CopiedParts title="Copied" items={COPIED} copied />
+          <CopiedParts title="Starts fresh" items={FRESH} />
         </FieldRow>
       </form>
     </Modal>
   )
 }
 
-function CopyList({ title, items, copied }: { title: string; items: string[]; copied?: boolean }) {
+function CopiedParts({
+  title,
+  items,
+  copied,
+}: {
+  title: string
+  items: string[]
+  copied?: boolean
+}) {
   const Mark = copied ? Check : Minus
   return (
     <section aria-label={title} className="space-y-2">

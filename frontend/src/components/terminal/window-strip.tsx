@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils"
 import type { TerminalActivity, TerminalWindow as Window } from "@/lib/types"
 import { windowActivity, windowLabel, windowProgram } from "@/lib/terminal/activity"
 import { TERMINAL_WINDOW_DRAG } from "@/lib/terminal/layout"
-import { Button } from "@/components/ui/button"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
 
@@ -255,10 +254,10 @@ function WindowTab({
       </button>
       {/* Close sits on the tab itself rather than in a menu, and appears under
           the pointer, as a browser's does; the active tab keeps it. */}
-      <Button
+      <IconAction
         size="icon-sm"
         variant="ghost"
-        aria-label={`Close window ${label}`}
+        label={`Close window ${label}`}
         // Its press box is its own box: the tab is inside a scroller, and a
         // press box reaching past the tab made the strip scroll up and down
         // under a thumb and sideways past its last tab. Under a finger the
@@ -270,7 +269,7 @@ function WindowTab({
         onClick={onClose}
       >
         <Cross className="size-3" />
-      </Button>
+      </IconAction>
     </div>
   )
 }

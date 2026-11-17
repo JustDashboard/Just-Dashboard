@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { ArrowRight, Key, Location, Play, Plus, RefreshClockwise } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { ErrorState, NeedsAdmin, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -186,7 +187,7 @@ export function ExternalChecksPage() {
   return (
     <Page rise>
       <PageContext eyebrow="Network" title="External checks" />
-      <HostIdentity
+      <IdentityHeader
         fallback={Location}
         title="External checks"
         label="About external checks"
@@ -206,22 +207,13 @@ export function ExternalChecksPage() {
               <span>needs an administrator</span>
             ) : (
               <>
-                <span className="numeric">{plural(counts.enrolled, "source")} enrolled</span>
-                {counts.pending > 0 && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">{counts.pending} in flight</span>
-                  </>
-                )}
-                <FactDot />
-                <span className="numeric">{plural(counts.retained, "measurement")} kept</span>
+                <Fact className="numeric">{plural(counts.enrolled, "source")} enrolled</Fact>
+                {counts.pending > 0 && <Fact className="numeric">{counts.pending} in flight</Fact>}
+                <Fact className="numeric">{plural(counts.retained, "measurement")} kept</Fact>
                 {counts.unknown > 0 && (
-                  <>
-                    <FactDot />
-                    <span className="numeric" title="Expired or cancelled checks stay unknown">
-                      {counts.unknown} without evidence
-                    </span>
-                  </>
+                  <Fact className="numeric" title="Expired or cancelled checks stay unknown">
+                    {counts.unknown} without evidence
+                  </Fact>
                 )}
               </>
             )}

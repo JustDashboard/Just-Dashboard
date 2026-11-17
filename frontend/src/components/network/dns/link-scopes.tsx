@@ -10,7 +10,7 @@ import type { DNSView } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, OptionRow } from "@/components/form"
 import { Detail, DetailList } from "@/components/detail-list"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { NetworkDevice } from "@/components/icons"
 import { ProductLogo, interfaceProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
@@ -20,7 +20,6 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { NetworkReadWarning } from "@/components/network/read-warning"
-import { GhostRows } from "@/components/network/dns/ghost"
 import { encryptionOf } from "@/components/network/dns/resolvers"
 import {
   splitDNSDraft,
@@ -58,7 +57,7 @@ export function LinkScopes({
 }) {
   const { can } = useAuth()
   const [open, setOpen] = useState<string>()
-  if (!view) return rows > 0 ? <GhostRows rows={rows} /> : null
+  if (!view) return rows > 0 ? <ChoiceListSkeleton rows={rows} /> : null
   const links = view.resolved.links
   return (
     <>

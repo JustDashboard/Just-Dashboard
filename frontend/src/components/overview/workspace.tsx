@@ -10,11 +10,10 @@ import type { PollState } from "@/hooks/use-poll"
 import { sessionLabel, sessionProgram } from "@/lib/terminal/activity"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
 import { DrawingPreview } from "@/components/boards/drawing-preview"
-import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct } from "@/components/product-logo"
 import { EmptyState } from "@/components/state"
-import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { OpenCard } from "@/components/open-card"
@@ -62,7 +61,7 @@ export function ShellsPanel({ read }: { read: PollState<TerminalList> }) {
       />
       <PanelBody flush>
         {loading && !data ? (
-          <LoadingRows rows={3} className="[&>*]:h-14 [&>*]:rounded-xl" />
+          <ChoiceListSkeleton rows={3} />
         ) : !data ? (
           <p className="py-2 text-body text-muted-foreground">
             {error ? "The sessions could not be read." : "Nothing to show."}

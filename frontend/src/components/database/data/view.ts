@@ -215,9 +215,3 @@ export function pageFacts(
     lastPage: total === null ? null : Math.max(1, Math.ceil(total / Math.max(page.limit, 1))),
   }
 }
-
-/**
- * @deprecated use `grouped` and `compactCount` from lib/format, which now hold
- * the count style every page writes (en-US grouping, a lower-case k).
- */
-export { compactCount, grouped } from "@/lib/format"

@@ -152,7 +152,7 @@ export function ShortcutsDialog({
                       className={cn(
                         "min-w-28 shrink-0 rounded-md border px-2 py-0.5 text-center font-mono text-hint transition-colors",
                         isRecording
-                          ? "animate-pulse border-primary bg-plot-primary text-primary"
+                          ? "border-primary bg-plot-primary text-primary"
                           : chord
                             ? "border-hairline bg-control text-foreground hover:border-rule-primary"
                             : "border-dashed border-hairline text-muted-foreground hover:border-rule-primary",

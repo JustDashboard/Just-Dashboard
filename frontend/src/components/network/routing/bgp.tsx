@@ -175,7 +175,7 @@ function peerTone(state: string) {
 function Neighbours({ peers }: { peers: Peer[] }) {
   const wide = useMediaQuery("(min-width: 1100px)")
   return (
-    <Panel aria-label="BGP neighbours">
+    <Panel framed aria-label="BGP neighbours">
       <PanelHeader title="Neighbours" count={peers.length} />
       <PanelBody flush>
         {wide ? (
@@ -251,7 +251,7 @@ function Neighbours({ peers }: { peers: Peer[] }) {
 
 function Adjacencies({ neighbours }: { neighbours: NonNullable<BGPView["ospf"]> }) {
   return (
-    <Panel aria-label="OSPF neighbours">
+    <Panel framed aria-label="OSPF neighbours">
       <PanelHeader title="OSPF neighbours" count={neighbours.length} />
       <PanelBody flush>
         <ul aria-label="OSPF neighbours" className="divide-y divide-hairline">
@@ -350,7 +350,7 @@ function RouteBrowser({ families }: { families: string[] }) {
     }
   }
   return (
-    <Panel aria-label="BGP routes">
+    <Panel framed aria-label="BGP routes">
       <PanelHeader title="Routes" count={view && !view.error ? view.routes.length : undefined} />
       <PanelToolbar>
         <form

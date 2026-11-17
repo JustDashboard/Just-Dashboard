@@ -22,7 +22,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { Fact } from "@/components/fact-line"
-import { HostIdentity, platformName } from "@/components/identity-header"
+import { IdentityHeader, platformName } from "@/components/identity-header"
 import { InstallPanel } from "@/components/packages/install-panel"
 import { upgradeDescription } from "@/components/packages/upgrade-description"
 import { PackageLogView } from "@/components/packages/log-view"
@@ -295,7 +295,7 @@ function PackagesPage({ asked }: { asked: string | null }) {
           after it, the index's age and the read as facts, and the index's
           verb as the one command, because it changes what the line says. */}
         {data?.available && (
-          <HostIdentity
+          <IdentityHeader
             className="animate-rise"
             mark={platformProduct(host?.platform) ?? managerProduct(data.manager)}
             fallback={Puzzle}
@@ -375,7 +375,7 @@ function PackagesPage({ asked }: { asked: string | null }) {
           is drawn on, so nothing under it moves when it lands. A host with no
           package manager is the one answer that has nothing to draw here. */}
         {reading && (
-          <HostIdentity
+          <IdentityHeader
             mark={platformProduct(host?.platform)}
             fallback={Puzzle}
             title={<TextShimmer>Reading the package database…</TextShimmer>}

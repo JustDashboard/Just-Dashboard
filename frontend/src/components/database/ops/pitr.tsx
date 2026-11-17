@@ -340,13 +340,7 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
     )
 
   return (
-    <Panel
-      plain
-      aria-label="Point-in-time recovery"
-      ref={frame}
-      data-pitr=""
-      className="outline-none"
-    >
+    <Panel plain aria-label="Point-in-time recovery" ref={frame} data-pitr="">
       <PanelHeader
         title={
           <span className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
@@ -684,10 +678,7 @@ function ArchiveReading({
           </Table>
         </PanelBody>
       ) : (
-        <ul
-          aria-label="Base backups"
-          className="divide-y divide-hairline border-y border-hairline"
-        >
+        <ul aria-label="Base backups" className="divide-y divide-hairline border-y border-hairline">
           {backups.map((one) => (
             <li key={one.name} className="py-2 text-xs">
               <p className="truncate font-mono">{one.name}</p>

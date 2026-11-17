@@ -14,7 +14,7 @@ import {
 describe("a status family's colour", () => {
   test("every family that answered takes its own hue", () => {
     expect(CLASS_TEXT["2xx"]).toBe("text-success")
-    expect(CLASS_TEXT["3xx"]).toBe("text-[var(--tag-cyan)]")
+    expect(CLASS_TEXT["3xx"]).toBe("text-tag-cyan")
     expect(CLASS_TEXT["4xx"]).toBe("text-warning")
     expect(CLASS_TEXT["5xx"]).toBe("text-destructive")
   })

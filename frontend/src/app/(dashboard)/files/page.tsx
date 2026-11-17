@@ -1591,6 +1591,8 @@ export default function FilesPage() {
                 current={path ?? "/"}
                 onPick={navigate}
               >
+                {/* PlacesMenu hands this to its DropdownMenuTrigger asChild. */}
+                {/* eslint-disable-next-line retired-apis/retired */}
                 <Button size="icon-sm" variant="outline" aria-label="Places">
                   <Location className="size-3.5" />
                 </Button>

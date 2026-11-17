@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   Archive,
   ArrowRight,
@@ -44,7 +45,6 @@ import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { FormSections, InfoTip } from "@/components/form"
 import { SettingSection } from "@/components/settings/setting-card"
-import { FactDot, HostFact } from "@/components/identity-header"
 import { Button } from "@/components/ui/button"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { ModelPicker } from "@/components/assistant/model-picker"
@@ -445,22 +445,16 @@ function AssistantSettingsView({
             title="Model"
             state={
               view.configured ? (
-                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                  <HostFact product={assistantProduct(view)}>
-                    {provider?.label ?? view.provider}
-                  </HostFact>
-                  <FactDot />
-                  <span className="font-mono text-foreground">{view.model}</span>
+                <FactLine>
+                  <Fact product={assistantProduct(view)}>{provider?.label ?? view.provider}</Fact>
+                  <Fact className="font-mono text-foreground">{view.model}</Fact>
                   {view.updatedBy && (
-                    <>
-                      <FactDot />
-                      <span>
-                        set up by {view.updatedBy}
-                        {view.updatedAt && ` on ${calendarDate(view.updatedAt)}`}
-                      </span>
-                    </>
+                    <Fact>
+                      set up by {view.updatedBy}
+                      {view.updatedAt && ` on ${calendarDate(view.updatedAt)}`}
+                    </Fact>
                   )}
-                </span>
+                </FactLine>
               ) : (
                 <span className="font-medium text-foreground">The assistant is off</span>
               )

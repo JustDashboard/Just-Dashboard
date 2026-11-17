@@ -7,7 +7,6 @@ import type { TerminalActivity, TerminalWorkspace } from "@/lib/types"
 import { sessionLabel, sessionProgram, sessionWorking } from "@/lib/terminal/activity"
 import { SearchInput } from "@/components/search-input"
 import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
-import { Button } from "@/components/ui/button"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { Pane, PaneHeader } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
@@ -143,15 +142,15 @@ function SessionRow({
         </span>
         <ActivityMark working={working} disconnected={dropped} className="pr-1" />
       </button>
-      <Button
+      <IconAction
         size="icon-sm"
         variant="ghost"
-        aria-label={`Close ${label}`}
+        label={`Close ${label}`}
         className={cn("size-6 shrink-0 text-muted-foreground hover:text-destructive", rowReveal())}
         onClick={() => onClose(session)}
       >
         <Cross className="size-3.5" />
-      </Button>
+      </IconAction>
     </div>
   )
 }

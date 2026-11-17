@@ -2,6 +2,7 @@
 
 import type { DeploymentStep, DeploymentStepState } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { Sweep } from "@/components/loading"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   RELEASE_GROUPS,
@@ -155,12 +156,9 @@ export function Segment({ state }: { state: ReleaseNodeState }) {
     )
   if (state === "running")
     return (
-      <span className={cn(track, "bg-plot-brand")}>
-        {/* `animate-sweep` (§11) is this bar: a third of the track crossing
-            it in 1.4 seconds, on the compositor. Reduced motion fills it. */}
-        <span className="absolute inset-0 bg-brand/60 motion-safe:hidden" />
-        <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep rounded-full bg-brand motion-reduce:hidden" />
-      </span>
+      // The sweep (§11): a third of the track crossing it in 1.4 seconds, on
+      // the compositor, and still and full where motion is reduced or paused.
+      <Sweep rounded track={false} className="h-1.5 w-full bg-plot-brand" />
     )
   return (
     <span

@@ -43,7 +43,6 @@ import {
 } from "@/components/database/mongo/use-mongo"
 import { useFocusTrail } from "@/hooks/use-focus-return"
 import {
-  OBJECT_HEAD,
   WORKBENCH_PAGE,
   WorkbenchFrame,
   WorkbenchSide,
@@ -60,12 +59,6 @@ export type Workbench = {
   catalog: Catalog
   /** The open collection as the list knows it; `undefined` while the list is unread. */
   collection: MongoCollection | undefined
-  /**
-   * @deprecated Always nothing: the control that brought the rail back is
-   * the frame head's menu and the phone's bar now. Kept until the pages that
-   * still pass it to `WorkbenchHead` stop; WP-39 deletes it.
-   */
-  leading: null
   confirm: (request: ConfirmRequest) => void
   /** Opens Export for the open collection, with the query on screen when there is one. */
   exportCollection: (draft?: QueryDraft) => void
@@ -252,7 +245,6 @@ export function MongoWorkbench({
     mongo,
     catalog,
     collection: current,
-    leading: null,
     confirm,
     exportCollection: (draft) => setExporting({ collection, draft }),
     exporting: exporter.running !== null,
@@ -382,22 +374,4 @@ export function MongoWorkbench({
       />
     </SectionFrame>
   )
-}
-
-/**
- * The strip at the top of a workbench's own column: the collection's name,
- * then the page's controls. On `ObjectHead`'s ground and height.
- *
- * @deprecated use `ObjectHead` (`workbench/chrome.tsx`), which draws the
- * collection's mark, name and kind itself and takes the views as a tablist.
- * `leading` is ignored: it was always nothing.
- */
-export function WorkbenchHead({
-  children,
-}: {
-  /** @deprecated ignored. */
-  leading?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return <div className={OBJECT_HEAD}>{children}</div>
 }

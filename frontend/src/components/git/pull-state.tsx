@@ -104,7 +104,7 @@ export function ChecksMark({
   const { Glyph } = reading
   const mark = (
     <span className={cn("inline-flex shrink-0 items-center gap-1", reading.className, className)}>
-      <Glyph aria-hidden className={cn("size-3.5", checks === "pending" && "animate-pulse")} />
+      <Glyph aria-hidden className="size-3.5" />
       {label ? (
         <span className="text-hint">{reading.word}</span>
       ) : (

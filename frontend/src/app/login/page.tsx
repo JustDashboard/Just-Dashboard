@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { IconAction } from "@/components/icon-action"
 import { ArrowRight, Check, Copy, Eye, EyeOff, Fingerprint, ShieldCheck } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
@@ -582,15 +583,15 @@ function ForgotPassword({ username }: { username: string }) {
       </p>
       <div className="flex min-w-0 items-center gap-2">
         <code className="min-w-0 flex-1 truncate font-mono text-xs">{command}</code>
-        <Button
+        <IconAction
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label={copied ? "Copied" : "Copy command"}
+          label={copied ? "Copied" : "Copy command"}
           onClick={() => void copy(command)}
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </Button>
+        </IconAction>
       </div>
     </div>
   )

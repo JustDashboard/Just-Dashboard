@@ -21,7 +21,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Fact } from "@/components/fact-line"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { useNow } from "@/hooks/use-now"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { ConfigEditor, type EditorView } from "@/components/proxy/config-editor"
@@ -395,7 +395,7 @@ function ConfigIdentity({
   }
 
   return (
-    <HostIdentity
+    <IdentityHeader
       // The view strip under the line draws the rule: the line's own under it
       // made two.
       className="border-b-0 pb-0"

@@ -42,6 +42,7 @@ import type {
 import { useViewState } from "@/lib/view-state"
 import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
+import { IconAction } from "@/components/icon-action"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { FindingList } from "@/components/finding-list"
 import { Field, OptionList, OptionRow } from "@/components/form"
@@ -1825,14 +1826,15 @@ function IssueDialogBody({
             {command && (
               <Well className="flex items-start gap-2 p-2">
                 <code className="min-w-0 flex-1 break-all">{command}</code>
-                <Button
+                <IconAction
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Copy the command"
+                  className="[&_svg:not([class*='size-'])]:size-3"
+                  label="Copy the command"
                   onClick={() => copy(command)}
                 >
                   {copied ? <Check /> : <Copy />}
-                </Button>
+                </IconAction>
               </Well>
             )}
           </Field>

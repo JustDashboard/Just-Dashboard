@@ -1,8 +1,9 @@
+import { FactLine } from "@/components/fact-line"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
  * The facts of an identity line, held to the room they take once they have
- * landed. `HostIdentity` wraps its facts as they come; on a phone a line of
+ * landed. `IdentityHeader` wraps its facts as they come; on a phone a line of
  * four wraps to two, and a page that drew one grey bar while it loaded grew
  * by a line when the read came back, moving everything under it. Here the
  * facts keep two lines' room on a phone in every state, and the placeholder
@@ -16,9 +17,9 @@ export function IdentityFacts({
   children: React.ReactNode
 }) {
   return (
-    <span className="flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9">
+    <FactLine className="max-sm:min-h-9 [&>span]:gap-y-1">
       {loading ? <LinePlaceholder className="h-3 w-64" /> : children}
-    </span>
+    </FactLine>
   )
 }
 

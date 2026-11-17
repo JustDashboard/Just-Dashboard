@@ -13,7 +13,6 @@ import {
   includeMap,
   MAX_MATCHES,
   readCount,
-  readLabel,
   readState,
   relativePath,
   searchEffective,
@@ -310,13 +309,6 @@ test("a diff's size leaves its file headers out", () => {
     "--- a/app\n+++ b/app\n@@ -1,3 +1,3 @@\n server {\n-    listen 80;\n+    listen 81;\n+    gzip on;\n }"
   expect(diffStat(diff)).toEqual({ added: 2, removed: 1 })
   expect(diffStat("")).toEqual({ added: 0, removed: 0 })
-})
-
-test("how long ago nginx was read, in its largest unit", () => {
-  const at = Date.parse("2026-09-27T10:00:00Z")
-  expect(readLabel(at, at + 3_000)).toBe("read just now")
-  expect(readLabel(at, at + 14_000)).toBe("read 14s ago")
-  expect(readLabel(at, at + 3 * 3_600_000 + 7_000)).toBe("read 3h ago")
 })
 
 describe("includeMap", () => {

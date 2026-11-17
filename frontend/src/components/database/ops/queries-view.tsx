@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   ClockRewind,
   CodeBracket,
@@ -31,7 +32,6 @@ import { useAuth } from "@/hooks/use-auth"
 import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { laneStyle } from "@/components/logs/log-text"
 import { Address } from "@/components/deploy/request-marks"
-import { FactDot } from "@/components/identity-header"
 import { PaneFooter, Well } from "@/components/panel"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -314,41 +314,30 @@ export function DatabaseQueries({
           </div>
           {result.data && rows.length > 0 && (
             <PaneFooter className="gap-x-2 px-3 text-hint text-muted-foreground">
-              <span className="numeric">{countWords(rows.length, noun)}</span>
-              {sqlite ? (
-                <>
-                  <FactDot />
-                  <span>run from this dashboard</span>
-                </>
-              ) : (
-                data && (
-                  <>
-                    <FactDot />
-                    <span>from {sourceWords(data.source)}</span>
-                    {data.threshold && (
-                      <>
-                        <FactDot />
-                        <span className="numeric">slower than {data.threshold}</span>
-                      </>
-                    )}
-                    {data.reason ? (
-                      <>
-                        <FactDot />
-                        <span className="min-w-0 truncate text-warning" title={data.reason}>
+              <FactLine className="flex-1">
+                <Fact className="numeric">{countWords(rows.length, noun)}</Fact>
+                {sqlite ? (
+                  <Fact>run from this dashboard</Fact>
+                ) : (
+                  data && (
+                    <>
+                      <Fact>from {sourceWords(data.source)}</Fact>
+                      {data.threshold && (
+                        <Fact className="numeric">slower than {data.threshold}</Fact>
+                      )}
+                      {data.reason ? (
+                        <Fact className="min-w-0 truncate text-warning" title={data.reason}>
                           {data.reason}
-                        </span>
-                      </>
-                    ) : (
-                      data.truncated && (
-                        <>
-                          <FactDot />
-                          <span>the newest {LIMIT} — narrow the window to see the rest</span>
-                        </>
-                      )
-                    )}
-                  </>
-                )
-              )}
+                        </Fact>
+                      ) : (
+                        data.truncated && (
+                          <Fact>the newest {LIMIT} — narrow the window to see the rest</Fact>
+                        )
+                      )}
+                    </>
+                  )
+                )}
+              </FactLine>
             </PaneFooter>
           )}
         </>
@@ -645,17 +634,14 @@ function QueryRows({
                     <span className="min-w-0 flex-1 truncate">{oneLine(entry.query)}</span>
                     {took}
                   </span>
-                  <span className="flex min-w-0 items-center gap-1.5 font-sans text-hint text-muted-foreground">
-                    <span className="numeric shrink-0">{clock(entry.at)}</span>
+                  <FactLine nowrap className="font-sans text-hint text-muted-foreground">
+                    <Fact className="numeric shrink-0">{clock(entry.at)}</Fact>
                     {(entry.user || entry.db) && (
-                      <>
-                        <FactDot />
-                        <span className="truncate">
-                          {[entry.user, entry.db].filter(Boolean).join(" · ")}
-                        </span>
-                      </>
+                      <Fact className="truncate">
+                        {[entry.user, entry.db].filter(Boolean).join(" · ")}
+                      </Fact>
                     )}
-                  </span>
+                  </FactLine>
                 </span>
               )}
             </button>

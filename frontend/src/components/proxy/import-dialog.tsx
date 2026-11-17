@@ -1,23 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import {
-  Check,
-  CheckCircle,
-  Copy,
-  FileText,
-  Key,
-  RefreshClockwise,
-  Warning,
-} from "@/components/icons"
+import { CheckCircle, FileText, Key, RefreshClockwise, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
 import { calendarDate, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { ImportInspection, ImportResult, ProxyReloadResult } from "@/lib/types"
-import { useCopy } from "@/hooks/use-copy"
+import { CopyAction } from "@/components/copy"
 import { Field } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -464,16 +455,13 @@ function ImportPreview({
   )
 }
 
-function CopyPath({ label, path }: { label: string; path: string }) {
-  const { copy, copied } = useCopy()
+function PathLine({ label, path }: { label: string; path: string }) {
   return (
     <p className="flex min-w-0 items-center gap-1">
       <span className="min-w-0 break-all">
         {label}: <code className="font-mono">{path}</code>
       </span>
-      <IconAction label={`Copy the ${label.toLowerCase()} path`} onClick={() => copy(path)}>
-        {copied ? <Check /> : <Copy />}
-      </IconAction>
+      <CopyAction text={path} label={`Copy ${label.toLowerCase()} path`} />
     </p>
   )
 }
@@ -513,8 +501,8 @@ export function ImportOutcome({ result }: { result: ImportResult }) {
         title={result.replaced ? `${result.name} was replaced` : `${result.name} is on disk`}
       >
         <div className="space-y-1">
-          <CopyPath label="Certificate" path={result.certPath} />
-          <CopyPath label="Key" path={result.keyPath} />
+          <PathLine label="Certificate" path={result.certPath} />
+          <PathLine label="Key" path={result.keyPath} />
           <p>
             Covers {result.certificate.domains.join(", ")} · expires in{" "}
             {result.certificate.daysLeft} days.

@@ -10,7 +10,7 @@ import { notify } from "@/lib/toast"
 import type { WGInterface } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IdentityHeader as HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Fact } from "@/components/fact-line"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -180,7 +180,7 @@ export function TunnelIdentity({
     verbs.push({ key: "remove", label: "Remove", icon: Trash, run: control.remove, danger: true })
 
   return (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${tunnel.name}`}
       slot="tunnel-identity"
       mark="wireguard"
@@ -230,5 +230,5 @@ export function TunnelIdentity({
 export function IdentitySkeleton({ mark }: { mark: string }) {
   // `menu={false}`: the tunnel's verbs land at the line's foot on a phone, and
   // their place is kept while it is read.
-  return <HostIdentity loading mark={mark} state menu={false} />
+  return <IdentityHeader loading mark={mark} state menu={false} />
 }

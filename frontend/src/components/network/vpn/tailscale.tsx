@@ -1,11 +1,12 @@
 "use client"
 
+import { Fact } from "@/components/fact-line"
 import { External, SignIn } from "@/components/icons"
 import { plural, relativeTime } from "@/lib/format"
 import type { HeadscaleView, TailscaleView } from "@/lib/types"
 import { ChoiceList } from "@/components/choice-row"
 import { InfoTip } from "@/components/form"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { MissingThing } from "@/components/missing-thing"
 import { Notice } from "@/components/state"
@@ -109,7 +110,7 @@ export function TailscaleBlock({
 
   return (
     <section aria-label="Tailscale" className="flex min-w-0 flex-col gap-8">
-      <HostIdentity
+      <IdentityHeader
         label="About this server on the tailnet"
         slot="tailnet-identity"
         mark="tailscale"
@@ -121,32 +122,20 @@ export function TailscaleBlock({
         state={<Status tone={state.tone} label={state.label} live={state.live} />}
         facts={
           <>
-            <HostFact>
+            <Fact>
               <span className="block truncate font-mono">
                 {self?.tailscaleIps.join(", ") || "no address"}
               </span>
-            </HostFact>
-            {tailscale.tailnet && (
-              <>
-                <FactDot />
-                <HostFact>{tailscale.tailnet}</HostFact>
-              </>
-            )}
-            <FactDot />
-            <HostFact product={hosted ? "tailscale" : "headscale"}>
+            </Fact>
+            {tailscale.tailnet && <Fact>{tailscale.tailnet}</Fact>}
+            <Fact product={hosted ? "tailscale" : "headscale"}>
               {hosted ? "Tailscale's coordination" : tailscale.controlUrl}
-            </HostFact>
-            {tailscale.version && (
-              <>
-                <FactDot />
-                <HostFact>v{tailscale.version.split("-")[0]}</HostFact>
-              </>
-            )}
+            </Fact>
+            {tailscale.version && <Fact>v{tailscale.version.split("-")[0]}</Fact>}
             {self?.keyExpiry ? (
-              <>
-                <FactDot />
-                <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <HostFact>{keyExpiry(self.keyExpiry).label}</HostFact>
+              <Fact>
+                <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
+                  <span className="truncate">{keyExpiry(self.keyExpiry).label}</span>
                   {keyExpiryTip(tailscale) && (
                     <InfoTip label="Disable key expiry for this machine">
                       Tailscale gives every new machine a key that expires, 180 days later by
@@ -157,7 +146,7 @@ export function TailscaleBlock({
                     </InfoTip>
                   )}
                 </span>
-              </>
+              </Fact>
             ) : null}
           </>
         }
@@ -209,7 +198,7 @@ export function Headscale({ headscale }: { headscale: HeadscaleView }) {
   const online = headscale.nodes.filter((n) => n.online).length
   return (
     <section aria-label="Headscale" className="flex min-w-0 flex-col gap-4">
-      <HostIdentity
+      <IdentityHeader
         slot="headscale-identity"
         mark="headscale"
         title="Headscale"
@@ -225,17 +214,14 @@ export function Headscale({ headscale }: { headscale: HeadscaleView }) {
         }
         facts={
           <>
-            <HostFact>
+            <Fact>
               {headscale.container ? `container ${headscale.container}` : "on this server"} ·{" "}
               {plural(headscale.nodes.length, "node")} · {plural(headscale.users.length, "user")}
-            </HostFact>
+            </Fact>
             {headscale.users.length > 0 && (
-              <>
-                <FactDot />
-                <span aria-label="Headscale users" className="min-w-0 truncate">
-                  {headscale.users.map((u) => `${u.name} (${u.nodes})`).join(" · ")}
-                </span>
-              </>
+              <Fact aria-label="Headscale users" className="min-w-0 truncate">
+                {headscale.users.map((u) => `${u.name} (${u.nodes})`).join(" · ")}
+              </Fact>
             )}
           </>
         }

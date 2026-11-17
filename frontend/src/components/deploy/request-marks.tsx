@@ -7,7 +7,6 @@ import { CLASS_TEXT, CLASS_TONE, methodEmphasis, statusClass, statusWord } from 
 import type { SocketState } from "@/hooks/use-socket"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { tokenClass } from "@/components/logs/log-text"
-import { FactDot } from "@/components/identity-header"
 import { ProductGlyph } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 
@@ -282,8 +281,8 @@ export function LiveDot({ state }: { state: SocketState }) {
  */
 export function WrapDot() {
   return (
-    <span aria-hidden className="max-sm:hidden">
-      <FactDot />
+    <span aria-hidden className="text-faint max-sm:hidden">
+      ·
     </span>
   )
 }

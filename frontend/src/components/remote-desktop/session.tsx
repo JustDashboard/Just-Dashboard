@@ -54,6 +54,7 @@ import {
   type StreamStats,
 } from "@/lib/remote-desktop"
 import { meterTunnel } from "@/lib/remote-desktop-stats"
+import { copyTextQuietly } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { useViewState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
@@ -331,7 +332,7 @@ export function RemoteSession({
         reader.ontext = (chunk) => (text += chunk)
         reader.onend = () => {
           setRemoteClip(text)
-          navigator.clipboard?.writeText(text).catch(() => {})
+          void copyTextQuietly(text)
         }
       }
       session.onfilesystem = () => setDrive(true)
@@ -803,6 +804,9 @@ export function RemoteSession({
                     viewport.current?.focus()
                   }}
                   className={cn(
+                    // The remote screen takes every key while it is in use; a
+                    // ring would frame it for the whole session.
+                    // eslint-disable-next-line design-system/tokens
                     "absolute inset-0 flex items-center justify-center overflow-hidden outline-none",
                     phase.kind !== "connected" && "invisible",
                   )}

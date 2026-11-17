@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import { CloudUpload, FileText, RefreshClockwise, ShieldCheck, ShieldOff } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { renewalReading } from "@/lib/certificates"
@@ -13,7 +14,7 @@ import { cn } from "@/lib/utils"
 import type { Certificate, CertificateCoverage, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { RecentJobs } from "@/components/job-console"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogos } from "@/components/product-logo"
@@ -385,7 +386,7 @@ function CertificatesIdentity() {
   )
 
   return (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise border-b-0 pb-0"
       logo={
         marks.length > 0 ? (
@@ -408,31 +409,24 @@ function CertificatesIdentity() {
             {/* On a phone the line keeps to what fits on one, so it is the
                 height it was while it loaded: which certbot is the Renewal
                 view's, and how soon is the list's first row. */}
-            <span className="contents max-sm:hidden">
-              {certbot.data ? (
-                <HostFact product="lets-encrypt">
-                  certbot
-                  {certbot.data.version
-                    ? ` ${certbot.data.version.replace(/^certbot\s*/i, "")}`
-                    : ""}
-                </HostFact>
-              ) : certbotGone ? (
-                <span>no certbot</span>
-              ) : null}
-              {(certbot.data || certbotGone) && <FactDot />}
-            </span>
-            <span className="numeric">{plural(counts.all, "certificate")}</span>
+            {certbot.data ? (
+              <Fact product="lets-encrypt" className="max-sm:hidden">
+                certbot
+                {certbot.data.version ? ` ${certbot.data.version.replace(/^certbot\s*/i, "")}` : ""}
+              </Fact>
+            ) : certbotGone ? (
+              <Fact className="max-sm:hidden">no certbot</Fact>
+            ) : null}
+            <Fact className="numeric">{plural(counts.all, "certificate")}</Fact>
             {counts.expiring > 0 && counts.refused > 0 && (
-              <>
-                <FactDot />
+              <Fact>
                 <ExpiringWords counts={counts} />
-              </>
+              </Fact>
             )}
+            {/* Its reading in a word, with what the record says behind it
+                on the Renewal view, where the run and its reason are. */}
             {certbot.data && !certbotGone && (
-              <>
-                <FactDot />
-                {/* Its reading in a word, with what the record says behind it
-                    on the Renewal view, where the run and its reason are. */}
+              <Fact>
                 <Link
                   href={certificatesHref("renewal")}
                   title={renewal.hint}
@@ -445,7 +439,7 @@ function CertificatesIdentity() {
                 >
                   renewal {renewal.value.toLowerCase()}
                 </Link>
-              </>
+              </Fact>
             )}
           </>
         )

@@ -550,6 +550,8 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
           ) : dirHasChanges ? (
             <Tooltip>
               <TooltipTrigger asChild>
+                {/* Git's modified hue, named by the tooltip: not a state tone. */}
+                {/* eslint-disable-next-line retired-apis/retired */}
                 <span className="ml-auto size-1.5 shrink-0 rounded-full bg-git-modified" />
               </TooltipTrigger>
               <TooltipContent>Contains changes</TooltipContent>

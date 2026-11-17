@@ -124,7 +124,7 @@ export function ResizeHandle({
       {dragging && (
         // While a drag is live the pointer is over the terminal half the time,
         // and xterm's own cursor would fight this one.
-        <span className="fixed inset-0 z-50 cursor-col-resize" aria-hidden />
+        <span className="fixed inset-0 z-overlay cursor-col-resize" aria-hidden />
       )}
     </div>
   )

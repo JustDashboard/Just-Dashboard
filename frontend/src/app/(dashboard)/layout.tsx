@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { MetricsStream, useHostName } from "@/hooks/use-metrics"
 import { SelfUpdateProvider } from "@/hooks/use-self-update"
+import { IconAction } from "@/components/icon-action"
 import { AppSidebar } from "@/components/shell/app-sidebar"
 import { Logo, LogoStacked } from "@/components/logo"
 import { tabTitle } from "@/components/shell/nav"
@@ -12,7 +13,6 @@ import { useTabName } from "@/components/shell/tab-title"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { CommandPaletteProvider, useCommandPalette } from "@/components/shell/command-palette"
 import { MagnifyingGlass } from "@/components/icons"
-import { Button } from "@/components/ui/button"
 import { Sweep } from "@/components/loading"
 import { NavScopeProvider } from "@/components/shell/nav-scope"
 import { SavedFolderColours } from "@/components/files/folder-colour"
@@ -183,15 +183,15 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 function MobileSearch() {
   const palette = useCommandPalette()
   return (
-    <Button
+    <IconAction
       variant="ghost"
       size="icon"
-      aria-label="Search"
-      className="size-11 text-muted-foreground"
+      label="Search"
+      className="size-11 text-muted-foreground [&_svg:not([class*='size-'])]:size-4"
       onClick={palette.open}
     >
       <MagnifyingGlass className="size-4" />
-    </Button>
+    </IconAction>
   )
 }
 
@@ -232,7 +232,7 @@ function SkipToContent() {
       // Held above the window's edge rather than clipped to a pixel, so it is
       // its real size when the focus brings it down: a finger's height, since
       // a phone with a keyboard attached reaches it too.
-      className="fixed top-2 left-2 z-50 inline-flex h-11 -translate-y-16 items-center rounded-md border bg-popover px-4 text-body font-medium text-popover-foreground shadow-md focus-ring focus:translate-y-0"
+      className="fixed top-2 left-2 z-overlay inline-flex h-11 -translate-y-16 items-center rounded-md border bg-popover px-4 text-body font-medium text-popover-foreground shadow-md focus-ring focus:translate-y-0"
     >
       Skip to content
     </a>

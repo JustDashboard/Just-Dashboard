@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { LineChart, MagnifyingGlassMinus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
-import { bytes, clock, grouped, plural, relativeTime, timestamp } from "@/lib/format"
+import { bytes, clock, grouped, plural, relativeTime, sharePercent, timestamp } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import { latency, type StatusClass } from "@/lib/requests"
 import type { LogBucket, LogFacet, LogFacetValue, LogSearchResult } from "@/lib/types"
@@ -22,7 +22,7 @@ import {
 import { fieldOf, isFilterable } from "@/lib/log/fields"
 import { groupScope, overviewFacets, overviewSplit, patternRegex } from "@/lib/log/insights"
 import { eventLabel, eventMeta, type LensGroup, type LogLens } from "@/lib/log/lenses"
-import { RankList, SplitBar, percent, type RankItem } from "@/components/rank-list"
+import { RankList, SplitBar, type RankItem } from "@/components/rank-list"
 import { FAMILY_HUE, Facet } from "@/components/deploy/traffic-facets"
 import { LatencyReadings } from "@/components/deploy/latency-readings"
 import { FieldMark, FieldValue } from "@/components/logs/field-value"
@@ -837,7 +837,7 @@ function FacetList({
           className="mb-1.5"
           parts={values.map((v) => ({ key: v.value, count: v.count, color: swatches[v.value] }))}
           label={values
-            .map((v) => `${percent(matched > 0 ? v.count / matched : 0)} ${named(v.value)}`)
+            .map((v) => `${sharePercent(matched > 0 ? v.count / matched : 0)} ${named(v.value)}`)
             .join(", ")}
         />
       )}

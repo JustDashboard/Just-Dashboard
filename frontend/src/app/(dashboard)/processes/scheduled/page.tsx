@@ -11,7 +11,7 @@ import { useSessionState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { EmbeddedLog } from "@/components/logs/embedded-log"
 import { Fact } from "@/components/fact-line"
-import { HostIdentity, platformName } from "@/components/identity-header"
+import { IdentityHeader, platformName } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { platformProduct } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
@@ -109,7 +109,7 @@ function Scheduled() {
       <PageContext title="Scheduled" />
 
       {host && (
-        <HostIdentity
+        <IdentityHeader
           mark={platformProduct(host.platform)}
           title={host.hostname}
           state={settled ? <NextUp lanes={lanes} zone={zone} /> : true}
