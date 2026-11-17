@@ -115,28 +115,20 @@ export function KeyLegend() {
       <Keycap cap="/">Find</Keycap>
       <Keycap cap="I">Panel</Keycap>
       <Keycap cap="H">Hide</Keycap>
+      <Keycap cap="↵">Pick</Keycap>
       <Keycap cap="Esc">Let go</Keycap>
-      <Keycap
-        cap={ARROW_CAPS}
-        title="Arrows slide the canvas, or move the chosen tables. Shift takes a longer step."
-      >
-        Move
-      </Keycap>
+      {/* The arrows slide the canvas until Enter picks a table, then move
+          the tables picked, as on the server map; Shift's longer step is
+          said in the legend, which wraps, not only in a title. */}
+      <Keycap cap={ARROW_CAPS}>Slide, move</Keycap>
+      <Keycap cap="Shift">Longer step</Keycap>
     </div>
   )
 }
 
-function Keycap({
-  cap,
-  title,
-  children,
-}: {
-  cap: string
-  title?: string
-  children: React.ReactNode
-}) {
+function Keycap({ cap, children }: { cap: string; children: React.ReactNode }) {
   return (
-    <span title={title} className="flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5">
       <Keycaps keys={cap} />
       {children}
     </span>

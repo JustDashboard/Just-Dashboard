@@ -205,7 +205,9 @@ test.describe("Redirects, access and headers", () => {
 
     // The menu offers the redirect only towards a name that serves the app,
     // and the row then says where it sends visitors: a fact on its line, whose
-    // two choices are a layer over the row rather than a band under it.
+    // two choices are a layer over the row rather than a band under it. The
+    // press that asked for the redirect opens both choices at once, with the
+    // keyboard on the first, rather than choosing a target without a word.
     await page.getByRole("button", { name: "Actions for www.api.example.test" }).click()
     await page.getByRole("menuitem", { name: "Redirect to another domain" }).click()
     const row = page.getByRole("list", { name: "Domains" }).getByRole("listitem").nth(1)
@@ -213,11 +215,10 @@ test.describe("Redirects, access and headers", () => {
       name: "Sends visitors from www.api.example.test to api.example.test",
     })
     await expect(sends).toContainText("· 308")
-    await expect(page.getByText("Sends visitors to")).toHaveCount(0)
-    await sends.click()
     await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toHaveText(
       "api.example.test",
     )
+    await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toBeFocused()
     await expect(page.getByRole("combobox", { name: "Answer" })).toHaveText("Permanent · 308")
     await page.getByRole("combobox", { name: "Answer" }).click()
     await page.getByRole("option", { name: "Temporary · 307" }).click()
@@ -1518,7 +1519,7 @@ test.describe("Automation", () => {
       sheet.getByRole("group", { name: "Provider" }).getByRole("button", { name: /^GitHub/ }),
     ).toHaveAttribute("aria-pressed", "true")
     await sheet.getByRole("textbox", { name: "Name" }).fill("Deploy hook")
-    await sheet.getByRole("textbox", { name: "Repository" }).fill("Wayy01/storefront")
+    await sheet.getByRole("textbox", { name: "Repository" }).fill("operator/storefront")
     await sheet.getByRole("textbox", { name: "Branch" }).fill("main")
     await sheet.getByRole("button", { name: "Add webhook" }).click()
 
@@ -1644,8 +1645,8 @@ test.describe("Automation", () => {
       triggerId: 31,
       providerRef: "43",
       revision: "deadbeefcafefeed0000",
-      repository: "Wayy01/storefront",
-      headRepository: "Wayy01/storefront",
+      repository: "operator/storefront",
+      headRepository: "operator/storefront",
       author: "octocat",
       state: "pending",
       configured: false,
@@ -1757,7 +1758,7 @@ test.describe("Automation", () => {
       name: "Deploy hook",
       kind: "github",
       provider: "github",
-      config: { repository: "Wayy01/storefront", ref: "main" },
+      config: { repository: "operator/storefront", ref: "main" },
       hookId: "provider-hook",
       enabled: true,
       lastStatus: "accepted",
@@ -1840,8 +1841,8 @@ test.describe("Automation", () => {
       triggerId: 31,
       providerRef: "43",
       revision: "deadbeefcafefeed0000",
-      repository: "Wayy01/storefront",
-      headRepository: "Wayy01/storefront",
+      repository: "operator/storefront",
+      headRepository: "operator/storefront",
       author: "octocat",
       state: "pending",
       configured: false,

@@ -16,8 +16,10 @@
    [`standard.md`](standard.md), the operator's decisions and D1 to D14, and to
    [`patterns/accessibility.md`](patterns/accessibility.md), what it owes a keyboard and a screen
    reader.
-5. **Run the spec.** `scripts/test-changed.sh` runs `design-system.spec.ts` for any UI change and
-   the specs that open the page. Then look at it at 1440 and at 390 on a touch device.
+5. **Run the spec.** `scripts/test-changed.sh` runs `design-system.spec.ts` for any UI change, and
+   `axe-gate.spec.ts` for a change to any page it opens, which is every route: it fails on a
+   serious or critical axe result, less the routes listed in its `KNOWN` with their finding. It
+   also runs the specs that open the page. Then look at it at 1440 and at 390 on a touch device.
 
 ## The pages
 

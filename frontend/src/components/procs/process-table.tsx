@@ -7,7 +7,8 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/identity-header"
+import { IdentityHeader, platformName } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
 import { Page, PageContext } from "@/components/page"
 import { RowLink } from "@/components/row-link"
@@ -250,7 +251,7 @@ export function LiveProcesses() {
         {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
         {paused ? "Resume" : "Pause"}
       </Button>
-      <WorkspaceHelp compact />
+      <WorkspaceHelp />
     </div>
   )
 
@@ -286,36 +287,25 @@ export function LiveProcesses() {
 
         {/* Held open before the metrics socket lands, so the band under it does
             not move when it does. */}
-        <HostIdentity
+        <IdentityHeader
           mark={host && platformProduct(host.platform)}
           title={host?.hostname ?? <TextShimmer>Reading this host…</TextShimmer>}
           facts={
             known ? (
               <>
-                <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
-                <FactDot />
-                <HostFact product={cpuProduct(host.cpuModel, host.kernelArch)}>
-                  <span className="numeric">
-                    <LiveFigure value={snapshot.cpu.totalPercent} unit="%" /> CPU
-                  </span>
-                </HostFact>
-                <FactDot />
-                <span className="numeric">
+                <Fact product={platformProduct(host.platform)}>{platformName(host)}</Fact>
+                <Fact product={cpuProduct(host.cpuModel, host.kernelArch)} className="numeric">
+                  <LiveFigure value={snapshot.cpu.totalPercent} unit="%" /> CPU
+                </Fact>
+                <Fact className="numeric">
                   load <LiveFigure value={snapshot.cpu.loadAvg1} decimals={2} />
-                </span>
-                <FactDot />
-                <span className="numeric">
+                </Fact>
+                <Fact className="numeric">
                   <LiveBytes value={snapshot.memory.available} /> available
-                </span>
-                <FactDot />
-                <span className="numeric">up {duration(snapshot.uptimeSeconds)}</span>
+                </Fact>
+                <Fact className="numeric">up {duration(snapshot.uptimeSeconds)}</Fact>
                 {data && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">
-                      {plural(data.available, "process", "processes")}
-                    </span>
-                  </>
+                  <Fact className="numeric">{plural(data.available, "process", "processes")}</Fact>
                 )}
               </>
             ) : (

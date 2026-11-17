@@ -15,7 +15,7 @@ import {
 import { useSessionState } from "@/lib/view-state"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useNow } from "@/hooks/use-now"
-import { FactDot } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct, unitProduct } from "@/components/product-logo"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
@@ -245,35 +245,34 @@ export function ScheduleBand({
           {settled && (listed.length > SHOWN || later + atBoot + off + skipped > 0) && (
             <div className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 border-t border-hairline pt-2 text-hint text-muted-foreground">
               {listed.length > SHOWN && (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    className="-ml-2 text-foreground"
-                    onClick={() => setAll(!all)}
-                  >
-                    {all ? `Show the next ${SHOWN}` : `Show all ${listed.length}`}
-                  </Button>
-                  {later + atBoot + off + skipped > 0 && <FactDot />}
-                </>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="-ml-2 text-foreground"
+                  onClick={() => setAll(!all)}
+                >
+                  {all ? `Show the next ${SHOWN}` : `Show all ${listed.length}`}
+                </Button>
               )}
-              {[
-                later > 0 && { text: `${later} run later in the week or month` },
-                atBoot > 0 && { text: `${atBoot} only at boot` },
-                off > 0 && { text: `${off} switched off` },
-                skipped > 0 && {
-                  text: `${plural(skipped, "cron line")} left to systemd`,
-                  title:
-                    "Package cron lines that step aside on a host running systemd, because a timer does the same work",
-                },
-              ]
-                .filter((item): item is { text: string; title?: string } => Boolean(item))
-                .map((item, i) => (
-                  <span key={i} className="inline-flex items-center gap-2" title={item.title}>
-                    {i > 0 && <FactDot />}
-                    {item.text}
-                  </span>
-                ))}
+              {/* Each fact carries its dot, so a wrapped line ends in none. */}
+              <FactLine className="flex-1">
+                {[
+                  later > 0 && { text: `${later} run later in the week or month` },
+                  atBoot > 0 && { text: `${atBoot} only at boot` },
+                  off > 0 && { text: `${off} switched off` },
+                  skipped > 0 && {
+                    text: `${plural(skipped, "cron line")} left to systemd`,
+                    title:
+                      "Package cron lines that step aside on a host running systemd, because a timer does the same work",
+                  },
+                ]
+                  .filter((item): item is { text: string; title?: string } => Boolean(item))
+                  .map((item, i) => (
+                    <Fact key={i} title={item.title}>
+                      {item.text}
+                    </Fact>
+                  ))}
+              </FactLine>
             </div>
           )}
         </section>
@@ -344,19 +343,17 @@ function DayChart({
   else if (lane) {
     const next = upcoming(lane, now)
     readout = (
-      <>
-        <span className="font-medium text-foreground">{lane.name}</span>
-        <FactDot />
-        <span className="first-letter:uppercase">{lane.when}</span>
+      <FactLine className="min-w-0">
+        <Fact className="font-medium text-foreground">{lane.name}</Fact>
+        <Fact>
+          <span className="inline-block first-letter:uppercase">{lane.when}</span>
+        </Fact>
         {next !== undefined && (
-          <>
-            <FactDot />
-            <span className="numeric">
-              next {longClock(next, zone)}, in {countdown(next - now)}
-            </span>
-          </>
+          <Fact className="numeric">
+            next {longClock(next, zone)}, in {countdown(next - now)}
+          </Fact>
         )}
-      </>
+      </FactLine>
     )
   } else if (column) {
     const from = `${String(column.hour).padStart(2, "0")}:00`

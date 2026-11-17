@@ -76,7 +76,14 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Segments } from "@/components/segments"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
-import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE, hostOf } from "@/components/deploy/vocabulary"
+import {
+  CERTIFICATE_LABEL,
+  CertificateStatus,
+  ROUTE_LABEL,
+  ROUTE_TONE,
+  hostOf,
+} from "@/components/deploy/vocabulary"
+import { INLINE_LINK } from "@/components/inline-link"
 import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { SettingsPage } from "@/components/settings/settings-page"
 import {
@@ -477,6 +484,9 @@ function DomainsForm({
     false,
   )
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
+  // A name just turned into a redirect: its row opens the two choices, where
+  // the first target used to be chosen without a word.
+  const [redirecting, setRedirecting] = useState<string>()
   // The name whose DNS record sheet is open. A preflight finding's Create the
   // record opens the page on it (`?record=`), and the address is then dropped
   // so a reload does not open it again.
@@ -600,7 +610,10 @@ function DomainsForm({
         key: "redirect",
         label: "Redirect to another domain",
         icon: CornerUpRight,
-        run: () => setDomains(withRedirect(domains, domain.hostname)),
+        run: () => {
+          setDomains(withRedirect(domains, domain.hostname))
+          setRedirecting(domain.hostname)
+        },
       })
     if (canAdmin && domain.redirectTo)
       verbs.push({
@@ -712,6 +725,8 @@ function DomainsForm({
                   sharedWith={sharedUser(domains, passwords, domain.hostname)}
                   password={passwords[domain.hostname] ?? ""}
                   onPassword={(password) => typePassword(domain.hostname, password)}
+                  askRedirect={redirecting === domain.hostname}
+                  onRedirectAsked={() => setRedirecting(undefined)}
                 />
               ))}
               {leaving.map((route) => {
@@ -789,7 +804,15 @@ function DomainRow({
   sharedWith,
   password,
   onPassword,
+  askRedirect,
+  onRedirectAsked,
 }: {
+  /**
+   * The row was just made a redirect from its menu: open where it sends
+   * visitors and with which answer, both at once, as the press asked.
+   */
+  askRedirect?: boolean
+  onRedirectAsked?: () => void
   domain: DomainValue
   route?: DeploymentDomainRoute
   pending: boolean
@@ -870,6 +893,13 @@ function DomainRow({
   const [asking, setAsking] = useState(false)
   // Where a redirecting name sends visitors, and with which answer, opened from its fact.
   const [routing, setRouting] = useState(false)
+  // Asked for from the row's menu, the choices are open as soon as the row
+  // redirects, until the reader closes them.
+  const routeOpen = routing || Boolean(askRedirect && domain.redirectTo)
+  const onRouteOpen = (next: boolean) => {
+    setRouting(next)
+    if (askRedirect) onRedirectAsked?.()
+  }
   const signInIncomplete = Boolean(
     protection &&
     (!protection.username ||
@@ -879,39 +909,52 @@ function DomainRow({
   )
 
   // One group, so turning HTTPS back on brings the live certificate's
-  // readings back together rather than popping in one by one. It gives way
-  // without clipping itself: the line cuts what does not fit, and a clip on
-  // the group cut the focus ring of its status on three sides.
+  // readings back together rather than popping in one by one. At the line's
+  // end it gives way with an ellipsis ("9 da…"), never a second line, and the
+  // whole of it is its explanation, opened by hover, focus or a press. The
+  // group's own ring is outside the box it cuts, so the cut never clips it.
+  const daysLeft =
+    certificateRead &&
+    typeof certificateRead.certificateDaysLeft === "number" &&
+    certificateRead.certificateDaysLeft > 0
+      ? certificateRead.certificateDaysLeft
+      : undefined
+  const certificateWords =
+    certificateRead &&
+    [
+      `${
+        certificateRead.certificate === "unavailable"
+          ? "Certificate not observed"
+          : CERTIFICATE_LABEL[certificateRead.certificate]
+      }${daysLeft !== undefined ? `, ${plural(daysLeft, "day")} left` : ""}.`,
+      renewal,
+    ]
+      .filter(Boolean)
+      .join(" ")
   const certificateFacts = certificateRead && (
-    <span
-      className={cn(
-        "flex animate-rise items-center gap-x-3",
-        // Whole when it leads; at the line's end it gives way.
-        certificateUrgent ? "shrink-0" : "min-w-0",
-      )}
-    >
-      {renewal ? (
-        <Explain face="wrap" tip={renewal}>
-          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
-          <span tabIndex={0} className="rounded-sm focus-ring">
-            <CertificateStatus domain={certificateRead} named />
-          </span>
-        </Explain>
-      ) : (
+    <Explain face="wrap" tip={certificateWords} label={`Certificate on ${host}`}>
+      <span
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that what the line cuts can be read without a pointer
+        tabIndex={0}
+        className={cn(
+          "block animate-rise truncate rounded-sm focus-ring",
+          // Whole when it leads; at the line's end it gives way.
+          certificateUrgent ? "shrink-0" : "min-w-0",
+        )}
+      >
         <CertificateStatus domain={certificateRead} named />
-      )}
-      {typeof certificateRead.certificateDaysLeft === "number" &&
-        certificateRead.certificateDaysLeft > 0 && (
+        {daysLeft !== undefined && (
           <span
             className={cn(
-              "numeric",
+              "numeric ml-3",
               certificateRead.certificate === "expiring" ? "text-warning" : "text-muted-foreground",
             )}
           >
-            {plural(certificateRead.certificateDaysLeft, "day")} left
+            {plural(daysLeft, "day")} left
           </span>
         )}
-    </span>
+      </span>
+    </Explain>
   )
 
   return (
@@ -966,7 +1009,8 @@ function DomainRow({
                   type="button"
                   title={`Password · ${protection.username || "no user name"}`}
                   className={cn(
-                    "-m-1 inline-flex shrink-0 animate-rise items-center rounded-sm p-1 focus-ring hover:bg-row-hover",
+                    // 22px drawn, a finger's 44px pressed (hit-area).
+                    "hit-area -m-1 inline-flex shrink-0 animate-rise items-center rounded-sm p-1 focus-ring hover:bg-row-hover",
                     // A user name shared with another password is said in
                     // the popover; the mark carries its ink, or the row
                     // showed nothing of it until the fact was pressed.
@@ -1043,14 +1087,17 @@ function DomainRow({
               unless a certificate that wants attention stands before it; then
               the target gives way, with an ellipsis. */}
           {domain.redirectTo && (
-            <Popover open={routing} onOpenChange={setRouting}>
+            <Popover open={routeOpen} onOpenChange={onRouteOpen}>
               <PopoverTrigger asChild>
                 <button
                   type="button"
                   aria-label={`Sends visitors from ${host} to ${domain.redirectTo}`}
                   title={`Sends visitors to ${domain.redirectTo} · ${domain.redirectCode ?? 308}`}
                   className={cn(
-                    "inline-flex max-w-48 min-w-0 animate-rise items-center gap-1 rounded-sm text-muted-foreground focus-ring hover:underline",
+                    "inline-flex max-w-48 min-w-0 animate-rise items-center gap-1 text-muted-foreground",
+                    // A fact that opens something is a link on the line, so
+                    // it is underlined at rest (INLINE_LINK), not on hover.
+                    INLINE_LINK,
                     !certificateUrgent && "shrink-0",
                   )}
                 >
@@ -1059,7 +1106,21 @@ function DomainRow({
                   <span className="numeric shrink-0">· {domain.redirectCode ?? 308}</span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="start" className="w-80 space-y-4">
+              <PopoverContent
+                align="start"
+                className="w-80 space-y-4"
+                // The menu that asked for them hands the keyboard back to its
+                // trigger once it has gone. That is not the reader leaving
+                // the choices: the focus is taken into the first of them.
+                onFocusOutside={(event) => {
+                  const to = event.detail.originalEvent.target
+                  if (!askRedirect || !(to instanceof Element)) return
+                  if (!to.closest("[aria-haspopup='menu']")) return
+                  event.preventDefault()
+                  onRouteOpen(true)
+                  document.getElementById(`domain-redirect-${index}`)?.focus()
+                }}
+              >
                 <Field
                   label="Sends visitors to"
                   htmlFor={`domain-redirect-${index}`}

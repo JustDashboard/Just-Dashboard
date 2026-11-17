@@ -22,8 +22,8 @@ export type MapBoard = {
     /**
      * The page's own mark and name over the rail, where nothing else on the
      * page names it: the server map is a workbench with no header (PGW-13).
-     * A board sets its own. The databases map's (`database/fleet/map.tsx`)
-     * sets none, though it draws no header either.
+     * A board sets its own; the databases map's (`database/fleet/map.tsx`)
+     * is its nav row's mark and "Map".
      */
     head?: { icon: Icon; title: string }
   }

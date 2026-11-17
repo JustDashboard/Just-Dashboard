@@ -74,7 +74,7 @@ test("edited project intent reaches the server and invalidates the previous revi
 }) => {
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "project")
   await page.getByRole("textbox", { name: "Project name" }).fill("background-jobs")
   await page.getByRole("combobox", { name: "Project type" }).click()
@@ -123,7 +123,7 @@ test("encrypted draft values survive a reload and can be retained or removed wit
 }) => {
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "variables")
   await page.getByText("Paste .env", { exact: true }).click()
   await page
@@ -169,7 +169,7 @@ test("an environment validation failure does not create a partially configured p
     return route.fallback()
   })
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "variables")
   await page.getByText("Paste .env", { exact: true }).click()
   await page
@@ -199,7 +199,7 @@ test("a saved visitor password survives reload as its server hash without repeat
     return route.fallback()
   })
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "runtime")
   await page.getByRole("switch", { name: "Ask visitors for a password" }).click()
   await page.getByRole("textbox", { name: "User name" }).fill("client")
@@ -269,7 +269,7 @@ test("an explicit variable reference replaces a retained value and a pasted conf
 }) => {
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "variables")
   await page.getByText("Paste .env", { exact: true }).click()
   await page
@@ -357,7 +357,7 @@ test("a plan nothing gates is warned about on review, acknowledged, and deployed
     ],
   })
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "review")
   const warnings = page.locator("#deployment-warning-acknowledgements")
   await expect(warnings.getByText("No readiness check gates this release")).toBeVisible()

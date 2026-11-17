@@ -55,6 +55,31 @@ export function uncontrollable(
 }
 
 /**
+ * Whether what runs the process keeps a log of what it prints: a systemd
+ * unit, a PM2 application or a container. Known from the row alone, so a
+ * process's Logs view and its command are there from the first read rather
+ * than arriving once the owner is read (a PM2 app's read lands later).
+ */
+export function ownerKeepsLogs(process: Pick<ProcessRow, "manager" | "managerName">): boolean {
+  if (!process.managerName) return false
+  return (
+    process.manager === "systemd" || process.manager === "pm2" || process.manager === "container"
+  )
+}
+
+/**
+ * Whether a process's identity line has a command: a zombie's Open parent,
+ * or Logs where its owner keeps them. Decided from the row alone, so the
+ * loading line holds a command's place only for a process that will fill it,
+ * and no slot appears or leaves under the reader.
+ */
+export function processHasCommand(
+  process: Pick<ProcessRow, "state" | "manager" | "managerName" | "ppid">,
+): boolean {
+  return (process.state === "zombie" && process.ppid > 0) || ownerKeepsLogs(process)
+}
+
+/**
  * The line under a process's name: its command line, or what an empty one
  * means. A kernel thread has none; a zombie's went with its memory; anything
  * else is a command line this account could not read. All three used to say

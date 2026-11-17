@@ -180,11 +180,11 @@ function dbLoop(): Event[] {
 export const EVENTS: Event[] = [
   ...dbLoop(),
   // A restart pressed in this dashboard: kill, die, stop, start, restart.
-  byDashboard(api.kill(41 * MIN), 812, "wayy", "docker.container.restart"),
+  byDashboard(api.kill(41 * MIN), 812, "operator", "docker.container.restart"),
   api.die(41 * MIN - 400, "143"),
-  byDashboard(api.stop(41 * MIN - 600), 812, "wayy", "docker.container.restart"),
-  byDashboard(api.start(41 * MIN - 1_400), 812, "wayy", "docker.container.restart"),
-  byDashboard(api.restart(41 * MIN - 1_500), 812, "wayy", "docker.container.restart"),
+  byDashboard(api.stop(41 * MIN - 600), 812, "operator", "docker.container.restart"),
+  byDashboard(api.start(41 * MIN - 1_400), 812, "operator", "docker.container.restart"),
+  byDashboard(api.restart(41 * MIN - 1_500), 812, "operator", "docker.container.restart"),
   // The kernel took the worker for memory, and nothing brought it back.
   worker.oom(25 * MIN),
   worker.die(25 * MIN - 300, "137"),
@@ -307,7 +307,7 @@ const user = {
   ],
   user: {
     id: 1,
-    username: "wayy",
+    username: "operator",
     role: "admin",
     totpEnabled: true,
     disabled: false,

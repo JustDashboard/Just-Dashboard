@@ -1554,12 +1554,7 @@ for (const [label, viewport] of [
  * it (FND-07, which the `ink-opacity` lint closes): an entry must still fade,
  * so the list is taken down as the fixes land, and every other page must not.
  */
-const FADED_TODAY: Record<string, string> = {
-  // A disabled account's row is drawn at 60% (`app/(dashboard)/system-users/page.tsx`).
-  "/system-users": "FND-07",
-  // A paused schedule, webhook or preview rule is drawn at 80% (`deploy/settings/automation/`).
-  "/deploy/7/settings/automation": "FND-07",
-}
+const FADED_TODAY: Record<string, string> = {}
 
 test("no page fades its words with opacity", async ({ page }) => {
   test.setTimeout((SURFACES.length + PROJECT_SURFACES.length) * 10_000)
@@ -1622,14 +1617,15 @@ for (const [path, mock] of IDENTITY_SURFACES.slice(2, 8)) {
  * until the loading page has been measured, then let go at once. `hold`
  * narrows them where the page waits on one read before it draws its body.
  *
- * `today` names what a page still does wrong: the test is expected to fail
- * until the fix lands, and then fails until the line is taken out. Three
- * things fail today. A ghost row is 58px and the row it stands for 59px, and
- * on a phone a row with a description is two lines (107 to 109px) where its
- * ghost is one (`ChoiceListSkeleton` in `choice-row.tsx`). On
- * `/deploy/notifications` and `/proxy/ports` a block lands over the list and
+ * `today` names what a page still does wrong, at both widths or at one: the
+ * test is expected to fail until the fix lands, and then fails until the line
+ * is taken out. What fails today: on a phone the drains' and secret stores'
+ * ghosts are one line where their rows carry a second band (`band` on
+ * `ChoiceListSkeleton`), and a `WireFlow` drawn as `marks` waits 15px shorter
+ * than it lands, which moves the list under it; Notifications' picture waits
+ * 4px short at a desk. On `/proxy/ports` the picture lands over the list and
  * moves it down. On `/proxy` the band moves 12px at a desk and 13px on a
- * phone, because what stands over it is another height while it loads.
+ * phone, because the route picture's stand-in is another height.
  */
 type Holding = {
   path: string
@@ -1637,7 +1633,8 @@ type Holding = {
   /** What is read off the page: the first band, or the first row (a ghost standing for one). */
   part: "band" | "row"
   hold?: RegExp
-  today?: string
+  /** What still fails, at both widths or at one. */
+  today?: string | { desk?: string; phone?: string }
 }
 
 const SHELL_READS =
@@ -1646,7 +1643,8 @@ const SHELL_READS =
 /** Docker's reads but the engine's answer, which the section waits on before it draws. */
 const DOCKER_READS = /^\/docker\/(?!ping)/
 
-const GHOST_ROW = "a ghost row is 58px and its row 59px, and one line where a phone's row is two"
+const GHOST_ROW = "on a phone a ghost row is one line where its row is two (ChoiceListSkeleton band)"
+const MARKS = "on a phone the picture's marks wait 15px shorter than they land (WireFlow phone=\"marks\")"
 
 const HOLDING: Holding[] = [
   { path: "/docker", mock: (page) => mockDockerHost(page), part: "band", hold: DOCKER_READS },
@@ -1666,18 +1664,26 @@ const HOLDING: Holding[] = [
     hold: /^\/(proxy\/(vhosts|streams|alerts)|certificates\/|ports)/,
     today: "the band moves 12 to 13px as the proxy's reads land",
   },
-  { path: "/deploy/drains", mock: (page) => mockSections(page), part: "row", today: GHOST_ROW },
+  {
+    path: "/deploy/drains",
+    mock: (page) => mockSections(page),
+    part: "row",
+    today: { phone: `${GHOST_ROW}, and ${MARKS}` },
+  },
   {
     path: "/deploy/secret-stores",
     mock: (page) => mockSections(page),
     part: "row",
-    today: GHOST_ROW,
+    today: { phone: `${GHOST_ROW}, and ${MARKS}` },
   },
   {
     path: "/deploy/notifications",
     mock: (page) => mockProject(page, { showcase: true }),
     part: "row",
-    today: "the list lands 15 to 56px under its ghosts, and " + GHOST_ROW,
+    today: {
+      desk: "the list lands 4px under its ghosts: the picture's waiting rows are a hair short",
+      phone: MARKS,
+    },
   },
   {
     path: "/proxy/ports",
@@ -1723,7 +1729,8 @@ for (const [label, viewport] of [
 ] as const) {
   for (const { path, mock, part, hold, today } of HOLDING) {
     test(`${path}'s first ${part} stands where it lands${label}`, async ({ page }) => {
-      test.fail(Boolean(today), today)
+      const failing = typeof today === "string" ? today : label ? today?.phone : today?.desk
+      test.fail(Boolean(failing), failing)
       await page.setViewportSize(viewport)
       await mock(page)
       const release = await holdReads(page, hold)

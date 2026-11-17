@@ -47,7 +47,8 @@ Every detail page places the same things in the same places.
 | Every other verb, and every destructive one | `⋯` after the command | `IdentityHeader menu` |
 
 `IdentityVerbs({ verbs, name })` turns a thing's `Verb[]` into that `command` and `menu`: the first
-inline verb is the command, everything else goes in a menu named "More actions for `<name>`".
+inline verb is the command (the first verb when none is inline), everything else goes in a menu
+named "More actions for `<name>`".
 The command says the verb's `short` word where it has one ("Logs" for "Open logs") and keeps `label`
 as its accessible name. On a phone the command is its icon alone, and the tip on hover or focus
 says that name, the words a screen reader hears, never the shorter ones. Spread it in:
@@ -94,7 +95,8 @@ whatever its shape, and each recipe's checklist carries them.
 3. **No destructive verb takes the brand face.** Terminate, Kill, Delete, Drop, Remove and the like
    go behind the `⋯`, in the destructive ink. A page whose only verbs are destructive draws no
    command: pass `menu` alone. `IdentityVerbs` holds this for you: a `danger` verb never becomes
-   its `command`, and when every verb is `danger` it returns `menu` alone.
+   its `command`, and nothing is promoted in its place. When the inline verb is destructive, or
+   every verb is, it returns `menu` alone (unit `identity-header.test.js`).
 4. **`?` sits at the end of the identity line**, after the `⋯` (in `menu`, as Packages does, or as
    `aside` on a line with no verbs), hidden on a phone. It gets a row of its own only where it
    shares that row with a back link: on a page with `back`, it is on the back line
@@ -199,9 +201,9 @@ shape while it loads and nothing under the line moves when the words land (D11).
   it fits.
 - `tests/browser/deploy-header.spec.ts`, `deploy-run.spec.ts`, `network-vpn-page.spec.ts`,
   `network-device-page.spec.ts`, `account-ui.spec.ts`: the headers as pages draw them.
-- `tests/browser/design-system.spec.ts` gains the identity line's rules with this release's browser
-  gates: no destructive verb in the brand face, and on a phone a command that is its icon with a
-  name.
+- `tests/browser/design-system.spec.ts` (*… keeps the identity line's rules*, at 1440 and on a touch
+  phone): no destructive verb in the brand face, and on a phone a command that is its icon with a
+  name. `tests/browser/axe-gate.spec.ts` reads every route's header with the rest of the page.
 - WP-39 adds the lint rules that ban `HostIdentity`, `HostFact`, `FactDot` and string eyebrows.
 
 ## Related

@@ -193,8 +193,10 @@ test("each reading is a sentence that carries its last hour", async ({ page }) =
   await expect(page.getByRole("img", { name: "Network over the last hour" })).toBeVisible()
   // The panel of sparklines that repeated the readings is gone.
   await expect(page.getByRole("heading", { name: "Last hour" })).toHaveCount(0)
-  // Every core from the same frame, beside the figure they add up to.
-  await expect(cpu.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
+  // Every core from the same frame, beside the figure they add up to. The figure is the link's
+  // description, outside its name, so the picture is read there rather than as an image of its own.
+  await expect(cpu.locator("[aria-label='4 cores, the busiest at 31%']")).toBeVisible()
+  await expect(cpu).toHaveAccessibleDescription(/4 cores, the busiest at 31%/)
 
   const lines = page.locator("[data-slot=resources] [data-slot=reading-line]")
   // A live figure keeps its unit with a no-break space (`\s` matches it).

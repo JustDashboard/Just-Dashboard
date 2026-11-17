@@ -160,8 +160,9 @@ The rule that fell out of the Docker pass, and which generalises:
   nothing inline: the daily verb on a process table is reading it, and a stop glyph beside four
   hundred rows is four hundred invitations to end something by mis-click, so Terminate and Kill are
   words in the row's menu. On the process's page they stay behind its `⋯` too, in the destructive
-  ink: no destructive verb takes an identity line's command (`IdentityVerbs` passes over a `danger`
-  verb, and a thing whose only verbs are destructive draws no command).
+  ink: no destructive verb takes an identity line's command (`IdentityVerbs` never promotes a `danger`
+  verb, nor a menu verb in its place, and a thing whose only verbs are destructive draws no
+  command).
 
 The deployment section declares its two sets the same way. A project's verbs are declared once in
 `deploy/project-verbs.tsx` and drawn by the project context row — whose one brand command,

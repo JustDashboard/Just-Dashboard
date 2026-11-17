@@ -19,7 +19,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { useCommandPalette } from "@/components/shell/command-palette"
 import { useMotionPaused } from "@/components/shell/motion-pause"
-import { KEYCAP, useLauncherKeys } from "@/components/command-search/keycaps"
+import { KEYCAP, useLauncherKeys } from "@/components/keycaps"
 import { Logo, LogoMark } from "@/components/logo"
 import { UpdateNoticeSlot } from "@/components/update/update-notice-slot"
 import { HubNotice } from "@/components/hub-link/hub-notice"
@@ -261,7 +261,7 @@ export function AppSidebar() {
   const pathname = usePathname()
   const { can } = useAuth()
   const palette = useCommandPalette()
-  const { state } = useSidebar()
+  const { state, setOpenMobile } = useSidebar()
   const collapsed = state === "collapsed"
   const scope = useNavScopeValue()
   const { hidden } = useHiddenSections()
@@ -340,9 +340,14 @@ export function AppSidebar() {
           {hub ? (
             <ServerSwitcher hub={hub} />
           ) : (
+            // A finger's 44px under a coarse pointer, pulled back by its own
+            // margin as the trigger beside it is. Pressed on the Overview the
+            // address does not change, so it puts the drawer away itself, as
+            // a row does.
             <Link
               href="/"
-              className="flex h-8 min-w-0 flex-1 items-center rounded-lg focus-ring group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center"
+              onClick={() => setOpenMobile(false)}
+              className="flex h-8 min-w-0 flex-1 items-center rounded-lg focus-ring group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center pointer-coarse:-my-1.5 pointer-coarse:h-11"
             >
               <Logo className="group-data-[collapsible=icon]:hidden" />
               <LogoMark className="hidden group-data-[collapsible=icon]:block" />

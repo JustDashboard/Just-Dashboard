@@ -95,9 +95,10 @@ test("a wildcard has no address to open, nowhere to redirect, and no tunnel", as
   // Nor is a wildcard offered as somewhere to land.
   await page.getByRole("button", { name: "Actions for www.example.test" }).click()
   await page.getByRole("menuitem", { name: "Redirect to another domain" }).click()
-  await page
-    .getByRole("button", { name: "Sends visitors from www.example.test to api.example.test" })
-    .click()
+  // The press opens the two choices itself.
+  await expect(
+    page.getByRole("button", { name: "Sends visitors from www.example.test to api.example.test" }),
+  ).toBeVisible()
   await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toHaveText(
     "api.example.test",
   )

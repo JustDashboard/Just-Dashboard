@@ -195,7 +195,7 @@ export function IdentityHeader({
           word wide, one fact to a line, where the aside should go under. */}
       <div
         className={cn(
-          "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-y-3 sm:flex sm:flex-[1_1_18rem]",
+          "grid min-w-0 grid-cols-start-main items-center gap-y-3 sm:flex sm:flex-[1_1_18rem]",
           bar ? "gap-x-3" : "gap-x-4",
         )}
       >
@@ -245,8 +245,15 @@ function factRun(facts: React.ReactNode) {
   // The rows a wrap makes are the line's own 4px apart, the gap its bones
   // wait at, so a line whose facts wrap is as tall loaded as loading. On a
   // phone it takes what the line leaves, so a state leading it keeps its place.
+  // A fact that is a link ("3 sites, 2 on TLS") is a 16px line of words: it
+  // takes `hit-area`, a press box of 24px under a mouse and 44px under a
+  // finger, without growing the line (PGP-19). On a phone a fact is one line
+  // of words: one wider than the room the state leaves is cut at the line's
+  // end, where its words wrapped inside it and the clip showed half of each.
   return (
-    <FactLine className="w-full max-sm:w-auto max-sm:flex-1 [&>span]:gap-y-1">{facts}</FactLine>
+    <FactLine className="w-full max-sm:w-auto max-sm:flex-1 max-sm:[&_[data-slot=fact]]:whitespace-nowrap [&_a]:hit-area [&>span]:gap-y-1">
+      {facts}
+    </FactLine>
   )
 }
 
@@ -328,7 +335,7 @@ function ProjectLine({
       data-slot={slot}
       data-layout="project"
       className={cn(
-        "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5",
+        "grid min-w-0 grid-cols-start-main-end items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5",
         className,
       )}
     >
@@ -436,26 +443,56 @@ function useStateLeadsFacts(
     const observer = new ResizeObserver(() => measure())
     if (nameRef.current) observer.observe(nameRef.current)
     if (stateRef.current) observer.observe(stateRef.current)
+    // A title that draws itself (a database's switcher, which reads the
+    // connection) gains its words in a render of its own, which is not this
+    // one, and inside a cell that is already held to its width, so no size
+    // the observer sees changes. Without the rise's animation to measure
+    // again after it (reduced motion, the product's pause) the state kept
+    // its place beside a name cut to nothing.
+    const words = new MutationObserver(() => measure())
+    if (titleRef.current)
+      words.observe(titleRef.current, { childList: true, subtree: true, characterData: true })
     // A web font landing changes the name's width and nothing else.
     document.fonts?.ready.then(() => measure())
-    return () => observer.disconnect()
-  }, [phone, measure, nameRef, stateRef])
+    return () => {
+      observer.disconnect()
+      words.disconnect()
+    }
+  }, [phone, measure, nameRef, stateRef, titleRef])
   return leads
 }
 
 /** `gap-x-3` between the name and its state. */
 const STATE_GAP = 12
 
-/** An element's width at its content's full length, however its box is held now. */
+/**
+ * An element's width at its content's full length, however its box is held
+ * now. Read off a hidden copy laid beside it, out of the flow: the element
+ * itself, asked for `max-content` in place, answered with the width its
+ * content had already been squeezed to whenever that content held a
+ * `max-w-full` (a database's switcher), so a name the state had cut to
+ * nothing measured as nothing and the state never gave the row back
+ * (reduced motion, where no animation measured again before the cut).
+ */
 function naturalWidth(element: HTMLElement) {
-  const { flex, width, maxWidth } = element.style
-  element.style.flex = "none"
-  element.style.width = "max-content"
-  element.style.maxWidth = "none"
-  const natural = element.getBoundingClientRect().width
-  element.style.flex = flex
-  element.style.width = width
-  element.style.maxWidth = maxWidth
+  const parent = element.parentElement
+  if (!parent) return element.getBoundingClientRect().width
+  const copy = element.cloneNode(true) as HTMLElement
+  copy.removeAttribute("id")
+  copy.setAttribute("aria-hidden", "true")
+  Object.assign(copy.style, {
+    position: "absolute",
+    visibility: "hidden",
+    pointerEvents: "none",
+    left: "0",
+    top: "0",
+    flex: "none",
+    width: "max-content",
+    maxWidth: "none",
+  })
+  parent.appendChild(copy)
+  const natural = copy.getBoundingClientRect().width
+  copy.remove()
   return natural
 }
 
@@ -565,8 +602,12 @@ export function IdentityVerbs({ verbs, name }: { verbs: Verb[]; name: string }):
   command?: React.ReactNode
   menu?: React.ReactNode
 } {
-  const safe = verbs.filter((verb) => !verb.danger)
-  const lead = safe.find((verb) => verb.inline) ?? safe[0]
+  // The command is the thing's first inline verb, or its first verb when it
+  // marks none inline. A destructive one is never promoted, and nothing takes
+  // its place: a menu verb drawn in the brand face because the inline verb
+  // was destructive would be a command the page never chose.
+  const inline = verbs.filter((verb) => verb.inline)
+  const lead = (inline.length > 0 ? inline : verbs.slice(0, 1)).find((verb) => !verb.danger)
   const rest = verbs.filter((verb) => verb !== lead)
   return {
     command: lead && (

@@ -98,4 +98,4 @@ column percentages stay arbitrary: they are layout.
 | On touch, `text-hint` is 12px and `text-micro` 11px (T1). | `globals.css` (`@media (pointer: coarse)` on the type tokens) |
 | Hover reveals are for real pointers only; on touch the controls are drawn. | spec `design-system.spec.ts` (*row actions … are visible without a pointer*) |
 | The page clears the home indicator and the notch (`viewportFit: cover`, safe-area utilities). | `app/layout.tsx` (`viewportFit: cover`, `themeColor`, `interactiveWidget`); `pt-safe` … `mb-safe` |
-| Canvases (the server map, the ER diagram, the boards) pan and pinch like Excalidraw, and arrow keys pan and move on them (T10, coming in WP-44). | unit `canvas-move.test.js` |
+| Canvases (the server map, the ER diagram, the boards) pan and pinch like Excalidraw, and arrow keys pan and move on them (T10). | unit `canvas-move.test.js`, `canvas-keys.test.js`; spec `server-map.spec.ts`, `database-schema.spec.ts`, `boards-ui.spec.ts` |

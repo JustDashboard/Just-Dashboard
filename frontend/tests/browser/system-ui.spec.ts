@@ -145,7 +145,7 @@ const trail = [
   entry({
     ts: ago(5 * HOUR),
     action: "git.clone",
-    target: "Wayy01/api",
+    target: "operator/api",
     path: "/api/v1/git/clone",
   }),
   entry({

@@ -20,13 +20,12 @@ import {
 import {
   RUN_LABELS,
   StepMark,
-  formatDuration,
   runFailed,
   runTone,
   stepName,
   stepSeconds,
 } from "@/components/deploy/vocabulary"
-import { clock, plural } from "@/lib/format"
+import { clock, duration, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { transcriptLine, type TranscriptLine } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
@@ -255,6 +254,26 @@ export function BuildConsole({
     followedTo.current = body.current.scrollTop
   }, [visible, follow])
 
+  // A hidden console (a phone's pane while another stop is read) has no box,
+  // so the lines that land meanwhile cannot be followed. When it is shown
+  // again, or resized, its box changes size, and a console that was
+  // following goes back to the last line.
+  const following = useRef(follow)
+  useEffect(() => {
+    following.current = follow
+  }, [follow])
+  useEffect(() => {
+    const el = body.current
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      if (!following.current || el.clientHeight === 0) return
+      el.scrollTop = el.scrollHeight
+      followedTo.current = el.scrollTop
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   // A search or the errors filter could hide the line; following would pull
   // the console away from it again.
   const [focused, setFocused] = useState<number>()
@@ -308,7 +327,9 @@ export function BuildConsole({
 
   return (
     <Pane flush={flush} className={cn("relative", className ?? "h-[min(70svh,44rem)] min-h-72")}>
-      {active && <BorderBeam size={96} duration={7} />}
+      {/* A flush pane's edges are the screen's (a phone's pane), so a beam
+          there would run round the window rather than the console. */}
+      {active && !flush && <BorderBeam size={96} duration={7} />}
       <PaneHeader className="flex-wrap gap-2 py-2">
         <SearchInput
           dense
@@ -407,6 +428,9 @@ export function BuildConsole({
           ref={body}
           onScroll={(event) => {
             const el = event.currentTarget
+            // Hidden, it has no box: what the browser reports then is not
+            // the reader leaving the end.
+            if (el.clientHeight === 0) return
             const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 32
             // Following stops the moment the reader scrolls up, or a build
             // still writing yanks them back down with every line; it resumes
@@ -597,7 +621,7 @@ function StepRule({
       </span>
       {seconds !== undefined && (
         <span className="numeric shrink-0 text-hint text-muted-foreground">
-          {formatDuration(seconds)}
+          {duration(seconds)}
         </span>
       )}
       <span className="numeric ml-auto shrink-0 text-hint text-muted-foreground">
@@ -686,7 +710,7 @@ function StageRail({
             </span>
             {seconds !== undefined && (
               <span className="numeric shrink-0 text-hint text-muted-foreground">
-                {formatDuration(seconds)}
+                {duration(seconds)}
               </span>
             )}
             <span

@@ -3,6 +3,7 @@
 import { useEffect, useId, useState, useSyncExternalStore } from "react"
 import { AnimatePresence, MotionConfig, motion } from "motion/react"
 import { cn } from "@/lib/utils"
+import { watchOccupant } from "@/lib/stack-occupant"
 
 /**
  * The bottom stack: everything that floats at the foot of the window, and
@@ -96,14 +97,8 @@ function publish() {
     const root = document.documentElement.style
     root.setProperty("--bottom-occupied", `${snapshot.occupied}px`)
     root.setProperty("--bottom-stack", `${snapshot.top}px`)
-    // The shell's scroller is where a focused field is scrolled into view:
-    // with a bar up, it stops short of the bar.
-    for (const scroller of document.querySelectorAll<HTMLElement>(
-      "[data-workspace-shell-scroll]",
-    )) {
-      scroller.style.scrollPaddingBottom =
-        snapshot.occupied > 0 ? "calc(var(--bottom-occupied) + 0.5rem)" : ""
-    }
+    // The shell's scroller reads `--bottom-occupied` for its scroll padding
+    // (globals.css), so a focused field stops short of the bars.
   }
   for (const listener of listeners) listener()
 }
@@ -146,10 +141,11 @@ function extentOf(element: HTMLElement, layer: StackLayer) {
 }
 
 /**
- * Puts an element in the stack while `active`: measured as it changes size,
- * and taken out when it goes. A bar passes the element that is positioned at
- * the foot (the one with `bottom`); a dock passes itself. Returns the stack's
- * id for it, which a dock reads its place under and a bar its lift.
+ * Puts an element in the stack while `active`: measured as it changes size or
+ * is lifted, and taken out when it goes. A bar passes the element that is
+ * positioned at the foot (the one with `bottom`); a dock passes itself.
+ * Returns the stack's id for it, which a dock reads its place under and a bar
+ * its lift.
  */
 export function useStackOccupant(
   element: HTMLElement | null,
@@ -161,12 +157,9 @@ export function useStackOccupant(
     if (!element || !active) return
     const measure = () => setOccupant(id, { layer, order, extent: extentOf(element, layer) })
     measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    window.addEventListener("resize", measure)
+    const stop = watchOccupant(element, layer, measure)
     return () => {
-      observer.disconnect()
-      window.removeEventListener("resize", measure)
+      stop()
       setOccupant(id, null)
     }
   }, [element, layer, order, active, id])
@@ -243,7 +236,7 @@ function DockFrame({
       transition={{ duration: 0.22, ease: EASE }}
       style={{ bottom }}
       className={cn(
-        "fixed right-4 z-float flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-border-strong bg-popover/95 p-2 text-popover-foreground shadow-lg backdrop-blur transition-[bottom] duration-base ease-arrive",
+        "fixed right-4 z-float flex w-inspector max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-border-strong bg-popover/95 p-2 text-popover-foreground shadow-lg backdrop-blur transition-[bottom] duration-base ease-arrive",
         className,
       )}
     >

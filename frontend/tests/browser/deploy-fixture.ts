@@ -1425,8 +1425,8 @@ const showcaseAppRepositories: GitHubAppRepository[] = [
 }))
 
 const showcaseCliRepositories: GitHubRepoSummary[] = [
-  ["Wayy01", "wesmokefish", "TypeScript", "A Next.js site"],
-  ["Wayy01", "dotfiles", "Shell", undefined],
+  ["operator", "wesmokefish", "TypeScript", "A Next.js site"],
+  ["operator", "dotfiles", "Shell", undefined],
 ].map(([owner, name, language, description]) => ({
   nameWithOwner: `${owner}/${name}`,
   name: String(name),
@@ -2072,7 +2072,7 @@ function showcaseRead(path: string, url: URL): unknown {
   if (path === "/deploy/github-app/") return showcaseGitHubApp
   if (path === "/deploy/github-app/repositories") return showcaseAppRepositories
   if (path === "/git/github/") {
-    return { available: true, account: { loggedIn: true, login: "Wayy01", name: "Wayy" } }
+    return { available: true, account: { loggedIn: true, login: "operator", name: "Operator" } }
   }
   if (path === "/git/github/repos") return showcaseCliRepositories
   if (path === "/git/github/branches") return [{ name: "main", default: true }, { name: "preview" }]
@@ -2802,7 +2802,7 @@ export async function mockProject(
             trigger: {
               auditId: 918,
               action: "deploy.run",
-              actor: "wayy",
+              actor: "operator",
               confidence: "likely",
             },
           },
@@ -3641,12 +3641,12 @@ export async function mockNewProject(
     if (path === "/git/github/repos")
       return json(route, [
         {
-          nameWithOwner: "Wayy01/wesmokefish",
+          nameWithOwner: "operator/wesmokefish",
           name: "wesmokefish",
-          owner: "Wayy01",
+          owner: "operator",
           description: "A Next.js site",
-          url: "https://github.com/Wayy01/wesmokefish",
-          cloneUrl: "https://github.com/Wayy01/wesmokefish.git",
+          url: "https://github.com/operator/wesmokefish",
+          cloneUrl: "https://github.com/operator/wesmokefish.git",
           defaultBranch: "main",
           language: "TypeScript",
           private: false,
@@ -3658,7 +3658,7 @@ export async function mockNewProject(
       return json(route, [{ name: "main", default: true }, { name: "preview" }])
     return json(route, {
       available: true,
-      account: { loggedIn: true, login: "Wayy01", gitConfigured: true },
+      account: { loggedIn: true, login: "operator", gitConfigured: true },
     })
   })
   await page.route("**/api/v1/deploy/hostname**", (route) =>

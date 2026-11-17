@@ -154,7 +154,7 @@ rule. Source: `api/host_alerts.go` (rules, the pass, `stepHostAlert`, history), 
 (each kind's source and judge), `api/handlers_host_alerts.go` (routes); tables `host_alert_rules`,
 `host_alert_state`, `host_alert_events` in `store/schema_host_alerts.go`; the page is
 `components/metrics/alerts-page.tsx` over `lib/host-alerts.ts`, with the parts it shares with the
-proxy's page in `components/alerts/alert-parts.tsx`.
+proxy's page in the alerts kit (`components/alerts/kit.tsx`, `kinds.ts`, `alert-parts.tsx`).
 
 - **Seven kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
   (default 90%, 10–100) and a window (CPU 10 min, memory 5 — the OOM killer does not wait ten; 1–1440):

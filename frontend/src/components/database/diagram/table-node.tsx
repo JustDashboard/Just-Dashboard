@@ -238,7 +238,8 @@ function ColumnRow({ table, column, hit }: { table: string; column: DbGraphColum
       <span
         className={cn(
           "min-w-0 flex-1 truncate font-mono text-hint",
-          column.primaryKey ? "font-semibold text-foreground" : "text-foreground/80",
+          // Never a faded ink (FND-07): the key is told by its weight.
+          column.primaryKey ? "font-semibold text-foreground" : "text-foreground",
         )}
       >
         {column.name}

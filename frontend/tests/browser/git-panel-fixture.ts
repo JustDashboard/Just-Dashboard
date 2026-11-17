@@ -42,7 +42,7 @@ export const repo = {
   remote: "https://github.com/JustDashboard/Just-Dashboard.git",
   head: sha,
   subject: "Merge pull request #409 from JustDashboard/patch/0.8.4",
-  author: "Wayy",
+  author: "Operator",
   commitAt: now,
   dirty: true,
   changes: 3,
@@ -108,7 +108,7 @@ const pull = (number: number, title: string, extra: Record<string, unknown> = {}
   draft: false,
   head: "feat/0.8.5-bar-reading",
   base: "patch/0.8.5",
-  author: "Wayy01",
+  author: "operator",
   createdAt: ago(250),
   updatedAt: ago(7),
   comments: 0,
@@ -168,8 +168,8 @@ export const commits = [
   subject,
   refs,
   isMerge,
-  author: "Wayy",
-  email: "wayy@example.com",
+  author: "Operator",
+  email: "operator@example.com",
   at: ago(minutes as number),
   insertions: 26,
   deletions: 14,
@@ -214,10 +214,10 @@ export async function mockPanel(
       case "/git/github/":
         return json(route, {
           available: true,
-          account: { loggedIn: true, login: "Wayy01", gitConfigured: true },
+          account: { loggedIn: true, login: "operator", gitConfigured: true },
         })
       case "/git/github/authors":
-        return json(route, { "wayy@example.com": "Wayy01" })
+        return json(route, { "operator@example.com": "operator" })
       case "/git/github/avatar":
         return route.fulfill({
           status: 200,
@@ -295,7 +295,7 @@ export async function mockPanel(
           repo,
           clean: false,
           stashes: 0,
-          identity: { name: "Wayy", email: "wayy@example.com" },
+          identity: { name: "Operator", email: "operator@example.com" },
           files: [
             {
               path: "frontend/src/components/git/history-panel.tsx",

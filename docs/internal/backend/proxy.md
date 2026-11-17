@@ -2416,8 +2416,8 @@
   muted}`. The ordinary watched-check schedule still records a handshake and certificate; only an
   enabled grade rule runs the full grader. The operator chooses the minimum expected grade. The
   rules are read and edited on their own page, `/proxy/alerts` (`components/proxy/alerts-page.tsx`,
-  with the parts that do not know its kinds in `components/alerts/alert-parts.tsx`, which the host's
-  Alerts page shares), and the overview's identity bar links there with the firing count from the same
+  with the parts that do not know its kinds in the alerts kit (`components/alerts/kit.tsx`,
+  `kinds.ts`, `alert-parts.tsx`), which the host's Alerts page shares), and the overview's identity bar links there with the firing count from the same
   `GET /proxy/alerts`.
   `TestProxyAlertsRequireAdminAndTellEachTransitionOnce` covers the API gate, audit, firing, unreadable
   source, and recovery; `TestProxyAlertReadingsForRenewalAndServedCertificates` covers the two additional

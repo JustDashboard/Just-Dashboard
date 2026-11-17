@@ -3,6 +3,7 @@
 import { useReactFlow, useStore } from "@xyflow/react"
 import { Minus, Plus, RotateCounterClockwise } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { motionMs } from "@/lib/motion"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 
@@ -14,7 +15,12 @@ import { Button } from "@/components/ui/button"
 export const FLOAT =
   "absolute flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5"
 
-const ZOOM_STEP = { duration: 150 }
+/**
+ * A press's zoom: glided, or at once when motion is reduced or paused. Asked
+ * at the press, as the zoom keys ask, since a duration handed to the library
+ * is not CSS and the root rule cannot reach it.
+ */
+const zoomStep = () => ({ duration: motionMs(150) })
 
 /**
  * The bar at the foot of a canvas — the server's map, a database's diagram:
@@ -48,7 +54,7 @@ export function CanvasZoom({
   const percent = useStore((state) => Math.round(state.transform[2] * 100))
   return (
     <div data-slot={slot} className={cn(FLOAT, "bottom-3 left-3", className)}>
-      <IconAction label="Zoom out" className="size-7" onClick={() => void flow.zoomOut(ZOOM_STEP)}>
+      <IconAction label="Zoom out" className="size-7" onClick={() => void flow.zoomOut(zoomStep())}>
         <Minus />
       </IconAction>
       <Button
@@ -57,11 +63,11 @@ export function CanvasZoom({
         title="Back to the real size (Ctrl 0)"
         aria-label={`Zoom ${percent}%: back to the real size`}
         className="numeric h-7 min-w-12 px-1.5 text-hint"
-        onClick={() => void flow.zoomTo(1, ZOOM_STEP)}
+        onClick={() => void flow.zoomTo(1, zoomStep())}
       >
         {percent}%
       </Button>
-      <IconAction label="Zoom in" className="size-7" onClick={() => void flow.zoomIn(ZOOM_STEP)}>
+      <IconAction label="Zoom in" className="size-7" onClick={() => void flow.zoomIn(zoomStep())}>
         <Plus />
       </IconAction>
       <Button

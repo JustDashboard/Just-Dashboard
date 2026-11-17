@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { SystemdTimer, SystemdUnit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { ShellWords } from "@/components/deploy/run-evidence"
+import { ShellWords } from "@/components/code"
 import { useNow } from "@/hooks/use-now"
 import { IconAction } from "@/components/icon-action"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"

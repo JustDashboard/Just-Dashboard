@@ -2361,12 +2361,16 @@ test("the diagram is zoomed and fitted from one bar at its foot, as the maps are
     "/",
     "I",
     "H",
+    "↵",
     "Esc",
     "←",
     "↑",
     "↓",
     "→",
+    "Shift",
   ])
+  // Shift's longer step is said in the legend, not only in a title.
+  await expect(page.locator("[data-slot=diagram-keys]")).toContainText("Longer step")
 
   // Which way the layout runs is a word in the head's menu.
   await headMenu(page, "Lay out top to bottom")
