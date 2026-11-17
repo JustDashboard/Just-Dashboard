@@ -132,7 +132,7 @@ export function ChoiceRow({
   workspaceItem?: { id: string; name: string }
   leading?: React.ReactNode
   title: React.ReactNode
-  /** The accessible name of the title control — "Import Wayy01/api". */
+  /** The accessible name of the title control — "Import operator/api". */
   verb: string
   description?: React.ReactNode
   /**
