@@ -92,8 +92,8 @@ whatever its shape, and each recipe's checklist carries them.
    side) too: both halves are icons on a phone.
 3. **No destructive verb takes the brand face.** Terminate, Kill, Delete, Drop, Remove and the like
    go behind the `⋯`, in the destructive ink. A page whose only verbs are destructive draws no
-   command: pass `menu` alone. With `IdentityVerbs`, mark a verb `inline` only when it is not
-   destructive, and when none is, build the menu with `VerbMenu` and leave `command` out.
+   command: pass `menu` alone. `IdentityVerbs` holds this for you: a `danger` verb never becomes
+   its `command`, and when every verb is `danger` it returns `menu` alone.
 4. **`?` sits at the end of the identity line**, after the `⋯` (in `menu`, as Packages does, or as
    `aside` on a line with no verbs), hidden on a phone. It gets a row of its own only where it
    shares that row with a back link: on a page with `back`, it is on the back line
