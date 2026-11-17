@@ -380,6 +380,35 @@ test("says its size again on every return, unchanged or not", async ({ page }) =
   expect(errors).toEqual([])
 })
 
+// A terminal is a canvas: nothing in it exists for a screen reader until xterm
+// mirrors its rows, which it does only when asked. The page hides the pane's
+// toolbar, so the way to ask is the stop before the terminal itself.
+test("screen reader mode is one press from the keyboard, and is remembered", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { errors } = await terminalFixture(page, "dom")
+  const mode = page.getByRole("button", { name: "Screen reader mode", exact: true })
+  const mirror = page.locator(".xterm-accessibility")
+  await expect(mode).toHaveAttribute("aria-pressed", "false")
+  await expect(mode).toHaveCSS("opacity", "0")
+  await expect(mirror).toHaveCount(0)
+
+  // Drawn only while the keyboard is on it, as a skip link is: away and back
+  // by the keyboard, so the focus is the keyboard's and not the script's.
+  await mode.focus()
+  await page.keyboard.press("Shift+Tab")
+  await page.keyboard.press("Tab")
+  await expect(mode).toBeFocused()
+  await expect(mode).toHaveCSS("opacity", "1")
+  await page.keyboard.press("Enter")
+  await expect(mode).toHaveAttribute("aria-pressed", "true")
+  await expect(mirror).not.toHaveCount(0)
+
+  await page.reload()
+  await expect(mode).toHaveAttribute("aria-pressed", "true")
+  await expect(mirror).not.toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
 // WebGL floors the cell width to whole device pixels and the DOM renderer does
 // not, so the grid WebGL fitted runs off the pane under DOM. The box itself has
 // not changed, so only the fallback can fit it again.

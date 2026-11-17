@@ -1,5 +1,6 @@
 "use client"
 
+import { useId } from "react"
 import { StatusDot } from "@/components/status-dot"
 import { systemCensus, systemTitle, type System } from "@/lib/server-systems"
 import { plural } from "@/lib/format"
@@ -39,6 +40,10 @@ export function censusLine(system: System, most = 3) {
  * server map's by what anchors a system, the databases map's by engine: the
  * contents of the canvas in the order a reader looks for them. A row flies the
  * canvas to its system; the one being read is marked.
+ *
+ * A group's name is a label on its list, not a heading: the rail stands
+ * before the page's own headings, so an h3 here opened the outline two levels
+ * down on both maps (A11Y-12).
  */
 export function SystemRail({
   board,
@@ -51,6 +56,7 @@ export function SystemRail({
   focus: string | null
   onFocus: (id: string) => void
 }) {
+  const heads = useId()
   return (
     <nav
       aria-label={board.rail.label}
@@ -58,13 +64,16 @@ export function SystemRail({
     >
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {systems.length === 0 && <EmptyNote dense>{board.rail.empty}</EmptyNote>}
-        {board.rail.group(systems).map((group) => {
+        {board.rail.group(systems).map((group, index) => {
           const here = group.systems
           if (here.length === 0) return null
+          const head = `${heads}-${index}`
           return (
-            <section key={group.label} className="mb-3">
-              <h3 className="eyebrow px-2 pt-1 pb-1.5">{group.label}</h3>
-              <ul className="space-y-0.5">
+            <div key={group.label} className="mb-3">
+              <div id={head} className="eyebrow px-2 pt-1 pb-1.5">
+                {group.label}
+              </div>
+              <ul aria-labelledby={head} className="space-y-0.5">
                 {here.map((s) => (
                   <li key={s.id}>
                     <button
@@ -86,12 +95,20 @@ export function SystemRail({
                           {board.census(s, 2)}
                         </span>
                       </span>
-                      {s.kind !== "loose" && <StatusDot tone={TONE_DOT[s.anchor.tone]} />}
+                      {/* The row has no room for the state's word, so the dot
+                          carries it: read out, and under the pointer. */}
+                      {s.kind !== "loose" && (
+                        <StatusDot
+                          tone={TONE_DOT[s.anchor.tone]}
+                          label={s.anchor.state}
+                          title={s.anchor.state}
+                        />
+                      )}
                     </button>
                   </li>
                 ))}
               </ul>
-            </section>
+            </div>
           )
         })}
       </div>
