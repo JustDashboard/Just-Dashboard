@@ -607,6 +607,9 @@ async function gate(page: Page, key: string, url: string) {
   ).toEqual([])
 }
 
+// CI's planner (scripts/ci-plan.py) counts these routes itself; an axe page costs about 1.2
+// ordinary tests (measured 17 Nov 2026), which is the weight it needs from here.
+// ci-plan: each weighs 1.2
 for (const [name, url, mock] of ROUTES) {
   test(`axe finds nothing serious on ${name}`, async ({ page }) => {
     test.setTimeout(60_000)

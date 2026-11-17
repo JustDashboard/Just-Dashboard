@@ -50,6 +50,17 @@ package, and `go.mod` runs the packages its changed modules reach, which is ever
 toolchain line moves. The Go picking for files that are not Go is `scripts/ci-plan.py`'s own, imported,
 so the local gate and the workflow's plan cannot drift apart again.
 
+In CI the same script deals the browser specs a change reaches into jobs. A spec weighs the tests it
+really runs, read from its source: a test written once in a loop counts for every item of the loop's
+list, and a screenshot test that an unset variable switches off counts for nothing. A spec whose loop
+the source cannot count, or whose tests cost several ordinary ones, says so in a comment on a line of
+its own (`// ci-plan: 190 tests, each weighs 2.5`, either half alone). The heaviest spec is dealt
+first and a section is spread over the jobs: about a hundred tests a job in a pull request, two
+hundred in a merge's run, and twelve jobs of about four hundred in a full run, which is twelve
+minutes of tests on the slowest runner seen, of the twenty a job has. A change to the UI docs alone
+(`docs/internal/frontend/`) starts the `frontend` job, whose unit tests include the one that holds
+those docs to the code; any other documentation-only change starts nothing.
+
 The browser gate serves the latest `bun run build` output on `127.0.0.1:43117`; it does not reuse a
 development server or an unrelated dashboard on port 3000. `bun run start` is
 `frontend/scripts/serve-standalone.mjs`, not `next start`: it copies `.next/static` and `public` beside
