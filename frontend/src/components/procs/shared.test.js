@@ -5,7 +5,9 @@ import {
   cronLogSource,
   groupName,
   managerHref,
+  ownerKeepsLogs,
   processCaption,
+  processHasCommand,
   processStateTone,
   uncontrollable,
 } from "./shared"
@@ -134,4 +136,35 @@ test("a blocked or zombie process reads amber, not the danger ink", () => {
   expect(toneFor(processStateTone("zombie"))).toBe("warning")
   expect(toneFor(processStateTone("sleeping"))).toBe("stopped")
   expect(toneFor(processStateTone("running"))).toBe("running")
+})
+
+// The process page's line holds still: whether it has a command, and whether
+// a Logs view exists, are read from the row, never from the owner's later read.
+describe("a process's command", () => {
+  const row = (over) => ({
+    state: "sleeping",
+    manager: "unmanaged",
+    managerName: "",
+    ppid: 1,
+    ...over,
+  })
+
+  test("an owner that keeps logs gives the Logs view and the command, a PM2 app included", () => {
+    for (const manager of ["systemd", "pm2", "container"]) {
+      expect(ownerKeepsLogs(row({ manager, managerName: "api" }))).toBe(true)
+      expect(processHasCommand(row({ manager, managerName: "api" }))).toBe(true)
+    }
+    // A manager with no name has nothing to read its log from.
+    expect(ownerKeepsLogs(row({ manager: "pm2" }))).toBe(false)
+  })
+
+  test("a bare process has only its menu", () => {
+    expect(processHasCommand(row({}))).toBe(false)
+    expect(processHasCommand(row({ manager: "session", managerName: "tty1" }))).toBe(false)
+  })
+
+  test("a zombie's command is its parent, when it has one", () => {
+    expect(processHasCommand(row({ state: "zombie" }))).toBe(true)
+    expect(processHasCommand(row({ state: "zombie", ppid: 0 }))).toBe(false)
+  })
 })

@@ -44,7 +44,6 @@ import {
   ProcessLogs,
   ProcessNetwork,
   ProcessThreads,
-  ownerLogSources,
   useOwner,
 } from "@/components/procs/process-views"
 import { useProcessControl, useProcessVerbs } from "@/components/procs/process-actions"
@@ -57,7 +56,9 @@ import {
 import {
   managerHref,
   managerName,
+  ownerKeepsLogs,
   ownerName,
+  processHasCommand,
   processKey,
   processStateTone,
   uncontrollable,
@@ -113,6 +114,7 @@ export function ProcessPage() {
     open,
   )
   const reading = useProcessReading(pid)
+  const railRow = rail.rows.find((candidate) => candidate.pid === pid)
   const { confirm, dialog } = useConfirm()
   const { snapshot } = useMetrics()
   const memTotal = snapshot?.memory?.total ?? 0
@@ -127,7 +129,7 @@ export function ProcessPage() {
     [pid],
     { enabled: pid !== null && live },
   )
-  const { owner, refresh: refreshOwner } = useOwner(row)
+  const { owner, pending: ownerPending, refresh: refreshOwner } = useOwner(row)
   const refreshInspect = inspect.refresh
   const refreshTree = tree.refresh
   const refreshReading = reading.refresh
@@ -156,9 +158,9 @@ export function ProcessPage() {
         { key: "environment", label: "Environment", count: inspect.data?.environment.length },
         { key: "limits", label: "Limits and privileges" },
         { key: "control", label: "Control" },
-        ...(ownerLogSources(row, owner).length > 0
-          ? [{ key: "logs" as const, label: "Logs" }]
-          : []),
+        // From the row alone, so the view and the line's Logs command are
+        // there from the first read, not once a PM2 app's read lands.
+        ...(ownerKeepsLogs(row) ? [{ key: "logs" as const, label: "Logs" }] : []),
       ]
     : []
   const shown = views.some((view) => view.key === tab) ? tab : "overview"
@@ -201,6 +203,7 @@ export function ProcessPage() {
             signal={control.signal}
             onOpen={open}
             onLogs={views.some((view) => view.key === "logs") ? () => setTab("logs") : undefined}
+            logsOpen={shown === "logs"}
           />
         ) : (
           // The line's final shape while the process is read, its verbs'
@@ -210,7 +213,9 @@ export function ProcessPage() {
             className="border-b-0 pb-0"
             title={<TextShimmer>{`Reading PID ${pid}…`}</TextShimmer>}
             state
-            command
+            // The rail's row, when it is in, says whether this process will
+            // have a command; the slot is held only for one that will.
+            command={railRow ? processHasCommand(railRow) : true}
             menu={false}
           />
         )
@@ -281,7 +286,7 @@ export function ProcessPage() {
             )}
           </TabsContent>
           <TabsContent value="logs" className="flex flex-col pt-4">
-            {shown === "logs" && <ProcessLogs row={row} owner={owner} />}
+            {shown === "logs" && <ProcessLogs row={row} owner={owner} pending={ownerPending} />}
           </TabsContent>
         </Tabs>
       )}
@@ -380,6 +385,7 @@ function ProcessIdentity({
   signal,
   onOpen,
   onLogs,
+  logsOpen,
 }: {
   process: ProcessRow
   gone?: string
@@ -391,6 +397,11 @@ function ProcessIdentity({
   onOpen: (pid: number) => void
   /** Opens the Logs view; absent when the process's owner keeps none. */
   onLogs?: () => void
+  /**
+   * The Logs view is the one open: the command stays, so the line holds
+   * still, but it has nothing to do there and says so by being off.
+   */
+  logsOpen?: boolean
 }) {
   const now = useNow(1000, !gone)
   const signals = useProcessVerbs({ process: row, confirm, signal, onOpen, children: childCount })
@@ -401,6 +412,7 @@ function ProcessIdentity({
     short: "Logs",
     icon: Logs,
     inline: true,
+    disabled: logsOpen,
     run: onLogs,
   }
   const verbs = [
