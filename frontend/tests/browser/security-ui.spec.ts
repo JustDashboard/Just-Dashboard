@@ -842,17 +842,10 @@ test("the logins page folds the failed record into attackers", async ({ page }) 
     .toEqual({ action: "deny", direction: "in", from: "198.51.100.4", comment: "failed logins" })
 })
 
-/** A figure in the page's one grid, by its name. */
 /** One of a page's reading lines, by its name: what a tile became on Intrusion and SSH. */
 function reading(page: Page, label: string) {
   return page
     .locator("[data-slot=reading-line]")
-    .filter({ has: page.getByText(label, { exact: true }) })
-}
-
-function tile(page: Page, label: string) {
-  return page
-    .locator("[data-slot=stat-grid] [data-slot=stat-tile]")
     .filter({ has: page.getByText(label, { exact: true }) })
 }
 
