@@ -57,11 +57,24 @@ export function SystemRail({
   onFocus: (id: string) => void
 }) {
   const heads = useId()
+  const head = board.rail.head
   return (
     <nav
       aria-label={board.rail.label}
       className="flex min-h-0 min-w-0 flex-col border-r border-hairline"
     >
+      {head && (
+        // The page's mark and name, level with the inspector's head across
+        // the canvas. Words, not a heading: the rail stands before the page's
+        // own outline (A11Y-12). A phone's top bar names the page already.
+        <div
+          data-slot="map-rail-head"
+          className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-4 max-lg:hidden"
+        >
+          <head.icon aria-hidden className="size-4 text-muted-foreground" />
+          <span className="text-body font-semibold text-foreground">{head.title}</span>
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {systems.length === 0 && <EmptyNote dense>{board.rail.empty}</EmptyNote>}
         {board.rail.group(systems).map((group, index) => {
