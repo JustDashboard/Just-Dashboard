@@ -229,7 +229,13 @@ export function ChoiceRow({
           </button>
         )}
         {description && (
-          <span className="block truncate text-hint text-muted-foreground">{description}</span>
+          // A literal in mono inside the line (an address, a URL) is set
+          // at its own size's height: the other face's taller ascent grew
+          // the line a pixel, and the row past the 58px every card and its
+          // ghost keep.
+          <span className="block truncate text-hint text-muted-foreground [&_.font-mono]:leading-none">
+            {description}
+          </span>
         )}
       </span>
       <span className="flex shrink-0 items-center gap-2">
