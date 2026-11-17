@@ -180,16 +180,19 @@ it covers anything else.
   up from the window's edge it reaches (`useStackOccupant(element, "bar")`). A bar of a higher
   `order` stands above the ones under it, lifted by how far they reach: the save bar is order 1 and
   a `PaneBar` order 0, so the two on one phone page stand one above the other rather than one on
-  the other's stops. The stack takes the tallest reach, which is the upper bar's.
+  the other's stops. The stack takes the tallest reach, which is the upper bar's: a bar is measured
+  again when its size changes and when its `style` does, since a lift moves its reach without
+  changing its size (`watchOccupant`, `lib/stack-occupant.ts`).
 - **Docks** sit in the bottom-right corner above every bar, and on each other in `order`, each
   lifted by the measured height of the ones below: Remote Desktop's held sessions (`order` 0, the
   corner first), then the assistant's conversations (`order` 1). `Dock` is the frame: a popover's
   surface, 22rem wide and the window less its gutters on a phone, rising in and sinking away.
 - **What the page gets.** The stack publishes `--bottom-occupied` (what the bars cover) and
-  `--bottom-stack` (the top of everything, docks included) on the root, and gives the shell's
-  scroller a `scroll-padding-bottom` of the first, so a focused field near the foot of a long form
-  is scrolled clear of the save bar instead of sitting under it.
-- **`stackOffsets`** is the arithmetic, unit-tested in `components/dock.test.js`.
+  `--bottom-stack` (the top of everything, docks included) on the root. The shell's scroller takes
+  a `scroll-padding-bottom` of the first in `globals.css`, so a focused field near the foot of a
+  long form is scrolled clear of the save bar instead of sitting under it.
+- **`stackOffsets`** is the arithmetic and `watchOccupant` the measuring, both unit-tested in
+  `components/dock.test.js`.
 
 `FloatingBar({ headline, note, state, actions, width, position, label })`: `headline` is what there
 is to save and shimmers while saving; `note` is what saving does, one line (two on a phone);

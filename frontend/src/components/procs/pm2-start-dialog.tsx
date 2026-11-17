@@ -15,7 +15,7 @@ import {
   ChoiceGrid,
   ProductCard,
 } from "@/components/choice-card"
-import { ShellWords } from "@/components/deploy/run-evidence"
+import { ShellWords } from "@/components/code"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { ChartActivity, Copy, Terminal } from "@/components/icons"
 import { Modal } from "@/components/modal"

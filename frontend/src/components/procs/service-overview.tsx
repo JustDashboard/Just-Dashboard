@@ -28,7 +28,7 @@ import type {
   SystemdUnit,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { ShellWords } from "@/components/deploy/run-evidence"
+import { ShellWords } from "@/components/code"
 import { useNow } from "@/hooks/use-now"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { IconAction } from "@/components/icon-action"

@@ -503,7 +503,11 @@ export function ObjectHead({
         {views && (
           <div className="flex min-w-0 shrink-0 items-stretch [&_[role=tab]]:h-[39px]">{views}</div>
         )}
-        {verbs && <div className="ml-auto flex shrink-0 items-center gap-1 py-1 pl-2">{verbs}</div>}
+        {/* Its own padding a hair under the identity's: a 32px menu with 4px
+            each side made the head 41px beside the rail's 40. */}
+        {verbs && (
+          <div className="ml-auto flex shrink-0 items-center gap-1 py-0.5 pl-2">{verbs}</div>
+        )}
       </div>
       {facts && (
         <div className="flex min-w-0 items-center gap-2 px-3 pb-1.5 text-hint text-muted-foreground">

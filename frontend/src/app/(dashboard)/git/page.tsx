@@ -254,7 +254,7 @@ export default function GitPage() {
       }}
     >
       <Page rise>
-        <PageContext title="Git" actions={<WorkspaceHelp />} />
+        <PageContext title="Git" />
 
         {selected && repos.data && !active && (
           <ErrorState
@@ -324,7 +324,13 @@ export default function GitPage() {
                     ) : null,
                   )}
                 </div>
-                {controls}
+                {/* The shortcuts' `?` closes the page's one line of
+                    controls, as it closes an identity line (16 Nov): a row
+                    of its own above the toolbar pushed the shelves down. */}
+                <span className="ml-auto flex max-w-full items-center gap-2">
+                  {controls}
+                  <WorkspaceHelp />
+                </span>
               </Toolbar>
 
               {visible.cards.length === 0 && visible.worktrees.length === 0 ? (

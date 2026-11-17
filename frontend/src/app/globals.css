@@ -940,6 +940,14 @@
     overscroll-behavior: contain;
   }
 
+  /* The shell's scroller is where a focused field is scrolled into view: it
+     stops short of whatever bars the bottom stack holds (`--bottom-occupied`,
+     published by components/dock.tsx), so a field near the foot of a long
+     form is not left under the save bar (MOB-09). */
+  [data-workspace-shell-scroll] {
+    scroll-padding-bottom: calc(var(--bottom-occupied, 0px) + 0.5rem);
+  }
+
   /* Tailwind v4 dropped the browser's pointer cursor on buttons, which leaves
    * every control in the app feeling inert under the mouse. Restored once here
    * rather than as a class on each component. The ARIA roles cover menu and
@@ -1577,8 +1585,17 @@
 [data-slot="server-map"] .react-flow__handle.map-port-off {
   opacity: 0;
 }
+/* The keyboard is on a box or a frame: the ring is drawn on what it is, at
+ * its own corners, not on the library's square wrapper. An arrow moves the
+ * box the ring is on once Enter has picked it, so the ring is how a keyboard
+ * reader sees which one (patterns/accessibility.md, "Focus is always
+ * visible"). */
 [data-slot="server-map"] .react-flow__node:focus-visible {
   outline: none;
+}
+[data-slot="server-map"] .react-flow__node:focus-visible > * {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 [data-slot="server-map"] .map-frame {
   background: color-mix(in oklab, var(--card) 42%, transparent);

@@ -233,10 +233,19 @@ Each is a checklist. The linked document owns the rule; this only says which fil
 1. Create `app/<section>/<page>/page.tsx` and its panels under `components/<section>/`.
 2. Add it to `NAV` in `components/shell/nav.ts`, with `capability` if the backend restricts it. A new
    section also goes in `SECTION_KEYS` (`lib/sidebar-sections.ts`).
-3. Decide the page's register first ([`../frontend/patterns/registers.md`](../frontend/patterns/registers.md)),
-   open its recipe in [`../frontend/recipes/`](../frontend/recipes/README.md), and take its
-   components from the catalogue, [`../frontend/components/`](../frontend/components/README.md).
-   The page is held to [`../frontend/standard.md`](../frontend/standard.md).
+3. Decide the page's shape first ([`../frontend/patterns/registers.md`](../frontend/patterns/registers.md))
+   and open its recipe in [`../frontend/recipes/`](../frontend/recipes/README.md): each has a
+   skeleton. A page is `Page` and `PageContext`, opens on `IdentityHeader` (verbs through
+   `IdentityVerbs`), and is built from `WireFlow` for its picture, `ReadingLine` and
+   `BarReading` for its readings, `Panel plain` with `PanelHeader` for its sections,
+   `ListToolbar` and `ChoiceList` of `ChoiceRow` for its lists, `DetailPage` and `Rail` for an
+   item's page, `SettingsColumn` with `SettingForm` and `SettingSection` for settings,
+   `FlowHeader`, `FlowPanel` and `FlowActions` for a flow, `WorkbenchHeader`, `Pane` and
+   `PaneBar` for a workbench, and `EmptyState`, `ErrorState`, `MissingThing` and the
+   skeletons for its states. The rest is in the catalogue,
+   [`../frontend/components/`](../frontend/components/README.md). The page is held to
+   [`../frontend/standard.md`](../frontend/standard.md) and
+   [`../frontend/patterns/accessibility.md`](../frontend/patterns/accessibility.md).
 4. Add a spec and, if the area has none, a fixture; add its section to
    [`../frontend/features/`](../frontend/features/README.md) and its row to the table above.
 

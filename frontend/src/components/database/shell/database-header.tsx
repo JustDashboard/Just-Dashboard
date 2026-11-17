@@ -4,7 +4,7 @@ import Link from "next/link"
 import { LANES, hueFor } from "@/lib/hue"
 import { cn } from "@/lib/utils"
 import { Fact } from "@/components/fact-line"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Button } from "@/components/ui/button"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { EngineMark } from "@/components/database/kit/engine-mark"
@@ -20,7 +20,7 @@ import { supportFact } from "@/components/database/support"
 
 /**
  * The header a database's pages open on, laid out as a project's is
- * (`HostIdentity` with a state, a command and a menu): the engine as the mark,
+ * (`IdentityHeader` with a state, a command and a menu): the engine as the mark,
  * the name — which is also the control that goes to another database — with
  * whether it answers after it, then one line of what it is: the engine and
  * until when its release is maintained, where it runs, the address it is
@@ -57,7 +57,7 @@ export function DatabaseHeader({ className }: { className?: string }) {
   )
 
   return (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${conn.name}`}
       className={className}
       // The name is read whole and the end holds three controls, so on a

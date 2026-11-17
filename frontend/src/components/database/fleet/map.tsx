@@ -8,7 +8,7 @@ import { engineOf } from "@/components/database/engine"
 import { lastTopology, readTopology } from "@/components/database/fleet/read"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASE_ID } from "@/components/database/shell/routes"
-import { Plus } from "@/components/icons"
+import { Plus, Route } from "@/components/icons"
 import {
   MapSkeleton,
   lastServerMap,
@@ -61,6 +61,10 @@ const DATABASES_BOARD: MapBoard = {
       return [...byEngine.values()].sort((a, b) => a.label.localeCompare(b.label))
     },
     empty: "No database is connected yet.",
+    // The page draws no header, so the rail is headed as the server map's
+    // is, level with the inspector's head across the canvas: one pattern,
+    // drawn one way on both maps.
+    head: { icon: Route, title: "Map" },
   },
   census: databaseCensusLine,
   holds: (system) => {

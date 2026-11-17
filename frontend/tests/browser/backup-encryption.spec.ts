@@ -162,7 +162,7 @@ test("the key is drawn with what depends on it, and says so while no copy has le
   await expect(panel).toContainText("Keep a copy of the key off this server")
   await expect(panel.getByRole("button", { name: "Export key…" })).toBeEnabled()
   // Which jobs seal what they write is on their cards.
-  await expect(card(page, "Databases nightly")).toContainText("wayy-backups · encrypted")
+  await expect(card(page, "Databases nightly")).toContainText("operator-backups · encrypted")
   await expect(card(page, "Nginx configuration")).not.toContainText("encrypted")
 })
 
@@ -241,7 +241,7 @@ test("the job form encrypts what leaves the server unless the operator says not 
   await expect(option).not.toBeChecked()
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Offsite configuration")
   await dialog.getByRole("textbox", { name: "Sources (one per line)" }).fill("/etc/nginx")
-  await dialog.getByRole("textbox", { name: "Bucket", exact: true }).fill("wayy-config")
+  await dialog.getByRole("textbox", { name: "Bucket", exact: true }).fill("operator-config")
   const created = page.waitForRequest(
     (request) => request.url().endsWith("/api/v1/backups/") && request.method() === "POST",
   )

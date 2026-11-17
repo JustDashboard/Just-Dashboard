@@ -557,9 +557,11 @@ function WebhookCard({
       onSelect={onOpen}
       disabled={!onOpen}
       busy={Boolean(deploying)}
-      className={cn(!trigger.enabled && "opacity-80")}
+      // Disabled is said by its status and the name's muted ink (FND-07).
       leading={<TriggerMark trigger={trigger} />}
-      title={trigger.name}
+      title={
+        <span className={cn(!trigger.enabled && "text-muted-foreground")}>{trigger.name}</span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           {trigger.config.repository ? (

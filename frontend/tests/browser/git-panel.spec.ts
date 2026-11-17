@@ -64,7 +64,7 @@ test.describe("the lists", () => {
     // The merges name what they merged, with GitHub's sentence kept for hover.
     const merge = page.getByTitle("Merge pull request #409 from JustDashboard/patch/0.8.4")
     await expect(merge).toHaveText("Merged #409 from patch/0.8.4")
-    await expect(page.locator('img[src*="account=Wayy01"]').first()).toBeVisible()
+    await expect(page.locator('img[src*="account=operator"]').first()).toBeVisible()
     await expect(page.getByText("Mira Stone")).toBeVisible()
     await expect(page.locator('img[src*="account=Mira"]')).toHaveCount(0)
   })

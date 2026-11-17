@@ -21,7 +21,8 @@ import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { Address } from "@/components/security/marks"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { platformProduct, ProductGlyph } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
@@ -50,6 +51,7 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import type { BulkResults, SystemUser } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -230,7 +232,7 @@ function SystemUsers() {
   // brings them into view.
   const narrow = (next: Scope) => {
     setScope(next)
-    list.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    scrollIntoViewRespectingMotion(list.current, { block: "start" })
   }
 
   const row = (user: SystemUser) => (
@@ -264,7 +266,7 @@ function SystemUsers() {
     <Page rise>
       <PageContext eyebrow="Advanced" title="System users" />
 
-      <HostIdentity
+      <IdentityHeader
         mark={platformProduct(host?.platform)}
         fallback={Users}
         title={host?.hostname ?? "Accounts"}
@@ -279,13 +281,11 @@ function SystemUsers() {
         facts={
           data ? (
             <>
-              <span className="numeric">{plural(figures.people, "person", "people")}</span>
-              <FactDot />
-              <span className="numeric">{figures.root} reach root</span>
+              <Fact className="numeric">{plural(figures.people, "person", "people")}</Fact>
+              <Fact className="numeric">{figures.root} reach root</Fact>
               {figures.latest && (
-                <>
-                  <FactDot />
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                <Fact>
+                  <span className="inline-flex max-w-full min-w-0 items-center gap-1.5 align-top">
                     <span className="shrink-0 text-foreground">{figures.latest.username}</span>
                     <span className="numeric shrink-0">
                       {relativeTime(figures.latest.lastLogin)}
@@ -294,7 +294,7 @@ function SystemUsers() {
                       <Address ip={figures.latest.lastLoginFrom} className="min-w-0" />
                     )}
                   </span>
-                </>
+                </Fact>
               )}
             </>
           ) : error ? (
@@ -629,7 +629,9 @@ function AccountRow({
     <ChoiceRow
       href={href}
       verb={`Open ${user.username}`}
-      className={cn(user.disabled && "opacity-60", selected && "bg-accent/40")}
+      // A disabled account is said in words (its sign-in reading) and in the
+      // muted ink of its name, never by fading the row (FND-07).
+      className={cn(selected && "bg-accent/40")}
       leading={
         <span className="flex items-center gap-3">
           {selecting && (
@@ -646,7 +648,11 @@ function AccountRow({
           <AccountMark user={user} />
         </span>
       }
-      title={<span className="font-mono">{user.username}</span>}
+      title={
+        <span className={cn("font-mono", user.disabled && "text-muted-foreground")}>
+          {user.username}
+        </span>
+      }
       description={
         <>
           <span className="numeric font-mono">uid {user.uid}</span>

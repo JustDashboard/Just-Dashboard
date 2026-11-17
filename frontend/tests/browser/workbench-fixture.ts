@@ -26,7 +26,7 @@ const user = {
   ],
   user: {
     id: 1,
-    username: "wayy",
+    username: "operator",
     role: "admin",
     totpEnabled: true,
     disabled: false,
@@ -79,7 +79,7 @@ export const jobs = [
     excludes: [],
     databaseDumps: [1, 2],
     targetKind: "b2",
-    target: { bucket: "wayy-backups", prefix: "db/" },
+    target: { bucket: "operator-backups", prefix: "db/" },
     schedule: "30 2 * * *",
     retention: 14,
     retentionDays: 30,
@@ -302,7 +302,7 @@ const status = {
   },
   clean: false,
   stashes: 0,
-  identity: { name: "Wayy" },
+  identity: { name: "Operator" },
   files: [
     {
       path: "frontend/src/app/(dashboard)/backups/page.tsx",
@@ -420,7 +420,7 @@ const pull = (
   url: `https://github.com/JustDashboard/Just-Dashboard/pull/${number}`,
   state: "open",
   draft: false,
-  author: "wayy",
+  author: "operator",
   comments: 0,
   updatedAt: iso(now - number * 60_000),
   ...extra,
@@ -507,7 +507,7 @@ export async function mockWorkbench(page: Page, tab = "git") {
     if (path === "/git/checkout")
       return json(route, { command: "git checkout", output: "Switched", ok: true })
     if (path === "/git/github/")
-      return json(route, { available: true, account: { loggedIn: true, login: "wayy" } })
+      return json(route, { available: true, account: { loggedIn: true, login: "operator" } })
     if (path === "/git/github/pulls") return json(route, pulls)
     if (/^\/git\/github\/pulls\/\d+\/checkout$/.test(path)) return json(route, { ok: true })
     if (path === "/files/list" || path === "/files/")

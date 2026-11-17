@@ -12,7 +12,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { ago as agoWords, plural } from "@/lib/format"
 import type { PortsFirewall, PortsMeta, SeenListener } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
@@ -20,7 +20,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/hooks/use-now"
 import { useConfirm } from "@/components/confirm-dialog"
-import { InfoTip } from "@/components/form"
+import { Explain } from "@/components/explain"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Fact } from "@/components/fact-line"
 import { IdentityHeader } from "@/components/identity-header"
@@ -66,7 +66,6 @@ import {
   parseQuery,
   parseReachFilter,
   parseSort,
-  sinceWords,
   sortParam,
   sortSockets,
   toCsv,
@@ -535,12 +534,12 @@ function PortsView() {
                 className="pr-8"
                 trailing={
                   <span className="flex size-7 items-center justify-center">
-                    <InfoTip label="Search syntax">
+                    <Explain label="Search syntax">
                       Words match the port, process, command, user, address and reach. Narrow by
                       field with <code>:443</code>, <code>[::]:22</code>, <code>0.0.0.0:80</code>,{" "}
                       <code>port:8000-8100</code>, <code>port:5432,6379</code>,{" "}
                       <code>proto:udp</code>, <code>user:postgres</code> or <code>pid:812</code>.
-                    </InfoTip>
+                    </Explain>
                   </span>
                 }
               />
@@ -861,7 +860,7 @@ function Freshness({
   stale: boolean
 }) {
   const now = useNow(1000)
-  const ago = sinceWords(now - at)
+  const ago = agoWords(at, now)
   return (
     <span className="whitespace-nowrap tabular-nums">
       {refreshing

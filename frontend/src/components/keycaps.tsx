@@ -10,6 +10,15 @@ import { Switch } from "@/components/ui/switch"
 export const KEYCAP =
   "inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-hairline bg-control px-1 font-mono text-micro leading-none text-muted-foreground"
 
+/**
+ * Keys drawn as a glyph rather than a letter: the arrows, Enter, and the
+ * modifiers' signs. The mono face draws them a hairline thin, so beside a
+ * letter's cap they read a step fainter; the sans face, a weight up, draws
+ * them at the letters' ink.
+ */
+const GLYPH_KEYS = /^[←↑→↓↵⏎⇧⌘⌥⌃]$/
+const GLYPH_CAP = "font-sans font-semibold"
+
 /** Names that are keys on a keyboard; anything longer than one character and not here is words. */
 const KEY_NAMES = new Set([
   "Ctrl",
@@ -102,7 +111,7 @@ export function Keycaps({
               <span className="inline-flex items-center gap-1">
                 {part.map((piece, k) =>
                   piece.cap ? (
-                    <kbd key={k} className={KEYCAP}>
+                    <kbd key={k} className={cn(KEYCAP, GLYPH_KEYS.test(piece.text) && GLYPH_CAP)}>
                       {piece.text}
                     </kbd>
                   ) : (

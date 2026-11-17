@@ -97,6 +97,33 @@ describe("IdentityVerbs", () => {
     expect(more).toContain('aria-label="More actions for api"')
   })
 
+  test("never promotes a destructive verb, nor a menu verb in its place", () => {
+    const terminate = { key: "kill", label: "Terminate", icon: Glyph, run: noop, danger: true }
+    const copy = { key: "copy", label: "Copy name", icon: Glyph, run: noop }
+    // The inline verb is destructive: no command, and both verbs in the menu.
+    const inlineDanger = IdentityVerbs({
+      verbs: [{ ...terminate, inline: true }, copy],
+      name: "api",
+    })
+    expect(inlineDanger.command).toBeFalsy()
+    expect(inlineDanger.menu).toBeTruthy()
+    // Nothing marked inline and the first verb destructive: the same.
+    expect(IdentityVerbs({ verbs: [terminate, copy], name: "api" }).command).toBeFalsy()
+    // Only destructive verbs: no command at all.
+    expect(IdentityVerbs({ verbs: [terminate], name: "api" }).command).toBeFalsy()
+    // A safe inline verb after a destructive one is still the command.
+    const html = renderToStaticMarkup(
+      IdentityVerbs({
+        verbs: [
+          { ...terminate, inline: true },
+          { ...copy, inline: true },
+        ],
+        name: "api",
+      }).command,
+    )
+    expect(html).toContain("Copy name")
+  })
+
   test("no other verb, no menu", () => {
     const { command, menu } = IdentityVerbs({ verbs: verbs.slice(0, 1), name: "api" })
     expect(command).toBeTruthy()

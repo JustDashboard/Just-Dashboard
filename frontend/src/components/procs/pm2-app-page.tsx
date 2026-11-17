@@ -15,7 +15,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/hooks/use-now"
 import { DetailPage, useDetailTab, useSiblingSteps } from "@/components/detail-page"
-import { FactDot, IdentityHeader } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { ProductLogo, ProductLogos, hasProductLogo, pm2Product } from "@/components/product-logo"
 import { EmptyState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -47,7 +48,7 @@ import {
   pm2Resolve,
   type PM2StateFilter,
 } from "@/components/procs/pm2-facts"
-import { PM2FactsLine, PM2Missing, PM2Unanswered } from "@/components/procs/pm2-missing"
+import { PM2Missing, PM2Unanswered } from "@/components/procs/pm2-missing"
 import { PM2ScaleDialog } from "@/components/procs/pm2-scale-dialog"
 import {
   isCluster,
@@ -576,7 +577,7 @@ function useHeldStart(process: PM2Process, now: number): number | undefined {
 
 /**
  * The line the page opens on, laid out as a project's header is
- * (`HostIdentity` with a state and a command): the application as what runs
+ * (`IdentityHeader` with a state and a command): the application as what runs
  * it — Node, Bun, Python — its name with its state beside it, then the facts
  * an application is opened to check: its script, how it runs, how often PM2
  * has restarted it and how long it has been up (ticking), and whose daemon
@@ -633,55 +634,39 @@ function AppIdentity({
       command={command}
       menu={menu}
       facts={
-        <PM2FactsLine>
-          <span className="max-w-full min-w-0 truncate font-mono" title={lead.scriptPath}>
+        // One FactLine (drawn by the header from these Facts): each fact
+        // carries its dot, so a wrapped line leaves none at its end.
+        <>
+          <Fact mono title={lead.scriptPath}>
             {lead.scriptPath}
-          </span>
-          <FactDot />
-          <span className="text-foreground">{pm2ModeWords(app)}</span>
-          <FactDot />
-          <span className="numeric">
+          </Fact>
+          <Fact className="text-foreground">{pm2ModeWords(app)}</Fact>
+          <Fact className="numeric">
             {plural(restarts, "restart")}
             {unstable > 0 && <span className="text-destructive"> ({unstable} unstable)</span>}
-          </span>
+          </Fact>
           {uptime > 0 && (
-            <>
-              <FactDot />
-              <span
-                className={cn(
-                  "numeric",
-                  uptime < RECENT_START && restarts > 0 ? "text-warning" : "text-foreground",
-                )}
-              >
-                up {duration(uptime)}
-              </span>
-            </>
+            <Fact
+              className={cn(
+                "numeric",
+                uptime < RECENT_START && restarts > 0 ? "text-warning" : "text-foreground",
+              )}
+            >
+              up {duration(uptime)}
+            </Fact>
           )}
           {/* Whose daemon, only where there is more than one to tell apart. */}
-          {several && (
-            <>
-              <FactDot />
-              <span className="font-mono">{app.daemonId}</span>
-            </>
-          )}
-          {lead.watching && (
-            <>
-              <FactDot />
-              <span className="text-warning">restarts on file change</span>
-            </>
-          )}
+          {several && <Fact mono>{app.daemonId}</Fact>}
+          {lead.watching && <Fact className="text-warning">restarts on file change</Fact>}
           {unsaved && (
-            <>
-              <FactDot />
-              <span
-                className="text-warning"
-                title="Started since the startup list was saved: a reboot would not bring it back"
-              >
-                not in the saved list
-              </span>
-            </>
+            <Fact
+              className="text-warning"
+              title="Started since the startup list was saved: a reboot would not bring it back"
+            >
+              not in the saved list
+            </Fact>
           )}
-        </PM2FactsLine>
+        </>
       }
     />
   )

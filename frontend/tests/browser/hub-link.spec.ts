@@ -29,10 +29,10 @@ const FINGERPRINT = "21fe:31df:a154:a261"
 const MACHINE = {
   id: "nK7f2QbPaa21CNTRL",
   name: "hub.tailed39ba.ts.net",
-  owner: "wayy01@github",
+  owner: "operator@github",
   tags: [],
 }
-const MACHINE_LINE = "The hub's machine: hub.tailed39ba.ts.net, a machine of wayy01@github"
+const MACHINE_LINE = "The hub's machine: hub.tailed39ba.ts.net, a machine of operator@github"
 // Another machine at the hub's name, as the backend says it (§2.4).
 const CHANGED =
   "the hub's machine changed: hub.tailed39ba.ts.net is now held by hub-2.tailed39ba.ts.net (nB2c0000CNTRL), not by hub.tailed39ba.ts.net (nK7f2QbPaa21CNTRL)"
@@ -286,7 +286,7 @@ async function mock(page: Page, initial: Status, auth = admin) {
         releases: [],
         history: [],
         breaking: false,
-        check: { enabled: true, checkedAt: ago(0), repo: "wayy/just-dashboard", ref: "main" },
+        check: { enabled: true, checkedAt: ago(0), repo: "operator/just-dashboard", ref: "main" },
         install: { supported: true, dir: "/opt/just-dashboard", dirty: [] },
       })
     }

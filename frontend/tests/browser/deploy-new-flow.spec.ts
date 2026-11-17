@@ -73,12 +73,12 @@ test.describe("An ambiguous detection", () => {
         source: {
           kind: "git",
           mode: "git_url",
-          url: "https://github.com/Wayy01/ambiguous.git",
+          url: "https://github.com/operator/ambiguous.git",
           ref: "main",
         },
         configuration,
         detection: {
-          source: { kind: "git", remote: "https://github.com/Wayy01/ambiguous.git", ref: "main" },
+          source: { kind: "git", remote: "https://github.com/operator/ambiguous.git", ref: "main" },
           candidates,
           selectedId,
           scannedFiles: 6,

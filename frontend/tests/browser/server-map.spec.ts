@@ -527,19 +527,34 @@ test("the arrows slide the canvas that has the keyboard, and move a chosen box a
   expect(await offset()).toEqual({ x: before.x + 40, y: before.y + 8 })
 })
 
-test("a system's frame the keyboard is on moves with the arrows, everything in it with it", async ({
+test("a system's frame Enter picks moves with the arrows, everything in it with it", async ({
   page,
 }) => {
   const mock = await open(page, "/map?system=system:stack:monitoring")
   await still(page)
   const s = "system:stack:monitoring"
   const was = await at(page, `frame:${s}`)
-  const camera = await view(page)
   // Reached by Tab from the canvas, as a keyboard reaches it.
   await page.locator("[data-slot=server-map] .react-flow").focus()
   await page.keyboard.press("Tab")
   await frame(page, s).focus()
   await expect(frame(page, s)).toBeFocused()
+  // The ring says where the keyboard is: on the frame's own box.
+  const ring = await frame(page, s)
+    .locator(":scope > *")
+    .first()
+    .evaluate((box) => getComputedStyle(box).outlineStyle)
+  expect(ring).toBe("solid")
+  // Walking onto it picks nothing, as on the diagram: the arrows slide the
+  // canvas until Enter picks the frame.
+  const slid = await view(page)
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(async () => Math.round((await view(page)).x)).toBe(Math.round(slid.x) - 48)
+  await page.keyboard.press("ArrowLeft")
+  await expect.poll(async () => Math.round((await view(page)).x)).toBe(Math.round(slid.x))
+  const camera = await view(page)
+  expect(Math.round((await at(page, `frame:${s}`)).x)).toBe(Math.round(was.x))
+  await page.keyboard.press("Enter")
   await page.keyboard.press("Shift+ArrowRight")
   await expect
     .poll(async () => Math.round(((await at(page, `frame:${s}`)).x - was.x) / camera.zoom))

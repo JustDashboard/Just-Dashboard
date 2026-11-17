@@ -5,7 +5,7 @@ import { Copy, External, Key, Play, Warning } from "@/components/icons"
 import { SourceBranch, SourcePull } from "@/components/git/glyphs"
 import { get, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { relativeTime } from "@/lib/format"
+import { duration, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -36,7 +36,6 @@ import { VariablesPanel } from "@/components/deploy/settings/variables"
 import { RunStrip } from "@/components/deploy/run-marks"
 import {
   RunStatus,
-  formatDuration,
   hostOf,
   humanize,
   isActiveRun,
@@ -505,7 +504,7 @@ function ApprovalCard({
       index={index}
       onSelect={onReview}
       disabled={rejected || !canReview}
-      className={cn(rejected && "opacity-80")}
+      // Rejected is said by its status and the muted ink (FND-07).
       leading={
         <AuthorFace
           login={approval.author}
@@ -513,7 +512,9 @@ function ApprovalCard({
           className={cn(rejected && "grayscale")}
         />
       }
-      title={`PR ${approval.providerRef}`}
+      title={
+        <span className={cn(rejected && "text-muted-foreground")}>PR {approval.providerRef}</span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           {approval.author || "unknown author"} ·{" "}
@@ -780,9 +781,13 @@ function PreviewCard({
       index={index}
       onSelect={onOpen}
       busy={deploying || Boolean(active)}
-      className={cn(!open && "opacity-80")}
+      // A closed preview is said by its state and the name's muted ink (FND-07).
       leading={<AuthorFace login={author} trigger={trigger} />}
-      title={<span className="font-mono">{preview.environmentSlug}</span>}
+      title={
+        <span className={cn("font-mono", !open && "text-muted-foreground")}>
+          {preview.environmentSlug}
+        </span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           PR #{preview.providerRef}
@@ -950,7 +955,7 @@ function PreviewSheet({
                       <>
                         <RunStatus state={run.state} />
                         <span className="numeric w-16 text-right text-hint whitespace-nowrap text-muted-foreground">
-                          {formatDuration(runDurationSeconds(run))}
+                          {duration(runDurationSeconds(run))}
                         </span>
                       </>
                     }

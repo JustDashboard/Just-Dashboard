@@ -448,7 +448,7 @@ function LogsScreen() {
     setFilter(next)
   }
   const identity = record
-    ? found && <RecordIdentity key={record} record={found} aside={<WorkspaceHelp compact />} />
+    ? found && <RecordIdentity key={record} record={found} aside={<WorkspaceHelp />} />
     : viewSource &&
       selected &&
       !windowError && (
@@ -478,7 +478,7 @@ function LogsScreen() {
                   lens={lens}
                 />
               )}
-              <WorkspaceHelp compact />
+              <WorkspaceHelp />
             </div>
           }
         />
@@ -521,7 +521,10 @@ function LogsScreen() {
       }}
     >
       <Page fill className="gap-4 md:gap-5 md:max-lg:h-auto md:max-lg:overflow-visible">
-        <PageContext title="Logs" actions={identity ? undefined : <WorkspaceHelp />} />
+        {/* The shortcuts' `?` closes the identity line (its `aside`), never
+            a row of its own (16 Nov): with no line drawn — no source read
+            yet, or a window that failed — the `?` key still opens them. */}
+        <PageContext title="Logs" />
         {identity}
 
         {/* One frame around the whole workbench. The rail and the lines are

@@ -1,11 +1,12 @@
 "use client"
 
+import { INLINE_LINK } from "@/components/inline-link"
 import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Bell, Globe } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { ago, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type {
@@ -53,7 +54,6 @@ import {
   reading,
   REFRESH_DEADLINE_MS,
   unanswered,
-  updatedLabel,
   type Answer,
   type Reading,
 } from "@/components/proxy/freshness"
@@ -431,7 +431,10 @@ export default function ProxyOverviewPage() {
           href={fact.href}
           title={fact.title}
           className={cn(
-            "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+            // A fact that opens its page is a link on the line: underlined at
+            // rest (INLINE_LINK) and a finger's press wide (hit-area).
+            INLINE_LINK,
+            "hit-area transition-colors hover:text-foreground",
             fact.tone === "danger" && "font-medium text-destructive",
             fact.tone === "warning" && "font-medium text-warning",
           )}
@@ -781,7 +784,7 @@ function Freshness({
 }) {
   const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
   if (late.length > 0) return noAnswerLabel(late)
-  return refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)
+  return refreshing ? "Refreshing…" : at !== undefined && `Updated ${ago(at, now, { units: 2 })}`
 }
 
 /**
@@ -799,7 +802,8 @@ function firingFact(alerts?: ProxyAlerts) {
       <Link
         href="/proxy/alerts"
         className={cn(
-          "numeric rounded-sm font-medium focus-ring hover:underline",
+          "numeric hit-area font-medium",
+          INLINE_LINK,
           firing > 0 ? "text-destructive" : "text-warning",
         )}
       >
