@@ -2325,6 +2325,60 @@ test.describe("A domain row", () => {
         true,
       )
     })
+
+    test(`says a certificate that wants attention whole, ahead of a redirect's target, at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1200 })
+      const fixture = await mockProject(page, {
+        operations: {
+          ...healthyOperations,
+          domains: {
+            ...healthyOperations.domains,
+            domains: [
+              served("api.example.test"),
+              { ...served("www.example.test"), certificate: "expired", certificateDaysLeft: 0 },
+              served("last.example.test"),
+            ],
+          },
+        },
+      })
+      ;(fixture.configuration() as { domains: unknown[] }).domains = [
+        { hostname: "api.example.test", https: true, ownership: "managed" },
+        // The most a line holds: a sign-in, a redirect and a certificate past its day.
+        {
+          hostname: "www.example.test",
+          https: true,
+          ownership: "managed",
+          redirectTo: "api.example.test",
+          protection: { username: "ops", hash: "fixture-sealed" },
+        },
+        { hostname: "last.example.test", https: true, ownership: "managed" },
+      ]
+      await page.goto("/deploy/7/settings/domains")
+      const rows = page.getByRole("list", { name: "Domains" }).getByRole("listitem")
+      await expect(rows).toHaveCount(3)
+      const row = rows.nth(1)
+      const expired = row.getByText("Certificate expired", { exact: true })
+      const sends = row.getByRole("button", {
+        name: "Sends visitors from www.example.test to api.example.test",
+      })
+      await expect(expired).toBeVisible()
+      // The line cuts what does not fit at its end, so a danger is not left
+      // there: it is inside the line whole, and the redirect follows it.
+      const cut = await expired.evaluate((word) => {
+        let line = word.parentElement!
+        while (getComputedStyle(line).overflowX !== "clip") line = line.parentElement!
+        return word.getBoundingClientRect().right - line.getBoundingClientRect().right
+      })
+      expect(cut).toBeLessThanOrEqual(0.5)
+      const [danger, target] = [(await expired.boundingBox())!, (await sends.boundingBox())!]
+      expect(target.x).toBeGreaterThan(danger.x + danger.width)
+      // And the row is still the height of the plain one before it.
+      const [plain, full] = [(await rows.nth(0).boundingBox())!, (await row.boundingBox())!]
+      // The first row has no padding above it; the rest of a row is the same.
+      expect(full.height - plain.height).toBeCloseTo(12, 0)
+    })
   }
 })
 

@@ -66,7 +66,11 @@ export function ConsoleView({
   state: ConsoleState
   /** After the state: when it ended, the status it exited with. */
   detail?: React.ReactNode
-  /** A short word on how the run behaves, as a `Tag`: "Keeps running if you leave". */
+  /**
+   * A short word on how the run behaves, as a `Tag`: "Keeps running if you
+   * leave". Drawn from `sm` up: a phone's head is one row, and beside the
+   * state and Stop the tag left the run's own name a word wide.
+   */
   note?: React.ReactNode
   lines: ConsoleLine[]
   /** Lines the buffer let go of at the start, said rather than quietly missing. */
@@ -99,8 +103,14 @@ export function ConsoleView({
   return (
     <Pane className={cn("bg-surface-sunken", rise && "animate-rise", className)}>
       <PaneHeader className="flex-wrap gap-x-2 gap-y-1 px-3">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">{title}</span>
-        {note}
+        {/* Cut, it is cut only at its end, and the whole name is on hover. */}
+        <span
+          className="min-w-0 flex-1 truncate text-xs font-medium"
+          title={typeof title === "string" ? title : label}
+        >
+          {title}
+        </span>
+        {note && <span className="flex shrink-0 max-sm:hidden">{note}</span>}
         <Status
           tone={shown.tone}
           live={running}

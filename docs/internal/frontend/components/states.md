@@ -12,7 +12,7 @@ Empty, absent, failed, stale, notice and loading: each one designed, and each at
 
 **Deprecated, kept until the page passes move their callers:** `CouldNotRead` and `NotUpdating`
 (`database/home/blocks.tsx`), `ReadFailed` (`database/fleet/read-failed.tsx`), `ReadError`
-(`database/redis/read-error.tsx`), `NetworkReadWarning` (`network/read-warning.tsx`). Each is now
+(`database/kit/read-error.tsx`; `database/redis/read-error.tsx` re-exports it), `NetworkReadWarning` (`network/read-warning.tsx`). Each is now
 one call of the member named in its `@deprecated` line.
 
 ## Which one
