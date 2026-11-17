@@ -22,7 +22,7 @@ import type {
 } from "@/lib/types"
 import { browserInlined, pointsAtLocalhost } from "@/components/deploy/deployment-defaults"
 import { InitialsMark } from "@/components/user-avatar"
-import { FileIcon } from "@/components/files/file-icon"
+import { FileIcon } from "@/components/file-icon"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,

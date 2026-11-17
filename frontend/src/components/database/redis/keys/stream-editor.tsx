@@ -47,7 +47,7 @@ import type { KeyEditorProps } from "@/components/database/redis/keys/key-pane"
 import { MemberDialog } from "@/components/database/redis/keys/member-dialog"
 import { MemberTable, type MemberColumn } from "@/components/database/redis/keys/member-table"
 import { useMembers } from "@/components/database/redis/keys/members"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { entryMoment, localMoment } from "@/components/database/redis/ttl"
 import type { RedisBytes, RedisRow, RedisStreamGroup } from "@/components/database/redis/types"
 

@@ -238,11 +238,17 @@ export function KeyRail({
     <Pane flush data-slot="redis-key-rail" className="min-w-0 flex-1">
       <RailHead>
         {server.data ? (
-          <DbPicker server={server.data} db={db} onChange={redis.setDb} />
+          <DbPicker server={server.data} db={db} onChange={redis.setDb} fill />
         ) : (
           !server.error && <Skeleton className="h-7 w-20" />
         )}
-        <span className="min-w-0 flex-1" />
+        {/* The picker takes the head's room, as it does in every rail. A
+            spacer beside it took half of that, and "db0" was cut to "d". It
+            is drawn only where no picker is: while the server is read, and
+            on a cluster node or a sentinel, which have no numbered databases. */}
+        {!(server.data?.features.databases && db !== undefined) && (
+          <span className="min-w-0 flex-1" />
+        )}
         <IconAction
           label="Refresh the keys"
           className={RAIL_ACTION}

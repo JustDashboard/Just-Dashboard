@@ -24,6 +24,7 @@ import type {
 } from "@/lib/types"
 import { CHANGE_TONE, sentence, shortIdentity, shortRevision } from "@/components/deploy/vocabulary"
 import { dataPointChanges } from "@/components/deploy/data-rollback-model"
+import { DIFF_WASH } from "@/components/diff-view"
 
 const UPDATE_TEXT: Record<NonNullable<ReleaseUpdateStatus["state"]>, string> = {
   current: "The upstream tag still resolves to the digest this release pinned.",
@@ -53,10 +54,10 @@ const LETTER: Record<ReleaseListChange["change"], string> = {
   unchanged: "",
 }
 
-/** The diff view's own wash behind an added or a removed value (`files/diff-view.tsx`). */
+/** The diff view's own wash behind an added or a removed value. */
 const WASH: Partial<Record<ReleaseListChange["change"], string>> = {
-  added: "color-mix(in oklab, var(--git-added) 9%, transparent)",
-  removed: "color-mix(in oklab, var(--git-deleted) 9%, transparent)",
+  added: DIFF_WASH.add,
+  removed: DIFF_WASH.del,
 }
 
 type Change = {

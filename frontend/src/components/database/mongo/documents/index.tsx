@@ -65,7 +65,7 @@ import {
   useListed,
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
-import { Stopped, useSecondsRunning, useStoppable } from "@/components/database/mongo/in-flight"
+import { Stopped, useSecondsRunning, useStoppable } from "@/components/database/kit/in-flight"
 import {
   CollectionKindTag,
   CollectionMark,
@@ -95,13 +95,9 @@ import {
 import { mergeFilter } from "@/components/database/mongo/shell"
 import { ImportDialog } from "@/components/database/mongo/transfer"
 import type { MongoDoc, MongoFindResult } from "@/components/database/mongo/types"
-import {
-  MongoWorkbench,
-  WorkbenchHead,
-  type Workbench,
-} from "@/components/database/mongo/workbench"
-import { ReadError } from "@/components/database/redis/read-error"
-import { HeadVerbs, useHeadMenu } from "@/components/database/workbench/chrome"
+import { MongoWorkbench, type Workbench } from "@/components/database/mongo/workbench"
+import { ReadError } from "@/components/database/kit/read-error"
+import { HeadVerbs, ObjectHead, useHeadMenu } from "@/components/database/workbench/chrome"
 
 /** The documents before they land: a few of them, each a short run of fields. */
 function DocumentsSkeleton() {
@@ -160,7 +156,6 @@ function Documents({
   mongo,
   catalog,
   collection: info,
-  leading,
   confirm,
   exportCollection,
   exporting,
@@ -564,26 +559,27 @@ function Documents({
 
   return (
     <div data-slot="mongo-documents" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <WorkbenchHead leading={leading}>
-        <h2 className="flex min-w-0 items-center gap-1.5">
-          <CollectionMark kind={kind} />
-          <span className="min-w-0 truncate font-mono text-sm leading-6 font-medium">
-            {collection}
+      <ObjectHead
+        mark={<CollectionMark kind={kind} />}
+        name={collection}
+        // What it holds stands beside its name from `md`, on the head's one
+        // line, and is the rail's row to say below that. As a second line
+        // under the name it made the head taller than the rail's head beside
+        // it, whose hairline it continues, and a row taller on a phone.
+        kind={
+          <span className="flex items-center gap-2">
+            <CollectionKindTag kind={kind} />
+            {info && (info.type === "view" || info.statsKnown) && (
+              <span className="numeric text-hint text-muted-foreground max-md:hidden">
+                {info.type === "view"
+                  ? `on ${info.viewOn}`
+                  : `${plural(info.count, "document")} · ${bytes(info.size)}`}
+              </span>
+            )}
           </span>
-        </h2>
-        <CollectionKindTag kind={kind} />
-        {info && (
-          <span className="numeric min-w-0 truncate text-hint text-muted-foreground max-md:hidden">
-            {info.type === "view"
-              ? `on ${info.viewOn}`
-              : info.statsKnown
-                ? `${plural(info.count, "document")} · ${bytes(info.size)}`
-                : ""}
-          </span>
-        )}
-        <span className="min-w-0 flex-1" />
-        <VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />
-      </WorkbenchHead>
+        }
+        verbs={<VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />}
+      />
       {/* The collection's commands, in the frame's head; reading again is a
           word in its menu. */}
       <HeadVerbs>

@@ -628,7 +628,8 @@ test.describe("a group's page", () => {
     await expect(b.getByText("carrying", { exact: true })).toBeVisible()
     await expect(b.getByText("19.8 ms")).toBeVisible()
     await expect(b.getByRole("img", { name: "12 of 12 recent samples good" })).toBeVisible()
-    await expect(page.getByText(/Every member's device is up/)).toBeVisible()
+    // Readiness with nothing in the way is no footer: the table already says each is up.
+    await expect(page.getByText(/Every member's device is up/)).toHaveCount(0)
     await expect(page.getByRole("list", { name: "What each member is bound to" })).toContainText(
       "via 198.51.100.1 on eth1 · tier 2 · mark 0x200/0x7f00 · table 7702 · from 198.51.100.20",
     )

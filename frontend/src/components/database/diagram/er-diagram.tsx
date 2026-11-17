@@ -80,7 +80,7 @@ import { useCatalog } from "@/components/database/data/use-table"
 import { EngineMark } from "@/components/database/kit"
 import { ContainerPicker } from "@/components/database/kit/container-picker"
 import { tableParams } from "@/components/database/schema/address"
-import { useFocusReturn } from "@/components/database/schema/focus"
+import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
 import { selectStatement } from "@/components/database/schema/select"
 import { useSettledAddress } from "@/components/database/schema/use-settled-address"
 import { useDatabase } from "@/components/database/shell/database-context"
@@ -392,7 +392,7 @@ function Canvas({
   const { conn, engine, select, href, goto } = useDatabase()
   const flow = useReactFlow()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn((dialog.props as { request: unknown }).request !== null)
+  useSurfaceFocusReturn((dialog.props as { request: unknown }).request !== null)
   const searchRef = useRef<HTMLInputElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
   const [pickedEdge, setPickedEdge] = useState<string | null>(null)

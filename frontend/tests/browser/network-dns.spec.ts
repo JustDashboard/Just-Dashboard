@@ -232,6 +232,21 @@ test.describe("DNS", () => {
       }
     })
 
+    test(`the line's command is its icon on a phone and its words from sm, at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await open(page, "/network/dns")
+      await expect(page.getByText("MagicDNS")).toBeVisible()
+      const resolve = page
+        .locator("[data-slot=host-identity]")
+        .getByRole("button", { name: "Resolve a name" })
+      await expect(resolve.locator("svg")).toBeVisible()
+      const box = (await resolve.boundingBox())!
+      if (width < 640) expect(box.width).toBeLessThanOrEqual(box.height + 1)
+      else expect(box.width).toBeGreaterThan(box.height * 2)
+    })
+
     test(`cards with and without optional data are one height at ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await open(page, "/network/dns")

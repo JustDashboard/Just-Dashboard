@@ -416,7 +416,7 @@ const withoutTailscale = {
     peers: [],
   },
 }
-// The install in place is a `MissingThing`; the pointer elsewhere is still an empty state.
+// The install in place and the pointer elsewhere are both a `MissingThing`.
 const tailscaleBlock = (page: Page) =>
   page
     .locator("[data-slot=empty-state], [data-slot=missing-thing]")

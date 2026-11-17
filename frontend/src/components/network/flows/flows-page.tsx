@@ -14,7 +14,7 @@ import {
 import { Page, PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { ErrorState, NeedsAdmin, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -305,7 +305,7 @@ export function SocketHistoryPage() {
         facts={
           <IdentityFacts loading={loading}>
             {!admin ? (
-              <span>needs the admin capability</span>
+              <span>needs an administrator</span>
             ) : !data ? (
               <span>the recorder could not be read</span>
             ) : (
@@ -337,10 +337,10 @@ export function SocketHistoryPage() {
         menu={admin ? <VerbMenu verbs={menu} label="More recorder actions" /> : undefined}
       />
       {!admin ? (
-        <EmptyState
+        <NeedsAdmin
+          what="Socket history"
           icon={ClockRewind}
-          title="Socket history needs the admin capability"
-          description="Peer and descriptor-owner history can expose private workload connections."
+          why="Peer and descriptor-owner history can expose private workload connections."
         />
       ) : !data && read.error ? (
         <ErrorState error={read.error} onRetry={read.refresh} retryable />

@@ -141,7 +141,7 @@ describe("sessions in words", () => {
     expect(sessionsWords({ sessions: 1, complete: false })).toBe("1 or more session")
     const words = lengthWords({ p50: 2.4, p90: 31, p99: 410, max: 7300 })
     expect(words.reading).toBe("half inside 2.4 s")
-    expect(words.hint).toBe("9 in 10 inside 31.0 s · 99 in 100 inside 6m 50s · longest 2h 1m")
+    expect(words.hint).toBe("9 in 10 inside 31.0 s · longest 2h 1m")
     expect(`${words.reading} ${words.hint}`).not.toMatch(/p\d\d/)
   })
 })

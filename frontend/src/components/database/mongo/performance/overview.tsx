@@ -21,11 +21,11 @@ import {
 } from "@/components/ui/table"
 import { BusiestCollections } from "@/components/database/mongo/performance/busiest"
 import { latest, type StatRow } from "@/components/database/mongo/performance/samples"
-import { DatabaseMark } from "@/components/database/mongo/rail"
+import { NameMark } from "@/components/database/kit/marks"
 import type { MongoDatabase, MongoServer } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { countScale, micros, perSecond } from "@/components/database/redis/performance/samples"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 // Module constants: `ChartPanel` is memoised on its props, and a series or a
 // formatter made fresh each render would redraw every chart on every sample.
@@ -355,7 +355,7 @@ export function OverviewView({
                   <TableRow key={entry.name}>
                     <TableCell>
                       <span className="flex min-w-0 items-center gap-2">
-                        <DatabaseMark name={entry.name} />
+                        <NameMark name={entry.name} />
                         <RowLink
                           mono
                           title={`Open ${entry.name} in Documents`}

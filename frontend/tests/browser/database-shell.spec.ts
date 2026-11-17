@@ -541,7 +541,6 @@ const UNDER_THE_HEADER = [
   "/databases/1/logs",
   "/databases/1/access",
   "/databases/1/backups",
-  "/databases/1/import",
   "/databases/1/alerts",
   "/databases/1/settings",
   "/databases/1/settings/network",
@@ -613,6 +612,21 @@ test("a workbench heads itself, and the shell draws no header over it", async ({
   await expect(header(page)).toHaveCount(1)
   await expect(line(page)).toContainText("Redis 7.4.1")
   await expect(line(page).getByRole("link", { name: "Browse keys" })).toBeVisible()
+})
+
+test("a flow opens on its own question and the way back, with no header over it", async ({
+  page,
+}) => {
+  await mockDatabases(page, LABELLED)
+  await page.goto("/databases/1/import")
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Where is the database coming from?",
+  )
+  await expect(header(page)).toHaveCount(0)
+  await expect(strip(page)).toHaveCount(0)
+  const flow = page.locator("[data-slot=flow-header]")
+  await expect(flow.getByRole("link", { name: "shop" })).toHaveAttribute("href", "/databases/1")
+  await expect(flow).toContainText("Step 1 of 4")
 })
 
 test("the page of one item keeps the one-line strip over its own line", async ({ page }) => {

@@ -32,8 +32,8 @@ import {
   TRANSCRIPT_KEPT,
   commandMs,
   type CommandClass,
-} from "@/components/database/query/command-class"
-import { DatabaseMark } from "@/components/database/mongo/rail"
+} from "@/components/database/kit/command-class"
+import { NameMark } from "@/components/database/kit/marks"
 import { shapeProblem } from "@/components/database/mongo/shell"
 import type {
   MongoCapability,
@@ -42,7 +42,7 @@ import type {
   MongoVerdict,
 } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
@@ -326,7 +326,7 @@ export function ConsoleView({
                 <SelectContent position="popper" align="start" className="max-h-72">
                   {listedDatabases.map((name) => (
                     <SelectItem key={name} value={name} className="font-mono text-xs">
-                      <DatabaseMark name={name} />
+                      <NameMark name={name} />
                       {name}
                     </SelectItem>
                   ))}

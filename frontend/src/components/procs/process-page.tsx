@@ -3,7 +3,7 @@
 import { useCallback } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { ArrowUpRight, Copy, Cpu } from "@/components/icons"
+import { ArrowUpRight, Copy, Cpu, Logs } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { duration, plural, timestamp } from "@/lib/format"
@@ -18,6 +18,7 @@ import { rowReveal } from "@/components/icon-action"
 import { DetailPage, useDetailTab, useSiblingSteps } from "@/components/detail-page"
 import { Fact } from "@/components/fact-line"
 import { IdentityHeader, IdentityVerbs } from "@/components/identity-header"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import {
   ProductGlyph,
   ProductLogo,
@@ -199,6 +200,7 @@ export function ProcessPage() {
             confirm={confirm}
             signal={control.signal}
             onOpen={open}
+            onLogs={views.some((view) => view.key === "logs") ? () => setTab("logs") : undefined}
           />
         ) : (
           // The line's final shape while the process is read, its verbs'
@@ -362,8 +364,11 @@ function useRail() {
  * (with that supervisor's own mark, a link to its page), how long it has been
  * up, ticking, and its parent. A process nothing supervises leads the facts,
  * because that is the one a reader acts on. Its verbs are the line's own:
- * Terminate as the command and the other signals behind `⋯`. A process that
- * has gone has none.
+ * its logs as the command, where its owner keeps any (a zombie's parent, its
+ * remedy, before them), and every signal behind `⋯`, Terminate and Kill last
+ * in the destructive ink. No destructive verb takes the command: with no
+ * logs and no parent to open, the line has only its menu. A process that has
+ * gone has none.
  */
 function ProcessIdentity({
   process: row,
@@ -374,6 +379,7 @@ function ProcessIdentity({
   confirm,
   signal,
   onOpen,
+  onLogs,
 }: {
   process: ProcessRow
   gone?: string
@@ -383,9 +389,25 @@ function ProcessIdentity({
   confirm: Parameters<typeof useProcessVerbs>[0]["confirm"]
   signal: Parameters<typeof useProcessVerbs>[0]["signal"]
   onOpen: (pid: number) => void
+  /** Opens the Logs view; absent when the process's owner keeps none. */
+  onLogs?: () => void
 }) {
   const now = useNow(1000, !gone)
-  const verbs = useProcessVerbs({ process: row, confirm, signal, onOpen, children: childCount })
+  const signals = useProcessVerbs({ process: row, confirm, signal, onOpen, children: childCount })
+  const parent = signals.find((verb) => verb.inline)
+  const logs: Verb | undefined = onLogs && {
+    key: "logs",
+    label: "Open logs",
+    short: "Logs",
+    icon: Logs,
+    inline: true,
+    run: onLogs,
+  }
+  const verbs = [
+    ...(parent ? [parent] : []),
+    ...(logs ? [logs] : []),
+    ...signals.filter((verb) => verb !== parent),
+  ]
   const kind = uncontrollable(row)
   const started = new Date(row.createTime).getTime()
   const up = duration(Math.max(0, (now - started) / 1000))
@@ -485,7 +507,15 @@ function ProcessIdentity({
           )}
         </>
       }
-      {...(gone ? { menu: false } : IdentityVerbs({ verbs, name: row.name }))}
+      {...(gone
+        ? { menu: false }
+        : parent || logs
+          ? IdentityVerbs({ verbs, name: row.name })
+          : {
+              menu: verbs.length > 0 && (
+                <VerbMenu verbs={verbs} label={`More actions for ${row.name}`} />
+              ),
+            })}
     />
   )
 }

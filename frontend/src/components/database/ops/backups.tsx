@@ -29,7 +29,7 @@ import { TakeDump } from "@/components/database/ops/backups-take"
 import type { DbBackupFile, DbBackups } from "@/components/database/ops/backups-types"
 import { UploadDump } from "@/components/database/ops/backups-upload"
 import { useAddressStep } from "@/components/database/ops/settings-step"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
@@ -108,7 +108,7 @@ export function Backups() {
   const command = useRef<HTMLButtonElement>(null)
   // The dialogs of this page are opened by state: this hands the keyboard
   // back to the button or the row that opened one.
-  useFocusReturn()
+  useFocusTrail()
 
   // Every thirty seconds, and every two while a transfer runs: a dump in
   // flight is not in the list, and the list is where its end shows.

@@ -99,23 +99,30 @@ export function gutterCh(lines: number): number {
  * Lines with a number gutter, in the faint ink every gutter uses. `render`
  * draws a line's text (a highlighter); without it the line is plain.
  * `wrap` breaks a long line under itself instead of scrolling sideways.
+ * `rule` hairlines a line off the one above (a Dockerfile's new build stage),
+ * so a file reads as the parts it is.
  */
 export function CodeLines({
   lines,
   render,
   wrap = true,
+  rule,
   className,
 }: {
   lines: string[]
   render?: (line: string, index: number) => React.ReactNode
   wrap?: boolean
+  rule?: (index: number) => boolean
   className?: string
 }) {
   const gutter = gutterCh(lines.length)
   return (
     <span className={cn("block", !wrap && "min-w-max", className)}>
       {lines.map((line, index) => (
-        <span key={index} className="flex">
+        <span
+          key={index}
+          className={cn("flex", rule?.(index) && "mt-1.5 border-t border-hairline pt-1.5")}
+        >
           <span
             aria-hidden
             data-slot="code-gutter"

@@ -57,7 +57,7 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   what the page has not drawn) feeds `LiveBytes` figures, each tile's fifteen minutes as its
   `TileTrend`, the device rows' two-minute sparklines and every chart's Live window.
 - **Colour that names a kind.** A device's role takes a lane hue (`ROLE_HUE`, from the palette that
-  cannot be read as a state), an address's prefix the port hue (`network/address.tsx`), in and out
+  cannot be read as a state), an address's prefix the muted ink (`Cidr`, `components/address.tsx`), in and out
   their chart colours everywhere they are drawn.
 - **The lit edge on what is taken.** Peers, forwards and lists open their sheets and a device its
   page (0.8.7), and all are lit rows; route tables, rule lists and shaping are readings and stay framed tables. (The tailnet's

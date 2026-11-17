@@ -63,7 +63,7 @@ test("read-only VPN visits do not request administrator-only peer data", async (
     await json(route, {})
   })
   await page.goto("/network/vpn")
-  await expect(page.getByText("VPN needs the admin capability")).toBeVisible()
+  await expect(page.getByText("VPN needs an administrator")).toBeVisible()
   expect(reads).toBe(0)
 })
 

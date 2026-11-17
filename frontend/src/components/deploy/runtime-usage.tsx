@@ -19,7 +19,7 @@ import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { ChartPanel, ChartPlaceholder } from "@/components/chart-panel"
 import { HeadReading } from "@/components/metrics/chart-reading"
-import { SplitBar } from "@/components/metrics/hardware-panels"
+import { ScaledPair } from "@/components/metrics/hardware-panels"
 import { MomentInspector } from "@/components/metrics/moment-inspector"
 import { RangePicker, windowPhrase } from "@/components/metrics/range-picker"
 import { TileTrend } from "@/components/sparkline"
@@ -555,19 +555,20 @@ function Readings({
             Disk I/O
           </>
         }
-        value={
-          read !== null || write !== null ? (
-            <LiveBytes value={(read ?? 0) + (write ?? 0)} suffix="/s" />
-          ) : (
-            "—"
-          )
-        }
+        // Read as the Network tile beside it reads: the one direction is the
+        // figure and the other its detail. The sum with both in the detail
+        // left no room for the minute it was recorded at, before the first
+        // live frame.
+        value={read !== null ? <LiveBytes value={read} suffix="/s" /> : "—"}
         trend={trend(trends.disk, "Disk I/O", HUE.disk)}
         hint={
-          read !== null || write !== null
-            ? `${rate(read)} read · ${rate(write)} written${liveDisk ? "" : ` · ${asOf}`}`
-            : undefined
+          write !== null
+            ? `${rate(write)} written${liveDisk ? "" : ` · ${asOf}`}`
+            : read !== null && !liveDisk
+              ? asOf
+              : undefined
         }
+        trailing={read !== null ? "read" : undefined}
       />
     </StatGrid>
   )
@@ -639,7 +640,7 @@ function DataMoved({ stats, running }: { stats?: ContainerStats; running: boolea
                   )}
                 </div>
                 {row.counted && (
-                  <SplitBar
+                  <ScaledPair
                     label={row.sides.map((s) => `${bytes(s.value)} ${s.word}`).join(", ")}
                     busiest={busiest}
                     parts={row.sides}

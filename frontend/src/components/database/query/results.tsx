@@ -3,7 +3,7 @@
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
 import { useState } from "react"
-import { ChevronDown, Download, Sparkles, StopCircle, Warning } from "@/components/icons"
+import { ChevronDown, Download, Sparkles, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DbExportFormat } from "@/lib/types"
 import { Sweep } from "@/components/loading"
@@ -25,6 +25,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { EXPORT_FORMATS, EXPORT_ROWS, EXPORT_ROWS_MAX } from "@/components/database/data/export"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { RunningCommand } from "@/components/database/kit/running-command"
 import { ChartView } from "@/components/database/query/chart-view"
 import { useKeyNames } from "@/components/database/query/keys"
 import { Messages, StatementLine } from "@/components/database/query/messages"
@@ -369,7 +370,8 @@ export function Results({
               ) : (
                 entry.label
               ),
-            count: entry.id === "results" && run && run.steps.length > 1 ? run.steps.length : undefined,
+            count:
+              entry.id === "results" && run && run.steps.length > 1 ? run.steps.length : undefined,
           }))}
         />
         <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
@@ -422,10 +424,8 @@ function Waiting({ run, onCancel }: { run: Run; onCancel: () => void }) {
         </p>
         <StatementLine sql={again?.sql ?? run.sql} className="block text-muted-foreground" />
         {engine.can("queryCancel") && (
-          <Button size="sm" variant="outline" onClick={onCancel} disabled={run.cancelling}>
-            <StopCircle />
-            Cancel
-          </Button>
+          // The one Stop every query surface draws; the time is said beside it.
+          <RunningCommand stopping={run.cancelling} onStop={onCancel} />
         )}
       </div>
     </div>

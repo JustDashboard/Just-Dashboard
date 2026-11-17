@@ -204,17 +204,25 @@ test.describe("Redirects, access and headers", () => {
     await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
 
     // The menu offers the redirect only towards a name that serves the app,
-    // and the row then says where it sends visitors.
+    // and the row then says where it sends visitors: a fact on its line, whose
+    // two choices are a layer over the row rather than a band under it.
     await page.getByRole("button", { name: "Actions for www.api.example.test" }).click()
     await page.getByRole("menuitem", { name: "Redirect to another domain" }).click()
     const row = page.getByRole("list", { name: "Domains" }).getByRole("listitem").nth(1)
-    await expect(row.getByText("Sends visitors to")).toBeVisible()
+    const sends = row.getByRole("button", {
+      name: "Sends visitors from www.api.example.test to api.example.test",
+    })
+    await expect(sends).toContainText("· 308")
+    await expect(page.getByText("Sends visitors to")).toHaveCount(0)
+    await sends.click()
     await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toHaveText(
       "api.example.test",
     )
     await expect(page.getByRole("combobox", { name: "Answer" })).toHaveText("Permanent · 308")
     await page.getByRole("combobox", { name: "Answer" }).click()
     await page.getByRole("option", { name: "Temporary · 307" }).click()
+    await expect(sends).toContainText("· 307")
+    await page.keyboard.press("Escape")
 
     // The route's rules are one form under the list, for every name at once.
     const access = page.getByRole("form", { name: "Access and headers" })
@@ -258,7 +266,7 @@ test.describe("Redirects, access and headers", () => {
     // Removing the name redirected to puts the other back to serving.
     await page.getByRole("button", { name: "Actions for api.example.test" }).click()
     await page.getByRole("menuitem", { name: "Remove" }).click()
-    await expect(page.getByText("Sends visitors to")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /^Sends visitors from/ })).toHaveCount(0)
   })
 
   test("each domain says its own scheme, and HSTS follows the HTTPS domains", async ({ page }) => {
@@ -2221,6 +2229,155 @@ test.describe("Screenshots", () => {
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true)
+    })
+  }
+})
+
+test.describe("A domain row", () => {
+  // Every name has a live route and certificate, so each line holds the most
+  // it can: the state, the certificate and its days left, then the sign-in's
+  // key or where a redirect goes.
+  const served = (hostname: string) => ({
+    ...healthyOperations.domains.domains[0],
+    hostname,
+    certificateName: hostname,
+  })
+  const names = [
+    "api.example.test",
+    "plain.example.test",
+    "www.example.test",
+    "team.example.test",
+    "last.example.test",
+  ]
+
+  for (const width of [1440, 390]) {
+    test(`is one height with a password on, a redirect set, or neither, at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1200 })
+      const fixture = await mockProject(page, {
+        operations: {
+          ...healthyOperations,
+          domains: { ...healthyOperations.domains, domains: names.map(served) },
+        },
+      })
+      ;(fixture.configuration() as { domains: unknown[] }).domains = [
+        { hostname: "api.example.test", https: true, ownership: "managed" },
+        { hostname: "plain.example.test", https: true, ownership: "managed" },
+        {
+          hostname: "www.example.test",
+          https: true,
+          ownership: "managed",
+          redirectTo: "api.example.test",
+        },
+        {
+          hostname: "team.example.test",
+          https: true,
+          ownership: "managed",
+          protection: { username: "a-rather-long-user-name", hash: "fixture-sealed" },
+        },
+        // The last row has no hairline under it, so it is not one of those compared.
+        { hostname: "last.example.test", https: true, ownership: "managed" },
+      ]
+      await page.goto("/deploy/7/settings/domains")
+      const list = page.getByRole("list", { name: "Domains" })
+      await expect(list.getByRole("listitem")).toHaveCount(5)
+      await expect(
+        page.getByRole("button", {
+          name: "Password · a-rather-long-user-name on team.example.test",
+        }),
+      ).toBeVisible()
+      await expect(
+        page.getByRole("button", {
+          name: "Sends visitors from www.example.test to api.example.test",
+        }),
+      ).toBeVisible()
+
+      // The first row has no padding above it, so the three states are
+      // compared from the second row on: neither, a redirect, a password.
+      const rows = await list.getByRole("listitem").evaluateAll((items) =>
+        items.map((item) => {
+          const box = item.getBoundingClientRect()
+          const at = (selector: string) => {
+            const inner = item.querySelector(selector)!.getBoundingClientRect()
+            return { top: inner.top - box.top, height: inner.height }
+          }
+          return {
+            top: box.top,
+            height: box.height,
+            name: at("a[aria-label^='Open']"),
+            owner: at("[role=combobox]"),
+          }
+        }),
+      )
+      const [first, plain, redirecting, guarded] = rows
+      for (const row of [redirecting, guarded]) {
+        expect(row.height).toBeCloseTo(plain.height, 0)
+        // Position, not only height: the name, its line and the controls sit
+        // where they sit in a plain row, and the rows step evenly down.
+        expect(row.name.top).toBeCloseTo(plain.name.top, 0)
+        expect(row.owner.top).toBeCloseTo(plain.owner.top, 0)
+      }
+      expect(plain.top - first.top).toBeCloseTo(first.height, 0)
+      expect(redirecting.top - plain.top).toBeCloseTo(plain.height, 0)
+      expect(guarded.top - redirecting.top).toBeCloseTo(plain.height, 0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      )
+    })
+
+    test(`says a certificate that wants attention whole, ahead of a redirect's target, at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1200 })
+      const fixture = await mockProject(page, {
+        operations: {
+          ...healthyOperations,
+          domains: {
+            ...healthyOperations.domains,
+            domains: [
+              served("api.example.test"),
+              { ...served("www.example.test"), certificate: "expired", certificateDaysLeft: 0 },
+              served("last.example.test"),
+            ],
+          },
+        },
+      })
+      ;(fixture.configuration() as { domains: unknown[] }).domains = [
+        { hostname: "api.example.test", https: true, ownership: "managed" },
+        // The most a line holds: a sign-in, a redirect and a certificate past its day.
+        {
+          hostname: "www.example.test",
+          https: true,
+          ownership: "managed",
+          redirectTo: "api.example.test",
+          protection: { username: "ops", hash: "fixture-sealed" },
+        },
+        { hostname: "last.example.test", https: true, ownership: "managed" },
+      ]
+      await page.goto("/deploy/7/settings/domains")
+      const rows = page.getByRole("list", { name: "Domains" }).getByRole("listitem")
+      await expect(rows).toHaveCount(3)
+      const row = rows.nth(1)
+      const expired = row.getByText("Certificate expired", { exact: true })
+      const sends = row.getByRole("button", {
+        name: "Sends visitors from www.example.test to api.example.test",
+      })
+      await expect(expired).toBeVisible()
+      // The line cuts what does not fit at its end, so a danger is not left
+      // there: it is inside the line whole, and the redirect follows it.
+      const cut = await expired.evaluate((word) => {
+        let line = word.parentElement!
+        while (getComputedStyle(line).overflowX !== "clip") line = line.parentElement!
+        return word.getBoundingClientRect().right - line.getBoundingClientRect().right
+      })
+      expect(cut).toBeLessThanOrEqual(0.5)
+      const [danger, target] = [(await expired.boundingBox())!, (await sends.boundingBox())!]
+      expect(target.x).toBeGreaterThan(danger.x + danger.width)
+      // And the row is still the height of the plain one before it.
+      const [plain, full] = [(await rows.nth(0).boundingBox())!, (await row.boundingBox())!]
+      // The first row has no padding above it; the rest of a row is the same.
+      expect(full.height - plain.height).toBeCloseTo(12, 0)
     })
   }
 })

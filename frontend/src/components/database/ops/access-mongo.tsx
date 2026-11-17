@@ -30,7 +30,7 @@ import type { MongoRoleRef, MongoUser, MongoUsers } from "@/components/database/
 import { accountHref } from "@/components/database/ops/account-address"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
@@ -78,7 +78,7 @@ export function MongoAccess() {
   const { id, readOnly, status, param, goto } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const view = param("view") === "roles" ? "roles" : "users"
   const [creating, setCreating] = useState(false)

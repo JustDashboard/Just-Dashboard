@@ -15,7 +15,7 @@ import {
   TRANSCRIPT_KEPT,
   commandMs,
   type CommandClass,
-} from "@/components/database/query/command-class"
+} from "@/components/database/kit/command-class"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
 import { redisClassify, redisCommand } from "@/components/database/redis/api"

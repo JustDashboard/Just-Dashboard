@@ -1,4 +1,4 @@
-import { del, get, patch, post, put } from "@/lib/api"
+import { del, get, patch, post, put, shaped } from "@/lib/api"
 import { uploadForm } from "@/components/database/data/upload"
 import { recordedServers } from "@/components/database/mongo/performance/samples"
 import type {
@@ -45,17 +45,6 @@ const of = (target: MongoTarget) => ({
   database: target.database || undefined,
   collection: target.collection,
 })
-
-/**
- * An answer held to the one field the page cannot do without. A server that
- * answers one of these routes with something else — an older backend, a
- * proxy's page — is a failed read with a sentence, not a page that throws
- * half-way through drawing it.
- */
-function shaped<T>(value: unknown, field: string, what: string): T {
-  if (typeof value === "object" && value !== null && field in value) return value as T
-  throw new Error(`The server's answer for ${what} could not be read.`)
-}
 
 /* ------------------------------------------------------------- collections */
 

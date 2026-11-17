@@ -556,18 +556,22 @@ function buttonName(button: Pick<Element, "getAttribute" | "textContent">) {
  * phone, where it is drawn as its icon alone, the tip says that name, so the
  * icon is never explained in fewer words than a screen reader hears. The
  * menu always says `label`.
+ *
+ * No destructive verb takes the command (the operator's rule of 16 Nov):
+ * Terminate, Kill, Delete and the like stay behind `⋯` in the destructive
+ * ink, and a thing whose only verbs are destructive draws no command.
  */
 export function IdentityVerbs({ verbs, name }: { verbs: Verb[]; name: string }): {
   command?: React.ReactNode
   menu?: React.ReactNode
 } {
-  const lead = verbs.find((verb) => verb.inline) ?? verbs[0]
+  const safe = verbs.filter((verb) => !verb.danger)
+  const lead = safe.find((verb) => verb.inline) ?? safe[0]
   const rest = verbs.filter((verb) => verb !== lead)
   return {
     command: lead && (
       <Button
         size="sm"
-        variant={lead.danger ? "destructive" : "default"}
         disabled={lead.disabled}
         aria-label={lead.short ? lead.label : undefined}
         onClick={lead.run}

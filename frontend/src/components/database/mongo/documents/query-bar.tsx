@@ -17,9 +17,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { RunningCommand } from "@/components/database/query/running-command"
+import { RunningCommand } from "@/components/database/kit/running-command"
 import { CodeField } from "@/components/database/mongo/code-field"
-import { worthShowing } from "@/components/database/mongo/in-flight"
+import { worthShowing } from "@/components/database/kit/in-flight"
 import {
   draftLabel,
   optionCount,

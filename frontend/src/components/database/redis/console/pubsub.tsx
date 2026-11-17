@@ -20,7 +20,7 @@ import { redisPubSub, redisPublish } from "@/components/database/redis/api"
 import { bytesId, bytesLabel } from "@/components/database/redis/bytes"
 import { FeedList } from "@/components/database/redis/console/feed-list"
 import { listenTargets } from "@/components/database/redis/console/targets"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { RedisFeedEnd, RedisMessage } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
 

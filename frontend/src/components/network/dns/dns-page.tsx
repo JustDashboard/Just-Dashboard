@@ -8,7 +8,7 @@ import type { DNSTLSReport, DNSView, HostRecords } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { Globe, Inspect, Plus, RefreshClockwise } from "@/components/icons"
+import { Globe, Inspect, MagnifyingGlass, Plus, RefreshClockwise } from "@/components/icons"
 import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { ErrorState } from "@/components/state"
@@ -248,9 +248,11 @@ export function DNSPage() {
           view={data}
           failed={Boolean(failed)}
           command={
-            <Button size="sm" onClick={resolve} aria-label="Resolve a name">
-              <span className="sm:hidden">Resolve</span>
-              <span className="max-sm:hidden">Resolve a name</span>
+            // Its icon alone on a phone, as every identity line's command is;
+            // its words from `sm`, and its name the tip.
+            <Button size="sm" onClick={resolve}>
+              <MagnifyingGlass className="size-3.5" />
+              Resolve a name
             </Button>
           }
           menu={<VerbMenu verbs={verbs} label="DNS actions" />}

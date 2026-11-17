@@ -15,7 +15,7 @@ import { KeyRail, useKeyWalk, type RailView } from "@/components/database/redis/
 import { Keyspace } from "@/components/database/redis/keys/keyspace"
 import { NewKeyDialog } from "@/components/database/redis/keys/new-key"
 import type { RedisBytes } from "@/components/database/redis/types"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 import {
   WORKBENCH_PAGE,
@@ -47,7 +47,7 @@ export function RedisKeys() {
   const redis = useRedis()
   const { id, db, server, selection, param, goto, select, engine, canWrite } = redis
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
 
   const selected = keyFromAddress(selection.key, param("keyB64"))
   const [epoch, setEpoch] = useState(0)

@@ -10,7 +10,7 @@ import { Field } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { useFocusReturn } from "@/components/database/schema/focus"
+import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
 import { NameMark } from "@/components/database/kit/marks"
 import type { MemoryStatus } from "@/components/database/diagram/memory"
 
@@ -209,7 +209,7 @@ export function NoteDialog({
   const [text, setText] = useState(initial)
   const [asking, setAsking] = useState(false)
   const dirty = text.trim() !== initial.trim()
-  useFocusReturn(true, returnTo)
+  useSurfaceFocusReturn(true, returnTo)
   // The question takes the keyboard, and hands it back to the note.
   const keep = useRef<HTMLButtonElement>(null)
   const note = useRef<HTMLTextAreaElement>(null)

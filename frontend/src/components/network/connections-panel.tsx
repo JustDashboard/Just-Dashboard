@@ -156,14 +156,19 @@ export function ConnectionsPanel() {
         {picture}
         <section aria-label="Remote addresses" className="flex min-w-0 flex-col gap-4">
           <Toolbar>
-            <FilterChip selected={scope === "all"} onClick={() => setScope("all")}>
-              Everything
-              {data && <ChipCount>{data.peers.length}</ChipCount>}
-            </FilterChip>
-            <FilterChip selected={scope === "public"} onClick={() => setScope("public")}>
-              From the internet
-              {data && <ChipCount>{fromInternet}</ChipCount>}
-            </FilterChip>
+            {/* One choice, so it is named as one; `contents` keeps the two
+                chips items of the toolbar's own wrap, as they were before
+                they had a group. */}
+            <div role="group" aria-label="Which peers to show" className="contents">
+              <FilterChip selected={scope === "all"} onClick={() => setScope("all")}>
+                Everything
+                {data && <ChipCount>{data.peers.length}</ChipCount>}
+              </FilterChip>
+              <FilterChip selected={scope === "public"} onClick={() => setScope("public")}>
+                From the internet
+                {data && <ChipCount>{fromInternet}</ChipCount>}
+              </FilterChip>
+            </div>
             {search}
           </Toolbar>
           {!data ? (

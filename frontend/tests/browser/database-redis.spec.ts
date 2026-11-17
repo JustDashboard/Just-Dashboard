@@ -822,15 +822,24 @@ test.describe("keys", () => {
 
     // The old browser showed db0 selected over the keys of whichever database
     // the connection was made to.
-    await expect(page.getByRole("combobox", { name: "Logical database" })).toHaveText("db3")
+    await expect(page.getByRole("button", { name: "database: db3" })).toHaveText("db3")
+    // Whole, beside the rail's other controls: it was cut to its first letter.
+    await expect
+      .poll(() =>
+        page
+          .getByRole("button", { name: "database: db3" })
+          .getByText("db3", { exact: true })
+          .evaluate((name) => name.scrollWidth <= name.clientWidth),
+      )
+      .toBe(true)
     await expect(rail(page).getByRole("button", { name: /^session/ })).toBeVisible()
     for (const call of redis.asked("/keys/tree")) expect(call.query.has("db")).toBe(false)
 
     // Database 0 can be reached, and is asked for by its number.
-    await page.getByRole("combobox", { name: "Logical database" }).click()
-    await expect(page.getByRole("option", { name: /^db3/ })).toContainText("connects here")
-    await expect(page.getByRole("option", { name: /^db7/ })).toContainText("41 keys")
-    await page.getByRole("option", { name: /^db0/ }).click()
+    await page.getByRole("button", { name: "database: db3" }).click()
+    await expect(page.getByRole("menuitem", { name: /^db3/ })).toContainText("connects here")
+    await expect(page.getByRole("menuitem", { name: /^db7/ })).toContainText("41 keys")
+    await page.getByRole("menuitem", { name: /^db0/ }).click()
     await expect(page).toHaveURL(/[?&]db=0(&|$)/)
     await expect.poll(() => redis.asked("/keys/tree").at(-1)?.query.get("db")).toBe("0")
   })

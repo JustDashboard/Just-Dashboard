@@ -920,6 +920,29 @@ test.describe("documents", () => {
     await expect(page.getByText("No collection called nope")).toBeVisible()
   })
 
+  test("a collection's head is one line on Documents and Schema, level with the rail's head, and on a phone", async ({
+    page,
+  }) => {
+    await mockMongo(page)
+    const head = page.locator("[data-slot=object-head]")
+    const railHead = rail(page).locator("[data-slot=rail-head]")
+    for (const address of [collection("users"), `${SCHEMA}?db=${DB}&collection=users`]) {
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.goto(address)
+      // What the collection holds is beside its name, not a line under it:
+      // the head's hairline continues the rail's.
+      await expect(head).toContainText("2 documents · 508 B")
+      const [strip, beside] = [(await head.boundingBox())!, (await railHead.boundingBox())!]
+      expect(strip.y).toBeCloseTo(beside.y, 0)
+      // One row: within the pixel its menu's button adds, not a line taller.
+      expect(Math.abs(strip.height - beside.height)).toBeLessThan(2)
+      // A phone's head is the same one row, and leaves the count to the rail.
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(head.getByText("2 documents · 508 B")).toBeHidden()
+      expect((await head.boundingBox())!.height).toBeCloseTo(strip.height, 0)
+    }
+  })
+
   // C2: the old editor loaded a grid row through JSON.parse and saved it back,
   // which rewrote ObjectIds, dates and 64-bit integers and re-ordered the fields.
   test("a document is edited as the text it is stored as, and saved only if it is still that document", async ({
@@ -1946,7 +1969,7 @@ test.describe("aggregations", () => {
     })
     // The console needs no collection.
     await page.goto(`${QUERY}?db=${DB}&view=command`)
-    const prompt = page.getByLabel("Command", { exact: true })
+    const prompt = page.getByRole("textbox", { name: "Command", exact: true })
     const run = page.getByRole("button", { name: "Run", exact: true })
 
     await prompt.fill("{ ping: 1 }")
@@ -2006,7 +2029,7 @@ test.describe("aggregations", () => {
     const classify = hold()
     const mongo = await mockMongo(page, { classifyHeld: classify.until })
     await page.goto(`${QUERY}?db=${DB}&view=command`)
-    const prompt = page.getByLabel("Command", { exact: true })
+    const prompt = page.getByRole("textbox", { name: "Command", exact: true })
     await prompt.fill("{ ping: 1 }")
     await prompt.press("Enter")
     // Nothing is run before the server has said what the command is.
@@ -2025,7 +2048,7 @@ test.describe("aggregations", () => {
     await mockMongo(page, { reader: true })
     await page.goto(`${QUERY}?db=${DB}&view=command`)
     await expect(page.getByText("Your role cannot run commands")).toBeVisible()
-    await expect(page.getByLabel("Command", { exact: true })).toHaveCount(0)
+    await expect(page.getByRole("textbox", { name: "Command", exact: true })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Run", exact: true })).toHaveCount(0)
     await expect(
       page.getByRole("complementary", { name: "Commands the console knows" }),
@@ -2038,7 +2061,7 @@ test.describe("aggregations", () => {
       verdicts: { insert: { class: "write" } },
     })
     await page.goto(`${QUERY}?db=${DB}&view=command`)
-    const prompt = page.getByLabel("Command", { exact: true })
+    const prompt = page.getByRole("textbox", { name: "Command", exact: true })
     await prompt.fill("{ ping: 1 }")
     await expect(page.getByRole("button", { name: "Run", exact: true })).toBeEnabled()
     await prompt.fill('{ insert: "orders" }')
@@ -2219,9 +2242,9 @@ test.describe("schema", () => {
     // usage and no plan to explain.
     await mockMongo(page, { summaries: { 5: { flavor: "ferretdb", flavorLabel: "FerretDB" } } })
     await page.goto(`${SCHEMA}?db=${DB}&collection=users`)
-    const strip = page.getByRole("group", { name: "Schema views" })
-    await expect(strip.getByRole("button", { name: "Analysis" })).toBeVisible()
-    await expect(strip.getByRole("button", { name: "Validation" })).toHaveCount(0)
+    const strip = page.getByRole("tablist", { name: "Schema views" })
+    await expect(strip.getByRole("tab", { name: "Analysis" })).toBeVisible()
+    await expect(strip.getByRole("tab", { name: "Validation" })).toHaveCount(0)
     await page.goto(collection("users"))
     await expect(documents(page)).toHaveCount(2)
     await expect(page.getByRole("button", { name: "Explain" })).toHaveCount(0)
@@ -2643,7 +2666,7 @@ for (const [label, viewport] of [
     await expect(page.locator("[data-slot=mongo-stage]")).toHaveCount(2)
     await expectTheRules(page, "the builder with stages")
     await page.goto(`${QUERY}?db=${DB}&view=command`)
-    await page.getByLabel("Command", { exact: true }).fill("{ ping: 1 }")
+    await page.getByRole("textbox", { name: "Command", exact: true }).fill("{ ping: 1 }")
     await page.getByRole("button", { name: "Run", exact: true }).click()
     await expect(page.getByRole("log")).toContainText("ok")
     await expectTheRules(page, "the console")

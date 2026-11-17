@@ -1569,11 +1569,13 @@ test("a volume's contents are in the volume, not a page away", async ({ page }) 
   await expect(panel.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
   await expect(panel.getByRole("button", { name: "base" })).toBeVisible()
 
-  // The file manager is still one click away, and it is handed the directory.
-  await expect(panel.getByRole("link", { name: "Open in Files" })).toHaveAttribute(
-    "href",
-    "/files?path=%2Fvar%2Flib%2Fdocker%2Fvolumes%2Fapp-data%2F_data",
-  )
+  // The file manager is still one click away, from the volume's line: the
+  // browser under it draws no second way there.
+  await expect(panel.getByRole("link", { name: "Open in Files" })).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "Open in Files" })).toHaveCount(0)
+  await page.getByRole("button", { name: "More actions for app-data" }).click()
+  await expect(page.getByRole("menuitem", { name: "Open in Files" })).toBeVisible()
+  await page.keyboard.press("Escape")
 
   // Postgres' own files, under a running container: reading is safe, and the
   // editor one click below this line is not.

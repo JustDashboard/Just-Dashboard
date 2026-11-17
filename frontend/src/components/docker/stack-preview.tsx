@@ -33,7 +33,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ComposeDiff, DiffCount, ServiceLabel } from "@/components/docker/stack-diff"
+import { ComposeDiff, ServiceLabel } from "@/components/docker/stack-diff"
+import { DiffCount } from "@/components/diff-count"
 import { bucketTone, type ServiceReading } from "@/components/docker/stack-service-readings"
 import { diffCounts, splitImage } from "@/components/docker/stack-views"
 

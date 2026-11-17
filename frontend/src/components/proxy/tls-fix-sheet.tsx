@@ -16,8 +16,8 @@ import type {
   VHost,
 } from "@/lib/types"
 import type { Finding } from "@/components/finding-list"
-import { unifiedDiff } from "@/components/files/diff"
-import { DiffView } from "@/components/files/diff-view"
+import { unifiedDiff } from "@/lib/diff"
+import { DiffView } from "@/components/diff-view"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { Pane } from "@/components/panel"
 import { RowList, Row } from "@/components/row-list"
