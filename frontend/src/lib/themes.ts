@@ -18,18 +18,36 @@
 export const THEME_STORAGE_KEY = "just-dashboard.theme"
 
 /**
+ * Where "Pause animations" is kept: this browser's, like the reduced-motion
+ * setting it stands beside, and not the account's. `MOTION_PAUSED` is the one
+ * value it holds; anything else, or nothing, is motion as designed.
+ */
+export const MOTION_STORAGE_KEY = "just-dashboard.motion"
+export const MOTION_PAUSED = "paused"
+
+/**
  * Inlined in <head>, before anything paints.
  *
- * Two jobs: put `.dark` on the root so the `dark:` variants resolve, and tell
- * the browser the page is dark so its own form controls, scrollbars and
- * `color-scheme`-derived defaults match. It also drops the stored light/dark
- * choice from anyone upgrading, so the key does not sit in localStorage
- * forever meaning nothing.
+ * Three jobs. It puts `.dark` on the root so the `dark:` variants resolve, and
+ * tells the browser the page is dark so its own form controls, scrollbars and
+ * `color-scheme`-derived defaults match. It puts `data-motion="paused"` on the
+ * root for a browser that asked for still pages (the shell's "Pause
+ * animations", `components/shell/motion-pause.ts`), so a paused page never
+ * starts moving and then stops: the stylesheet reads the attribute the way it
+ * reads `prefers-reduced-motion`. And it drops the stored light/dark choice
+ * from anyone upgrading, so the key does not sit in localStorage forever
+ * meaning nothing.
+ *
+ * Storage is read last and inside the `try`: a browser that refuses it (a
+ * private window, site data blocked) still gets the class, and is simply not
+ * paused.
  */
 export function themeBootstrapScript(): string {
   return (
-    `(function(){try{var d=document.documentElement;` +
+    `(function(){var d=document.documentElement;` +
     `d.classList.add("dark");d.style.colorScheme="dark";` +
+    `try{if(localStorage.getItem(${JSON.stringify(MOTION_STORAGE_KEY)})===${JSON.stringify(MOTION_PAUSED)})` +
+    `d.setAttribute("data-motion",${JSON.stringify(MOTION_PAUSED)});` +
     `localStorage.removeItem(${JSON.stringify(THEME_STORAGE_KEY)})}catch(e){}})()`
   )
 }
