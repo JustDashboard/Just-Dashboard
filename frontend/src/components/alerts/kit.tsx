@@ -15,6 +15,7 @@ import { ChannelGlyph } from "@/components/deploy/vocabulary"
 import { Bone } from "@/components/bone"
 import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { WireLaneTitle } from "@/components/wire/wire-lane"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
 import {
@@ -194,6 +195,14 @@ export function KindCards<K extends string>({
  *
  * While `waiting` (the rules not read yet) every area keeps its place without
  * its words, so nothing under the picture moves when they land.
+ *
+ * On a phone it takes the phone form of `pictures-on-a-phone.md` its page
+ * calls for. `marks` (the default): the areas' and the channels' marks with
+ * the server named between them, for a page whose kind cards and rules name
+ * the areas again. `stack`: the areas, the server and the channels stacked
+ * with their words and no lines, for a page where the picture is the only
+ * place an area that is not watched is named — the host's eight sources,
+ * whose marks ran off as a row of seven with no captions.
  */
 export function AlertsPicture<K extends string>({
   kinds,
@@ -205,6 +214,7 @@ export function AlertsPicture<K extends string>({
   reach,
   waiting,
   onAdd,
+  phone = "marks",
 }: {
   kinds: AlertKinds<K>
   rules: AlertRuleView<K>[]
@@ -217,8 +227,13 @@ export function AlertsPicture<K extends string>({
   reach: React.ReactNode
   waiting?: boolean
   onAdd?: (kind: K) => void
+  /** The phone's form: the marks alone, or every word stacked. */
+  phone?: "marks" | "stack"
 }) {
   const wide = useBreakpoint("lg")
+  const stacked = !wide && phone === "stack"
+  // Stacked, no line is drawn: the nodes wire to a hub that is never placed.
+  const unwired = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
@@ -236,8 +251,8 @@ export function AlertsPicture<K extends string>({
       rules={enabled.filter((rule) => area.kinds.includes(rule.kind))}
       subjects={subjects.filter((s) => area.kinds.includes(s.kind))}
       containerRef={container}
-      hubRef={hub}
-      compact={!wide}
+      hubRef={stacked ? unwired : hub}
+      compact={!wide && !stacked}
       waiting={waiting}
       onAdd={onAdd}
     />
@@ -249,8 +264,8 @@ export function AlertsPicture<K extends string>({
       kind={target.kind}
       live={target.channel ? reaches(rules, target.channel) : false}
       containerRef={container}
-      hubRef={hub}
-      compact={!wide}
+      hubRef={stacked ? unwired : hub}
+      compact={!wide && !stacked}
       onAdd={() => router.push("/deploy/notifications")}
     />
   ))
@@ -278,6 +293,27 @@ export function AlertsPicture<K extends string>({
           <div aria-hidden />
           <div role="group" aria-label="Who is told" className="flex flex-col gap-4">
             {channelNodes}
+          </div>
+        </div>
+      ) : stacked ? (
+        <div className="flex flex-col gap-8">
+          <div>
+            <WireLaneTitle title="Watched" className="mb-4" />
+            <div role="group" aria-label="What the rules watch" className="flex flex-col gap-4">
+              {areas}
+            </div>
+          </div>
+          <WireNode
+            mark={<WireHost size="md" />}
+            eyebrow="This server"
+            title={hubTitle}
+            hint={hubReach}
+          />
+          <div>
+            <WireLaneTitle title="Told" className="mb-4" />
+            <div role="group" aria-label="Who is told" className="flex flex-col gap-4">
+              {channelNodes}
+            </div>
           </div>
         </div>
       ) : (
