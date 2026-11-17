@@ -17,7 +17,9 @@ project's (`shell/database-header.tsx`, drawn by `shell/database-shell.tsx`): th
 name as the switcher, whether it answers, one line of facts, *Open data* as its one command, Connect
 and the verb menu. The exceptions are decided in one place (`shell/header-rule.ts`): Data, Query,
 Schema and the Diagram carry that line as their own frame's head, and the page of one item (a
-statement, a table, a session, an account) keeps a one-line strip over the item's own identity line.
+statement, a table, a session, an account) keeps a one-line strip over the item's own identity line:
+a smaller copy of the header in its order (state beside the name, the Open command, Connect and the
+menu).
 
 The control center draws every saved database as a card, shelved by where it runs, its engine or its
 environment (the table it could be laid across as, and its picture of what the databases feed, went
@@ -73,10 +75,13 @@ engine keeps run times) and rows. Access
 opens on who signs in (each account wired to the server, pulsing while it holds sessions) over the
 accounts with counted filters, one card to an account and one height in every state. **An account
 is a page of its own** (`/databases/[id]/access/[account]`, `ops/account-page.tsx` and
-`account-frame.tsx`; the sheet's `?account=` address redirects there): its line (mark, name, whether
-a session is open as it, its tags, what its grants add up to), one command (a new password) with
-the drop in the `⋯` menu, its views in the address (`?tab=`), and from `xl` the list beside it as a
-rail in the filter the list was left in, walked by Alt+↑ and Alt+↓ with the view carried. A SQL
+`account-frame.tsx`; the sheet's `?account=` address redirects there), on the shared `DetailPage`
+(`components/detail-page.tsx`): the way back, the previous and next arrows and the shortcuts' help
+on one line (the arrows hidden on a phone), its line (mark, name, whether a session is open as it,
+its tags, what its grants add up to), one command (a new password) with the drop in the `⋯` menu,
+its views on `ViewTabList` with the open one in `?tab=`, and from `xl` the list beside it as a
+`Rail` in the filter the list was left in, walked by Alt+↑ and Alt+↓ as Workspace commands with
+the view carried. A SQL
 account has Grants (memberships and the privilege matrix, staged and reviewed as the server's
 statements), Sessions (Performance's sessions narrowed to it, each a way to its panel there) and
 Settings (its attributes on one save bar, sending only what changed); a key–value user has Rule
@@ -168,11 +173,12 @@ CONCURRENTLY` through the schema change dialog, and **Missing indexes** on SQL S
 
 A statement, a table and a session each open as a page of their own under Performance
 (`/databases/[id]/performance/statements/[key]`, `/tables/[name]`, `/sessions/[pid]`), on the
-process page's shape (`ops/performance-detail.tsx`): the way back to the list, an identity line with
-one command and a `⋯` menu, the views as an underlined strip with the open one in `?tab=`, and from
-`xl` the list it came from as a rail with that list's own filter, order and narrowing
-(`ops/performance-lists.ts` holds the keys both read), Alt+↑ and Alt+↓ walking it with the view
-kept; on a phone the page is the one pane and its two arrows step. A statement
+shared `DetailPage` (`components/detail-page.tsx`, framed by `ops/performance-detail.tsx`): the way
+back, the previous and next arrows and the shortcuts' help on one line (the arrows hidden on a
+phone), an identity line with one command and a `⋯` menu, the views on `ViewTabList` with the open
+one in `?tab=`, and from `xl` the list it came from as a `Rail` with that list's own filter, order
+and narrowing (`ops/performance-lists.ts` holds the keys both read), Alt+↑ and Alt+↓ walking it as
+Workspace commands with the view kept. A statement
 (`ops/performance-statement.tsx`) has Figures as `ReadingLine`s with the recorded window at each
 line's end, Text, Plan and History; it is the one place the Statements view, Statement history and
 the top statements on Logs open. A table (`ops/performance-table.tsx`) has its size as one strip,
@@ -188,7 +194,10 @@ footnote said is a fact on its title line (`ops/performance-words.tsx`);
 `tests/browser/database-performance.spec.ts`.
 
 Data, Query, Schema and Diagram are four workbenches under one head
-(`components/database/workbench/chrome.tsx`): the database's identity and the open thing's verbs in
+(`components/database/workbench/chrome.tsx`) — with one rail kit (`workbench/rail.tsx`: `RailHead`,
+`RailFind`, `RailGroupHead`, `RailRow`, `RailSkeleton`, `RailNoMatch`), one side column
+(`WorkbenchSide`, 256px opening width on every workbench), one open-object strip (`ObjectHead`),
+and one container picker and mark (`kit/container-picker.tsx`, `kit/marks.tsx`): the database's identity and the open thing's verbs in
 the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
 a bar at the foot — Tables, Rows and Details on Data, where a row is a card and its full row the
 Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where Run's menu holds the
@@ -208,7 +217,8 @@ draws the replication (`import/picture.tsx`, words in the unit-tested `import/mo
 source, the subscription and the database here, a line that moves while rows or changes are on
 their way with how far behind the target is written on it. Generate draws each generator as the
 project it writes for (`generate/options.ts` `logoKeys`; its language's mark where the project has
-none), and before anything is written its place is that mark, "Nothing written yet" and Generate.
+none), with its language as a tag only where the language is not the name; before anything is
+written its place is that mark, "Nothing written yet" and the one Generate.
 Search says a limit only when one was hit, as the tail of its summary sentence, and each table's
 *Every match* is a small verb on its title line.
 

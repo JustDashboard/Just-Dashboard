@@ -11,7 +11,8 @@ import {
   Warning,
 } from "@/components/icons"
 import { IconAction, rowReveal } from "@/components/icon-action"
-import { KEYCAP } from "@/components/command-search/keycaps"
+import { Keycaps } from "@/components/keycaps"
+import { ARROW_CAPS } from "@/components/map/canvas-keys"
 import { Status } from "@/components/status-dot"
 import { PaneSection } from "@/components/panel"
 import { Detail, DetailList } from "@/components/detail-list"
@@ -114,20 +115,31 @@ export function MapInspector({
         )}
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground">
+      {/* The canvas's keys. A key means nothing under a finger, so a touch
+          screen is not shown them. */}
+      <div
+        data-slot="map-keys"
+        className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground pointer-coarse:hidden"
+      >
         <Key cap="F">Fit</Key>
         <Key cap="I">Panel</Key>
         <Key cap="↵">Open</Key>
         <Key cap="Esc">Let go</Key>
+        <Key
+          cap={ARROW_CAPS}
+          title="Arrows slide the canvas, or move the chosen box. Shift takes a longer step."
+        >
+          Move
+        </Key>
       </div>
     </aside>
   )
 }
 
-function Key({ cap, children }: { cap: string; children: React.ReactNode }) {
+function Key({ cap, title, children }: { cap: string; title?: string; children: React.ReactNode }) {
   return (
-    <span className="flex items-center gap-1.5">
-      <kbd className={KEYCAP}>{cap}</kbd>
+    <span title={title} className="flex items-center gap-1.5">
+      <Keycaps keys={cap} />
       {children}
     </span>
   )

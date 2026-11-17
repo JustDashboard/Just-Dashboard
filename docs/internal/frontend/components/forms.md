@@ -145,9 +145,9 @@ their labels. WP-39 adds lint rules against the retired names.
 
 **Retired names, still exported until WP-39:** `SecretField` from `database/ops/access-parts`,
 `generatePassword` from `database/connect/rules`, `SettingsPage` from `settings/setting-card`. The
-proxy's own `ListField` and generator, the found-server dialog's password field, the tailnet field
-on Domains and the code fields on Passkeys and the hub sign-in move onto the shared parts in their
-areas' wave-2 passes.
+proxy's `ListField` is a deprecated wrapper over the shared one, and the code fields on Passkeys
+and the hub sign-in are `OneTimeCodeInput` now. Two local `SecretField`s remain, on the credentials
+page and a webhook's sheet.
 
 ## Related
 
@@ -347,7 +347,9 @@ parameter search `?q=`) is sent on to the page that holds it.
 **A sheet is the same anatomy wherever it opens**, which is `SidePanel`'s doc comment and `Modal`'s
 too. The deployment section's sheets each put a different body in the one frame — a `Select` for a
 kind, an eyebrow `<legend>` over a group, Cancel on one and not the next — so a sheet was
-recognisable by which page opened it. In order: a sheet that edits a thing that exists opens on
+recognisable by which page opened it. A sheet that edits is titled `Edit {name}`, one that adds
+`Add {kind}`, and a read-only history sheet `{name} · history`, waiting on the skeleton of its
+list. In order: a sheet that edits a thing that exists opens on
 that thing, its mark, its name and its `FormFacts`, so the subject is recognised before a field is
 read; a choice between kinds — a credential kind, a channel's service, a webhook's provider, an
 alert's measure, a schedule's action — is a `ChoiceGrid` of cards carrying their marks (a

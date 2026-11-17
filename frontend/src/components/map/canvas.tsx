@@ -40,11 +40,14 @@ import {
   type System,
   type SystemNode,
 } from "@/lib/server-systems"
+import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
+import { motionMs } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
 import { CanvasZoom, CanvasZoomWord, FLOAT } from "@/components/canvas-zoom"
 import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
+import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
 import { edgeTypes, type WireData } from "@/components/map/edges"
 import { MapInspector, UnreadNotices } from "@/components/map/inspector"
 import {
@@ -76,18 +79,6 @@ const UNREAD_ROOM = 96
 const FIT_PADDING = 0.06
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
 const FLY = { padding: 0.04, maxZoom: 1 }
-
-/**
- * A fly-to's length, or none when the reader asked for less motion — in the
- * system or with the product's pause (`data-motion="paused"`). The root rule
- * that stills every CSS animation cannot reach a duration handed to the
- * canvas, so the view lands where it was going without the travel.
- */
-function glide(ms: number) {
-  if (typeof window === "undefined") return ms
-  if (document.documentElement.dataset.motion === "paused") return 0
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : ms
-}
 
 const clampZoom = (z: number) => Math.min(ZOOM.max, Math.max(ZOOM.min, z))
 
@@ -254,7 +245,7 @@ export function MapCanvas({
 
   const flyTo = useCallback(
     (id: string, duration = 450) => {
-      void flow.fitView({ ...FLY, nodes: [{ id: `frame:${id}` }], duration: glide(duration) })
+      void flow.fitView({ ...FLY, nodes: [{ id: `frame:${id}` }], duration: motionMs(duration) })
     },
     [flow],
   )
@@ -263,7 +254,7 @@ export function MapCanvas({
     setChosen(null)
     setKinds(null)
     update({ focus: undefined })
-    void flow.fitView({ padding: 0.06, duration: glide(450) })
+    void flow.fitView({ padding: 0.06, duration: motionMs(450) })
   }, [flow, update])
   const focusOn = useCallback(
     (id: string, fly = true) => {
@@ -284,7 +275,7 @@ export function MapCanvas({
       void flow.fitView({
         nodes: ids.map((n) => ({ id: n })),
         padding: 0.25,
-        duration: glide(400),
+        duration: motionMs(400),
         maxZoom: 1.1,
       })
     },
@@ -304,19 +295,16 @@ export function MapCanvas({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
-      if (
-        target?.closest?.("input, textarea, select, [contenteditable], [role=dialog], [role=menu]")
-      )
-        return
+      if (isTypingTarget(target) || target?.closest?.(OWNER_SELECTOR)) return
       const zoom = zoomKey(e)
       if (zoom) {
         e.preventDefault()
-        if (zoom === "in") void flow.zoomIn({ duration: glide(150) })
-        else if (zoom === "out") void flow.zoomOut({ duration: glide(150) })
-        else void flow.zoomTo(1, { duration: glide(150) })
+        if (zoom === "in") void flow.zoomIn({ duration: motionMs(150) })
+        else if (zoom === "out") void flow.zoomOut({ duration: motionMs(150) })
+        else void flow.zoomTo(1, { duration: motionMs(150) })
       } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit1") {
         e.preventDefault()
-        void flow.fitView({ padding: 0.06, duration: glide(300) })
+        void flow.fitView({ padding: 0.06, duration: motionMs(300) })
       } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit2") {
         e.preventDefault()
         const { chosen: id, focus: system } = chosenRef.current
@@ -676,21 +664,105 @@ export function MapCanvas({
       void flow.fitView({
         nodes: ids.map((id) => ({ id })),
         padding: 0.12,
-        duration: glide(400),
+        duration: motionMs(400),
         maxZoom: 1,
       })
     },
     [placed, flow],
   )
 
+  /**
+   * The box or the frame the keyboard itself walked onto, asked when the
+   * focus lands. Asked at an arrow's press, `:focus-visible` is true of
+   * whatever has the focus: a browser turns it on at the first key. Open
+   * ground inside a system is its frame, which a click focuses, so a click
+   * there and an arrow moved that system and saved the move, where the arrow
+   * was meant to slide the canvas. A press of the pointer takes it back: what
+   * a mouse picks is `chosen`.
+   */
+  const keyedRef = useRef<string | null>(null)
+  const noteKeyed = (e: React.FocusEvent) => {
+    const on = e.target as HTMLElement
+    keyedRef.current =
+      on.matches(".react-flow__node") && on.matches(":focus-visible")
+        ? (on.dataset.id ?? null)
+        : null
+  }
+
+  /**
+   * The arrows, while the keyboard is on the canvas (T10): what is chosen
+   * moves by a step, kept as a drag keeps it — the chosen box, or a box or a
+   * system's frame the keyboard itself is on — and with nothing chosen the
+   * picture slides. A phone only looks, so there it always slides.
+   */
+  const arrowKey = (e: React.KeyboardEvent) => {
+    const direction = arrowOf(e)
+    const canvas = canvasRef.current
+    const target = e.target as HTMLElement
+    if (!direction || !canvas || !canvas.contains(target)) return false
+    // The canvas itself or the picture on it: not the controls floating over it.
+    if (target !== canvas && !target.closest(".react-flow")) return false
+    e.preventDefault()
+    const shift = e.shiftKey
+    const keyedId =
+      keyedRef.current !== null && target.dataset.id === keyedRef.current
+        ? keyedRef.current
+        : undefined
+    const subject = [keyedId, chosen].find(
+      (id) => id && (seats.has(id) || (id.startsWith("frame:") && bySystem.has(id.slice(6)))),
+    )
+    if (!bare && subject?.startsWith("frame:")) {
+      const sid = subject.slice("frame:".length)
+      const p = bySystem.get(sid)!
+      update((d) => ({
+        ...d,
+        frames: { ...d.frames, [sid]: moved(d.frames[sid] ?? atlasCorner(p), direction, shift) },
+      }))
+    } else if (!bare && subject) {
+      const seat = seats.get(subject)!
+      const n = settled.get(seat.system.id)?.nodes.find((node) => node.id === subject)
+      if (!n) return true
+      update((d) => ({
+        ...d,
+        positions: {
+          ...d.positions,
+          [subject]: moved(d.positions[subject] ?? { x: n.x, y: n.y }, direction, shift),
+        },
+      }))
+    } else {
+      const all = flow.getNodes()
+      const next = panned(
+        flow.getViewport(),
+        direction,
+        shift,
+        all.length > 0
+          ? {
+              bounds: flow.getNodesBounds(all),
+              size: { width: canvas.clientWidth, height: canvas.clientHeight },
+            }
+          : undefined,
+      )
+      void flow.setViewport(next)
+      // Where the reader left the canvas, as a slide by the pointer is kept.
+      if (!bare && restored.current) update({ viewport: next })
+    }
+    return true
+  }
+
   const onKey = (e: React.KeyboardEvent) => {
     const target = e.target as HTMLElement
-    if (target.closest("input, textarea, [role=menu], [role=dialog]")) return
+    if (isTypingTarget(target) || target.closest(OWNER_SELECTOR)) return
+    if (arrowKey(e)) return
+    const keyedBox = target.closest<HTMLElement>(".react-flow__node")?.dataset.id
     if (e.key === "f") {
       if (focus) flyTo(focus)
-      else void flow.fitView({ padding: 0.06, duration: glide(300) })
+      else void flow.fitView({ padding: 0.06, duration: motionMs(300) })
     } else if (e.key === "i") {
       setInspectorOpen((open) => !open)
+    } else if (e.key === "Enter" && keyedBox && keyedBox !== chosen && seats.has(keyedBox)) {
+      // A box the keyboard is on is chosen by Enter, as a click chooses it;
+      // Enter again opens it.
+      choose(keyedBox)
     } else if (e.key === "Enter" && chosenNode) {
       router.push(chosenNode.item.href)
     } else if (e.key === "Escape") {
@@ -699,6 +771,11 @@ export function MapCanvas({
       if (chosen || kinds) e.preventDefault()
       setChosen(null)
       setKinds(null)
+      // React Flow lets go of a box by blurring it, which sent the keyboard
+      // to the page: it stays on the canvas, where the arrows still slide.
+      if (target.closest(".react-flow__node")) {
+        canvasRef.current?.querySelector<HTMLElement>(".react-flow")?.focus({ preventScroll: true })
+      }
     }
   }
 
@@ -737,6 +814,10 @@ export function MapCanvas({
         <div
           ref={canvasRef}
           data-slot="server-map"
+          onFocus={noteKeyed}
+          onPointerDownCapture={() => {
+            keyedRef.current = null
+          }}
           onPointerDown={bare ? undefined : carry}
           className="group/map relative min-h-0 min-w-0"
         >
@@ -793,12 +874,16 @@ export function MapCanvas({
               selectionKeyCode={null}
               multiSelectionKeyCode={null}
               aria-label={board.label}
+              // A stop of its own, so the arrows reach it: a click on open
+              // ground puts the keyboard here, and Tab does.
+              tabIndex={0}
+              className="focus-ring-inset"
             />
           )}
           {systems.length > 0 && !bare && (
             <CanvasZoom
               onFit={() =>
-                focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: glide(300) })
+                focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: motionMs(300) })
               }
               extra={<CanvasZoomWord onClick={showAll}>All</CanvasZoomWord>}
               onTidy={isArranged(doc) ? tidy : undefined}

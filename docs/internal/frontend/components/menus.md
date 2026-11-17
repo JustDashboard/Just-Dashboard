@@ -89,7 +89,7 @@ const verbs: VerbSpec[] = [
 `docker/container-actions.tsx` still carries its own copy of the verb and the menu (whose items do
 not close the menu on a choice), and Files has a second model of a verb with its own renderer
 (`files/file-actions.tsx`); seventeen pages still assemble a `DropdownMenu` and an ellipsis by hand.
-All of them move onto `VerbSpec` and `VerbItems` in their page passes.
+They are the copies still to move onto `VerbSpec` and `VerbItems`; a new page starts there.
 
 ## What enforces it
 

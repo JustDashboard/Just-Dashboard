@@ -56,8 +56,9 @@ reading page, and what makes them alive is the sanctioned five, held hard:
 - **Figures that move.** The live ring (`use-live-traffic.ts`, two-second points topped up with only
   what the page has not drawn) feeds `LiveBytes` figures, each tile's fifteen minutes as its
   `TileTrend`, the device rows' two-minute sparklines and every chart's Live window.
-- **Colour that names a kind.** A device's role takes a lane hue (`ROLE_HUE`, from the palette that
-  cannot be read as a state), an address's prefix the muted ink (`Cidr`, `components/address.tsx`), in and out
+- **Colour that names a kind.** A device's role is its Tag and its section; `ROLE_HUE` (from the
+  palette that cannot be read as a state) keeps the topology's lanes. An address's prefix takes the
+  muted ink (`Cidr`, `components/address.tsx`), in and out
   their chart colours everywhere they are drawn.
 - **The lit edge on what is taken.** Peers, forwards and lists open their sheets and a device its
   page (0.8.7), and all are lit rows; route tables, rule lists and shaping are readings and stay framed tables. (The tailnet's
@@ -67,8 +68,9 @@ What the guard refuses is drawn, not hidden: a control the server would refuse s
 with the guard's sentence beside it (a device's *Set down* on the uplink, forwarding that Docker
 needs), because a control that disappears says nothing and one greyed out with no reason says less.
 Each page that reads a tool this host may not have opens on its install where it is missing
-(`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
-Packages page's install job streaming under the button). The Git page and Tailscale on the VPN page do
+(`components/install-handoff.tsx`, drawn as `MissingThing`: the package's name, what it would do
+here drawn as the product, and the Packages page's install job streaming under the button). FRR on
+the routing page installs in place the same way. The Git page and Tailscale on the VPN page do
 the same, without the after-install phases the server keeps only for the network and security tools
 (`phases={false}`); Tailscale is offered only where the package manager carries it
 (`usePackageKnown`, one `GET /packages/tailscale`), since Debian and Ubuntu do not until its own
@@ -98,23 +100,24 @@ what took their place (`components/network/drift/`):
   before any difference, the differences counted in red while another owner holds one, its dot
   breathing only while an inspection is in flight. A press narrows the table to them. The other
   three figures are the table's chips, and the proposals the plan's own review button.
-- **A picture of where the saved configuration goes** (`drift-picture.tsx`), the backups map's
-  shape: `spec.json` wired to the rendered files, the kernel objects, the boot unit and the
+- **A picture of where the saved configuration goes** (`drift-picture.tsx`), a `WireFlow` with
+  the saved spec as its hub and the domains as its end column, full width (0.9.0; the backups map's
+  shape until then): the spec file wired to the rendered files, the kernel objects, the boot unit and the
   blocklists, each drawn as the product that reads it — netfilter's flame for the nftables files and
   admission chains, systemd's brackets for the units, Linux for the kernel's devices, routes and
   settings, WireGuard for a tunnel, Spamhaus and FireHOL for their lists (four marks arrived for it,
   each the project's own artwork, `public/logos/NOTICE`). A wire takes the worst state in its domain
-  (red, amber, green, plain, dashed for nothing to compare), every comparison is a block in its
-  state's colour beside the domain, the wires pulse while an inspection is in flight and once as
-  each lands, and pressing a domain narrows the table to it.
+  (red, amber, plain, dashed for nothing to compare) and runs while an inspection is in flight,
+  and pressing a domain narrows the table to it.
 - **Since this page opened** (`drift-rhythm.tsx`): each inspection a beat on fifteen minutes that end
   at this second, split into its states and sliding left as the clock runs, the countdown to the
   next one under it, and each comparison whose state moved between two of them, newest first. It is
-  the page's memory and nothing else; a host that has not drifted says how many inspections it has
-  stood through. The three configuration identities sit under it.
+  the page's memory and nothing else. Since 0.9.0 it sits under the picture beside the three
+  configuration identities, and a host that has not drifted shows the strip alone, its count in
+  the head.
 - **One framed table of every comparison**, worst first, each as its product, named the way a
-  reader knows it (a route by its destination, an address by its prefix and device), its kind in
-  its lane hue, and its evidence read in place — expected beside observed, a digest as seven
+  reader knows it (a route by its destination, an address by its prefix and device), its kind a
+  plain tag, and its evidence read in place — expected beside observed, a digest as seven
   characters, amber where they disagree. A row whose state changes rises.
 - **The boot unit as one line** (`drift-boot.tsx`, 0.8.7): systemd's mark, the unit over its four
   facts, its last activation and how long ago, and its state with the reason under it; the caveat

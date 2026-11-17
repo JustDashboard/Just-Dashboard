@@ -3,8 +3,9 @@
 A picture of what is connected to what, drawn first (D2).
 
 **Members:** `WireFlow` (`wire/wire-flow.tsx`, its arithmetic in `wire/wire-flow-model.ts`),
-`WireLane`, `WireLaneTitle` (`wire/wire-lane.tsx`), `WireNode`, `WireMark`, `WireHost`,
-`WirePlaceholder`, `WireLink`, `WireLabel` (`wire/wire.tsx`), `useMotionHeld`
+`WireLane`, `WireLaneTitle` (`wire/wire-lane.tsx`), `WireMarks`, `MoreTile`
+(`wire/wire-marks.tsx`), `WireNode`, `WireMark`, `WireHost`, `WirePlaceholder`, `WireLink`,
+`WireLabel` (`wire/wire.tsx`), `MonoValue` (`wire/mono-value.tsx`), `useMotionHeld`
 (`wire/use-motion-held.ts`), `AnimatedBeam` (`ui/animated-beam.tsx`), and `SettingPicture`
 (`settings/setting-picture.tsx`), a settings section's row of two or three marks.
 
@@ -14,7 +15,7 @@ A picture of what is connected to what, drawn first (D2).
 | --- | --- |
 | Things on the left, one hub, things on the right, a line from each to the hub | `WireFlow` |
 | One node a side, in a settings section, the lines the caller's | `SettingPicture` |
-| Tiers, a chain, two lanes a side, many to many, faces on a node | laid by hand on `WireNode`, `WireMark` and `AnimatedBeam`, each column a `WireLane` |
+| Tiers, a chain, two lanes a side, many to many, faces on a node | laid by hand on `WireNode`, `WireMark` and `AnimatedBeam`, each column a `WireLane`; below `lg` it draws `WireMarks` |
 
 A picture that is the hub shape uses `WireFlow` and lays its nodes by hand only when it is not that
 shape. In 0.9.0 the account's access picture and the link picture (Settings → Connect, Settings →
@@ -62,9 +63,9 @@ still under reduced motion, while the tab is hidden and while the reader has pau
 **Phone.**
 
 - `stack` (the default): the columns stack under their headings with every word kept and no lines,
-  for a picture that is the only place its nodes are named (the Network overview, the link
-  picture).
-- `marks`: a row of the start column's marks, the hub with its words under it, and a row of the end
+  the hub one row among them at the lanes' size, for a picture that is the only place its nodes
+  are named (the Network overview, the link picture).
+- `marks`: `WireMarks` (below), a row of the start column's marks, the hub with its words under it, and a row of the end
   column's marks, the lines running down between them, for a picture whose nodes a list under it
   names again (Notifications, Backups, the proxy's alerts, the account). The lines to the end row
   leave from under the hub's words, so none runs through them. Until 0.9.0 the words were printed
@@ -121,9 +122,38 @@ columns draw their headings with it.
 </WireLane>
 ```
 
-Its users: `docker/container-picture.tsx`, `procs/wiring-picture.tsx`, `proxy/ports-picture.tsx`,
-`proxy/route-picture.tsx`; the stack map, a project's runtime map and the stream picture still carry
-their own copy until their page passes (WP-28, WP-18, WP-26).
+Its users: `docker/container-picture.tsx`, `docker/stack-map.tsx`, `procs/wiring-picture.tsx`,
+`proxy/ports-picture.tsx`, `proxy/route-picture.tsx` and `proxy/stream-picture.tsx`; a project's
+runtime map still carries its own copy.
+
+## WireMarks
+
+**Purpose.** The phone form of every picture: the one shape a wiring picture takes below `lg`
+([`../patterns/pictures-on-a-phone.md`](../patterns/pictures-on-a-phone.md)). The picture shrinks
+to its marks. Each lane is a centred row of small marks, the hub stands between the rows at its
+own size with its words under it, and the lines run down from centre to centre. The names are not
+drawn, because a list under the picture says them.
+
+**Props.**
+
+- `tiers`, top to bottom. A row is `{ title, nodes, empty?, heading?, href?, count? }`: `title` is
+  its landmark's name, and `heading` (`above` or `below`) draws it only where no hub between rows
+  says what the row is. A hub is `{ id, mark, eyebrow?, title?, hint? }`. A row, a hub, a row is
+  things wired through one place; two rows and no hub is things wired to each other (Ports); a
+  row and a chain of hubs is a path (a tunnel).
+- A node (`WireMarksNode`): `id`, `mark` at the `sm` size, `name` for a screen reader, `href` or
+  `onPress` (with `pressed` for a toggle) and `label`; `round` for a dashed ring or a count tile,
+  `anonymous` for a mark that is not a node of its own.
+- `wires`: `{ from, to }` by node id, each with what the wide line says (`still`, `dashed`, `tone`,
+  `reverse`, `duration`, `delay`).
+- `MoreTile({ count, size })` is the nodes a row has no room for, as a `+N` tile of the marks' own
+  shape.
+
+**Use.** `WireFlow phone="marks"` draws it for a hub-shaped picture. A hand-laid picture keeps its
+wide layout and draws `WireMarks` below `lg`, choosing between the two with `useBreakpoint("lg")`,
+not with `max-lg:hidden` on a second copy: the specs and a screen reader would find every node
+twice. Its users: the route, stream, ports and tunnel pictures, the Remote Desktop picture and a
+project's databases.
 
 ## The parts
 
@@ -137,6 +167,9 @@ their own copy until their page passes (WP-28, WP-18, WP-26).
   `WireMark`'s of the same size, so a line meets it where it would meet any mark.
 - `WireLink` is a mark that is a link when there is somewhere to go; `WireLabel` a caption along a
   line.
+- `MonoValue({ value })`: a path, an address or a unit's name that wraps only at its separators
+  (`monoBreaks`), never inside a word, and copies whole. It is not specific to pictures: use it
+  wherever a mono value must wrap, in place of `break-all`.
 - `AnimatedBeam`: the line between two marks, measured from their positions and redrawn when the
   container resizes. `shape="s"` leaves and arrives level, as a node editor's wires do; the arc is
   for a path down a phone. `still`, `dashed`, `tone` and `once` say what the line carries. The pulse

@@ -83,7 +83,10 @@ Icon-only controls, declared verb sets, a choice closes the menu, a control says
 
 - The header carries its name and its actions; one `h1`; no icon plots; wayfinding marks; *Any
   page can open as a project does*:
-[`patterns/identity-line.md`](patterns/identity-line.md#14-a-header-is-its-title).
+[`patterns/identity-line.md`](patterns/identity-line.md#14-a-header-is-its-title). The identity
+  line's rules of 16 Nov 2026 (one row on a phone, the command an icon, no destructive verb in the
+  brand face, where `?` goes) are in
+  [`components/page-header.md`](components/page-header.md#the-identity-lines-rules).
 - A product is drawn as itself (templates, databases, the host, accounts, packages, projects,
   sources, channels, variables, people, the logo files, git glyphs):
   [`patterns/drawn-as-itself.md`](patterns/drawn-as-itself.md).
@@ -95,7 +98,7 @@ Icon-only controls, declared verb sets, a choice closes the menu, a control says
 
 ## 15. Redesigning a page
 
-The reading page's passes, in order, and what the 0.8.7 run settled:
+The reading page's recipe, then its passes, in order, and what the 0.8.7 run settled:
 [`recipes/reading-page.md`](recipes/reading-page.md#15-redesigning-a-page). Pass 2 is *Figures are
 readings* since 0.9.0. The per-page stories that ran under pass 2 and after the passes are in
 [`decisions/`](decisions/README.md), one file per section. *A thing that is not there has one
@@ -111,7 +114,14 @@ project's Overview in sentences. [`patterns/registers.md`](patterns/registers.md
 
 ## 17. Redesigning a flow page
 
+The flow page's recipe, then its passes:
 [`recipes/flow-page.md`](recipes/flow-page.md#17-redesigning-a-flow-page).
+
+## 18. What a keyboard and a screen reader get
+
+Landmarks, heading levels, names, live regions, a keyboard model for each control, toggletips and
+press sizes, and the checks that hold them (lint, the shell and field specs, the axe gate):
+[`patterns/accessibility.md`](patterns/accessibility.md).
 
 ## The other pages
 
@@ -119,8 +129,8 @@ project's Overview in sentences. [`patterns/registers.md`](patterns/registers.md
 | --- | --- |
 | [`foundations/`](foundations/README.md) | Tokens and scales: colour, surfaces, type, spacing, motion, words, layout and the phone |
 | [`components/`](components/README.md) | The component catalogue, one page per family |
-| [`patterns/`](patterns/README.md) | Rules that span components: identity line, picture first, rows never grow, registers, data flow, keyboard and place |
-| [`recipes/`](recipes/README.md) | One recipe per page shape |
+| [`patterns/`](patterns/README.md) | Rules that span components: identity line, picture first, readings in words, sections, the page holds still, rows never grow, settings, confirmations, live data, registers, data flow, keyboard and place, accessibility |
+| [`recipes/`](recipes/README.md) | One recipe per page shape: reading, list, detail with a rail, settings, flow, workbench |
 | [`decisions/`](decisions/README.md) | Why each page looks as it does: the dated stories, by section |
 | [`shell.md`](shell.md) | The shell: routing, the rail, sign-in, the hub link, command search, the editor |
 | [`features/`](features/README.md) | Every route area, its files and its specs |

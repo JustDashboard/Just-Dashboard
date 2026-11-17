@@ -88,7 +88,7 @@ taking a frame:
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
   facts, route picture, traffic, certificate and error band, attention list, sites and Engine log;
   the sites, certificates and
-  streams inventories and the ports table with their toolbars; the Renewal view's sections on
+  streams inventories and the ports list with their toolbars; the Renewal view's sections on
   Certificates and a certificate's own page; a site's own page, its route picture on the page's
   ground and its logs one `Pane` under it; the TLS report's findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
@@ -263,8 +263,9 @@ pointing at a node steps the rest back, keeping what `related` says travels with
 final shape — the hub and grey rows where the nodes will go — so nothing under it moves when the data
 lands. On a phone it does one of the two things the pictures did: `stack`, the columns under their
 headings with every word and no lines, for a picture that is the only place its nodes are named (the
-Network overview, the gateway); or `marks`, the hub's words over a row of marks, the hub, and a row of
-marks with the lines running down, for a picture a list under it names again (Notifications, Backups,
+Network overview, the gateway); or `marks`, a row of marks, the hub with its words under it, and a row of
+marks with the lines running down from under the words (a column with `href` keeps its heading as a
+link), for a picture a list under it names again (Notifications, Backups,
 the proxy's alerts). The Network overview, the gateway and the firewall's inbound path draw through it
 since 0.8.7; a new picture of
 this shape uses it, and lays its nodes by hand only when it is not this shape (the routing decision's
@@ -335,6 +336,11 @@ fixed the neighbouring defect: `.scroll-affordance` painted its cover gradient i
 unconditionally, so every table on a plain panel wore a faint lighter smear down both edges — the
 same mistake §8 records for the sticky header, missed here because the gradient *named* the colour
 instead of inheriting `--panel-ground`.
+
+A table inside a section that also holds its toolbar and states (Performance's views) stays on the
+section's ground and fits its column: `FIT_COLUMN` (`database/ops/performance-parts.tsx`) zeroes
+the outer cells' padding instead of bleeding the table out, so no row hairline runs past the
+title's.
 
 A panel that is also a destination takes `interactive`: its border steps up to `--border-strong`
 under the pointer, and nothing else moves.

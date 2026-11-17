@@ -1,10 +1,40 @@
 # The identity line
 
-A page opens on what it is about (D1).
+A page opens on what it is about (D1): a mark, the name, its state, one line of live facts, and
+its verbs at the far end. The header is its title. It carries no picture of itself and no sentence
+under it.
 
-WP-41 cuts this page down to the rule; until then it holds the text that was in `design-system.md`
-§14, below. The dated stories it tells are also why the pages in
-[`../decisions/`](../decisions/README.md) look as they do.
+## The rule
+
+1. **Every page about one thing opens on `IdentityHeader`**: a project, a container, a site, an
+   engine, an account. A section's landing page opens on the section's own line. A workbench opens
+   on its strip (`WorkbenchHeader`) and a flow on its question (`FlowHeader`) instead.
+2. **The mark is the thing drawn as itself**: the product's logo, a project's own icon, an
+   account's picture ([`drawn-as-itself.md`](drawn-as-itself.md)). Never a decorative glyph on a
+   tinted plate.
+3. **The state is a dot and a word** beside the name, and the facts are live data: the source, the
+   branch, the release, counts. Not a description of the page.
+4. **One brand-faced command, the rest behind `⋯`** (`IdentityVerbs`). No destructive verb takes
+   the brand face: Terminate, Kill, Delete and Drop go behind the `⋯` in the destructive ink, and a
+   page whose only verbs are destructive draws no command.
+5. **On a phone it is one row and one line of facts.** The command is its icon, with a tooltip and
+   its words as its name. The line clips, so danger and warning facts come first. Never add a row
+   to fix a truncated name.
+6. **`?` ends the identity line.** It has a row of its own only where it shares that row with a
+   back link.
+7. **A section page names the one thing it is about when there is one** (ufw, systemd-resolved),
+   otherwise the section: "Traffic", not its uplink.
+8. **The way back is above the line**, on a page one level under a list (`PageContext back`). The
+   thing's verbs never go there.
+9. **The line stands at its loaded shape while it loads** (`IdentityHeader loading`), with what is
+   already known drawn as itself.
+10. **One `h1` a page**, drawn for a screen reader only: the rail says where you are for the eye.
+    Given a `label`, the line is a region named "About …".
+
+The props, the phone's measurements and the rules of 16 Nov 2026 in full are in
+[`../components/page-header.md`](../components/page-header.md). What follows is the text that was
+`design-system.md` §14: why a header is its title, and how the product got here. The dated stories
+it tells are also why the pages in [`../decisions/`](../decisions/README.md) look as they do.
 
 ## 14. A header is its title
 
@@ -65,10 +95,9 @@ That was always the honest mark, because its colour is a reading rather than a d
 
 **A wayfinding mark may carry its own colour, and only a wayfinding mark.** A repository list is
 scanned rather than read, and after the name the language is what decides which of forty rows is the
-one — so `LanguageMark` draws the language's logo in front of its word. In `text-muted-foreground`
-that glyph was the same grey as the forty words around it: a mark doing the half of its job that
-costs pixels and none of the half that saves a read, because a column of twenty identical grey
-glyphs is a texture and the reader goes back to reading the words. The hue is not this product's to
+one — so `LanguageMark` draws the language's own logo (`ProductGlyph`) in front of its word, the
+mark a repository's tile already carries. The `--language-*` tokens remain, for the language bar
+and the files page. Their hue is not this product's to
 choose — it is GitHub Linguist's, the colour the same repository carries on the site the list was
 fetched from, which is the argument §3 makes for `--brand` applied to somebody else's mark. The
 lightness *is* ours, and it is one rule rather than twenty judgements: every `--language-*` in
@@ -90,7 +119,8 @@ on (§3), and twenty hues in a row of four would be saying nothing.
 ### Any page can open as a project does
 
 **Any page can open as a project does.** The project's header was markup in `ProjectShell` and the
-other pages' line was `HostIdentity`; since 0.8.7 the header is `HostIdentity` too. Given a `state`, a
+other pages' line was `HostIdentity`; since 0.8.7 the header is the same component, and since 0.9.0 its
+name is `IdentityHeader` (`components/identity-header.tsx`). Given a `state`, a
 `command` or a `menu` it takes the project's layout: a 40px tile beside two rows, the title with its
 state after it, the facts under them, the command and its `⋯` at the far end across both, 16px above the
 hairline. On a phone it is one row and one line of facts: a 32px tile, the title, and the command as

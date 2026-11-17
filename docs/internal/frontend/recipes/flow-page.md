@@ -1,10 +1,123 @@
 # Flow page
 
-A page where the reader decides a sequence. Reference: `/deploy/new`.
+A page where the reader decides a sequence and something exists at the end of it. Reference:
+`/deploy/new`.
 
-**Status: moved text.** WP-41 gives this page the recipe shape (the reference shot, the regions, a
-skeleton, the four states, the phone, a checklist and the spec). Until then it holds the passes that
-were in `design-system.md`, below, and they are what a redesign runs.
+**Reference:** `components/deploy/new-project.tsx` and the screens under
+`components/deploy/new-project/`. The shot is [`docs/readme/deploy-new.png`](../../../readme/deploy-new.png).
+Its siblings are `/databases/new`, a database's Connect, adding a Remote Desktop computer and a new
+system account.
+
+**Components:** `Page register="flow"`; `FlowHeader`, `FlowSteps`, `FlowPanel`, `FlowPanelHeader`,
+`FlowPanelBody`, `FlowActions` (`components/flow.tsx`); `ChoiceGrid` and `ChoiceCard` for kinds
+([`../components/choice-card.md`](../components/choice-card.md)); `ChoiceList` and `ChoiceRow` for
+instances ([`../components/card-row.md`](../components/card-row.md)); the form kit
+([`../components/forms.md`](../components/forms.md)). Which pages are flows is in
+[`../patterns/registers.md`](../patterns/registers.md): if you cannot name the sequence and its
+outcome in one sentence, the page is a reading page.
+
+## The regions, in order
+
+1. **The head** (`FlowHeader`): the way out to the list the new thing will join (`back`), the
+   question as the `h1`, the shortcuts' `?` at the end (`actions`), and the spine (`steps`).
+2. **The spine** (`FlowSteps`): the steps of the state machine underneath, as segments of a rule
+   with their names. Not numbered circles.
+3. **The one focused surface** (`FlowPanel`): the thing being decided on this screen. It is the
+   only surface that takes depth, and there is one a screen.
+4. **Supporting facts** beside or under it, as plain panels: what was chosen so far, what the
+   server found.
+5. **The foot** (`FlowActions`): one brand-faced command that advances, the ways out before it,
+   quieter, and a note where the command's word does not say what it is about to do.
+
+## Skeleton
+
+```tsx
+export function NewThing() {
+  const [step, setStep] = useStepInAddress(STEPS) // `?step=`, so Back walks the steps
+  return (
+    <Workspace name="New thing" stateKey="things.new">
+      <Page register="flow" fill="xl">
+        <FlowHeader
+          back={{ href: "/things", label: "Things" }}
+          question={QUESTIONS[step]}
+          actions={<WorkspaceHelp />}
+          steps={<FlowSteps steps={STEPS} current={STEPS.findIndex((s) => s.key === step)} />}
+        />
+        <div className="grid min-h-0 gap-6 xl:grid-cols-main-end">
+          <FlowPanel className="max-h-full self-start">
+            <FlowPanelHeader title="Where is it?" />
+            <FlowPanelBody>
+              <ChoiceGrid mode="single" label="Source">
+                {SOURCES.map((source, index) => (
+                  <ChoiceCard
+                    key={source.id}
+                    index={index}
+                    logo={<ProductLogo id={source.product} />}
+                    title={source.name}
+                    description={source.line}
+                    selected={source.id === draft.source}
+                    onClick={() => pick(source)}
+                  />
+                ))}
+              </ChoiceGrid>
+            </FlowPanelBody>
+          </FlowPanel>
+          <Panel plain>
+            <PanelHeader title="So far" />
+            <PanelBody><ChosenFacts draft={draft} /></PanelBody>
+          </Panel>
+        </div>
+        <FlowActions secondary={<Button variant="ghost" onClick={back}>Back</Button>}>
+          <Button disabled={!ready} onClick={next}>Continue</Button>
+        </FlowActions>
+      </Page>
+    </Workspace>
+  )
+}
+```
+
+The step hook is the page's own. Take the steps from the server's draft, not from the page, so the
+spine cannot drift from what the server thinks is happening.
+
+## The four states
+
+| State | What the page draws |
+| --- | --- |
+| Loading | The head, the spine and the focused surface at their sizes; a list being inspected waits as `ChoiceListSkeleton`, and the row that was pressed carries the beam (`ChoiceRow busy`) beside its words. The command is disabled, not hidden. |
+| Empty | Nothing to choose from (no repositories, no images): `EmptyState` inside the focused surface with what would be there and the step that fills it (connect an account). |
+| Unavailable | The flow cannot run here (no Docker, no rights): `MissingThing`, or `NeedsAdmin`, in place of the focused surface, with the head kept so the way out is still there. |
+| Failed | A step the server refused keeps everything typed, marks the field it named and says its words by the command. A read that failed is `ErrorState` in the surface with Try again. Nothing made so far is lost: an unfinished setup can be resumed. |
+
+## The phone
+
+Below `xl` the columns stack and the page scrolls as any page does: a phone is not a window to
+hold. The spine keeps its segments and shows the current step's name. A strip of sources runs to
+the screen's edge and scrolls sideways (`ChipStrip`). A grid of kinds is one column, each card one
+height. The command is the full width at the foot of the surface.
+
+## Checklist
+
+- [ ] `Page register="flow"`, and only a flow page has a foreground surface.
+- [ ] The `h1` is the question. No sentence under it.
+- [ ] One `FlowPanel` a screen, and one brand-faced command in `FlowActions`.
+- [ ] Kinds are `ChoiceCard`s and instances are `ChoiceRow`s; nothing to pick is a plain row.
+- [ ] The steps are in the address, so Back and Forward walk them, and a refresh keeps the place.
+- [ ] At `xl` the screen is decided in one view: the shell does not scroll, and the one long list
+      or form scrolls inside its surface.
+- [ ] Motion only on a state change: the spine's segment, a beam on work in flight, one arrival
+      when the outcome lands.
+- [ ] Leaving with something typed asks first.
+
+## The spec to add
+
+1. The page declares `data-register="flow"`, its `h1` is the question, and the spine marks the
+   current step (`aria-current`).
+2. Each step is reached from the one before by the command, and Back returns with what was typed.
+3. At 1280×800 the shell does not scroll on any step.
+4. A refused step keeps the draft and shows the server's words.
+5. At 390 the page scrolls as one column and is no wider than the window.
+
+`tests/browser/deploy-new.spec.ts` and `deploy-new-flow.spec.ts` are the models.
 
 ## 17. Redesigning a flow page
 
@@ -12,8 +125,8 @@ were in `design-system.md`, below, and they are what a redesign runs.
 
 1. **Declare it.** `<Page register="flow">`. If you cannot name the sequence and its outcome in one
    sentence, the page is a reading page and §15 is what you want.
-2. **Ask the question.** The `h1` becomes what the screen is asking. The page's name moves to the
-   eyebrow beside the back link. No sentence under it — §5 holds.
+2. **Ask the question.** The `h1` becomes what the screen is asking. The way out is `back`, drawn as
+   every page's back link above the question. No sentence under it — §5 holds.
 3. **Draw the spine.** `FlowSteps`, with the steps taken from the state machine underneath rather
    than invented: `/deploy/new`'s three are the draft's own `source` → `configuration` → commit, so
    the spine cannot drift from what the server thinks is happening.

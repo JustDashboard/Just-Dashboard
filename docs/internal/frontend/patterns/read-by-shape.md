@@ -2,9 +2,25 @@
 
 A log line and a step's record are coloured by the shapes in them.
 
-WP-41 cuts this page down to the rule; until then it holds the text that was in `design-system.md`
-§14, below. The dated stories it tells are also why the pages in
-[`../decisions/`](../decisions/README.md) look as they do.
+## The rule
+
+- **A log line is cut into its shapes** (a time, a host, a program, an address, a status code, a
+  path, a quoted string) by `lib/log/tokens.ts`, and each shape takes its hue from the `--tag-*`
+  rung. `LogText` draws it. No shape takes a status hue unless it is a status: a string is not a
+  success.
+- **A level is a wash on the line**, not a coloured tag in front of it: a failure is found by
+  where it is, and says so in words.
+- **Text that was written is kept as written**, in a `CodeBlock` with its name, its length and a
+  copy; a command is `ShellWords`, a record `JsonCode`, a Dockerfile its pieces in the same palette
+  (`components/code.tsx`).
+- **A transcript is numbered lines** (`TranscriptRow`), a console is a `ConsoleView`, and a diff is
+  a `DiffView`. One renderer each, so the same line reads the same on every page.
+- **A record is drawn as what its values are**: a digest cut to twelve characters with a copy, a
+  commit as the Git page draws one, an image beside its product's mark.
+- **A log pane's filters narrow in place** and are kept in the address.
+
+What follows is the text that was in `design-system.md` §14: why, and the cases. The dated stories
+it tells are also why the pages in [`../decisions/`](../decisions/README.md) look as they do.
 
 ## 14. A header is its title: logs and records
 
@@ -67,7 +83,7 @@ items carry — and draws each the way the product draws it elsewhere: a toolcha
 platform or an image beside its product's mark, a digest cut to twelve characters with a copy, a
 commit as the Git page draws one, a list of images as rows of their products with size and platform,
 a list of health checks as rows of their outcomes. What is text — a Dockerfile, a command line, a
-record nested past two levels — is a `CodeBlock`: the `Well`'s ground with a strip naming it, its
+record nested past two levels — is a `CodeBlock` (`components/code.tsx`): the `Well`'s ground with a strip naming it, its
 length and a copy, and its tokens in the `--tag-*` hues the log console's tokens sit on (keys blue,
 strings green, numbers pink, literals and a Dockerfile's instructions violet, paths and flags cyan,
 digests slate, punctuation and comments stepped back). None of the status hues: a string is not a
@@ -83,7 +99,7 @@ segment of the spine, each part of the plan the step decides on the tile of the 
 forge, the framework, the runtime, Let's Encrypt for a name served over HTTPS, a glyph for a health
 check, the limits, the storage, the environment and the server's check), what it currently says
 under its name, a build or start command, a check's request, the paths kept between releases or the
-variables still owed as code in the same hues (`ShellWords`, the inline form of the run page's
+variables still owed as code in the same hues (`ShellWords` in `components/code.tsx`, the inline form of the run page's
 `CommandBlock`), and a part that wants a look before Deploy marked in its tile's corner. Every row
 opens the fields that decide it. Review opens on what the server said about the plan the way the
 run page opens on how a run ended, and draws what the release does to this server — a mount, a

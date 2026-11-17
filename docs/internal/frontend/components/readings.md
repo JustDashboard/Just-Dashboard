@@ -68,9 +68,8 @@ activity lines (`database/home/activity-lines.tsx`).
 </ReadingLine>
 ```
 
-The host Overview's `Mark` and the PM2 page's local `ReadingMark` are this mark under other names;
-the page passes (WP-28, WP-29) move them and the service and container overviews' `StatGrid`s onto
-`ReadingLine`, keeping the `service-readings` and `container-readings` test ids on the wrapper.
+A log lens's readings are `LensReadingLine` (`components/logs/lens-reading-line.tsx`): a
+`ReadingLine` whose press narrows the log to the lines it counts.
 
 ## StatTile, StatGrid and StatButton
 
@@ -82,8 +81,11 @@ nothing around them.
 a meter and its tone:
 
 - Metrics' five readings (processor, memory, load, network, disks);
-- the Docker overview's band of figures over its table;
-- a log lens's counts, as `StatButton`s that narrow the log.
+- the Docker overview's band of figures over its table.
+
+A figure whose press narrows what is under it is a `StatButton` (the Logs insights, a project's
+audience). A log lens's counts are `LensReadingLine`s now, and Docker's Events draws a band
+(`EventBand`), not tiles.
 
 **Not** on a project's Overview or the host's (the operator's rule: a logo, a sentence, one
 picture), and not as the row of bare grey tiles that opens a page (D4). Every other tile row is a
@@ -130,9 +132,10 @@ the track showing past it), `legend`:
 
 **Use when** the reading is parts of one whole: a table's bytes, a database's keys by type, traffic
 by country, in and out. **Not** for a list of the heaviest few (`RankList`) or a band
-(`BarReading`). Four bars were drawn by hand beside it (the schema's `Composition`, the home's
-`TypeBar`, Redis's `TypeComposition`, a table's `Split`) and the metrics page's own `SplitBar`
-against the busiest; the page passes move them here (WP-20, WP-23, WP-28).
+(`BarReading`). The four bars that were drawn by hand beside it (the schema's `Composition`, the
+home's `TypeBar`, Redis's `TypeComposition` with `legend="pick"`, a table's `Split`) are callers
+of it now, and the metrics page's own bar against the busiest is `ScaledPair`, the shared bar
+with `total`.
 
 **Example.**
 
