@@ -388,6 +388,11 @@ function DiskShare({
  * line's control comes before the strip, so a keyboard moving along the marks
  * never reaches the Reclaim of the kind it has just read. Here focus reads the
  * kind and a press does what that Reclaim does, behind the same confirmation.
+ *
+ * It is a 24px box of its own, the size of the strip's cell, rather than a
+ * layer over the cell: the cell's glyph is scaled, and a layer placed inside
+ * the scaled glyph was the glyph's own box, 16px wide and 2px tall, the target
+ * a thumb had for a prune.
  */
 function KindMark({ kind, onReclaim }: { kind: Kind; onReclaim?: () => void }) {
   const Icon = kind.icon
@@ -397,7 +402,9 @@ function KindMark({ kind, onReclaim }: { kind: Kind; onReclaim?: () => void }) {
       aria-label={onReclaim ? kind.verb : kind.label}
       onClick={onReclaim}
       className={cn(
-        "absolute inset-0 flex items-center justify-center rounded-md pb-0.5 focus-ring-inset",
+        // The cell's own padding is taken back, so the cell stays the 26px
+        // square every strip's cell is.
+        "-mx-1 flex size-6 items-center justify-center rounded-md focus-ring-inset",
         !onReclaim && "cursor-default",
       )}
     >

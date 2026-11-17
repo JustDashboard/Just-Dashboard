@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Clock } from "@/components/icons"
 import { ApiError } from "@/lib/api"
@@ -19,6 +20,8 @@ import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import {
+  ROW_NAME,
+  SortHead,
   Table,
   TableBody,
   TableCell,
@@ -54,7 +57,6 @@ import {
   NoFigure,
   NotAvailable,
   RETURNS_FOCUS,
-  SortHead,
   StatementLine,
 } from "@/components/database/ops/performance-parts"
 import { Fig, FigureLine, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
@@ -245,10 +247,17 @@ export function StatementHistoryView() {
                           onActivate={() =>
                             router.push(statementHref(id, entry.id, { tab: "history" }))
                           }
-                          aria-label={`Open the history of the statement: ${oneLine(entry.query).slice(0, 80)}`}
                         >
                           <TableCell className="w-full max-w-0 py-2">
-                            <StatementLine text={entry.query} />
+                            {/* The statement is the row's name, and the keyboard's way in. */}
+                            <Link
+                              href={statementHref(id, entry.id, { tab: "history" })}
+                              {...ROW_NAME}
+                              aria-label={`Open the history of the statement: ${oneLine(entry.query).slice(0, 80)}`}
+                              className="block min-w-0 rounded-sm focus-ring hover:underline"
+                            >
+                              <StatementLine text={entry.query} />
+                            </Link>
                           </TableCell>
                           <TableCell className="px-2 py-2">
                             <Sparkline

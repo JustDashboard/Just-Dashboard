@@ -9,7 +9,11 @@ import { listenLabel, protocolLabel, stateStatus, upstreamAddress } from "@/lib/
 import { ProductGlyph, hasProductLogo, portProduct } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { useBreakpoint } from "@/lib/breakpoints"
 import { WireMark, WireNode } from "@/components/wire/wire"
+import { WireLane } from "@/components/wire/wire-lane"
+import { MoreTile, WireMarks } from "@/components/wire/wire-marks"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
 import {
   hourWords,
   restrictionWords,
@@ -37,7 +41,9 @@ function stateTone(stream: StreamEntry): DotTone {
  * the port and bytes crossed it in the last hour — the one way both ends are
  * known to be up. Pointing at a port steps back every line but its own.
  *
- * Three lanes, from `lg` only: on a phone the rows under it say the same.
+ * Three lanes from `lg`. On a phone it is the one phone form (`WireMarks`):
+ * the ports' marks, nginx named, the addresses' marks, and the lines between;
+ * the rows under it name each one.
  */
 export function StreamPicture({
   streams,
@@ -57,6 +63,8 @@ export function StreamPicture({
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
+  const wide = useBreakpoint("lg")
+  const held = useMotionHeld()
   const picture = useMemo(() => streamPicture(streams, summaries), [streams, summaries])
 
   const ids = [
@@ -83,10 +91,71 @@ export function StreamPicture({
     onBlur: () => setFocus((held) => (held === id ? null : held)),
   })
 
+  const engineMark = (size: "lg" | "sm") => (
+    <span className="relative flex">
+      <WireMark tone="logo" size={size}>
+        <ProductGlyph id="nginx" />
+      </WireMark>
+      <StatusDot tone={engineTone} corner={size === "lg" ? "lg" : "sm"} />
+    </span>
+  )
+
+  if (!wide)
+    return (
+      <WireMarks
+        data-slot="stream-picture"
+        className="animate-rise"
+        tiers={[
+          {
+            title: "Ports on this host",
+            nodes: [
+              ...picture.ports.map((stream) => ({
+                id: `p:${stream.name}`,
+                mark: <PortMark stream={stream} size="sm" />,
+                name: `${listenLabel(stream)} ${stream.name}`,
+                href: stream.name === current ? undefined : streamHref(stream.name),
+              })),
+              ...(picture.hidden > 0
+                ? [
+                    {
+                      id: "p:more",
+                      mark: <MoreTile count={picture.hidden} />,
+                      name: `${picture.hidden} more in the list below`,
+                      round: true,
+                      anonymous: true,
+                    },
+                  ]
+                : []),
+            ],
+          },
+          {
+            id: "hub",
+            mark: engineMark("lg"),
+            eyebrow: "Stream module",
+            title: "nginx",
+            hint: engineHint,
+          },
+          {
+            title: "Forwarded to",
+            nodes: picture.upstreams.map((node) => ({
+              id: `u:${node.address}`,
+              mark: <UpstreamMark address={node.address} size="sm" />,
+              name: node.address,
+            })),
+          },
+        ]}
+        wires={picture.edges.map((edge) => ({
+          from: edge.from,
+          to: edge.to,
+          still: !edge.moving || held,
+          dashed: edge.dashed,
+          tone: edge.tone,
+        }))}
+      />
+    )
+
   return (
-    // Below `lg` the lanes would stack into a second list of what the rows
-    // and the identity line already say, so a phone is not drawn one.
-    <div data-slot="stream-picture" className="relative animate-rise pt-4 pb-6 max-lg:hidden">
+    <div data-slot="stream-picture" className="relative animate-rise pt-4 pb-6">
       <div ref={container} className="relative">
         {picture.edges.map((edge, index) => {
           const into = edge.to === "hub"
@@ -103,17 +172,17 @@ export function StreamPicture({
               shape="s"
               startXOffset={into ? 26 : 30}
               endXOffset={into ? -30 : -26}
-              still={!edge.moving}
+              still={!edge.moving || held}
               dashed={edge.dashed}
               tone={edge.tone}
               delay={(index % 6) * 0.35}
-              className={cn("transition-opacity max-lg:hidden", !lit(end) && "opacity-15")}
+              className={cn("transition-opacity", !lit(end) && "opacity-15")}
             />
           )
         })}
 
         <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(2.5rem,6vw,6rem)_minmax(0,0.7fr)_clamp(2.5rem,6vw,6rem)_minmax(0,1fr)] lg:items-center">
-          <Lane title="Ports on this host" count={streams.length} className="lg:text-right">
+          <WireLane title="Ports on this host" count={streams.length} align="end" float>
             {picture.ports.map((stream) => (
               <li
                 key={stream.name}
@@ -136,7 +205,7 @@ export function StreamPicture({
                 {picture.hidden} more in the list below
               </li>
             )}
-          </Lane>
+          </WireLane>
 
           <div aria-hidden className="max-lg:hidden" />
 
@@ -144,16 +213,7 @@ export function StreamPicture({
             <WireNode
               nodeRef={hub}
               align="center"
-              mark={
-                <span className="relative flex">
-                  <WireMark tone="logo" size="lg">
-                    <ProductGlyph id="nginx" />
-                  </WireMark>
-                  <span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background">
-                    <StatusDot tone={engineTone} className="size-2" />
-                  </span>
-                </span>
-              }
+              mark={engineMark("lg")}
               eyebrow="Stream module"
               title="nginx"
               hint={engineHint}
@@ -162,7 +222,7 @@ export function StreamPicture({
 
           <div aria-hidden className="max-lg:hidden" />
 
-          <Lane title="Forwarded to" count={picture.upstreams.length}>
+          <WireLane title="Forwarded to" count={picture.upstreams.length} float>
             {picture.upstreams.map((node) => (
               <li
                 key={node.address}
@@ -179,7 +239,7 @@ export function StreamPicture({
                 />
               </li>
             ))}
-          </Lane>
+          </WireLane>
         </div>
       </div>
     </div>
@@ -198,20 +258,14 @@ function PortNode({
   current: boolean
   nodeRef?: RefObject<HTMLSpanElement | null>
 }) {
-  const product = portProduct(stream.listen)
   const who = restrictionWords(stream)
   const hour = hourWords(summary)
   return (
     <WireNode
       align="end"
       mark={
-        <span ref={nodeRef} className="relative flex">
-          <WireMark tone="logo" size="md">
-            {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Connection aria-hidden />}
-          </WireMark>
-          <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-            <StatusDot tone={stateTone(stream)} />
-          </span>
+        <span ref={nodeRef} className="flex">
+          <PortMark stream={stream} size="md" />
         </span>
       }
       title={
@@ -258,49 +312,43 @@ function UpstreamNode({
   streams: string[]
   nodeRef?: RefObject<HTMLSpanElement | null>
 }) {
-  const port = upstreamAddress(address)?.port
-  const product = port ? portProduct(port) : undefined
   return (
     <WireNode
       mark={
         <span ref={nodeRef} className="flex">
-          <WireMark tone="logo" size="md">
-            {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Servers aria-hidden />}
-          </WireMark>
+          <UpstreamMark address={address} size="md" />
         </span>
       }
-      title={<span className="block truncate font-mono text-hint">{address}</span>}
+      title={
+        <span className="block truncate font-mono text-hint" title={address}>
+          {address}
+        </span>
+      }
       hint={<span className="block truncate">{streams.join(", ")}</span>}
     />
   )
 }
 
-function Lane({
-  title,
-  count,
-  className,
-  children,
-}: {
-  title: string
-  count: number
-  className?: string
-  children: React.ReactNode
-}) {
+/** A port as the service its number is, with the stream's state in the corner. */
+function PortMark({ stream, size }: { stream: StreamEntry; size: "md" | "sm" }) {
+  const product = portProduct(stream.listen)
   return (
-    // The heading hangs above the list rather than sharing its box, so every
-    // mark sits on the engine's line and the wires run level.
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center lg:py-8">
-      <div className="lg:relative">
-        <p className={cn("eyebrow mb-4 lg:absolute lg:inset-x-0 lg:bottom-full", className)}>
-          {title}
-          {count > 0 && (
-            <span className="numeric ml-1.5 font-medium tracking-normal text-faint">{count}</span>
-          )}
-        </p>
-        <ol className="flex flex-col gap-4" aria-label={title}>
-          {children}
-        </ol>
-      </div>
-    </div>
+    <span className="relative flex">
+      <WireMark tone="logo" size={size}>
+        {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Connection aria-hidden />}
+      </WireMark>
+      <StatusDot tone={stateTone(stream)} corner={size === "md" ? "md" : "sm"} />
+    </span>
+  )
+}
+
+/** An address a port is handed to, as the service its port is where that says one. */
+function UpstreamMark({ address, size }: { address: string; size: "md" | "sm" }) {
+  const port = upstreamAddress(address)?.port
+  const product = port ? portProduct(port) : undefined
+  return (
+    <WireMark tone="logo" size={size}>
+      {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Servers aria-hidden />}
+    </WireMark>
   )
 }

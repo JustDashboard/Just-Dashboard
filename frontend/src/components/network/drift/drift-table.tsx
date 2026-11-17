@@ -29,6 +29,7 @@ import {
 } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { DriftMark, ShortDigest } from "@/components/network/drift/marks"
+import { MonoValue } from "@/components/wire/mono-value"
 import { useBreakpoint } from "@/lib/breakpoints"
 
 export type DriftScope = "all" | "differ" | "incomplete" | "matching"
@@ -258,8 +259,15 @@ function Compared({ row }: { row: DriftRow }) {
     <div className="flex min-w-0 items-center gap-3">
       <DriftMark row={row} />
       <div className="min-w-0">
-        <p className="font-mono text-body break-all">{row.label}</p>
-        {row.detail && <p className="text-hint break-all text-muted-foreground">{row.detail}</p>}
+        {/* A path or an address wraps at its separators, never mid-word:
+            break-all cut "links.batch" as "link|s.batch" on a phone. */}
+        <MonoValue value={row.label} className="block text-body" />
+        {row.detail && (
+          <MonoValue
+            value={row.detail}
+            className="block font-sans text-hint text-muted-foreground"
+          />
+        )}
       </div>
     </div>
   )

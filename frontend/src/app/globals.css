@@ -3,6 +3,28 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* "Pause animations" (`data-motion="paused"` on <html>, the shell's switch) is
+ * the reduced-motion request made in the product, so `motion-reduce:` and
+ * `motion-safe:` answer to it as they answer to the system setting: a paused
+ * beam hides its pulse and a paused menu drops its stagger, the same as a
+ * reduced one. `:where()` keeps a utility's specificity what it was under the
+ * media query alone. */
+@custom-variant motion-reduce {
+  @media (prefers-reduced-motion: reduce) {
+    @slot;
+  }
+  &:where(:root[data-motion="paused"] *) {
+    @slot;
+  }
+}
+@custom-variant motion-safe {
+  @media (prefers-reduced-motion: no-preference) {
+    &:not(:where(:root[data-motion="paused"] *)) {
+      @slot;
+    }
+  }
+}
+
 /* Served from the copy `scripts/sync-excalidraw.mjs` makes of the pinned
  * package's fonts. Named apart from the editor's own "Virgil" face, which
  * Excalidraw registers itself when a board opens. */

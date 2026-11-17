@@ -378,9 +378,6 @@ export function NewProject({
       rows={false}
     >
       <Page rise register="flow" fill="xl">
-        <div className="flex shrink-0 justify-end">
-          <WorkspaceHelp />
-        </div>
         {choosing ? (
           <>
             {/* The screen asks something, and the question is the page's own
@@ -392,8 +389,13 @@ export function NewProject({
               // Unfinished work is a way back, not a step of this one: a button
               // that says how much there is, beside the question, rather than a
               // block pushing the sources down the screen.
+              // The shortcuts' `?` ends the head, as on every page, rather than
+              // standing on a row of its own above it; a touch screen has none.
               actions={
-                pending.length > 0 && <UnfinishedSetups drafts={pending} onDiscard={discard} />
+                <>
+                  {pending.length > 0 && <UnfinishedSetups drafts={pending} onDiscard={discard} />}
+                  <WorkspaceHelp />
+                </>
               }
               steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
             />
@@ -459,6 +461,7 @@ export function NewProject({
             <FlowHeader
               back={BACK}
               question={QUESTIONS[step]}
+              actions={<WorkspaceHelp />}
               steps={<FlowSteps steps={CREATION_STEPS} current={creationStepIndex(step)} />}
             />
             <div className="min-w-0 xl:min-h-0 xl:flex-1">

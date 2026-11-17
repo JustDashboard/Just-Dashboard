@@ -5,7 +5,6 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Workspace } from "@/components/workspace/workspace"
 import {
-  ArrowLeft,
   Archive,
   ChevronDown,
   ChevronUp,
@@ -72,7 +71,7 @@ import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Page } from "@/components/page"
 import { IconAction } from "@/components/icon-action"
-import { PaneHeader } from "@/components/panel"
+import { WorkbenchHeader } from "@/components/workbench-header"
 import { PaneBar } from "@/components/phone-panes"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -630,91 +629,80 @@ export function RepoWorkspace({
             menu and the account at its end, then where HEAD is stretched
             beside the sync verbs. The path goes when there is a remote to
             name instead; it stays on the title's tooltip. */}
-            <PaneHeader
-              className={cn("@container h-auto min-h-12 px-2 py-1.5", reading && "max-lg:hidden")}
-            >
-              <div className="grid w-full min-w-0 grid-cols-main-end items-center gap-x-2 gap-y-1.5 @4xl:flex">
-                <div className="flex min-w-0 items-center gap-2 @4xl:flex-1">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
-                        aria-label="Back to repositories"
-                        onClick={onBack}
-                      >
-                        <ArrowLeft className="size-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Back to all repositories</TooltipContent>
-                  </Tooltip>
-                  <RepoMark repo={repo} size="sm" />
-                  {Object.keys(fileDrafts).length > 0 && (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className="text-warning"
-                      title="Drafts stay in this tab until saved or discarded"
-                      onClick={() => setPreview({ kind: "file", path: Object.keys(fileDrafts)[0] })}
-                    >
-                      {Object.keys(fileDrafts).length} unsaved{" "}
-                      {Object.keys(fileDrafts).length === 1 ? "file" : "files"}
-                    </Button>
-                  )}
-                  <div className="min-w-0 shrink">
-                    <p className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-body font-semibold" title={repo.path}>
-                        {repo.name}
-                      </span>
-                      {repo.worktree && <Tag className="shrink-0">worktree</Tag>}
-                    </p>
-                    <p className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
-                      {forge && forgeMark && (
-                        <>
-                          <ProductGlyph id={forgeMark} className="size-3" />
-                          {forge.url ? (
-                            <a
-                              href={forge.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="max-w-[14rem] truncate text-muted-foreground hover:text-foreground hover:underline"
-                            >
-                              {forge.slug}
-                            </a>
-                          ) : (
-                            <span className="max-w-[14rem] truncate">{forge.slug}</span>
-                          )}
-                          <span
-                            aria-hidden
-                            className={cn(!(repo.worktree && repo.main) && "hidden")}
-                          >
-                            ·
-                          </span>
-                        </>
-                      )}
-                      {repo.worktree && repo.main ? (
-                        <button
-                          type="button"
-                          onClick={() => router.push(`/git?repo=${encodeURIComponent(repo.main!)}`)}
-                          className="truncate font-mono hover:text-foreground hover:underline"
-                          title={`Open the main checkout at ${repo.main}`}
+            <WorkbenchHeader
+              className={cn(reading && "max-lg:hidden")}
+              back={{
+                label: "Back to repositories",
+                hint: "Back to all repositories",
+                onClick: onBack,
+              }}
+              heading={repo.name}
+              mark={<RepoMark repo={repo} size="sm" />}
+              name={
+                <>
+                  <span className="truncate" title={repo.path}>
+                    {repo.name}
+                  </span>
+                  {repo.worktree && <Tag className="shrink-0 font-normal">worktree</Tag>}
+                </>
+              }
+              state={
+                Object.keys(fileDrafts).length > 0 && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="text-warning"
+                    title="Drafts stay in this tab until saved or discarded"
+                    onClick={() => setPreview({ kind: "file", path: Object.keys(fileDrafts)[0] })}
+                  >
+                    {Object.keys(fileDrafts).length} unsaved{" "}
+                    {Object.keys(fileDrafts).length === 1 ? "file" : "files"}
+                  </Button>
+                )
+              }
+              subline={
+                <>
+                  {forge && forgeMark && (
+                    <>
+                      <ProductGlyph id={forgeMark} className="size-3" />
+                      {forge.url ? (
+                        <a
+                          href={forge.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="max-w-[14rem] truncate text-muted-foreground hover:text-foreground hover:underline"
                         >
-                          worktree of {repo.main}
-                        </button>
+                          {forge.slug}
+                        </a>
                       ) : (
-                        <span
-                          className={cn("truncate font-mono", forge && forgeMark && "hidden")}
-                          title={repo.path}
-                        >
-                          {repo.path}
-                        </span>
+                        <span className="max-w-[14rem] truncate">{forge.slug}</span>
                       )}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="order-1 col-span-2 flex min-w-0 items-center gap-2 @4xl:order-none">
+                      <span aria-hidden className={cn(!(repo.worktree && repo.main) && "hidden")}>
+                        ·
+                      </span>
+                    </>
+                  )}
+                  {repo.worktree && repo.main ? (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/git?repo=${encodeURIComponent(repo.main!)}`)}
+                      className="truncate font-mono hover:text-foreground hover:underline"
+                      title={`Open the main checkout at ${repo.main}`}
+                    >
+                      worktree of {repo.main}
+                    </button>
+                  ) : (
+                    <span
+                      className={cn("truncate font-mono", forge && forgeMark && "hidden")}
+                      title={repo.path}
+                    >
+                      {repo.path}
+                    </span>
+                  )}
+                </>
+              }
+              tools={
+                <>
                   {/* Where HEAD is: a button into Branches, carrying how far it has
                 drifted. What it tracks is the tooltip, because "will this push
                 go where I think" is decided there and nowhere else. */}
@@ -840,9 +828,10 @@ export function RepoWorkspace({
                       </>
                     )}
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2">
+                </>
+              }
+              menu={
+                <>
                   <VerbMenu
                     verbs={more}
                     label="More git actions"
@@ -856,9 +845,9 @@ export function RepoWorkspace({
                   <span aria-hidden className="mx-0.5 hidden h-5 w-px bg-hairline @4xl:block" />
 
                   <GitHubAccountControl repoPath={repo.path} status={github} compact="fit" />
-                </div>
-              </div>
-            </PaneHeader>
+                </>
+              }
+            />
 
             {/* The three columns. Side by side they share the frame's height and
             each scrolls inside itself. On a small screen each takes the whole

@@ -22,7 +22,7 @@ import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { ViewTabList, tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Tabs as TabsPrimitive } from "radix-ui"
 import { FilterChip } from "@/components/chips"
 import { ForgeFace } from "@/components/git/marks"
@@ -479,22 +479,21 @@ export function PullReview({
                 value={writing}
                 onValueChange={(next) => setWriting(next as "write" | "preview")}
               >
-                <div className="flex h-8 items-center border-b border-hairline px-1">
-                  <TabsPrimitive.List aria-label="Comment" className="flex">
-                    {(["write", "preview"] as const).map((mode) => (
-                      <TabsPrimitive.Trigger
-                        key={mode}
-                        value={mode}
-                        className={tabClasses(writing === mode, "h-8 px-2.5 text-xs")}
-                      >
-                        {mode === "write" ? "Write" : "Preview"}
-                      </TabsPrimitive.Trigger>
-                    ))}
-                  </TabsPrimitive.List>
-                  <span className="ml-auto pr-2 text-micro text-muted-foreground">
-                    {ctx.githubLogin ? `as ${ctx.githubLogin}` : "as the checkout's owner"}
-                  </span>
-                </div>
+                <ViewTabList
+                  label="Comment"
+                  size="sm"
+                  value={writing}
+                  className="px-1"
+                  views={[
+                    { key: "write", label: "Write" },
+                    { key: "preview", label: "Preview" },
+                  ]}
+                  trailing={
+                    <span className="pr-2 text-micro text-muted-foreground">
+                      {ctx.githubLogin ? `as ${ctx.githubLogin}` : "as the checkout's owner"}
+                    </span>
+                  }
+                />
                 <TabsPrimitive.Content value={writing} className="outline-none">
                   {writing === "write" ? (
                     <Textarea

@@ -3,6 +3,9 @@ import { mockOnboarding } from "./onboarding-fixture"
 import { user } from "./host-fixture"
 import { mockProxy, user as proxyUser } from "./proxy-fixtures"
 
+// The account card is named by what it shows, the name then the role, and then by what it opens.
+const ACCOUNT_CARD = /^Ion, .*account menu$/
+
 const signedOut = {
   authenticated: false,
   needsTotp: false,
@@ -47,7 +50,7 @@ async function signIn(page: Page) {
 }
 
 async function signOut(page: Page) {
-  await page.getByRole("button", { name: "Account menu for Ion", exact: true }).click()
+  await page.getByRole("button", { name: ACCOUNT_CARD }).click()
   await page.getByRole("menuitem", { name: "Sign out", exact: true }).click()
 }
 
@@ -82,9 +85,7 @@ test("a temporarily unavailable session recheck preserves the current account", 
   await expect.poll(() => rechecked).toBe(true)
   await expect(page.getByText("Could not create the key")).toBeVisible()
   await page.keyboard.press("Escape")
-  await expect(
-    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: ACCOUNT_CARD })).toBeVisible()
   await expect(page).toHaveURL(/\/account\/keys$/)
   expect(fixture.reads()).toBe(2)
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toHaveCount(0)
@@ -112,9 +113,7 @@ test("a first session probe that is refused or unanswered waits on the splash an
   await page.goto("/account/sessions?tab=x")
   await expect(page.getByRole("status").filter({ hasText: "Trying again" })).toBeVisible()
   await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
-  await expect(page.getByRole("button", { name: "Account menu for Ion", exact: true })).toBeVisible(
-    { timeout: 20_000 },
-  )
+  await expect(page.getByRole("button", { name: ACCOUNT_CARD })).toBeVisible({ timeout: 20_000 })
   await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
   expect(fixture.reads()).toBe(3)
   await expect(page.getByLabel("Username")).toHaveCount(0)
@@ -138,9 +137,7 @@ test("the session is asked for while the page's JavaScript is still on its way",
     await route.continue()
   })
   await page.goto("/account/sessions")
-  await expect(
-    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: ACCOUNT_CARD })).toBeVisible()
   // The provider took the document's request: it did not ask a second time.
   expect(fixture.reads()).toBe(1)
 })
@@ -155,9 +152,7 @@ test("a link opened while signed out ends on its page after signing in, with onl
   await expect(page).toHaveURL(/\/login\?next=%2Faccount%2Fsessions%3Ftab%3Dx$/)
   await signIn(page)
   await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
-  await expect(
-    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: ACCOUNT_CARD })).toBeVisible()
 
   // Signing out is not arriving signed out: the next sign-in starts from the Overview.
   await signOut(page)
@@ -196,9 +191,7 @@ test("a delayed expired-session recheck cannot replace a later successful sign-i
   await expect(page).toHaveURL(/\/$/)
   release()
   await expect.poll(() => finished).toBe(true)
-  await expect(
-    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: ACCOUNT_CARD })).toBeVisible()
   await expect(page).toHaveURL(/\/$/)
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toHaveCount(0)
 })
@@ -221,9 +214,7 @@ test("a rejected current password keeps the account and makes no expiry recheck"
   await page.getByLabel("Confirm new password", { exact: true }).fill("A-New-Password-123!")
   await page.getByRole("button", { name: "Change password", exact: true }).click()
   await expect(page.getByText("Could not change password", { exact: true })).toBeVisible()
-  await expect(
-    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: ACCOUNT_CARD })).toBeVisible()
   await expect(page).toHaveURL(/\/account\/security$/)
   expect(fixture.reads()).toBe(1)
 })
@@ -270,9 +261,7 @@ test("repeated sign-out uses one pending request before a fresh login", async ({
   expect(calls).toBe(1)
   await signIn(page)
   await expect(page).toHaveURL(/\/$/)
-  await expect(
-    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: ACCOUNT_CARD })).toBeVisible()
 })
 
 test("a different account after expiry clears the previous account's working drafts", async ({
@@ -303,9 +292,7 @@ test("draft ownership survives a reload before a different account signs in", as
   const key = `jd.session.state.entry.${encodeURIComponent("audit.reload.secret")}`
   const fixture = await authFixture(page)
   await page.goto("/account/keys")
-  await expect(
-    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: ACCOUNT_CARD })).toBeVisible()
   await page.evaluate(
     (storageKey) => sessionStorage.setItem(storageKey, JSON.stringify("prior-account")),
     key,
@@ -374,7 +361,9 @@ for (const changedAccount of [false, true]) {
     await editor.getByRole("button", { name: "Save only", exact: true }).click()
     // A modal hides the sidebar from accessibility queries, but its real
     // account label proves AuthProvider adopted the usable session answer.
-    await expect(page.locator(`[aria-label="Account menu for ${nextName}"]`)).toHaveCount(1)
+    await expect(
+      page.locator(`[aria-label^="${nextName}, "][aria-label$="account menu"]`),
+    ).toHaveCount(1)
     expect(reads).toBe(2)
     await expect(page).toHaveURL(route)
     expect(writes).toHaveLength(1)

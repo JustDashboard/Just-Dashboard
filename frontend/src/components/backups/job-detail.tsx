@@ -63,11 +63,13 @@ import { RunContents, RunEncryption, RunLog, RunRail } from "@/components/backup
 import { JobMark, destinationProduct, jobProducts, jobProject } from "@/components/backups/marks"
 import { ProductLogo } from "@/components/product-logo"
 import { JobMap } from "@/components/backups/protection-map"
-import { FileIcon } from "@/components/files/file-icon"
+import { FileIcon } from "@/components/file-icon"
 import { useJobVerbs } from "@/components/backups/job-verbs"
 import { JobDialog } from "@/components/backups/job-form"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { JobRail } from "@/components/backups/job-rail"
+import { PaneBack, paneShown } from "@/components/phone-panes"
+import { useBelow } from "@/lib/breakpoints"
 import { rangeSelection } from "@/components/workspace/selection"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
@@ -167,6 +169,15 @@ export function JobPage() {
   const verbs = job ? verbsFor(job) : []
   const runList = runs.data?.runs ?? []
   const shown = runList.find((run) => run.id === selectedId) ?? runList[0]
+  // On a phone a run is a page of its own: the runs are plain rows in the
+  // page's scroll, and picking one shows it in their place with a way back,
+  // where the rail was a box cut off at 320px over the run it showed.
+  const phone = useBelow("lg")
+  const opened = selectedId !== null && runList.some((run) => run.id === selectedId)
+  const openRun = (id: number | null) => {
+    setSelectedId(id)
+    if (phone) document.querySelector("[data-workspace-shell-scroll]")?.scrollTo({ top: 0 })
+  }
 
   // ?run=<id>&restore=<connection> is how a deployment's data-aware rollback
   // hands the reader here ("Restore in place to this point"): that run's
@@ -320,14 +331,14 @@ export function JobPage() {
           {/* On the page's own ground with no frame and no dot grid, as the
                 list page's picture stands. */}
           {(resources.data || resources.error) && (
-            <div className="relative animate-rise py-2 lg:py-4">
+            <div className={cn("relative animate-rise py-2 lg:py-4", paneShown(!opened))}>
               <JobMap job={job} resources={resourceList} containers={containers} />
             </div>
           )}
 
           {/* Out by the line's own inset, as a run of them stands, so its
                 mark is on the page's edge. */}
-          <div className="-mx-2 animate-rise">
+          <div className={cn("-mx-2 animate-rise", paneShown(!opened))}>
             <ReadingLine
               mark={
                 <WireMark size="md" hue={HUE.disk}>
@@ -349,7 +360,7 @@ export function JobPage() {
           </div>
 
           {job.excludes.length > 0 && (
-            <DetailList className="text-body">
+            <DetailList className={cn("text-body", paneShown(!opened))}>
               <Detail label="Excludes">
                 <ul className="min-w-0 space-y-0.5 font-mono text-xs">
                   {job.excludes.map((path) => (
@@ -364,6 +375,7 @@ export function JobPage() {
 
           <Panel plain>
             <PanelHeader
+              className={paneShown(!opened)}
               title="Runs"
               actions={
                 runs.data?.running ? (
@@ -406,18 +418,25 @@ export function JobPage() {
               ) : (
                 // One frame round the rail and the run it shows, the run
                 // page's Details: the rail decides what the inspector holds.
-                <div className="grid min-w-0 overflow-hidden rounded-xl border bg-card lg:h-[min(80svh,48rem)] lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-                  <div className="min-h-0 overflow-y-auto p-2 max-lg:max-h-80 max-lg:border-b lg:border-r">
+                // Below `lg` there is no frame: one of the two, in the page.
+                <div className="grid min-w-0 lg:h-[min(80svh,48rem)] lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:overflow-hidden lg:rounded-xl lg:border lg:bg-card">
+                  <div
+                    className={cn(
+                      "min-h-0 lg:overflow-y-auto lg:border-r lg:p-2",
+                      paneShown(!opened),
+                    )}
+                  >
                     <RunRail
                       runs={runList}
-                      selectedId={shown?.id}
-                      onSelect={(run) => setSelectedId(run.id)}
+                      selectedId={phone ? undefined : shown?.id}
+                      onSelect={(run) => openRun(run.id)}
                     />
                   </div>
-                  <div className="min-h-0 min-w-0 overflow-y-auto">
+                  <div className={cn("min-h-0 min-w-0 lg:overflow-y-auto", paneShown(opened))}>
                     {shown && (
                       <RunInspector
                         key={shown.id}
+                        onBack={() => openRun(null)}
                         run={shown}
                         verbs={runVerbs(shown)}
                         browsing={browsing}
@@ -543,7 +562,10 @@ function RunInspector({
   canRestore,
   onBrowse,
   onRestorePaths,
+  onBack,
 }: {
+  /** On a phone, back to the runs it was opened from. */
+  onBack: () => void
   run: BackupRun
   verbs: Verb[]
   browsing: BackupRun | null
@@ -557,8 +579,19 @@ function RunInspector({
   }, [browsing, run.id, setShowFiles])
   const verification = run.restoreVerification
   return (
-    <section aria-label={`Run ${run.id}`} className="min-w-0 animate-rise space-y-5 p-4 sm:p-5">
+    <section
+      aria-label={`Run ${run.id}`}
+      className="min-w-0 animate-rise space-y-5 max-lg:space-y-4 lg:p-5"
+    >
       <header className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
+        {/* On the title's line, not the block's: pulled up by half of what
+            the arrow's box is taller than that line, under a mouse and under
+            a finger, or it hung between the title and the date. */}
+        <PaneBack
+          label="Back to runs"
+          onClick={onBack}
+          className="-mt-1.25 -mr-2 self-start pointer-coarse:-mt-2.25"
+        />
         <div className="min-w-0 flex-1 space-y-1">
           <h3 className="flex min-w-0 items-center gap-3 text-title font-semibold tracking-tight">
             Run {run.id}

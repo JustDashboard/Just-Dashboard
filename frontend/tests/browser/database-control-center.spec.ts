@@ -1290,10 +1290,9 @@ test.describe("the map", () => {
       ["Redis", ["cache"]],
       ["SQLite", ["notes"]],
     ] as const) {
-      const section = rail(page).locator("section", {
-        has: page.getByRole("heading", { name: engine }),
-      })
-      for (const name of names) await expect(section.getByRole("button", { name })).toBeVisible()
+      // An engine's name labels its list; a rail's group is not a heading.
+      const list = rail(page).getByRole("list", { name: engine, exact: true })
+      for (const name of names) await expect(list.getByRole("button", { name })).toBeVisible()
     }
     for (const id of [1, 2, 4, 5, 7]) await expect(frame(page, `system:db:${id}`)).toHaveCount(1)
     await expect(rail(page).getByRole("button", { name: /notes/ })).toContainText(
@@ -1476,10 +1475,14 @@ test.describe("the map", () => {
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true)
 
-      // The server map shares the canvas and did not ask for the bar: it is as it was.
+      // The server map shares the canvas and has a bar of its own, over systems, opening on the map.
       await page.goto("/map")
       await expect(page.locator(".react-flow__node").first()).toBeVisible()
-      await expect(page.locator("[data-slot=pane-bar]")).toHaveCount(0)
+      await expect(page.locator("[data-slot=pane-bar]").getByRole("button")).toHaveText([
+        "Systems",
+        "Map",
+        "Inspector",
+      ])
       await expect(page.locator("[data-slot=map-pane]")).toHaveCount(0)
     })
   })
