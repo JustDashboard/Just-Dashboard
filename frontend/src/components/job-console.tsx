@@ -137,7 +137,8 @@ const JOB_STATE: Record<Job["status"], ConsoleState> = {
  * A job's console (`ConsoleView`): its lines numbered from the job's own
  * sequence (`jobLineToTranscript`), its state as a word, Stop for a reader
  * the job's route would let start it, and a note while it runs that closing
- * the page does not stop it — the recent list beside it is the way back.
+ * the page does not stop it — the recent list beside it is the way back. On
+ * a phone the note is left off, so the job's name has the head's one row.
  */
 export function JobConsole({
   job,
