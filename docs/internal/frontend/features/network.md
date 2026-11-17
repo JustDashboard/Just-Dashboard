@@ -343,8 +343,8 @@ service state. The pages that moved keep their behaviour:
 - **Firewall** (`/network/firewall`): the page opens on its inbound path as a picture (`firewall-picture.tsx`, reading the
   rules through `firewall-reading.ts`): each port the rules admit, drawn as the product that answers
   there with who may reach it, and the default for everything else. The firewall turns on and off
-  from the line's `⋯` menu (Enable or Disable), and the shortcuts' `?` is on the row above the
-  line. The rules are the working column, and the defaults are one settings section under them at
+  from the line's `⋯` menu (Enable or Disable), and the shortcuts' `?` ends the line after the
+  `⋯`. The rules are the working column, and the defaults are one settings section under them at
   the page's width, staged and saved by the page's save bar (0.8.7). Each row carries its
   action in a `--tag-*` hue down its edge and groups its destination service, port and comment;
   actions stay visible, and the table ends on the default as a row of its own. The rule dialog groups policy, destination and source, using source choice cards
