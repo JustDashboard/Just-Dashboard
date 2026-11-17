@@ -460,7 +460,7 @@ test("the full template says what it carries and builds its image as a job befor
   // The build's own output, where the job console draws every job.
   await expect(settings.getByText("Building jd-postgres-full:18").first()).toBeVisible()
   await expect(settings.getByText(/Setting up postgresql-18-pgvector/)).toBeVisible()
-  await expect(settings).toContainText("This keeps running if you close the page")
+  await expect(settings).toContainText("Keeps running if you leave")
   expect(server.bodies("POST /databases/provision")).toEqual([])
 
   finished = true

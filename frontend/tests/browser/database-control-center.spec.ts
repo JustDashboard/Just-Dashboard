@@ -1475,10 +1475,14 @@ test.describe("the map", () => {
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true)
 
-      // The server map shares the canvas and did not ask for the bar: it is as it was.
+      // The server map shares the canvas and has a bar of its own, over systems, opening on the map.
       await page.goto("/map")
       await expect(page.locator(".react-flow__node").first()).toBeVisible()
-      await expect(page.locator("[data-slot=pane-bar]")).toHaveCount(0)
+      await expect(page.locator("[data-slot=pane-bar]").getByRole("button")).toHaveText([
+        "Systems",
+        "Map",
+        "Inspector",
+      ])
       await expect(page.locator("[data-slot=map-pane]")).toHaveCount(0)
     })
   })
