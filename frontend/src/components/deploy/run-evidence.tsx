@@ -733,4 +733,4 @@ function quote(word: string) {
 }
 
 /** @deprecated import from `@/components/code` */
-export { CODE, CodeBlock, JsonCode, ShellWords }
+export { CODE, ShellWords }

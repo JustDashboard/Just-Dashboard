@@ -70,9 +70,6 @@ export function unreadKinds(kinds: MapKindReading[], drawn: ReadonlySet<string>)
     .map((k) => ({ key: k.key, label: `${kindOf(k.key)?.label ?? k.key}s`, reason: k.reason }))
 }
 
-/** @deprecated import `useFullscreen` from `@/hooks/use-fullscreen`. */
-export { useFullscreen }
-
 /**
  * The server map: every system the server runs — each deployment, Compose
  * stack and PM2 app, this dashboard itself — drawn as its own diagram of what

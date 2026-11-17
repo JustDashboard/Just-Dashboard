@@ -214,7 +214,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `useSaveBarHost` | [Forms and settings](forms.md) | `components/settings/save-bar.tsx` | Where the save bar is drawn; `useFloatingBarHost` is. | retired (0.9.0) |
 | `SettingsPage` | [Forms and settings](forms.md) | `components/settings/settings-page.tsx` | A deployment's settings page: its configuration read, what is saved but not live, and its forms, in the one settings column. | keep |
 | `SettingForm`, `SettingSection`, `settingStatus` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | One form of a settings page, one section, and where a section stands against what is live. | keep |
-| `SettingsPage` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | The settings page's old home, re-exported. | deprecated (use `SettingsPage` from `settings/settings-page.tsx`) |
+| `SettingsPage` | [Forms and settings](forms.md) | `components/settings/setting-card.tsx` | The settings page's old home, re-exported; `SettingsPage` from `settings/settings-page.tsx` is the one. | retired (0.9.0) |
 | `SettingsColumn` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | The one centred settings column for a page that is not a deployment's. | keep |
 | `SwitchRows`, `SwitchRow` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | A switch as a full-width row, in a run ruled apart. | keep |
 | `EditedTag` | [Forms and settings](forms.md) | `components/settings/settings-column.tsx` | A section holding a change not applied yet, in git's modified colour. | keep |
@@ -265,7 +265,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `WireNode`, `WireMark`, `WireHost`, `WirePlaceholder`, `WireLink`, `WireLabel` | [Wiring pictures](wiring.md) | `components/wire/wire.tsx` | A picture's parts: a node, a filled mark, this server, a mark not there yet, a linked mark, a caption on a line. | keep |
 | `CANVAS_MOVE`, `zoomKey`, `zoomAbout`, `useCanvasPinch` | [Workbench](workbench.md) | `components/canvas-move.ts` | How a canvas moves, Excalidraw's way: trackpad pans, pinch and keys zoom about a point. | keep |
 | `CanvasZoom`, `CanvasZoomWord`, `FLOAT` | [Workbench](workbench.md) | `components/canvas-zoom.tsx` | A canvas's zoom out, percent, in, Fit and Tidy, a word beside Fit, and the ground of a control floating on a canvas. | keep |
-| `ZoomBar`, `FLOAT` | [Workbench](workbench.md) | `components/database/diagram/chrome.tsx` | The ER diagram's own zoom bar and its ground. | deprecated (use `CanvasZoom`, `FLOAT` from `canvas-zoom.tsx`) |
+| `ZoomBar`, `FLOAT` | [Workbench](workbench.md) | `components/database/diagram/chrome.tsx` | The ER diagram's own zoom bar and its ground; `CanvasZoom` and `FLOAT` from `canvas-zoom.tsx` draw them. | retired (0.9.0) |
 | `CodeEditor`, `EditorCommands` (type) | [Workbench](workbench.md) | `components/code-editor.tsx` | Monaco, wired to the dashboard's palette and keys. | keep |
 | `PaneBar`, `PaneBack`, `paneShown`, `PaneBreak` (type), `PaneStop` (type) | [Workbench](workbench.md) | `components/phone-panes.tsx` | One pane at a time on a phone: the bar at the foot (a bar in the bottom stack), the way back, and which pane shows. | keep |
 | `ResizeHandle` | [Workbench](workbench.md) | `components/resize-handle.tsx` | The grab strip between a side column and the work, by pointer or by keys. | keep |
