@@ -7,7 +7,8 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceListSkeleton } from "@/components/choice-row"
 import { ArrowRight, Plus, RefreshClockwise, TerminalWindow } from "@/components/icons"
 import { IdentityHeader } from "@/components/identity-header"
-import { facts } from "@/components/fact-line"
+import { Fact, facts } from "@/components/fact-line"
+import { Bone } from "@/components/bone"
 import { MissingThing } from "@/components/missing-thing"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -101,7 +102,16 @@ export function RemoteDesktopOverview() {
         </span>
       }
       state={data ? <Verdict overview={data} /> : null}
-      facts={data ? overviewFacts(data) : <Skeleton className="h-4 w-72 max-w-full" />}
+      // The placeholder is a fact too, so it waits in the line the facts land in.
+      facts={
+        data ? (
+          overviewFacts(data)
+        ) : (
+          <Fact>
+            <Bone className="w-72 max-w-full" />
+          </Fact>
+        )
+      }
       command={
         <Button size="sm" asChild>
           <Link href={NEW_HREF} aria-label="Add a computer">
@@ -268,7 +278,7 @@ function overviewFacts(overview: RdOverview) {
       <Link
         key="tailnet"
         href="/network/vpn"
-        className="inline-flex items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground hover:underline"
+        className="inline-flex items-center gap-1.5 rounded-sm align-top focus-ring transition-colors hover:text-foreground hover:underline"
       >
         <ProductGlyph id="tailscale" className="size-3.5" />
         over Tailscale

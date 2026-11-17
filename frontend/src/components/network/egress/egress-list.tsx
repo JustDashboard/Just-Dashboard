@@ -243,7 +243,8 @@ function ListIdentity({
 /** Two cards' worth of ground while the first read is out, at a card's height. */
 function LoadingCards() {
   return (
-    <div role="status" aria-label="Reading the egress groups">
+    // The list the groups will be, busy: its name says what it is waiting for.
+    <div role="list" aria-busy aria-label="Reading the egress groups">
       <ChoiceListSkeleton rows={2} />
     </div>
   )

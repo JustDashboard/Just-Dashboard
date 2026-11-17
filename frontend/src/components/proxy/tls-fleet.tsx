@@ -22,7 +22,7 @@ import { Toolbar } from "@/components/toolbar"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { IdentityHeader } from "@/components/identity-header"
-import { facts } from "@/components/fact-line"
+import { Fact, facts } from "@/components/fact-line"
 import { ProductLogo } from "@/components/product-logo"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -238,12 +238,15 @@ function TLSFleetPage() {
           </span>
         }
         facts={
+          // Every state is a fact, so each stands in the line the facts land in.
           loading ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Spinner className="size-3" /> reading the stored reports
-            </span>
+            <Fact>
+              <span className="inline-flex items-center gap-1.5">
+                <Spinner className="size-3" /> reading the stored reports
+              </span>
+            </Fact>
           ) : fleet.error && !fleet.data ? (
-            <span className="text-destructive">the stored reports could not be read</span>
+            <Fact className="text-destructive">the stored reports could not be read</Fact>
           ) : (
             fleetFactLine(all)
           )
