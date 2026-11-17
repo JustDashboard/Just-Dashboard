@@ -70,7 +70,7 @@ export function WireNode({
       )}
     >
       {/* Positioned, so the mark paints over the lines drawn under it. */}
-      <div ref={nodeRef} className="relative z-10 flex shrink-0">
+      <div ref={nodeRef} className="relative z-raised flex shrink-0">
         {mark}
       </div>
       {aside ? (
@@ -180,7 +180,7 @@ export function WireHost({
       className={cn(
         "flex shrink-0 border border-rule-brand bg-background",
         size === "lg" && "rounded-[1.125rem] p-[3px]",
-        size === "md" && "rounded-[0.875rem] p-[2px]",
+        size === "md" && "rounded-tile-lg p-[2px]",
         size === "sm" && "rounded-xl p-[2px]",
         className,
       )}
@@ -188,8 +188,8 @@ export function WireHost({
       <span
         className={cn(
           "flex items-center justify-center bg-wash-brand text-brand",
-          size === "lg" && "size-12 rounded-[0.875rem] [&>svg]:size-6",
-          size === "md" && "size-[2.375rem] rounded-[0.625rem] [&>svg]:size-5",
+          size === "lg" && "size-12 rounded-tile-lg [&>svg]:size-6",
+          size === "md" && "size-[2.375rem] rounded-tile-md [&>svg]:size-5",
           size === "sm" && "size-[1.875rem] rounded-lg [&>svg]:size-4",
         )}
       >

@@ -232,7 +232,7 @@ function SkipToContent() {
       // Held above the window's edge rather than clipped to a pixel, so it is
       // its real size when the focus brings it down: a finger's height, since
       // a phone with a keyboard attached reaches it too.
-      className="fixed top-2 left-2 z-50 inline-flex h-11 -translate-y-16 items-center rounded-md border bg-popover px-4 text-body font-medium text-popover-foreground shadow-md focus-ring focus:translate-y-0"
+      className="fixed top-2 left-2 z-overlay inline-flex h-11 -translate-y-16 items-center rounded-md border bg-popover px-4 text-body font-medium text-popover-foreground shadow-md focus-ring focus:translate-y-0"
     >
       Skip to content
     </a>

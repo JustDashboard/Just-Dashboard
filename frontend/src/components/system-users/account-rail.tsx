@@ -17,7 +17,7 @@ const ROOT_INK = {
   danger: "text-destructive",
   warning: "text-warning",
   default: "text-muted-foreground",
-  muted: "text-muted-foreground/50",
+  muted: "text-faint",
 } as const
 
 /**

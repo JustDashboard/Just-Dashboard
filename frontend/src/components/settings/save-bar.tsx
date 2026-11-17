@@ -308,14 +308,7 @@ function SaveBar({
       actions={
         !done && (
           <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={saving}
-              onClick={onDiscard}
-              className="max-sm:h-10"
-            >
+            <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={onDiscard}>
               Discard
             </Button>
             <Button
@@ -325,7 +318,6 @@ function SaveBar({
               disabled={invalid}
               onClick={onSave}
               aria-keyshortcuts="Control+S Meta+S"
-              className="max-sm:h-10"
             >
               {verb}
               <SaveKey hidden={saving} />

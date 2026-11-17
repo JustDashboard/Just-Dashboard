@@ -60,9 +60,7 @@ export function DangerRow({
         key={`${title}-${action ? "open" : "held"}`}
         className={cn(
           "grid min-w-0 animate-rise gap-x-4 gap-y-3 sm:items-center",
-          mark
-            ? "grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto]"
-            : "sm:grid-cols-[minmax(0,1fr)_auto]",
+          mark ? "grid-cols-start-main sm:grid-cols-start-main-end" : "sm:grid-cols-main-end",
         )}
       >
         {mark}

@@ -81,7 +81,7 @@ export function WorkbenchHeader({
         data-workbench-header=""
         className={cn("@container h-auto min-h-12 px-2 py-1.5", className)}
       >
-        <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 @4xl:flex">
+        <div className="grid w-full min-w-0 grid-cols-start-main-end items-center gap-x-2 gap-y-1.5 @4xl:flex">
           <div className="flex shrink-0 items-center gap-2">
             <BackButton back={back} />
             {mark}

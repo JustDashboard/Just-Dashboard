@@ -282,7 +282,7 @@ export function Explain(props: ExplainProps) {
             if (isMouse(event) && opened === "hover") after(CLOSE_MS, close)
           }}
           className={cn(
-            "z-50 origin-(--radix-popover-content-transform-origin) text-xs leading-relaxed outline-hidden data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none!",
+            "z-overlay origin-(--radix-popover-content-transform-origin) text-xs leading-relaxed outline-hidden data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none!",
             entry
               ? "w-80 max-w-(--radix-popover-content-available-width) rounded-md border bg-popover p-4 text-popover-foreground shadow-md"
               : "w-fit max-w-[min(20rem,var(--radix-popover-content-available-width))] rounded-md bg-foreground px-3 py-1.5 text-balance text-background",
@@ -300,7 +300,7 @@ export function Explain(props: ExplainProps) {
             )}
           </div>
           {!entry && (
-            <PopoverPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground" />
+            <PopoverPrimitive.Arrow className="z-overlay size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-xs bg-foreground fill-foreground" />
           )}
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>

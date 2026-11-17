@@ -2,10 +2,10 @@
 
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Disclosure } from "@/components/form"
 import { Tag } from "@/components/tag"
 import { CHANGE_TONE, ChangeTag } from "@/components/deploy/vocabulary"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const SHOWN = 6
 
@@ -56,7 +56,7 @@ export function PendingStrip({
   fold?: string
   className?: string
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const shown = items.slice(0, SHOWN)
   const list = (
     <ul className="flex w-full min-w-0 flex-row flex-wrap items-center gap-x-4 gap-y-1 sm:w-auto">
