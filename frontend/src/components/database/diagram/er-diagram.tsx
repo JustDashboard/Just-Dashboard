@@ -52,7 +52,14 @@ import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useFullscreen } from "@/hooks/use-fullscreen"
 import { usePoll } from "@/hooks/use-poll"
-import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
+import {
+  CANVAS_MOVE,
+  arrowOf,
+  moved,
+  panned,
+  useCanvasPinch,
+  zoomKey,
+} from "@/components/canvas-move"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/segments"
 import { FormFact } from "@/components/form"
@@ -96,7 +103,6 @@ import {
   Saved,
 } from "@/components/database/diagram/chrome"
 import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
-import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
 import {
   DIAGRAM_COLORS,
   isArranged,
@@ -722,11 +728,8 @@ function Canvas({
   // is in the diagram: on `window` they fired from anywhere on the page.
   const onKey = (e: React.KeyboardEvent) => {
     const target = e.target as HTMLElement
-    const typing =
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable ||
-      target.closest("[role=dialog],[role=menu]") !== null
+    // The product's one guard (`lib/keys`), as the map's keys use.
+    const typing = isTypingTarget(target) || target.closest(OWNER_SELECTOR) !== null
     if (e.key === "Escape") {
       if (typing) return
       // A focused table is cleared first; with nothing to clear, the press

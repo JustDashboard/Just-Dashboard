@@ -1577,8 +1577,17 @@
 [data-slot="server-map"] .react-flow__handle.map-port-off {
   opacity: 0;
 }
+/* The keyboard is on a box or a frame: the ring is drawn on what it is, at
+ * its own corners, not on the library's square wrapper. An arrow moves the
+ * box the ring is on once Enter has picked it, so the ring is how a keyboard
+ * reader sees which one (patterns/accessibility.md, "Focus is always
+ * visible"). */
 [data-slot="server-map"] .react-flow__node:focus-visible {
   outline: none;
+}
+[data-slot="server-map"] .react-flow__node:focus-visible > * {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 [data-slot="server-map"] .map-frame {
   background: color-mix(in oklab, var(--card) 42%, transparent);

@@ -12,7 +12,7 @@ import {
 } from "@/components/icons"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { Keycaps } from "@/components/keycaps"
-import { ARROW_CAPS } from "@/components/map/canvas-keys"
+import { ARROW_CAPS } from "@/components/canvas-move"
 import { Status } from "@/components/status-dot"
 import { PaneSection } from "@/components/panel"
 import { Detail, DetailList } from "@/components/detail-list"
@@ -121,24 +121,24 @@ export function MapInspector({
         data-slot="map-keys"
         className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground pointer-coarse:hidden"
       >
+        {/* The arrows slide the canvas until Enter picks a box or a frame,
+            then move it, as on a database's diagram. Shift's longer step is
+            said here, where a keyboard and a reader without a pointer see
+            it; the legend wraps rather than hide it in a title. */}
         <Key cap="F">Fit</Key>
         <Key cap="I">Panel</Key>
-        <Key cap="↵">Open</Key>
+        <Key cap="↵">Pick, open</Key>
         <Key cap="Esc">Let go</Key>
-        <Key
-          cap={ARROW_CAPS}
-          title="Arrows slide the canvas, or move the chosen box. Shift takes a longer step."
-        >
-          Move
-        </Key>
+        <Key cap={ARROW_CAPS}>Slide, move</Key>
+        <Key cap="Shift">Longer step</Key>
       </div>
     </aside>
   )
 }
 
-function Key({ cap, title, children }: { cap: string; title?: string; children: React.ReactNode }) {
+function Key({ cap, children }: { cap: string; children: React.ReactNode }) {
   return (
-    <span title={title} className="flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5">
       <Keycaps keys={cap} />
       {children}
     </span>

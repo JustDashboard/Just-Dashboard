@@ -44,10 +44,16 @@ import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
 import { motionMs } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
+import {
+  CANVAS_MOVE,
+  arrowOf,
+  moved,
+  panned,
+  useCanvasPinch,
+  zoomKey,
+} from "@/components/canvas-move"
 import { CanvasZoom, CanvasZoomWord, FLOAT } from "@/components/canvas-zoom"
 import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
-import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
 import { edgeTypes, type WireData } from "@/components/map/edges"
 import { MapInspector, UnreadNotices } from "@/components/map/inspector"
 import {
@@ -672,28 +678,23 @@ export function MapCanvas({
   )
 
   /**
-   * The box or the frame the keyboard itself walked onto, asked when the
-   * focus lands. Asked at an arrow's press, `:focus-visible` is true of
-   * whatever has the focus: a browser turns it on at the first key. Open
-   * ground inside a system is its frame, which a click focuses, so a click
-   * there and an arrow moved that system and saved the move, where the arrow
-   * was meant to slide the canvas. A press of the pointer takes it back: what
-   * a mouse picks is `chosen`.
+   * The system's frame Enter picked, which the arrows then move; a box is
+   * picked into `chosen`, as a click picks it. The diagram's rule, so one
+   * pattern is drawn one way (17 Nov): walking onto a box or a frame picks
+   * nothing, and until Enter does the arrows slide the canvas. The keyboard
+   * leaving the frame, a press of the pointer or Escape lets it go.
    */
-  const keyedRef = useRef<string | null>(null)
+  const framePickedRef = useRef<string | null>(null)
   const noteKeyed = (e: React.FocusEvent) => {
-    const on = e.target as HTMLElement
-    keyedRef.current =
-      on.matches(".react-flow__node") && on.matches(":focus-visible")
-        ? (on.dataset.id ?? null)
-        : null
+    const on = (e.target as HTMLElement).closest<HTMLElement>(".react-flow__node")
+    if (on?.dataset.id !== framePickedRef.current) framePickedRef.current = null
   }
 
   /**
-   * The arrows, while the keyboard is on the canvas (T10): what is chosen
-   * moves by a step, kept as a drag keeps it — the chosen box, or a box or a
-   * system's frame the keyboard itself is on — and with nothing chosen the
-   * picture slides. A phone only looks, so there it always slides.
+   * The arrows, while the keyboard is on the canvas (T10): what is picked
+   * moves by a step, kept as a drag keeps it — the chosen box, or the frame
+   * Enter picked — and with nothing picked the picture slides, as on the
+   * diagram. A phone only looks, so there it always slides.
    */
   const arrowKey = (e: React.KeyboardEvent) => {
     const direction = arrowOf(e)
@@ -704,11 +705,7 @@ export function MapCanvas({
     if (target !== canvas && !target.closest(".react-flow")) return false
     e.preventDefault()
     const shift = e.shiftKey
-    const keyedId =
-      keyedRef.current !== null && target.dataset.id === keyedRef.current
-        ? keyedRef.current
-        : undefined
-    const subject = [keyedId, chosen].find(
+    const subject = [framePickedRef.current, chosen].find(
       (id) => id && (seats.has(id) || (id.startsWith("frame:") && bySystem.has(id.slice(6)))),
     )
     if (!bare && subject?.startsWith("frame:")) {
@@ -763,12 +760,16 @@ export function MapCanvas({
       // A box the keyboard is on is chosen by Enter, as a click chooses it;
       // Enter again opens it.
       choose(keyedBox)
+    } else if (e.key === "Enter" && keyedBox?.startsWith("frame:") && !bare) {
+      // A system's frame is picked for the arrows to carry.
+      framePickedRef.current = keyedBox
     } else if (e.key === "Enter" && chosenNode) {
       router.push(chosenNode.item.href)
     } else if (e.key === "Escape") {
       // A choice is cleared first; with none, the press goes on to the full
       // screen, which leaves (`useFullscreen`).
-      if (chosen || kinds) e.preventDefault()
+      if (chosen || kinds || framePickedRef.current) e.preventDefault()
+      framePickedRef.current = null
       setChosen(null)
       setKinds(null)
       // React Flow lets go of a box by blurring it, which sent the keyboard
@@ -816,7 +817,7 @@ export function MapCanvas({
           data-slot="server-map"
           onFocus={noteKeyed}
           onPointerDownCapture={() => {
-            keyedRef.current = null
+            framePickedRef.current = null
           }}
           onPointerDown={bare ? undefined : carry}
           className="group/map relative min-h-0 min-w-0"
