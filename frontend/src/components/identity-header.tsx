@@ -319,8 +319,10 @@ function ProjectLine({
       data-slot="identity-state"
       className={cn(
         "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:shrink-0 max-sm:flex-nowrap max-sm:empty:hidden",
-        // In the facts' muted line, the state keeps the ink it has beside the name.
-        stateLeadsFacts && "text-foreground",
+        // In the facts' muted line, the state keeps the ink it has beside the name,
+        // but takes the line's size: a state set at the name's (`text-body`, as
+        // Packages and a capture draw theirs) sat a pixel off the facts' line.
+        stateLeadsFacts && "text-foreground [&>*]:text-xs",
       )}
     >
       {state}
