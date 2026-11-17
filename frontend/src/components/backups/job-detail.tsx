@@ -584,7 +584,14 @@ function RunInspector({
       className="min-w-0 animate-rise space-y-5 max-lg:space-y-4 lg:p-5"
     >
       <header className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
-        <PaneBack label="Back to runs" onClick={onBack} className="-mr-2 self-start" />
+        {/* On the title's line, not the block's: pulled up by half of what
+            the arrow's box is taller than that line, under a mouse and under
+            a finger, or it hung between the title and the date. */}
+        <PaneBack
+          label="Back to runs"
+          onClick={onBack}
+          className="-mt-1.25 -mr-2 self-start pointer-coarse:-mt-2.25"
+        />
         <div className="min-w-0 flex-1 space-y-1">
           <h3 className="flex min-w-0 items-center gap-3 text-title font-semibold tracking-tight">
             Run {run.id}
