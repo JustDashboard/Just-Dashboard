@@ -58,7 +58,7 @@ import { sectionHref } from "@/components/database/engine"
 import { ApiError, del, get, put } from "@/lib/api"
 import { dashboardResource, embeddable } from "@/lib/board/embeds"
 import { EXCALIDRAW_ASSETS } from "@/lib/vendored"
-import { isTypingTarget } from "@/lib/keys"
+import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
 import { arrowOf, panned } from "@/components/map/canvas-keys"
 import { BOARD_FILE_TYPES, shownFileIds } from "@/lib/board/files"
 import type { Board, BoardSaved, BoardScene } from "@/lib/board/boards"
@@ -259,6 +259,10 @@ export default function BoardWorkspace({ id }: { id: number }) {
 function slideScene(api: ExcalidrawImperativeAPI | null, event: React.KeyboardEvent) {
   const direction = arrowOf(event)
   if (!api || !direction || isTypingTarget(event.target)) return
+  // Excalidraw's confirmations (Reset the canvas, the overwrite on Open) are
+  // dialogs its app state does not name, and a key pressed in one still
+  // comes up through here.
+  if ((event.target as Element).closest?.(OWNER_SELECTOR)) return
   const state = api.getAppState()
   if (
     Object.values(state.selectedElementIds).some(Boolean) ||

@@ -423,6 +423,20 @@ test("the arrows slide a drawing with nothing selected, and Excalidraw's own mov
   await page.keyboard.press("ArrowUp")
   expect(await where()).toEqual(slid)
 
+  // Nor in one of Excalidraw's own confirmations, which its state does not
+  // name: the drawing slid behind "Reset the canvas".
+  await page.mouse.click(open.x, open.y)
+  await page.locator("[data-testid=main-menu-trigger]").click()
+  await page.getByText("Reset the canvas").click()
+  const confirm = page.getByRole("dialog")
+  await expect(confirm.getByRole("button", { name: "Confirm" })).toBeFocused()
+  await page.keyboard.press("ArrowRight")
+  await page.keyboard.press("Shift+ArrowDown")
+  await expect(confirm).toBeVisible()
+  expect(await where()).toEqual(slid)
+  await page.keyboard.press("Escape")
+  await expect(confirm).toHaveCount(0)
+
   // With the card selected the arrows are Excalidraw's: they move it, a
   // pixel at a time, five with Shift, and the drawing stays.
   await page.mouse.click(open.x, open.y)
