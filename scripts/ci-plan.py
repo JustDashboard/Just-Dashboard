@@ -182,11 +182,26 @@ NAME = re.compile(r"[A-Za-z_$][\w$]*")
 # its own costs.
 SAID = re.compile(r"^[ \t]*//[ \t]*ci-plan:[ \t]*(?:(\d+) tests?)?[, \t]*(?:each weighs (\d+(?:\.\d+)?))?[ \t]*$", re.M)
 
+# A browser job is sized in tests. One is 1.2 seconds of a hosted runner's two
+# workers (seven jobs of the full run of 15 Nov 2026, by the timestamps of
+# their logs: 3,862 tests in 4,473 seconds, a twentieth of them switched
+# off), and a job's setup, the build included, is two and a half minutes
+# before the first.
 TESTS_PER_SHARD = 200
-# Smaller in a pull request, which somebody waits on: a job's setup is about a
-# minute, and two hundred tests are six to ten more.
+# Smaller in a pull request, which somebody waits on: two hundred tests are
+# four minutes after the setup, and a hundred are two.
 PULL_REQUEST_TESTS_PER_SHARD = 100
-MOST_SHARDS = 8
+# A full run is every spec, so this is what sizes its jobs, and they have
+# twenty minutes each. Runners are not one speed and jobs not one mix: the job
+# cancelled at that limit on 17 Nov 2026 (run 44029967642, `browser (7)`) had
+# run 597 tests in 17m51s, 1.8 seconds each. At that rate 400 tests are twelve
+# minutes, which leaves five and a half to spare, and the 4,700 the suite
+# weighs after the 0.9.0 UI pass are twelve such jobs; in eight they were 580
+# tests and seventeen minutes. A full run is then twenty-two jobs where
+# GitHub runs twenty at once, so two of them wait for the first to finish,
+# which costs less than a job that is cancelled. Raise this when a full run's
+# jobs pass 400 tests again.
+MOST_SHARDS = 12
 
 
 def go_packages(root):

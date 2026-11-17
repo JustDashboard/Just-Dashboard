@@ -337,6 +337,17 @@ class PlanTest(unittest.TestCase):
         specs = self.write_specs({"a": 250, "b": 10, "c": 10})
         self.assertEqual(self.dealt(specs, per_shard=ci_plan.PULL_REQUEST_TESTS_PER_SHARD), [["a"], ["b"], ["c"]])
 
+    def test_a_full_run_keeps_its_jobs_to_twelve_minutes_of_tests(self):
+        # The suite after the 0.9.0 UI pass, about 4,700 tests: at the 1.8
+        # seconds a test of the job that ran out of its twenty minutes, 400
+        # tests are twelve.
+        specs = self.write_specs({f"{'abcde'[number % 5]}-{number}": 100 for number in range(47)})
+        jobs = self.dealt(specs)
+        self.assertEqual(len(jobs), ci_plan.MOST_SHARDS)
+        self.assertLessEqual(max(len(job) for job in jobs) * 100, 400)
+        # And a pull request's stay a hundred, however many that makes.
+        self.assertEqual(len(self.dealt(specs[:9], per_shard=ci_plan.PULL_REQUEST_TESTS_PER_SHARD)), 9)
+
     def test_a_test_written_in_a_loop_counts_for_each_item_of_its_list(self):
         for source, tests in [
             ('test("one", async () => {})\ntest("two", async () => {})\n', 2),
