@@ -55,7 +55,7 @@ export function EgressMembers({ group }: { group: EgressGroup }) {
           Measured every {egressDuration(group.thresholds.intervalSeconds)} · group table{" "}
           {group.table}
         </p>
-        <Panel>
+        <Panel framed>
           <PanelBody flush>
             <div className="max-md:hidden">
               <Table aria-label={`Members of ${group.name}`}>

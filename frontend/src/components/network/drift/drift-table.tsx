@@ -106,7 +106,7 @@ export function DriftTable({
     onClick: () => onScope(scope === value && value !== "all" ? "all" : value),
   })
   return (
-    <Panel aria-label="Comparisons">
+    <Panel framed aria-label="Comparisons">
       <PanelHeader title="Comparisons" count={rows.length}>
         {/* On a phone the chips take a row of their own, so the count stays
             at the end of the title's row. */}

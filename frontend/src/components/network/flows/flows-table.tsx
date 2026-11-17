@@ -83,7 +83,7 @@ export function FlowsTable({
   const totals = flowTotals(rows)
   const observed = flowKernelTotals(rows)
   return (
-    <Panel id="flow-rows" aria-label="Socket hours" className="scroll-mt-6">
+    <Panel framed id="flow-rows" aria-label="Socket hours" className="scroll-mt-6">
       <PanelHeader
         title="Socket hours"
         count={!loading && rows.length > 0 ? rows.length : undefined}

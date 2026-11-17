@@ -74,7 +74,7 @@ export function ExternalChecks({
   const sourceOf = (check: ExternalCheck) => vantages.find((v) => v.id === check.vantageId)
   const retained = checks.filter((check) => check.result).length
   return (
-    <Panel aria-label="Checks">
+    <Panel framed aria-label="Checks">
       <PanelHeader
         title="Checks"
         count={checks.length > 0 ? checks.length : undefined}

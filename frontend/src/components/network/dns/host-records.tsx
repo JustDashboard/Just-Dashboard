@@ -341,7 +341,7 @@ export function HostRecordsEditor({
             </span>
           }
         >
-          <Panel>
+          <Panel framed>
             <PanelBody flush>
               <Table containerClassName="max-h-80">
                 <TableHeader>
