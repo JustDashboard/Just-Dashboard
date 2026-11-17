@@ -1,5 +1,6 @@
 "use client"
 
+import { INLINE_LINK } from "@/components/inline-link"
 import { useCallback, useMemo } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
@@ -485,7 +486,8 @@ function ServiceIdentity({
         type="button"
         onClick={() => onTab("security")}
         className={cn(
-          "numeric rounded-sm focus-ring hover:underline",
+          "numeric hit-area",
+          INLINE_LINK,
           exposure &&
             {
               running: "text-success",

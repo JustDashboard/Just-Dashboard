@@ -1,5 +1,6 @@
 "use client"
 
+import { INLINE_LINK } from "@/components/inline-link"
 import { useCallback } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
@@ -506,7 +507,7 @@ function ProcessIdentity({
             <Fact>
               <button
                 type="button"
-                className="numeric rounded-sm focus-ring hover:text-foreground hover:underline"
+                className={cn("numeric hit-area hover:text-foreground", INLINE_LINK)}
                 onClick={() => onOpen(row.ppid)}
               >
                 parent {row.ppid}

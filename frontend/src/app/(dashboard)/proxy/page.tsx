@@ -1,5 +1,6 @@
 "use client"
 
+import { INLINE_LINK } from "@/components/inline-link"
 import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -431,7 +432,10 @@ export default function ProxyOverviewPage() {
           href={fact.href}
           title={fact.title}
           className={cn(
-            "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+            // A fact that opens its page is a link on the line: underlined at
+            // rest (INLINE_LINK) and a finger's press wide (hit-area).
+            INLINE_LINK,
+            "hit-area transition-colors hover:text-foreground",
             fact.tone === "danger" && "font-medium text-destructive",
             fact.tone === "warning" && "font-medium text-warning",
           )}
@@ -799,7 +803,8 @@ function firingFact(alerts?: ProxyAlerts) {
       <Link
         href="/proxy/alerts"
         className={cn(
-          "numeric rounded-sm font-medium focus-ring hover:underline",
+          "numeric hit-area font-medium",
+          INLINE_LINK,
           firing > 0 ? "text-destructive" : "text-warning",
         )}
       >
