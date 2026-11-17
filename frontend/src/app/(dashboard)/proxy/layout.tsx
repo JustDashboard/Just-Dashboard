@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { get } from "@/lib/api"
 import type { Certificate, Listener, StreamStatus, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { useShortcuts } from "@/hooks/use-shortcuts"
 import { ProxyProvider, type ProxyStatus } from "@/components/proxy/proxy-context"
 import { reading } from "@/components/proxy/freshness"
 import { useConfigTest } from "@/components/proxy/test-result"
@@ -80,19 +80,13 @@ export default function ProxyLayout({ children }: { children: React.ReactNode })
   )
 }
 
-/** Where `g` then a letter goes. */
-const GO: Record<string, string> = {
-  s: "/proxy/sites",
-  c: "/proxy/certificates",
-  p: "/proxy/ports",
-}
-
 /**
  * The section's keys: `t` tests the engine's config, Shift+R reads the
  * shared lists again, `/` puts the cursor in the page's filter, and `g`
- * then s, c or p opens Sites, Certificates or Ports. None fires while the
- * reader is typing, or while a dialog or menu owns the keyboard — a key
- * acting behind one acts on a page they cannot see.
+ * then s, c or p opens Sites, Certificates or Ports. `useShortcuts` holds
+ * them while the reader types or a dialog or menu owns the keyboard (a key
+ * acting behind one acts on a page they cannot see), and holds the letters
+ * when single-key shortcuts are off.
  */
 function useProxyShortcuts({
   onTest,
@@ -103,59 +97,17 @@ function useProxyShortcuts({
   onRefresh: () => void
 }) {
   const router = useRouter()
-  const handlers = useRef({ onTest, onRefresh })
-  useEffect(() => {
-    handlers.current = { onTest, onRefresh }
+  const go = (href: string) => () => router.push(href)
+  useShortcuts({
+    t: onTest && (() => onTest()),
+    "Shift+R": () => onRefresh(),
+    "/": () => {
+      const search = document.querySelector<HTMLInputElement>("[data-page-search]")
+      if (!search) return false
+      search.focus()
+    },
+    "g s": go("/proxy/sites"),
+    "g c": go("/proxy/certificates"),
+    "g p": go("/proxy/ports"),
   })
-  useEffect(() => {
-    // When `g` was pressed, waiting for the letter that says where to.
-    let goAt = 0
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
-      const target = event.target as HTMLElement | null
-      if (
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.tagName === "SELECT" ||
-        target?.isContentEditable
-      ) {
-        return
-      }
-      if (
-        document.querySelector(
-          "[role='dialog']:not([data-state='closed']), [role='menu']:not([data-state='closed'])",
-        )
-      ) {
-        return
-      }
-
-      const leading = goAt > 0 && Date.now() - goAt < 1500
-      goAt = 0
-      if (leading) {
-        const href = GO[event.key]
-        if (href) {
-          event.preventDefault()
-          router.push(href)
-        }
-        return
-      }
-      if (event.key === "g" && !event.shiftKey) {
-        goAt = Date.now()
-      } else if (event.key === "t" && !event.shiftKey && handlers.current.onTest) {
-        event.preventDefault()
-        handlers.current.onTest()
-      } else if (event.key === "R" && event.shiftKey) {
-        event.preventDefault()
-        handlers.current.onRefresh()
-      } else if (event.key === "/") {
-        const search = document.querySelector<HTMLInputElement>("[data-page-search]")
-        if (search) {
-          event.preventDefault()
-          search.focus()
-        }
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [router])
 }
