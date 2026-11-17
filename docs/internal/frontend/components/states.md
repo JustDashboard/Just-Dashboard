@@ -13,9 +13,10 @@ Empty, absent, failed, stale, notice and loading: each one designed, and each at
 
 **Deprecated, kept while they have callers:** `ReadFailed` (`database/fleet/read-failed.tsx`,
 called only from `database/schema/` and `database/diagram/` now), `ReadError`
-(`database/redis/read-error.tsx`), `NetworkReadWarning` (`network/read-warning.tsx`). Each is
-one call of the member named in its `@deprecated` line. The database home's own two copies are
-gone: its blocks use `ErrorState` and `Stale`.
+(`database/kit/read-error.tsx`; `database/redis/read-error.tsx` re-exports it),
+`NetworkReadWarning` (`network/read-warning.tsx`). Each is one call of the member named in its
+`@deprecated` line. The database home's own two copies are gone: its blocks use `ErrorState` and
+`Stale`.
 
 ## Which one
 

@@ -58,7 +58,7 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   `TileTrend`, the device rows' two-minute sparklines and every chart's Live window.
 - **Colour that names a kind.** A device's role is its Tag and its section; `ROLE_HUE` (from the
   palette that cannot be read as a state) keeps the topology's lanes. An address's prefix takes the
-  port hue (`components/address.tsx`), in and out
+  muted ink (`Cidr`, `components/address.tsx`), in and out
   their chart colours everywhere they are drawn.
 - **The lit edge on what is taken.** Peers, forwards and lists open their sheets and a device its
   page (0.8.7), and all are lit rows; route tables, rule lists and shaping are readings and stay framed tables. (The tailnet's
