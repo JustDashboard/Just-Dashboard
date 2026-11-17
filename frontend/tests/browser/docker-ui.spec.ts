@@ -1571,8 +1571,11 @@ test("a volume's contents are in the volume, not a page away", async ({ page }) 
 
   // The file manager is still one click away, from the volume's line: the
   // browser under it draws no second way there.
-  await expect(page.getByRole("button", { name: "Open in Files" })).toHaveCount(1)
   await expect(panel.getByRole("link", { name: "Open in Files" })).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "Open in Files" })).toHaveCount(0)
+  await page.getByRole("button", { name: "More actions for app-data" }).click()
+  await expect(page.getByRole("menuitem", { name: "Open in Files" })).toBeVisible()
+  await page.keyboard.press("Escape")
 
   // Postgres' own files, under a running container: reading is safe, and the
   // editor one click below this line is not.

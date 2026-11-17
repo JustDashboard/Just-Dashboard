@@ -112,6 +112,7 @@ export function diffHunks(lines: DiffLine[]): DiffHunk[] {
   return hunks
 }
 
+/** @deprecated import `diffCounts` from `@/lib/line-diff`, where it moved in 0.9.0. */
 export { diffCounts } from "@/lib/line-diff"
 
 /** An image reference's repository and tag: the tag is after the last colon past the last slash. */

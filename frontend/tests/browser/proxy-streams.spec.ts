@@ -1133,7 +1133,21 @@ test("a page opened while the module installs shows that install and starts no s
   // The install already running is on screen, and the button waits for it.
   await expect(page.getByText(/Unpacking libnginx-mod-stream/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Installing libnginx-mod-stream…" })).toBeDisabled()
-  await expect(page.getByText("Keeps running if you leave", { exact: true })).toBeVisible()
+  // A phone's console head is one row, and the tag is left off it so the
+  // job's name has the room: whole, beside its state and Stop.
+  await expect(page.getByText("Keeps running if you leave", { exact: true })).toBeHidden()
+  const head = page
+    .locator("[data-slot=pane]", {
+      has: page.getByRole("log", { name: "Installing libnginx-mod-stream" }),
+    })
+    .locator("[data-slot=pane-header]")
+  const name = head.getByText("Installing libnginx-mod-stream", { exact: true })
+  await expect(name).toBeVisible()
+  await expect(head.getByRole("button", { name: "Stop" })).toBeVisible()
+  expect(await name.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  const row = (await name.boundingBox())!
+  const stop = (await head.getByRole("button", { name: "Stop" }).boundingBox())!
+  expect(Math.abs(row.y + row.height / 2 - (stop.y + stop.height / 2))).toBeLessThanOrEqual(1)
   // The recent list the console names is beside the button.
   const steps = page.getByRole("list", { name: "Before a stream can forward" })
   await expect(steps.getByRole("button", { name: "htop", exact: true })).toBeVisible()

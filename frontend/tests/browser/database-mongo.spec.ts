@@ -920,6 +920,29 @@ test.describe("documents", () => {
     await expect(page.getByText("No collection called nope")).toBeVisible()
   })
 
+  test("a collection's head is one line on Documents and Schema, level with the rail's head, and on a phone", async ({
+    page,
+  }) => {
+    await mockMongo(page)
+    const head = page.locator("[data-slot=object-head]")
+    const railHead = rail(page).locator("[data-slot=rail-head]")
+    for (const address of [collection("users"), `${SCHEMA}?db=${DB}&collection=users`]) {
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.goto(address)
+      // What the collection holds is beside its name, not a line under it:
+      // the head's hairline continues the rail's.
+      await expect(head).toContainText("2 documents · 508 B")
+      const [strip, beside] = [(await head.boundingBox())!, (await railHead.boundingBox())!]
+      expect(strip.y).toBeCloseTo(beside.y, 0)
+      // One row: within the pixel its menu's button adds, not a line taller.
+      expect(Math.abs(strip.height - beside.height)).toBeLessThan(2)
+      // A phone's head is the same one row, and leaves the count to the rail.
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(head.getByText("2 documents · 508 B")).toBeHidden()
+      expect((await head.boundingBox())!.height).toBeCloseTo(strip.height, 0)
+    }
+  })
+
   // C2: the old editor loaded a grid row through JSON.parse and saved it back,
   // which rewrote ObjectIds, dates and 64-bit integers and re-ordered the fields.
   test("a document is edited as the text it is stored as, and saved only if it is still that document", async ({

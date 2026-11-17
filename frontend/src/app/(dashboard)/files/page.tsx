@@ -132,6 +132,7 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
+  ROW_NAME,
   SortHead,
   stickyTableHeader,
   Table,
@@ -1993,9 +1994,11 @@ export default function FilesPage() {
                             <TableRow className="select-none" onActivate={() => navigate(parent)}>
                               <TableCell />
                               <TableCell colSpan={6}>
-                                {/* The row's one control, so the keyboard reaches it by name. */}
+                                {/* The row's one control, so the keyboard reaches it by
+                                    name, and the row is no second stop beside it. */}
                                 <button
                                   type="button"
+                                  {...ROW_NAME}
                                   onClick={() => navigate(parent)}
                                   className="flex items-center gap-2 rounded-sm text-body text-muted-foreground focus-ring hover:text-foreground"
                                 >

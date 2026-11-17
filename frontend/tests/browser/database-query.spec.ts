@@ -2975,6 +2975,9 @@ test("Run is the page's one command: the row limit is in its menu, Format and Sa
   await expect(page.getByRole("menuitemradio", { name: "500", exact: true })).toBeChecked()
   await page.getByRole("menuitemradio", { name: "1,000" }).click()
   await page.keyboard.press("Escape")
+  // The menu hands focus back to its button when it has gone; a click before
+  // that loses the editor's focus to the button, and Ctrl+Enter opens the menu.
+  await expect(page.getByRole("menu")).toHaveCount(0)
   await editor(page).click()
   await page.keyboard.press("ControlOrMeta+Enter")
   await expect.poll(() => sent.query.at(-1)?.maxRows).toBe(1000)

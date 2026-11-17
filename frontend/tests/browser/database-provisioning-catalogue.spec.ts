@@ -460,7 +460,10 @@ test("the full template says what it carries and builds its image as a job befor
   // The build's own output, where the job console draws every job.
   await expect(settings.getByText("Building jd-postgres-full:18").first()).toBeVisible()
   await expect(settings.getByText(/Setting up postgresql-18-pgvector/)).toBeVisible()
-  await expect(settings).toContainText("Keeps running if you leave")
+  // At a desktop's width; a phone's console head leaves the tag off so the
+  // job's name has its one row (proxy-streams.spec.ts reads that at 390).
+  expect(page.viewportSize()!.width).toBeGreaterThanOrEqual(640)
+  await expect(settings.getByText("Keeps running if you leave", { exact: true })).toBeVisible()
   expect(server.bodies("POST /databases/provision")).toEqual([])
 
   finished = true
