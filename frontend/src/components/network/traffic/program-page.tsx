@@ -10,7 +10,7 @@ import type { EBPFView } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Code } from "@/components/icons"
-import { HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
@@ -205,7 +205,7 @@ function ProgramHeader({
   return (
     <>
       {id !== null && (
-        <HostIdentity
+        <IdentityHeader
           label={`About program ${id}`}
           mark="linux"
           fallback={Code}
@@ -228,9 +228,9 @@ function ProgramHeader({
               <FactGroups
                 groups={[
                   [
-                    <HostFact key="type">
+                    <span key="type">
                       <span className="font-mono">{d.type}</span>
-                    </HostFact>,
+                    </span>,
                     <span key="id" className="numeric">
                       ID {d.id}
                     </span>,
@@ -240,7 +240,7 @@ function ProgramHeader({
                       {d.loadedAt ? `loaded ${relativeTime(d.loadedAt)}` : "load time unknown"}
                     </span>,
                     d.owners && d.owners.length > 0 && (
-                      <HostFact key="owners">held by {d.owners.join(", ")}</HostFact>
+                      <span key="owners">held by {d.owners.join(", ")}</span>
                     ),
                     d.observer && <Tag key="observer">this dashboard&rsquo;s observer</Tag>,
                   ],

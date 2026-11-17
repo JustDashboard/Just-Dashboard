@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact, FactLine } from "@/components/fact-line"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
 import {
@@ -23,7 +24,7 @@ import type {
 } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, ProductLogos, hasProductLogo } from "@/components/product-logo"
@@ -72,6 +73,9 @@ type Editor =
  * start and the picture under it does not move when the read lands.
  */
 const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9"
+
+/** The same room once the facts are read: a `FactLine` lays itself out. */
+const FACT_LINE = "max-sm:min-h-9 [&>span]:gap-y-1"
 
 type View = "overview" | "table" | "kernel"
 
@@ -202,7 +206,7 @@ export default function NetworkProtectionPage() {
       {/* The line and its views are one block, as a process's page has them:
           the strip's hairline is the rule under the line. */}
       <div className="flex min-w-0 flex-col gap-4">
-        <HostIdentity
+        <IdentityHeader
           label="About protection"
           className="border-b-0 pb-0"
           fallback={ShieldCheck}
@@ -234,20 +238,17 @@ export default function NetworkProtectionPage() {
                 <Skeleton className="my-0.5 h-3 w-72 max-w-full" />
               </span>
             ) : (
-              <span className={FACTS}>
-                <span className="numeric">{plural(totals.lists, "blocklist")}</span>
-                <FactDot />
-                <span className="numeric">{plural(totals.limits, "limit")}</span>
-                <FactDot />
-                <span className="numeric">
+              <FactLine className={FACT_LINE}>
+                <Fact className="numeric">{plural(totals.lists, "blocklist")}</Fact>
+                <Fact className="numeric">{plural(totals.limits, "limit")}</Fact>
+                <Fact className="numeric">
                   <span className="text-foreground">{totals.dropped.toLocaleString()}</span> dropped
                   since load
-                </span>
-                <FactDot />
-                <span className="numeric">
+                </Fact>
+                <Fact className="numeric">
                   <span className="text-foreground">{totals.refused.toLocaleString()}</span> refused
-                </span>
-              </span>
+                </Fact>
+              </FactLine>
             )
           }
           command={

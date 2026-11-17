@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Users } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { plural } from "@/lib/format"
+import { FactLine } from "@/components/fact-line"
 import { DetailPage, siblingSteps } from "@/components/detail-page"
 import { FormFact, FormFacts } from "@/components/form"
 import { Modal } from "@/components/modal"
@@ -266,9 +267,9 @@ export function AccountPane({
  */
 export function AccountFacts({ children }: { children: React.ReactNode }) {
   return (
-    <span className="flex max-w-full min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
+    <FactLine nowrap className="whitespace-nowrap">
       {children}
-    </span>
+    </FactLine>
   )
 }
 

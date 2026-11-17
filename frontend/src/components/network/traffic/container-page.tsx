@@ -15,7 +15,7 @@ import { ArrowUpRight, Box } from "@/components/icons"
 import { Explain } from "@/components/explain"
 import { WindowPicker } from "@/components/window-picker"
 import { ChartPanel } from "@/components/chart-panel"
-import { HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
@@ -202,7 +202,7 @@ function ContainerHeader({
   return (
     <>
       {name !== null && (
-        <HostIdentity
+        <IdentityHeader
           label={`About ${name}`}
           mark={imageProduct(d?.image ?? name)}
           fallback={Box}
@@ -225,18 +225,18 @@ function ContainerHeader({
               <FactGroups
                 groups={[
                   [
-                    <HostFact key="image">
+                    <span key="image">
                       <span className="font-mono">{d.image ?? "image unknown"}</span>
-                    </HostFact>,
-                    <HostFact key="service">
+                    </span>,
+                    <span key="service">
                       <span className={d.project ? "font-mono" : undefined}>{service}</span>
-                    </HostFact>,
+                    </span>,
                   ],
                   [
                     d.networks.length > 0 && (
-                      <HostFact key="networks">
+                      <span key="networks">
                         on <span className="font-mono">{d.networks.join(", ")}</span>
-                      </HostFact>
+                      </span>
                     ),
                     <span key="seen">
                       last sample {relativeTime(new Date(d.lastSeen * 1000).toISOString())}

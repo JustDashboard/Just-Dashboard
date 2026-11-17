@@ -37,7 +37,7 @@ import {
   RefreshClockwise,
   Sparkles,
 } from "@/components/icons"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Section } from "@/components/section"
@@ -231,7 +231,7 @@ export function ControlCenter() {
   // holds nothing: the server by its name, in the place and at the height the
   // full line takes, with the command and the menu already where they will be.
   const opening = (facts: React.ReactNode, command: React.ReactNode = add) => (
-    <HostIdentity
+    <IdentityHeader
       label="About the databases on this server"
       fallback={Database}
       title={host?.hostname ?? "This server"}
@@ -381,7 +381,7 @@ export function ControlCenter() {
       {/* The commands are at the identity line's end, beside the verdict. */}
       <PageContext title="Databases" />
 
-      <HostIdentity
+      <IdentityHeader
         label="About the databases on this server"
         logo={
           marks.length > 0 ? (

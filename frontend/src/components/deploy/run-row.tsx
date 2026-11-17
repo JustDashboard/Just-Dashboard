@@ -3,9 +3,8 @@
 import { relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DeploymentEngineRun, DeploymentRelease, DeploymentSummary } from "@/lib/types"
-import { ChoiceRow } from "@/components/choice-row"
-import { FactDot } from "@/components/identity-header"
 import { Fact, FactLine } from "@/components/fact-line"
+import { ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { ProductGlyph, imageProduct } from "@/components/product-logo"
 import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
@@ -227,23 +226,28 @@ function Provenance({
     case "git":
     case "local":
       return (
-        <span className="flex min-w-0 items-center gap-1.5">
-          <BranchChip
-            branch={runRef(run, deployment.sourceRef)}
-            className="max-w-28 shrink-0 sm:max-w-40"
-          />
-          <ShortSha sha={shortRevision(runRevision(run, release))} />
+        <FactLine nowrap>
+          <Fact>
+            <span className="inline-flex max-w-full min-w-0 items-center gap-x-1.5 align-top">
+              <BranchChip
+                branch={runRef(run, deployment.sourceRef)}
+                className="max-w-28 shrink-0 sm:max-w-40"
+              />
+              <ShortSha sha={shortRevision(runRevision(run, release))} />
+            </span>
+          </Fact>
           {/* The author's square stays on a phone, as on the run page; only
               the name goes. */}
           {author && (
-            <span className="flex min-w-0 shrink items-center gap-1">
-              <AuthorMark name={author} />
-              {wide && <span className="truncate">{author}</span>}
-            </span>
+            <Fact>
+              <span className="flex min-w-0 shrink items-center gap-1">
+                <AuthorMark name={author} />
+                {wide && <span className="truncate">{author}</span>}
+              </span>
+            </Fact>
           )}
-          {author && <FactDot />}
-          {trigger}
-        </span>
+          <Fact>{trigger}</Fact>
+        </FactLine>
       )
     case "image":
     case "compose":

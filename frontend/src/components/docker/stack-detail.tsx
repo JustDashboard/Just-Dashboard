@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
+import { ProductGlyph } from "@/components/product-logo"
 import {
   ArrowCircleUp,
   Box,
@@ -67,8 +69,7 @@ import {
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconAction } from "@/components/icon-action"
 import { LogoGlyph } from "@/components/logo"
-import { HostFact, IdentityHeader, IdentityVerbs } from "@/components/identity-header"
-import { Fact } from "@/components/fact-line"
+import { IdentityHeader, IdentityVerbs } from "@/components/identity-header"
 import { VerdictButton } from "@/components/docker/docker-identity"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
@@ -974,7 +975,8 @@ function stackFacts({
         title={git.subject}
         className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
       >
-        <HostFact product="git">{git.branch ?? "repository"}</HostFact>
+        <ProductGlyph id="git" />
+        <span className="truncate">{git.branch ?? "repository"}</span>
         {git.dirty && (
           <span className="numeric" style={{ color: "var(--git-modified)" }}>
             {git.changes} uncommitted

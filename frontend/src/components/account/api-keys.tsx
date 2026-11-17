@@ -24,7 +24,7 @@ import { useCopy } from "@/hooks/use-copy"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormNote, InfoTip } from "@/components/form"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Fact } from "@/components/fact-line"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -329,7 +329,7 @@ function KeysIdentity({
 }) {
   if (!usable) {
     return (
-      <HostIdentity
+      <IdentityHeader
         fallback={Key}
         title="API keys"
         // Reading is said among the facts, not as a state: the loaded line
@@ -354,7 +354,7 @@ function KeysIdentity({
     ? Math.max(0, Math.floor((Date.parse(expiring[0].expiresAt) - now) / DAY))
     : 0
   return (
-    <HostIdentity
+    <IdentityHeader
       fallback={Key}
       title={usable.length > 0 ? plural(usable.length, "key") : "API keys"}
       state={usable.length === 0 ? <Status tone="unknown" label="none in use" /> : undefined}
@@ -375,8 +375,7 @@ function KeysIdentity({
           )}
           {roles.map(({ role, count }) => (
             <Fact key={role} className="numeric">
-              {count}{" "}
-              <span style={{ color: ROLE_HUE[role] }}>{ROLE_NAME[role].toLowerCase()}</span>
+              {count} <span style={{ color: ROLE_HUE[role] }}>{ROLE_NAME[role].toLowerCase()}</span>
             </Fact>
           ))}
           {Boolean(spent) && <Fact className="numeric">{spent} revoked or expired</Fact>}

@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import { LockClosed, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -11,7 +12,7 @@ import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { SaveBarProvider } from "@/components/settings/save-bar"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Modal } from "@/components/modal"
 import { Page, PageContext } from "@/components/page"
 import { ProductGlyph } from "@/components/product-logo"
@@ -270,7 +271,7 @@ function Identity({
   )
   if (!vpn)
     return (
-      <HostIdentity
+      <IdentityHeader
         fallback={LockClosed}
         className="border-b-0 pb-0"
         label="About the VPNs"
@@ -278,7 +279,7 @@ function Identity({
         state={failed ? <Status tone="danger" label="Not read" /> : <IdentityStateLoading />}
         facts={
           <IdentityFacts loading={!failed}>
-            <HostFact>WireGuard and Tailscale on this server</HostFact>
+            <Fact>WireGuard and Tailscale on this server</Fact>
           </IdentityFacts>
         }
         menu={menu}
@@ -289,7 +290,7 @@ function Identity({
   const peers = tunnels.flatMap((tunnel) => tunnel.peers)
   const tailnet = tailnetState(vpn.tailscale)
   return (
-    <HostIdentity
+    <IdentityHeader
       fallback={LockClosed}
       className="border-b-0 pb-0"
       label="About the VPNs"
@@ -297,24 +298,20 @@ function Identity({
       state={<Status tone={reading.tone} label={reading.label} />}
       facts={
         <IdentityFacts>
-          <HostFact product="wireguard">
+          <Fact product="wireguard">
             {!vpn.wireguard.installed
               ? "not installed"
               : tunnels.length === 0
                 ? "no tunnel yet"
                 : `${plural(tunnels.length, "tunnel")} · ${peers.filter((p) => p.online).length} of ${plural(peers.length, "peer")} online`}
-          </HostFact>
-          <FactDot />
-          <HostFact product="tailscale">
+          </Fact>
+          <Fact product="tailscale">
             {!vpn.tailscale.installed
               ? "not installed"
               : `${vpn.tailscale.tailnet || "tailnet"} · ${tailnet.label.toLowerCase()}`}
-          </HostFact>
+          </Fact>
           {headscale && (
-            <>
-              <FactDot />
-              <HostFact product="headscale">{plural(vpn.headscale.nodes.length, "node")}</HostFact>
-            </>
+            <Fact product="headscale">{plural(vpn.headscale.nodes.length, "node")}</Fact>
           )}
         </IdentityFacts>
       }
@@ -389,7 +386,7 @@ function WireGuard({ wireguard, onChanged }: { wireguard: WireGuardView; onChang
         />
       ) : wireguard.interfaces.length === 0 ? (
         <>
-          <HostIdentity
+          <IdentityHeader
             label="About WireGuard"
             slot="tunnel-identity"
             mark="wireguard"
@@ -397,16 +394,11 @@ function WireGuard({ wireguard, onChanged }: { wireguard: WireGuardView; onChang
             state={<Status tone="stopped" label="No tunnel yet" />}
             facts={
               <>
-                <HostFact>
+                <Fact>
                   <span className="font-mono">{wireguard.package || "wireguard-tools"}</span>{" "}
                   installed
-                </HostFact>
-                {wireguard.kernel && (
-                  <>
-                    <FactDot />
-                    <HostFact>in this kernel</HostFact>
-                  </>
-                )}
+                </Fact>
+                {wireguard.kernel && <Fact>in this kernel</Fact>}
               </>
             }
           />

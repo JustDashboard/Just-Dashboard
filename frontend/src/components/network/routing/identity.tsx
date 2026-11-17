@@ -1,9 +1,10 @@
 "use client"
 
+import { Fact } from "@/components/fact-line"
 import { Plus, RefreshClockwise, Route } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { NetworkRouting } from "@/lib/types"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -46,7 +47,7 @@ export function RoutingIdentity({
   const way = routing && defaultRoute(routing)
   const routes = routing?.tables.reduce((n, table) => n + table.routes.length, 0) ?? 0
   return (
-    <HostIdentity
+    <IdentityHeader
       label="About routing"
       // The view strip under it carries the hairline.
       className="border-b-0 pb-0"
@@ -66,34 +67,34 @@ export function RoutingIdentity({
       facts={
         routing ? (
           <>
-            {way ? (
-              // Each word its own box: mono set inside a line of the body
-              // face makes that line a pixel taller than the one it replaces.
-              <span className="flex min-w-0 flex-wrap items-center gap-x-1">
-                <span>default</span>{" "}
-                {way.gateway && (
-                  <>
-                    <span>via</span>{" "}
-                    <span className="min-w-0 font-mono break-all text-foreground">
-                      {way.gateway}
-                    </span>{" "}
-                  </>
-                )}
-                {way.device && (
-                  <>
-                    <span>on</span> <span className="font-mono text-foreground">{way.device}</span>
-                  </>
-                )}
-              </span>
-            ) : (
-              <span className="text-warning">no default route</span>
-            )}
-            <FactDot />
-            <span className="numeric">{plural(routing.tables.length, "table")}</span>
-            <FactDot />
-            <span className="numeric">{plural(routes, "route")}</span>
-            <FactDot />
-            <span className="numeric">{plural(routing.rules.length, "rule")}</span>
+            <Fact>
+              {way ? (
+                // Each word its own box: mono set inside a line of the body
+                // face makes that line a pixel taller than the one it replaces.
+                <span className="flex min-w-0 flex-wrap items-center gap-x-1">
+                  <span>default</span>{" "}
+                  {way.gateway && (
+                    <>
+                      <span>via</span>{" "}
+                      <span className="min-w-0 font-mono break-all text-foreground">
+                        {way.gateway}
+                      </span>{" "}
+                    </>
+                  )}
+                  {way.device && (
+                    <>
+                      <span>on</span>{" "}
+                      <span className="font-mono text-foreground">{way.device}</span>
+                    </>
+                  )}
+                </span>
+              ) : (
+                <span className="text-warning">no default route</span>
+              )}
+            </Fact>
+            <Fact className="numeric">{plural(routing.tables.length, "table")}</Fact>
+            <Fact className="numeric">{plural(routes, "route")}</Fact>
+            <Fact className="numeric">{plural(routing.rules.length, "rule")}</Fact>
           </>
         ) : (
           // The facts' own line, held while there is nothing to put on it.

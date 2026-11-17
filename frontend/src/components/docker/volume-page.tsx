@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { ChevronDown, ChevronUp, Database } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
@@ -55,7 +56,7 @@ import {
   type VolumeTab,
 } from "@/components/docker/volumes"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { containerProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -498,7 +499,7 @@ function VolumeMain({
 }
 
 /**
- * The line the page opens on (`HostIdentity`, laid out as a project's header):
+ * The line the page opens on (`IdentityHeader`, laid out as a project's header):
  * the volume as the product whose data it holds, its name with a Compose
  * project's prefix a step back, where it stands beside it — a press opens the
  * containers that decide it — and after it the facts a volume is opened to
@@ -527,7 +528,7 @@ function VolumeIdentity({
 }) {
   if (!volume) {
     return (
-      <HostIdentity
+      <IdentityHeader
         label={`About ${name}`}
         fallback={Database}
         title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
@@ -548,7 +549,7 @@ function VolumeIdentity({
   const holder = holderOf(volume)
   const words = standingWords(volume)
   return (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${volume.name}`}
       className="animate-rise"
       mark={volumeProduct(volume, productOf)}
@@ -593,16 +594,13 @@ function VolumeIdentity({
       menu={menu}
       facts={
         <>
-          <span className="numeric font-medium text-foreground">
+          <Fact className="numeric font-medium text-foreground">
             {size.bytes !== undefined ? bytes(size.bytes) : size.word}
-          </span>
+          </Fact>
           {/* Where it is kept and how old it is are in the picture and under
               Configuration; on a phone the line keeps to one row without them,
               so the picture is where it was while the volume was read. */}
-          <span className="contents max-sm:hidden">
-            <FactDot />
-          </span>
-          <span className="max-sm:hidden">
+          <Fact className="max-sm:hidden">
             {volume.driver === "local" ? (
               volume.mountType ? (
                 <span className="font-mono">{volume.mountType} mount</span>
@@ -614,10 +612,9 @@ function VolumeIdentity({
                 kept by <span className="font-mono">{volume.driver}</span>
               </>
             )}
-          </span>
+          </Fact>
           {holder.kind === "stack" && (
-            <>
-              <FactDot />
+            <Fact>
               {stacks.has(holder.name) ? (
                 <Link
                   href={`/docker/stacks/${encodeURIComponent(holder.name)}`}
@@ -631,19 +628,15 @@ function VolumeIdentity({
                   {holder.name}
                 </span>
               )}
-            </>
+            </Fact>
           )}
           {volume.createdAt && (
-            <span className="contents max-sm:hidden">
-              <FactDot />
-              <span title={timestamp(volume.createdAt)}>
-                created {relativeTime(volume.createdAt)}
-              </span>
-            </span>
+            <Fact className="max-sm:hidden" title={timestamp(volume.createdAt)}>
+              created {relativeTime(volume.createdAt)}
+            </Fact>
           )}
           {backup && (
-            <>
-              <FactDot />
+            <Fact>
               <button
                 type="button"
                 onClick={() => onTab("backups")}
@@ -662,7 +655,7 @@ function VolumeIdentity({
                     ? "backup paused"
                     : "not backed up"}
               </button>
-            </>
+            </Fact>
           )}
         </>
       }

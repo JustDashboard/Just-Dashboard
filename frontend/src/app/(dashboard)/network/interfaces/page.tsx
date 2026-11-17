@@ -3,12 +3,13 @@
 import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
+import { Fact, FactLine } from "@/components/fact-line"
 import { NetworkDevice, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import type { NetworkNamespace } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Toolbar } from "@/components/toolbar"
@@ -94,7 +95,7 @@ function Interfaces() {
   return (
     <Page rise>
       <PageContext eyebrow="Network" title="Interfaces" />
-      <HostIdentity
+      <IdentityHeader
         label="About the interfaces"
         fallback={NetworkDevice}
         title="Interfaces"
@@ -117,25 +118,21 @@ function Interfaces() {
         facts={
           // A box of the line's own height: the uplink's name is mono, and a
           // mono word in the line made it a pixel taller than while it waited.
-          <span className="flex h-4 min-w-0 items-center gap-x-3 whitespace-nowrap">
+          <FactLine nowrap className="h-4">
             {devices ? (
               <>
-                <span className="numeric">{plural(facts.devices, "device")}</span>
+                <Fact className="numeric">{plural(facts.devices, "device")}</Fact>
                 {facts.uplinks.length > 0 && (
-                  <>
-                    <FactDot />
-                    <span className="truncate">
-                      uplink <span className="font-mono">{facts.uplinks.join(", ")}</span>
-                    </span>
-                  </>
+                  <Fact className="truncate">
+                    uplink <span className="font-mono">{facts.uplinks.join(", ")}</span>
+                  </Fact>
                 )}
-                <FactDot />
-                <span className="numeric shrink-0">{facts.made} made here</span>
+                <Fact className="numeric shrink-0">{facts.made} made here</Fact>
               </>
             ) : (
               <>&nbsp;</>
             )}
-          </span>
+          </FactLine>
         }
         command={
           admin ? (

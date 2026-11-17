@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { Fact } from "@/components/fact-line"
 import {
   Archive,
   Bell,
@@ -52,7 +53,7 @@ import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { Bone } from "@/components/bone"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -372,7 +373,7 @@ export function HostAlertsPage() {
           doing now as the state, how many are on and who they reach as the
           facts, the one command at the end and the rest behind the menu.
           Add rule and Check now stood on two section lines. */}
-      <HostIdentity
+      <IdentityHeader
         fallback={Bell}
         title="Host alerts"
         state={
@@ -420,24 +421,24 @@ export function HostAlertsPage() {
             <span>The rules could not be read</span>
           ) : (
             <>
-              <span className="numeric">
+              <Fact className="numeric">
                 {plural(on, "rule")} on{paused > 0 && `, ${paused} paused`}
-              </span>
-              <FactDot />
-              <span className="numeric">
+              </Fact>
+              <Fact className="numeric">
                 {channelList.length === 0
                   ? "no channel to tell yet"
                   : `telling ${plural(told, "channel")} of ${channelList.length}`}
-              </span>
-              <FactDot />
-              {checking ? (
-                <TextShimmer>checking now</TextShimmer>
-              ) : (
-                <span className="numeric">
-                  {data.lastPass ? `checked ${relativeTime(data.lastPass)}, ` : "checked "}
-                  {cadence}
-                </span>
-              )}
+              </Fact>
+              <Fact>
+                {checking ? (
+                  <TextShimmer>checking now</TextShimmer>
+                ) : (
+                  <span className="numeric">
+                    {data.lastPass ? `checked ${relativeTime(data.lastPass)}, ` : "checked "}
+                    {cadence}
+                  </span>
+                )}
+              </Fact>
             </>
           )
         }

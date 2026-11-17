@@ -1,5 +1,5 @@
 import { Fragment } from "react"
-import { FactDot } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
 
 /**
  * An identity line's facts in groups. From `sm` they read as one run with a
@@ -23,18 +23,15 @@ export function FactGroups({ groups }: { groups: React.ReactNode[][] }) {
       {shown.map((group, at) => (
         <Fragment key={at}>
           {at > 0 && (
-            <span className="max-sm:hidden">
-              <FactDot />
+            <span aria-hidden className="text-faint max-sm:hidden">
+              ·
             </span>
           )}
-          <span className="inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:basis-full">
+          <FactLine className="max-sm:basis-full">
             {group.map((fact, i) => (
-              <Fragment key={i}>
-                {i > 0 && <FactDot />}
-                {fact}
-              </Fragment>
+              <Fact key={i}>{fact}</Fact>
             ))}
-          </span>
+          </FactLine>
         </Fragment>
       ))}
     </>

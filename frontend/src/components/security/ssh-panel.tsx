@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useSessionState } from "@/lib/view-state"
+import { Fact } from "@/components/fact-line"
 import {
   CheckCircle,
   Crosshair,
@@ -25,7 +26,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { FormSections, InfoTip } from "@/components/form"
 import { PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { InitialsMark } from "@/components/user-avatar"
 import { Modal } from "@/components/modal"
 import { SectionLink } from "@/components/section-link"
@@ -205,7 +206,7 @@ export function SSHPanel() {
     return (
       <>
         {header}
-        <HostIdentity
+        <IdentityHeader
           slot="ssh-identity"
           fallback={SecureConnection}
           title="sshd"
@@ -323,7 +324,7 @@ export function SSHPanel() {
     <SaveBarProvider>
       {header}
 
-      <HostIdentity
+      <IdentityHeader
         label="About sshd"
         slot="ssh-identity"
         fallback={SecureConnection}
@@ -351,30 +352,25 @@ export function SSHPanel() {
         }
         facts={
           <>
-            <span>
+            <Fact>
               {data.source.endsWith("-T") ? "as sshd reports it" : "read from sshd_config"}
-            </span>
+            </Fact>
             {data.socket?.unit && (
-              <>
-                <FactDot />
-                <span title="The systemd socket that holds the listener">
-                  listener held by{" "}
-                  <span className="font-mono text-foreground">{data.socket.unit}</span>
-                </span>
-              </>
+              <Fact title="The systemd socket that holds the listener">
+                listener held by{" "}
+                <span className="font-mono text-foreground">{data.socket.unit}</span>
+              </Fact>
             )}
             {data.managedFile && (
-              <>
-                <FactDot />
+              <Fact>
                 <span className="inline-flex items-center gap-1">
                   saved to a drop-in
                   <InfoTip label="Where SSH changes are saved">{data.managedFile}</InfoTip>
                 </span>
-              </>
+              </Fact>
             )}
             {data.hasMatchBlocks && (
-              <>
-                <FactDot />
+              <Fact>
                 <Tag
                   tone="warning"
                   icon={Warning}
@@ -382,7 +378,7 @@ export function SSHPanel() {
                 >
                   match blocks
                 </Tag>
-              </>
+              </Fact>
             )}
           </>
         }

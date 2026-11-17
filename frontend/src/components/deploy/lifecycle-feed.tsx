@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   ChevronDown,
   ClockRewind,
@@ -23,7 +24,6 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { GroupRule } from "@/components/choice-row"
 import { laneStyle } from "@/components/logs/log-text"
-import { FactDot } from "@/components/identity-header"
 import { PaneFooter } from "@/components/panel"
 import { ErrorState, Notice } from "@/components/state"
 import { ProjectEmpty } from "@/components/deploy/project-empty"
@@ -564,31 +564,31 @@ function EventFacts({
   runId?: string
 }) {
   return (
-    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-hint text-muted-foreground">
-      <span className="numeric" title={timestamp(event.time)}>
+    <FactLine className="text-hint text-muted-foreground">
+      <Fact className="numeric" title={timestamp(event.time)}>
         {clock(event.time)}
-      </span>
+      </Fact>
       {event.name && (
-        <>
-          <FactDot />
-          <span className="truncate font-mono" style={laneStyle(event.name)}>
-            {event.name}
-          </span>
-        </>
+        <Fact className="truncate font-mono" style={laneStyle(event.name)}>
+          {event.name}
+        </Fact>
       )}
-      {release &&
-        (runId ? (
-          <Link
-            href={`/deploy/${projectId}/runs/${runId}`}
-            className="rounded-sm text-foreground focus-ring hover:underline"
-            title="Open the run that put this release on the server"
-          >
-            · release {release}
-          </Link>
-        ) : (
-          <span>· release {release}</span>
-        ))}
-    </p>
+      {release && (
+        <Fact>
+          {runId ? (
+            <Link
+              href={`/deploy/${projectId}/runs/${runId}`}
+              className="rounded-sm text-foreground focus-ring hover:underline"
+              title="Open the run that put this release on the server"
+            >
+              release {release}
+            </Link>
+          ) : (
+            `release ${release}`
+          )}
+        </Fact>
+      )}
+    </FactLine>
   )
 }
 

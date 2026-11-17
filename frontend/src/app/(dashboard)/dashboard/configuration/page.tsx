@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
+import { Fact } from "@/components/fact-line"
 import { External, LockOpen, MoreHorizontal, ShieldCheck } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
@@ -23,7 +24,7 @@ import { SaveBarProvider, useSaveBarEntry } from "@/components/settings/save-bar
 import { SettingSection } from "@/components/settings/setting-card"
 import { Disclosure, Field, FieldRow } from "@/components/form"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
@@ -359,7 +360,7 @@ function Configuration() {
           it answers at is the name with its state beside it, the checkout it
           runs from and the files that configure it are the facts, and the
           two commands that recreate the stack are its `⋯`. */}
-      <HostIdentity
+      <IdentityHeader
         logo={
           <span
             aria-hidden
@@ -405,28 +406,19 @@ function Configuration() {
         facts={
           report.dir ? (
             <>
-              <HostFact product="docker-compose">
+              <Fact product="docker-compose">
                 <span className="font-mono text-foreground">{report.dir}</span>
-              </HostFact>
+              </Fact>
               {report.compose && (
-                <>
-                  <FactDot />
-                  <span className="font-mono">{within(report.dir, report.compose)}</span>
-                </>
+                <Fact className="font-mono">{within(report.dir, report.compose)}</Fact>
               )}
               {report.envPath && (
-                <>
-                  <FactDot />
-                  <span className="font-mono">{within(report.dir, report.envPath)}</span>
-                </>
+                <Fact className="font-mono">{within(report.dir, report.envPath)}</Fact>
               )}
               {run && !running && (
-                <>
-                  <FactDot />
-                  <span>
-                    restarted {relativeTime(run.finishedAt ?? run.updatedAt)} by {run.actor}
-                  </span>
-                </>
+                <Fact>
+                  restarted {relativeTime(run.finishedAt ?? run.updatedAt)} by {run.actor}
+                </Fact>
               )}
             </>
           ) : (

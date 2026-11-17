@@ -3,13 +3,14 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { CodeBracket, Copy, Cross, StopCircle } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { duration, plural, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
@@ -199,7 +200,7 @@ function Session({ pid }: { pid: string | null }) {
           pid !== null && !activity.data && !activity.error ? (
             // The loaded line's form, with a place for its verbs (empty
             // until they are known), so nothing under it moves when it is read.
-            <HostIdentity
+            <IdentityHeader
               loading
               className="border-b-0 pb-0"
               logo={<DbClientMark size="md" />}
@@ -295,7 +296,7 @@ function Session({ pid }: { pid: string | null }) {
       rail={rail}
       head={head}
       identity={
-        <HostIdentity
+        <IdentityHeader
           label={`About session ${session.pid}`}
           className="animate-rise border-b-0 pb-0"
           logo={
@@ -324,26 +325,15 @@ function Session({ pid }: { pid: string | null }) {
           }
           facts={
             <>
-              <Who session={session} />
-              {session.client && (
-                <>
-                  <FactDot />
-                  <span className="truncate font-mono">{session.client}</span>
-                </>
-              )}
-              {session.database && (
-                <>
-                  <FactDot />
-                  <span className="truncate font-mono">{session.database}</span>
-                </>
-              )}
+              <Fact>
+                <Who session={session} />
+              </Fact>
+              {session.client && <Fact className="truncate font-mono">{session.client}</Fact>}
+              {session.database && <Fact className="truncate font-mono">{session.database}</Fact>}
               {session.connectedAt && (
-                <>
-                  <FactDot />
-                  <span title={timestamp(session.connectedAt)}>
-                    connected {timestamp(session.connectedAt)}
-                  </span>
-                </>
+                <Fact title={timestamp(session.connectedAt)}>
+                  connected {timestamp(session.connectedAt)}
+                </Fact>
               )}
             </>
           }

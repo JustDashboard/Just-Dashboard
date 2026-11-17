@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { Fact } from "@/components/fact-line"
 import {
   Crosshair,
   LockClosed,
@@ -18,7 +19,6 @@ import type { SystemdUnitDetail } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useLensReadings } from "@/components/logs/lens-readings"
-import { FactDot } from "@/components/identity-header"
 import { InstallHandoff } from "@/components/install-handoff"
 import { ProductLogos } from "@/components/product-logo"
 import { ReadingLines } from "@/components/reading-line"
@@ -157,17 +157,15 @@ export function Fail2banPanel({
         state={<Status tone="running" label="running" />}
         facts={
           <>
-            <span className="numeric">
+            <Fact className="numeric">
               {jails.length === 1 ? "1 jail" : `${jails.length} jails`}
-            </span>
-            <FactDot />
-            <span className="numeric">
+            </Fact>
+            <Fact className="numeric">
               {watched === 1 ? "1 log watched" : `${watched} logs watched`}
-            </span>
-            <FactDot />
-            <span className="numeric">
+            </Fact>
+            <Fact className="numeric">
               {bansTotal.toLocaleString()} {bansTotal === 1 ? "ban" : "bans"} since it last started
-            </span>
+            </Fact>
           </>
         }
       />

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { Logout, RefreshClockwise, SignIn, Slash } from "@/components/icons"
 import { get, post, ApiError } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
@@ -18,7 +19,7 @@ import { InitialsMark } from "@/components/user-avatar"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { deniedSources } from "@/components/network/firewall-reading"
 import { PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
@@ -176,7 +177,7 @@ function LoginsIdentity({
   const attacks = attackers.data
   const latest = history.data?.find((record) => record.kind === "login" && record.loginTime)
   return (
-    <HostIdentity
+    <IdentityHeader
       mark={platformProduct(platform)}
       fallback={SignIn}
       label="Logins on this server"
@@ -210,49 +211,47 @@ function LoginsIdentity({
           </>
         ) : (
           <>
-            {latest ? (
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <span>last login</span>
-                <span className="font-medium text-foreground">{latest.user}</span>
-                <span className="numeric" title={timestamp(latest.loginTime)}>
-                  {relativeTime(latest.loginTime)}
+            <Fact>
+              {latest ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <span>last login</span>
+                  <span className="font-medium text-foreground">{latest.user}</span>
+                  <span className="numeric" title={timestamp(latest.loginTime)}>
+                    {relativeTime(latest.loginTime)}
+                  </span>
+                  <span>from</span>
+                  <Address ip={latest.from || "the console"} className="text-foreground" />
                 </span>
-                <span>from</span>
-                <Address ip={latest.from || "the console"} className="text-foreground" />
-              </span>
-            ) : noRecord(history.error) ? (
-              <span>no login record this server can read</span>
-            ) : history.error && !history.data ? (
-              <span className="text-warning">login record unread</span>
-            ) : history.data ? (
-              <span>no login on record</span>
-            ) : (
-              <span>reading the login record</span>
-            )}
-            {remote > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric">{remote} over ssh</span>
-              </>
-            )}
-            <FactDot />
-            {!admin ? (
-              <span>failed attempts: administrators only</span>
-            ) : attacks ? (
-              <span className="numeric">
-                <span className={cn("font-medium", attacks.attempts > 0 && "text-foreground")}>
-                  {attemptsWords(attacks)}
-                </span>{" "}
-                failed {attacks.attempts === 1 ? "attempt" : "attempts"} in{" "}
-                {windowWords(attacks.windowHours)}
-              </span>
-            ) : noRecord(attackers.error) ? (
-              <span>no failed-login record on this server</span>
-            ) : attackers.error ? (
-              <span className="text-warning">failed attempts unread</span>
-            ) : (
-              <span>counting failed attempts</span>
-            )}
+              ) : noRecord(history.error) ? (
+                <span>no login record this server can read</span>
+              ) : history.error && !history.data ? (
+                <span className="text-warning">login record unread</span>
+              ) : history.data ? (
+                <span>no login on record</span>
+              ) : (
+                <span>reading the login record</span>
+              )}
+            </Fact>
+            {remote > 0 && <Fact className="numeric">{remote} over ssh</Fact>}
+            <Fact>
+              {!admin ? (
+                <span>failed attempts: administrators only</span>
+              ) : attacks ? (
+                <span className="numeric">
+                  <span className={cn("font-medium", attacks.attempts > 0 && "text-foreground")}>
+                    {attemptsWords(attacks)}
+                  </span>{" "}
+                  failed {attacks.attempts === 1 ? "attempt" : "attempts"} in{" "}
+                  {windowWords(attacks.windowHours)}
+                </span>
+              ) : noRecord(attackers.error) ? (
+                <span>no failed-login record on this server</span>
+              ) : attackers.error ? (
+                <span className="text-warning">failed attempts unread</span>
+              ) : (
+                <span>counting failed attempts</span>
+              )}
+            </Fact>
           </>
         )
       }

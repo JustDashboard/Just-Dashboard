@@ -40,7 +40,7 @@ import { ProductLogo } from "@/components/product-logo"
 import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
 import { ErrorState, Notice } from "@/components/state"
 import { LoadingPanel } from "@/components/loading"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   AllClear,
@@ -386,7 +386,7 @@ export function AlertsPage() {
   return (
     <Page>
       <PageContext title="Alerts" />
-      <HostIdentity
+      <IdentityHeader
         fallback={Bell}
         title="Alerts"
         state={

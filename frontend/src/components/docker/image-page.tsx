@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { ChevronDown, ChevronUp, Copy, Layers } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -32,7 +33,7 @@ import {
   type ImageTab,
 } from "@/components/docker/images"
 import { IconAction, rowReveal } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -327,7 +328,7 @@ function ImageMain({
 
   return (
     <>
-      <HostIdentity
+      <IdentityHeader
         slot="image-identity"
         label={known ? `About ${name}` : undefined}
         className="shrink-0 animate-rise"
@@ -363,13 +364,11 @@ function ImageMain({
         facts={
           known ? (
             <>
-              <span className="numeric font-medium text-foreground">{bytes(known.size)}</span>
-              <FactDot />
-              <span title={timestamp(known.created)}>built {relativeTime(known.created)}</span>
+              <Fact className="numeric font-medium text-foreground">{bytes(known.size)}</Fact>
+              <Fact title={timestamp(known.created)}>built {relativeTime(known.created)}</Fact>
               {/* An image nothing runs says so as its state, beside its name. */}
               {known.containers > 0 ? (
-                <>
-                  <FactDot />
+                <Fact>
                   <button
                     type="button"
                     onClick={() => setTab("containers")}
@@ -377,21 +376,15 @@ function ImageMain({
                   >
                     used by {plural(known.containers, "container")}
                   </button>
-                </>
+                </Fact>
               ) : (
-                state !== "unused" && (
-                  <>
-                    <FactDot />
-                    <span>not in use</span>
-                  </>
-                )
+                state !== "unused" && <Fact>not in use</Fact>
               )}
               {/* The handle to quote, where the name is not already it. On a
                   phone the line has room for the three readings; the id is
                   whole under Configuration. */}
               {tag && (
-                <span className="contents max-sm:hidden">
-                  <FactDot />
+                <Fact className="max-sm:hidden">
                   <button
                     type="button"
                     onClick={() => void copyText(known.id, "ID copied")}
@@ -401,7 +394,7 @@ function ImageMain({
                     {shortId(known.id)}
                     <Copy aria-hidden className={cn("size-3", rowReveal())} />
                   </button>
-                </span>
+                </Fact>
               )}
             </>
           ) : (

@@ -2,6 +2,7 @@
 
 import { createRef, useMemo, useRef, useState, type RefObject } from "react"
 import Link from "next/link"
+import { Fact } from "@/components/fact-line"
 import { ArrowUpRight, Copy, Globe, Key, RefreshClockwise, Trash } from "@/components/icons"
 import { del, get, post, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -14,7 +15,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormFact } from "@/components/form"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
@@ -142,7 +143,7 @@ function TunnelIdentityShell({
   menu?: React.ReactNode
 }) {
   return (
-    <HostIdentity
+    <IdentityHeader
       mark="cloudflare"
       title={title}
       state={state}
@@ -242,9 +243,8 @@ function Connected({
         }
         facts={
           <>
-            <span>{connection?.mode === "api" ? "created here" : "token pasted"}</span>
-            <FactDot />
-            <HostFact product="docker">
+            <Fact>{connection?.mode === "api" ? "created here" : "token pasted"}</Fact>
+            <Fact product="docker">
               <span
                 title={[
                   "just-dashboard-cloudflared",
@@ -262,17 +262,11 @@ function Connected({
                     : ""
                   : `, ${connectorWords(connector)}`}
               </span>
-            </HostFact>
-            <FactDot />
-            <span>no published port</span>
-            {checked && (
-              <>
-                <FactDot />
-                {/* The clock above re-renders the line, so "checked 2m ago"
-                    moves between polls rather than holding its first answer. */}
-                <span>checked {relativeTime(checked)}</span>
-              </>
-            )}
+            </Fact>
+            <Fact>no published port</Fact>
+            {/* The clock above re-renders the line, so "checked 2m ago"
+                moves between polls rather than holding its first answer. */}
+            {checked && <Fact>checked {relativeTime(checked)}</Fact>}
           </>
         }
         command={
@@ -737,18 +731,17 @@ function Setup({
         state={<Status tone="unknown" label="not connected" />}
         facts={
           <>
-            <span className={cn(!status.api.available && "text-muted-foreground")}>
-              {status.api.available
-                ? "Cloudflare credentials saved"
-                : "no Cloudflare credentials saved"}
-            </span>
+            <Fact>
+              <span className={cn(!status.api.available && "text-muted-foreground")}>
+                {status.api.available
+                  ? "Cloudflare credentials saved"
+                  : "no Cloudflare credentials saved"}
+              </span>
+            </Fact>
             {status.origin && (
-              <>
-                <FactDot />
-                <span>
-                  to <span className="code-inline">{status.origin.service}</span>
-                </span>
-              </>
+              <Fact>
+                to <span className="code-inline">{status.origin.service}</span>
+              </Fact>
             )}
           </>
         }

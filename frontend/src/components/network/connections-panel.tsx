@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { NetworkDevice } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -17,7 +18,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { ChoiceList } from "@/components/choice-row"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
@@ -261,21 +262,20 @@ export function ConnectionsPanel() {
       }}
     >
       <PageContext eyebrow="Network" title="Connections" />
-      <HostIdentity
+      <IdentityHeader
         className="animate-rise"
         fallback={NetworkDevice}
         title="Connections"
         facts={
           data ? (
             <>
-              <span className="numeric text-foreground">{plural(data.total, "socket")}</span>
-              <FactDot />
-              <span className="numeric">
+              <Fact className="numeric text-foreground">{plural(data.total, "socket")}</Fact>
+              <Fact className="numeric">
                 {plural(data.peers.length, "remote address", "remote addresses")},{" "}
                 <span className={cn(fromInternet > 0 && "text-warning")}>
                   {fromInternet} from the internet
                 </span>
-              </span>
+              </Fact>
             </>
           ) : (
             <span>

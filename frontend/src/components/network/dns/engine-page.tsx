@@ -19,6 +19,7 @@ import {
   type DNSServiceChange,
   type DNSServiceView,
 } from "@/lib/network/dns-services"
+import { Fact } from "@/components/fact-line"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { DetailPage, type Step } from "@/components/detail-page"
@@ -31,7 +32,7 @@ import {
   RefreshClockwise,
   Trash,
 } from "@/components/icons"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
@@ -574,7 +575,7 @@ function Identity({
 }) {
   if (!view)
     return (
-      <HostIdentity
+      <IdentityHeader
         fallback={Globe}
         slot="dns-engine-header"
         className="border-b-0 pb-0"
@@ -599,7 +600,7 @@ function Identity({
   const { connection, snapshot } = view
   const whole = view.state === "available" && !view.error
   return (
-    <HostIdentity
+    <IdentityHeader
       mark={ENGINE_PRODUCT[connection.engine]}
       fallback={Globe}
       slot="dns-engine-header"
@@ -622,16 +623,14 @@ function Identity({
       // phone they wrap to two, and two lines are held from the first frame.
       facts={
         <IdentityFacts>
-          <HostFact>
+          <Fact>
             {dnsEngineName(connection.engine)}
             {snapshot?.version ? ` ${snapshot.version}` : ""}
-          </HostFact>
-          <FactDot />
-          <HostFact>
+          </Fact>
+          <Fact>
             <span className="block truncate font-mono">{connection.endpoint}</span>
-          </HostFact>
-          <FactDot />
-          <HostFact>{connection.management ? "reviewed changes" : "read-only"}</HostFact>
+          </Fact>
+          <Fact>{connection.management ? "reviewed changes" : "read-only"}</Fact>
         </IdentityFacts>
       }
       command={command}

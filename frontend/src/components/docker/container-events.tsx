@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import { CheckCircle, ChevronRight, ClockRewind, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { ApiError, errorMessage, get } from "@/lib/api"
@@ -27,7 +28,6 @@ import { laneStyle } from "@/components/logs/log-text"
 import { EventMark, EventWho } from "@/components/docker/event-marks"
 import { GroupRule } from "@/components/choice-row"
 import { InfoTip } from "@/components/form"
-import { FactDot } from "@/components/identity-header"
 import { PaneFooter } from "@/components/panel"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -395,19 +395,16 @@ function EventItem({
         <EventMark event={event} product={product} loop={Boolean(loop)} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-body leading-5 font-medium">{title}</p>
-          <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-hint text-muted-foreground">
-            <span className="numeric" title={timestamp(loop ? loop.since : event.time)}>
+          <FactLine className="text-hint text-muted-foreground">
+            <Fact className="numeric" title={timestamp(loop ? loop.since : event.time)}>
               {loop ? `${clock(loop.since)}–${clock(loop.until)}` : clock(event.time)}
-            </span>
+            </Fact>
             {named && name && (
-              <>
-                <FactDot />
-                <span className="truncate font-mono" style={laneStyle(name)}>
-                  {name}
-                </span>
-              </>
+              <Fact className="truncate font-mono" style={laneStyle(name)}>
+                {name}
+              </Fact>
             )}
-          </p>
+          </FactLine>
           {!wide && <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">{edge}</div>}
           {exited && (
             <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1">

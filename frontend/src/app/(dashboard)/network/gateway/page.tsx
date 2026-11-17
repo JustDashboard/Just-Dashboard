@@ -1,5 +1,6 @@
 "use client"
 
+import { Fact, FactLine } from "@/components/fact-line"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
 import { useCallback, useEffect, useState } from "react"
@@ -16,7 +17,7 @@ import type {
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { InfoTip } from "@/components/form"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Section } from "@/components/section"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -140,7 +141,7 @@ export default function NetworkGatewayPage() {
   return (
     <Page rise>
       <PageContext title="Gateway" />
-      <HostIdentity
+      <IdentityHeader
         label="About the gateway"
         mark={firewallProduct(view?.capability.firewall)}
         fallback={Router}
@@ -158,8 +159,8 @@ export default function NetworkGatewayPage() {
         }
         facts={
           view ? (
-            <span className={FACTS}>
-              <span data-testid="gateway-forwarding">
+            <FactLine className={FACT_LINE}>
+              <Fact data-testid="gateway-forwarding">
                 <span
                   className={
                     !view.forwarding.ipv4 && view.forwards.length + view.nat.length > 0
@@ -171,23 +172,22 @@ export default function NetworkGatewayPage() {
                 </span>
                 {" · "}
                 IPv6 {view.forwarding.ipv6 ? "forwarding" : "off"}
-              </span>
-              <FactDot />
-              <span className="numeric">
+              </Fact>
+              <Fact className="numeric">
                 {view.forwards.filter((f) => inForce(f.enabled)).length} of{" "}
                 {plural(view.forwards.length, "forward")}
-              </span>
-              <FactDot />
-              <span className="numeric">
+              </Fact>
+              <Fact className="numeric">
                 {view.nat.filter((n) => inForce(n.enabled)).length} of {view.nat.length} NAT
                 {made > 0 && ` · ${made} made by the VPN page`}
-              </span>
-              <FactDot />
-              <PolicyEvidence
-                view={view}
-                onRepair={admission.offered ? admission.repair : undefined}
-              />
-            </span>
+              </Fact>
+              <Fact>
+                <PolicyEvidence
+                  view={view}
+                  onRepair={admission.offered ? admission.repair : undefined}
+                />
+              </Fact>
+            </FactLine>
           ) : failed ? (
             <span>The gateway could not be read.</span>
           ) : (
@@ -344,6 +344,9 @@ export default function NetworkGatewayPage() {
  * the read lands.
  */
 const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9"
+
+/** The same room once the facts are read: a `FactLine` lays itself out. */
+const FACT_LINE = "max-sm:min-h-9 [&>span]:gap-y-1"
 
 /**
  * A section's own total, at the far end of its title line: how many entries,

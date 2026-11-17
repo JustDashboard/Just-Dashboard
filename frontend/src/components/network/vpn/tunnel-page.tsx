@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { LockClosed } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
@@ -10,7 +11,7 @@ import type { VPNView, WGArchived, WGInterface } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { DetailPage, useSiblingSteps, type Step } from "@/components/detail-page"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, NeedsAdmin } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -341,7 +342,7 @@ function RemovedTunnel({
     <DetailPage
       {...frame}
       identity={
-        <HostIdentity
+        <IdentityHeader
           label={`About ${name}`}
           slot="tunnel-identity"
           mark="wireguard"
@@ -360,20 +361,17 @@ function RemovedTunnel({
           facts={
             archived ? (
               <>
-                <HostFact>
+                <Fact>
                   <span className="block truncate font-mono">{archivedLine(archived)}</span>
-                </HostFact>
+                </Fact>
                 {archived.restorable && archived.endpoint && (
-                  <>
-                    <FactDot />
-                    <HostFact>
-                      <span className="block truncate font-mono">{archived.endpoint}</span>
-                    </HostFact>
-                  </>
+                  <Fact>
+                    <span className="block truncate font-mono">{archived.endpoint}</span>
+                  </Fact>
                 )}
               </>
             ) : (
-              <HostFact>its file is no longer in the archive</HostFact>
+              <Fact>its file is no longer in the archive</Fact>
             )
           }
           command={

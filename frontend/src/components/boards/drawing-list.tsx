@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { Plus, Trash } from "@/components/icons"
 import { ApiError, del, get, post } from "@/lib/api"
 import type { Board, BoardPreview, BoardResource, BoardSummary } from "@/lib/board/boards"
@@ -12,7 +13,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { OpenCard } from "@/components/open-card"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Section } from "@/components/section"
@@ -210,36 +211,22 @@ function Identity({ boards, actions }: { boards: BoardSummary[]; actions: React.
   ).size
   const latest = boards[0]
   return (
-    <HostIdentity
+    <IdentityHeader
       mark="excalidraw"
       title="Excalidraw"
       aside={actions}
       facts={
         <>
-          <span className="numeric">{plural(boards.length, "drawing")}</span>
-          {shapes > 0 && (
-            <>
-              <FactDot />
-              <span className="numeric">{plural(shapes, "shape")}</span>
-            </>
-          )}
-          {links > 0 && (
-            <>
-              <FactDot />
-              <span className="numeric">{plural(links, "server item")} linked</span>
-            </>
-          )}
+          <Fact className="numeric">{plural(boards.length, "drawing")}</Fact>
+          {shapes > 0 && <Fact className="numeric">{plural(shapes, "shape")}</Fact>}
+          {links > 0 && <Fact className="numeric">{plural(links, "server item")} linked</Fact>}
           {latest && (
-            <>
-              <FactDot />
-              <span className="min-w-0 truncate">
-                <span className="font-medium text-foreground">{latest.name}</span> edited{" "}
-                {relativeTime(latest.updatedAt)}
-              </span>
-            </>
+            <Fact className="min-w-0 truncate">
+              <span className="font-medium text-foreground">{latest.name}</span> edited{" "}
+              {relativeTime(latest.updatedAt)}
+            </Fact>
           )}
-          <FactDot />
-          <span>Saved on this server</span>
+          <Fact>Saved on this server</Fact>
         </>
       }
     />

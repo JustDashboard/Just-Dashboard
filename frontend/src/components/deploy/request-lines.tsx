@@ -3,7 +3,7 @@
 import { fieldPredicates } from "@/lib/log/filter"
 import { dockerSource, fileSource } from "@/lib/log/sources"
 import type { DeploymentRequests, RequestEntry } from "@/lib/types"
-import { FactDot } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
 import { ProductGlyph } from "@/components/product-logo"
 import { LinesBlock, OutputLines } from "@/components/deploy/output-lines"
 import type { Answering } from "@/components/deploy/logs-model"
@@ -88,18 +88,18 @@ export function RequestLines({
           <OutputLines
             title="Lines from this request"
             facts={
-              <span
-                className="flex min-w-0 items-center gap-1.5"
+              <FactLine
+                nowrap
+
                 title={
                   timed
                     ? "Every line the container wrote from the moment the request arrived to a second after it was answered. The proxy records no request id, so on a busy container some are other requests'."
                     : "Every line the container wrote in the second either side of the answer: this proxy records no duration, so when the request arrived is not known. Nothing ties a line to a request, so on a busy container some are other requests'."
                 }
               >
-                <span className="shrink-0">approximate</span>
-                <FactDot />
-                <span className="truncate font-mono">{answering.container.name}</span>
-              </span>
+                <Fact className="shrink-0">approximate</Fact>
+                <Fact className="truncate font-mono">{answering.container.name}</Fact>
+              </FactLine>
             }
             query={{
               source: dockerSource(answering.container.containerId),

@@ -1,5 +1,6 @@
 "use client"
 
+import { Fact, FactLine } from "@/components/fact-line"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -19,7 +20,7 @@ import type {
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList } from "@/components/choice-row"
@@ -46,6 +47,9 @@ import { useJobVerbs } from "@/components/backups/job-verbs"
  * when the jobs are read.
  */
 const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9"
+
+/** The same room once the facts are read: a `FactLine` lays itself out. */
+const FACT_LINE = "max-sm:min-h-9 [&>span]:gap-y-1"
 
 /**
  * Backups: where this server's data goes, what needs doing, the jobs, and what
@@ -216,7 +220,7 @@ export default function BackupsPage() {
       <Page rise>
         <PageContext eyebrow="Protection" title="Backups" />
 
-        <HostIdentity
+        <IdentityHeader
           label="About backups"
           className="border-b-0 pb-0"
           fallback={Archive}
@@ -252,17 +256,11 @@ export default function BackupsPage() {
                   : "\u00a0"}
               </span>
             ) : (
-              <span className={FACTS}>
-                <span className="numeric">{facts.jobs}</span>
-                <FactDot />
-                <span className="numeric">{facts.stored}</span>
-                {facts.next && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">{facts.next}</span>
-                  </>
-                )}
-              </span>
+              <FactLine className={FACT_LINE}>
+                <Fact className="numeric">{facts.jobs}</Fact>
+                <Fact className="numeric">{facts.stored}</Fact>
+                {facts.next && <Fact className="numeric">{facts.next}</Fact>}
+              </FactLine>
             )
           }
           command={

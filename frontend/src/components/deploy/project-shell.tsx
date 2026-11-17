@@ -38,7 +38,7 @@ import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/shell/nav"
 import { useNavScope, type NavScope } from "@/components/shell/nav-scope"
 import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { ProjectMark } from "@/components/project-mark"
 import { PullRequestPicker } from "@/components/deploy/pull-request-picker"
 import { EnvironmentSwitch } from "@/components/deploy/environment-switch"
@@ -189,7 +189,7 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
           that is the operator's call, since this is the reference header. */}
       <PageContext title={record.name} />
 
-      <HostIdentity
+      <IdentityHeader
         label={`About ${record.name}`}
         slot="project-header"
         logo={<ProjectMark deployment={deployment} product={project.product} />}

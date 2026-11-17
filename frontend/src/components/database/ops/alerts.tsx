@@ -15,7 +15,6 @@ import { ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
 import { toldBy } from "@/components/deploy/settings/traffic-alerts"
 import { ChoiceList } from "@/components/choice-row"
-import { FactDot } from "@/components/identity-header"
 import { Panel, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
@@ -222,8 +221,8 @@ export function Alerts() {
                 </span>
               )}
               {firing > 0 && rules.length > 0 && (
-                <span aria-hidden className="hidden md:inline">
-                  <FactDot />
+                <span aria-hidden className="hidden text-faint md:inline">
+                  ·
                 </span>
               )}
               {rules.length > 0 && (

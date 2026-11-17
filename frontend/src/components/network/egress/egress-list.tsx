@@ -11,9 +11,10 @@ import {
   type EgressView,
 } from "@/lib/network/egress"
 import { cn } from "@/lib/utils"
+import { Fact } from "@/components/fact-line"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Lifebuoy, Plus } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -176,7 +177,7 @@ function ListIdentity({
   const failing = groups.filter((g) => egressCarrying(g).tone === "danger").length
   const proven = members.filter((m) => m.proven).length
   return (
-    <HostIdentity
+    <IdentityHeader
       slot="egress-identity"
       fallback={Lifebuoy}
       title={TITLE}
@@ -210,30 +211,27 @@ function ListIdentity({
           )
         ) : (
           <>
-            <span className="numeric">
+            <Fact className="numeric">
               {groups.length} of {data.capacity} groups
-            </span>
+            </Fact>
             {groups.length > 0 && (
               <>
-                <FactDot />
-                <span className="numeric">
+                <Fact className="numeric">
                   {groups.filter((g) => g.enabled).length} carrying traffic
-                </span>
-                <FactDot />
-                <span className="numeric">
+                </Fact>
+                <Fact className="numeric">
                   {groups.filter((g) => g.enabled && g.automation).length} automatic
-                </span>
+                </Fact>
                 {/* The state beside the title says a member is down; a phone
                     has one line for the facts. */}
-                <span className="contents max-sm:hidden">
-                  <FactDot />
+                <Fact className="max-sm:hidden">
                   <span
                     className={cn("numeric", down > 0 ? "text-destructive" : undefined)}
                     title="Members whose path answered its probes recently"
                   >
                     {proven} of {members.length} members proven
                   </span>
-                </span>
+                </Fact>
               </>
             )}
           </>

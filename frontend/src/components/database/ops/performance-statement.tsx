@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import {
   Clock,
   CodeBracket,
@@ -19,7 +20,7 @@ import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { WireMark } from "@/components/wire/wire"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { TileTrend } from "@/components/sparkline"
 import { ReadingLine } from "@/components/reading-line"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -217,7 +218,7 @@ function Statement({ address }: { address: string | null }) {
         head={head}
         identity={
           address !== null && !settled ? (
-            <HostIdentity
+            <IdentityHeader
               className="border-b-0 pb-0"
               logo={<StatementTile />}
               title={<TextShimmer>Reading the statement…</TextShimmer>}
@@ -261,7 +262,7 @@ function Statement({ address }: { address: string | null }) {
       rail={rail}
       head={head}
       identity={
-        <HostIdentity
+        <IdentityHeader
           label="About this statement"
           className="animate-rise border-b-0 pb-0"
           logo={<StatementTile text={text} />}
@@ -275,30 +276,24 @@ function Statement({ address }: { address: string | null }) {
           facts={
             listed ? (
               <>
-                <span>
+                <Fact>
                   <Fig>{shareWords(listed.share)}</Fig> of runtime
-                </span>
-                <FactDot />
-                <span className="numeric">{plural(listed.calls, "call")}</span>
-                <FactDot />
-                <span className="numeric">{millis(listed.meanMs)} a call</span>
+                </Fact>
+                <Fact className="numeric">{plural(listed.calls, "call")}</Fact>
+                <Fact className="numeric">{millis(listed.meanMs)} a call</Fact>
                 {missing && (
-                  <>
-                    <FactDot />
-                    <span className="text-warning">
-                      {shareWords(1 - missing.hitRatio)} of its reads miss the cache
-                    </span>
-                  </>
+                  <Fact className="text-warning">
+                    {shareWords(1 - missing.hitRatio)} of its reads miss the cache
+                  </Fact>
                 )}
               </>
             ) : recorded ? (
               <>
-                <span>
+                <Fact>
                   <Fig>{shareWords(recorded.share)}</Fig> of {windowWords(hours)}&apos;s statement
                   time
-                </span>
-                <FactDot />
-                <span className="numeric">{plural(recorded.calls, "call")}</span>
+                </Fact>
+                <Fact className="numeric">{plural(recorded.calls, "call")}</Fact>
               </>
             ) : (
               <span>&nbsp;</span>

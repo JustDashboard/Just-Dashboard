@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { ArrowRight, Bug, TerminalWindow } from "@/components/icons"
 import { plural, relativeTime, timestamp } from "@/lib/format"
 import type { SuricataView } from "@/lib/types"
@@ -8,7 +9,6 @@ import type { PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { BarReading } from "@/components/bar-reading"
 import { RankList, type RankItem } from "@/components/rank-list"
-import { FactDot } from "@/components/identity-header"
 import { InstallFollowUp, InstallHandoff } from "@/components/install-handoff"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EngineHead, EngineWaiting } from "@/components/security/engine-head"
@@ -122,16 +122,13 @@ export function SuricataPanel({ view }: { view: PollState<SuricataView> }) {
         }
         facts={
           <>
-            <span title={ips ? "Sits in the packet path and may drop" : "Reads traffic and alerts"}>
+            <Fact title={ips ? "Sits in the packet path and may drop" : "Reads traffic and alerts"}>
               <span className="font-medium text-foreground">{ips ? "IPS" : "IDS"}</span>{" "}
               {ips ? "can drop what it matches" : "only reads"}
               {data.modeSource && <> · from {data.modeSource}</>}
-            </span>
+            </Fact>
             {data.rulesLoaded !== undefined && (
-              <>
-                <FactDot />
-                <span className="numeric">{plural(data.rulesLoaded, "rule")} loaded</span>
-              </>
+              <Fact className="numeric">{plural(data.rulesLoaded, "rule")} loaded</Fact>
             )}
           </>
         }

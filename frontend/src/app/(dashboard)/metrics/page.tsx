@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { cpuModes } from "@/components/metrics/cpu-modes"
 import { Download, Pause, Play } from "@/components/icons"
 import { bytes, duration, percent, rate } from "@/lib/format"
@@ -66,7 +67,7 @@ import {
 } from "@/components/live-figure"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/identity-header"
+import { IdentityHeader, platformName } from "@/components/identity-header"
 import { HostAlertsLink } from "@/components/metrics/alerts-link"
 import { cpuProduct, platformProduct, virtualizationProduct } from "@/components/product-logo"
 import { IconAction } from "@/components/icon-action"
@@ -351,41 +352,36 @@ export default function MetricsPage() {
           line, as Runtime's is (PGH-27), and on a phone this line no longer
           wraps to three rows. The shortcuts are the key at its end, where they
           had been a line of their own above the page. */}
-        <HostIdentity
+        <IdentityHeader
           mark={cpuProduct(host.cpuModel, host.kernelArch)}
           title={host.cpuModel || "Unknown processor"}
           facts={
             <>
-              <span className="numeric">
+              <Fact className="numeric">
                 {cores} cores{host.cpuMhz > 0 ? ` at ${(host.cpuMhz / 1000).toFixed(1)} GHz` : ""}
-              </span>
-              <FactDot />
-              <span className="numeric">{bytes(snapshot.memory.total, 0)} memory</span>
-              <FactDot />
-              <span className="numeric">
+              </Fact>
+              <Fact className="numeric">{bytes(snapshot.memory.total, 0)} memory</Fact>
+              <Fact className="numeric">
                 {snapshot.swap.total > 0 ? `${bytes(snapshot.swap.total, 0)} swap` : "no swap"}
-              </span>
+              </Fact>
               {host.virtualization && (
-                <>
-                  <FactDot />
-                  <HostFact product={virtualizationProduct(host.virtualization)}>
-                    {host.virtualization}
-                  </HostFact>
-                </>
+                <Fact product={virtualizationProduct(host.virtualization)}>
+                  {host.virtualization}
+                </Fact>
               )}
-              <FactDot />
-              <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
-              <FactDot />
-              {recorded.disabled ? (
-                <Tag tone="warning">history off</Tag>
-              ) : (
-                recorded.history && (
-                  <span className="numeric">
-                    sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
-                    {duration(recorded.history.retentionSeconds)}
-                  </span>
-                )
-              )}
+              <Fact product={platformProduct(host.platform)}>{platformName(host)}</Fact>
+              <Fact>
+                {recorded.disabled ? (
+                  <Tag tone="warning">history off</Tag>
+                ) : (
+                  recorded.history && (
+                    <span className="numeric">
+                      sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
+                      {duration(recorded.history.retentionSeconds)}
+                    </span>
+                  )
+                )}
+              </Fact>
             </>
           }
           aside={

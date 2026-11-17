@@ -1,6 +1,7 @@
 "use client"
 
 import { Fragment, useMemo, useState } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useFilterHistory } from "@/components/workspace/history"
 import { useHeldList } from "@/components/workspace/held-list"
@@ -29,7 +30,7 @@ import {
   keyTitle,
   keyWords,
 } from "@/components/audit/marks"
-import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
@@ -70,6 +71,9 @@ type AuditPage = { entries: AuditEntry[]; total: number }
  * when the day's read lands.
  */
 const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-14"
+
+/** The same room once the facts are read: a `FactLine` lays itself out. */
+const FACT_LINE = "max-sm:min-h-14 [&>span]:gap-y-1"
 
 const hostOf = (state: MetricsState) => state.host
 
@@ -605,7 +609,7 @@ function AuditIdentity({
   const who = reading && peopleWords(reading.people, reading.machines)
   const last = reading?.signIns.last
   return (
-    <HostIdentity
+    <IdentityHeader
       label="About the audit log"
       className="border-b-0 pb-0"
       fallback={Notes}
@@ -638,41 +642,38 @@ function AuditIdentity({
             <Skeleton className="my-0.5 h-3 w-96 max-w-full" />
           </span>
         ) : (
-          <span className={FACTS}>
+          <FactLine className={FACT_LINE}>
             {host?.hostname && (
-              <>
-                <HostFact product={platformProduct(host.platform)}>{host.hostname}</HostFact>
-                <FactDot />
-              </>
+              <Fact product={platformProduct(host.platform)}>{host.hostname}</Fact>
             )}
-            <span className="numeric">
+            <Fact className="numeric">
               <span className="text-foreground">{grouped(day.total)}</span>{" "}
               {day.total === 1 ? "change" : "changes"} in the last day
-            </span>
+            </Fact>
             {who && (
-              <>
-                <FactDot />
+              <Fact>
                 <span className="inline-flex min-w-0 items-center gap-1.5">
                   <FaceRun names={reading.people} />
                   <span className="truncate">{who}</span>
                 </span>
-              </>
+              </Fact>
             )}
-            <FactDot />
-            {last ? (
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <span className="shrink-0">
-                  {plural(reading.signIns.ok, "sign-in")}, the last by{" "}
-                  <span className="text-foreground">{last.username || "someone"}</span>
-                  {last.ip && " from"}
+            <Fact>
+              {last ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0">
+                    {plural(reading.signIns.ok, "sign-in")}, the last by{" "}
+                    <span className="text-foreground">{last.username || "someone"}</span>
+                    {last.ip && " from"}
+                  </span>
+                  {last.ip && <Address ip={last.ip} className="min-w-0" />}
+                  <span className="numeric shrink-0">{relativeTime(last.ts)}</span>
                 </span>
-                {last.ip && <Address ip={last.ip} className="min-w-0" />}
-                <span className="numeric shrink-0">{relativeTime(last.ts)}</span>
-              </span>
-            ) : (
-              <span>nobody signed in</span>
-            )}
-          </span>
+              ) : (
+                <span>nobody signed in</span>
+              )}
+            </Fact>
+          </FactLine>
         )
       }
       command={

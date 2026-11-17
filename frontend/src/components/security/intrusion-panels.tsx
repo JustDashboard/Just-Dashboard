@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import { Play, RefreshClockwise, ShieldOff, Slash } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -10,7 +11,7 @@ import { notify } from "@/lib/toast"
 import type { BlocksView, CrowdSecView, SuricataView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { PageContext } from "@/components/page"
 import { BanDialog, banKey, type BanTarget } from "@/components/security/ban-dialog"
 import { BlocksPanel } from "@/components/security/blocks-panel"
@@ -182,7 +183,7 @@ export function IntrusionPanels() {
     <>
       <PageContext eyebrow="Security" title="Intrusion prevention" />
 
-      <HostIdentity
+      <IdentityHeader
         label="About intrusion prevention"
         slot="intrusion-identity"
         fallback={ShieldOff}
@@ -196,31 +197,25 @@ export function IntrusionPanels() {
         }
         facts={
           <>
-            <span className="numeric">
+            <Fact className="numeric">
               {blocks.data
                 ? `${plural(blocks.data.distinct, "address", "addresses")} refused`
                 : blocks.error
                   ? "refused addresses not read"
                   : "reading the engines"}
-            </span>
+            </Fact>
             {blocks.data && blocks.data.duplicated > 0 && (
-              <>
-                {/* Not on a phone: three facts wrap to a second line there, which
-                    the line does not have while the engines are still out. */}
-                <span className="contents max-sm:hidden">
-                  <FactDot />
-                  <span className="numeric">{blocks.data.duplicated} held more than once</span>
-                </span>
-              </>
+              <Fact className="numeric max-sm:hidden">
+                {blocks.data.duplicated} held more than once
+              </Fact>
             )}
             {exposure?.client && (
-              <>
-                <FactDot />
+              <Fact>
                 <span className="inline-flex items-center gap-1">
                   <span>you</span>
                   <Address ip={exposure.client} className="text-foreground" />
                 </span>
-              </>
+              </Fact>
             )}
           </>
         }

@@ -2,12 +2,13 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { Fact } from "@/components/fact-line"
 import { GridSquare } from "@/components/icons"
 import { PURPOSES, purposeShown } from "@/lib/sidebar-sections"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { hideableSections } from "@/components/shell/nav"
 import { Page, PageContext } from "@/components/page"
 import { PurposePicker, SidebarEditor, useSectionCount } from "@/components/account/workspace"
@@ -84,20 +85,19 @@ function Workspace() {
   return (
     <Page rise>
       <PageContext title="Workspace" />
-      <HostIdentity
+      <IdentityHeader
         fallback={GridSquare}
         title="Your sidebar"
         facts={
           <>
-            <span className="numeric">
+            <Fact className="numeric">
               {shown} of {total} shown
-            </span>
-            <FactDot />
-            <span className="numeric">
+            </Fact>
+            <Fact className="numeric">
               {purposes === PURPOSES.length
                 ? `${purposes} purposes`
                 : `${purposes} of ${PURPOSES.length} purposes`}
-            </span>
+            </Fact>
           </>
         }
         command={

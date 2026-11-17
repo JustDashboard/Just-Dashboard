@@ -21,7 +21,8 @@ import { SearchInput } from "@/components/search-input"
 import { Toolbar } from "@/components/toolbar"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { facts } from "@/components/fact-line"
 import { ProductLogo } from "@/components/product-logo"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -227,7 +228,7 @@ function TLSFleetPage() {
   return (
     <Page rise>
       <PageContext eyebrow="Proxy" title="TLS report" />
-      <HostIdentity
+      <IdentityHeader
         // The view strip under the line draws the rule: the line's own under
         // it made two.
         className="border-b-0 pb-0"
@@ -245,7 +246,7 @@ function TLSFleetPage() {
           ) : fleet.error && !fleet.data ? (
             <span className="text-destructive">the stored reports could not be read</span>
           ) : (
-            <FleetFacts targets={all} />
+            fleetFactLine(all)
           )
         }
         // Laid out as a project's header: the worst of what the reports
@@ -413,21 +414,17 @@ function FleetState({ targets }: { targets: FleetTarget[] }) {
   return <Status tone="running" label="Nothing below A" />
 }
 
-function FleetFacts({ targets }: { targets: FleetTarget[] }) {
-  const facts = fleetFacts(targets)
+/** The fleet's facts as `Fact`s, called for rather than rendered, so the header's line sees each one. */
+function fleetFactLine(targets: FleetTarget[]) {
+  const fleet = fleetFacts(targets)
   // The state beside the name says the worst of the reports. How many are
   // below A, expiring or unreachable are the chips over the list, where a
   // press narrows to them; they were counted here as well.
-  const parts: React.ReactNode[] = [
-    <span key="total">{plural(facts.total, "name")}</span>,
-    <span key="scanned">
-      {facts.scanned === facts.total ? "all scanned" : `${facts.scanned} scanned`}
-    </span>,
-  ]
-  if (facts.newest) parts.push(<span key="newest">last report {relativeTime(facts.newest)}</span>)
-  return parts.flatMap((part, index) =>
-    index === 0 ? [part] : [<FactDot key={`dot-${index}`} />, part],
-  )
+  return facts([
+    plural(fleet.total, "name"),
+    fleet.scanned === fleet.total ? "all scanned" : `${fleet.scanned} scanned`,
+    fleet.newest && `last report ${relativeTime(fleet.newest)}`,
+  ])
 }
 
 /**

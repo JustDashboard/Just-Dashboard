@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Cross, Key, Trash } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -154,7 +155,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
   const mark = <AccountMark name={name} />
   const title = <AccountName name={name} host={home} className="text-title" />
   const identity = user ? (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${user.user}`}
       slot="account-identity"
       className="animate-rise border-b-0 pb-0"
@@ -169,21 +170,17 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
       }
       facts={
         <AccountFacts>
-          <span className="shrink-0">
+          <Fact className="shrink-0">
             kept in <span className="font-mono text-foreground">{user.db}</span>
-          </span>
+          </Fact>
           {user.mechanisms.length > 0 && (
-            <>
-              <FactDot />
-              <span className="min-w-0 truncate">
-                signs in by <span className="font-mono">{user.mechanisms.join(", ")}</span>
-              </span>
-            </>
+            <Fact className="min-w-0 truncate">
+              signs in by <span className="font-mono">{user.mechanisms.join(", ")}</span>
+            </Fact>
           )}
-          <FactDot />
-          <span className="numeric shrink-0">
+          <Fact className="numeric shrink-0">
             {user.roles.length > 0 ? `holds ${plural(user.roles.length, "role")}` : "holds no role"}
-          </span>
+          </Fact>
         </AccountFacts>
       }
       command={
@@ -199,7 +196,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
       }
     />
   ) : (
-    <HostIdentity
+    <IdentityHeader
       slot="account-identity"
       className="border-b-0 pb-0"
       logo={mark}

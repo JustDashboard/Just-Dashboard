@@ -3,6 +3,7 @@
 import { Children, useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { ArrowCircleUp, Plus, Puzzle, RotateClockwise, Terminal } from "@/components/icons"
 import { get } from "@/lib/api"
 import { duration } from "@/lib/format"
@@ -37,7 +38,7 @@ import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { TopProcesses } from "@/components/metrics/top-processes"
 import { lastFleet, readFleet } from "@/components/database/fleet/read"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/identity-header"
+import { IdentityHeader, platformName } from "@/components/identity-header"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
 import { DashboardHealthNotice } from "@/components/overview/health-notice"
@@ -145,7 +146,7 @@ export default function OverviewPage() {
           anywhere, a shell on it; what the dashboard can do to itself is
           behind the menu. */}
       {ready ? (
-        <HostIdentity
+        <IdentityHeader
           mark={platformProduct(ready.host.platform)}
           title={<span className="min-w-0 truncate">{platformName(ready.host)}</span>}
           state={
@@ -169,34 +170,26 @@ export default function OverviewPage() {
           menu={verbs.menu.length > 0 && <VerbMenu verbs={verbs.menu} label="Server actions" />}
           facts={
             <>
-              <span className="font-medium text-foreground">{ready.host.hostname}</span>
-              <FactDot />
-              <span className="font-mono">{ready.host.kernelVersion}</span>
-              <FactDot />
-              <HostFact product={cpuProduct(ready.host.cpuModel, ready.host.kernelArch)}>
+              <Fact className="font-medium text-foreground">{ready.host.hostname}</Fact>
+              <Fact className="font-mono">{ready.host.kernelVersion}</Fact>
+              <Fact product={cpuProduct(ready.host.cpuModel, ready.host.kernelArch)}>
                 {ready.host.cpuModel || ready.host.kernelArch}
-              </HostFact>
-              <FactDot />
-              <span className="numeric">{cores} cores</span>
+              </Fact>
+              <Fact className="numeric">{cores} cores</Fact>
               {ready.host.virtualization && (
-                <>
-                  <FactDot />
-                  <HostFact product={virtualizationProduct(ready.host.virtualization)}>
-                    {ready.host.virtualization}
-                  </HostFact>
-                </>
+                <Fact product={virtualizationProduct(ready.host.virtualization)}>
+                  {ready.host.virtualization}
+                </Fact>
               )}
-              <FactDot />
-              <span className="numeric">up {duration(ready.snapshot.uptimeSeconds)}</span>
-              <FactDot />
-              <span className="numeric">
+              <Fact className="numeric">up {duration(ready.snapshot.uptimeSeconds)}</Fact>
+              <Fact className="numeric">
                 {ready.snapshot.procs?.total || ready.host.processes} processes
-              </span>
+              </Fact>
             </>
           }
         />
       ) : (
-        <HostIdentity
+        <IdentityHeader
           logo={<Skeleton className="size-10 rounded-lg" />}
           title={<Bone className="w-56" />}
           state={<Bone className="w-14 text-xs" />}

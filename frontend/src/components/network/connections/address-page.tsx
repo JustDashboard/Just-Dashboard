@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { Crosshair, Inspect, LockOpen, Slash } from "@/components/icons"
 import { del, get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
@@ -21,7 +22,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/hooks/use-now"
 import { DetailPage } from "@/components/detail-page"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ViewTabList } from "@/components/tabs"
@@ -414,7 +415,7 @@ function AddressIdentity({
   const now = useNow(30_000)
   const network = networkOf(address)
   return (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise"
       logo={
         <AddressMark
@@ -427,20 +428,16 @@ function AddressIdentity({
       title={<span className="min-w-0 font-mono break-all">{address}</span>}
       facts={
         <>
-          <span>{network.label}</span>
-          {(peer || !listed) && <FactDot />}
+          <Fact>{network.label}</Fact>
           {peer ? (
             <>
-              <span className="numeric">
+              <Fact className="numeric">
                 {plural(peer.count, "socket")}, {peer.established} active
-              </span>
+              </Fact>
               {oldest && (
-                <>
-                  <FactDot />
-                  <span className="numeric" title={new Date(oldest).toLocaleString()}>
-                    seen for {duration(Math.max(0, (now - Date.parse(oldest)) / 1000))}
-                  </span>
-                </>
+                <Fact className="numeric" title={new Date(oldest).toLocaleString()}>
+                  seen for {duration(Math.max(0, (now - Date.parse(oldest)) / 1000))}
+                </Fact>
               )}
             </>
           ) : (

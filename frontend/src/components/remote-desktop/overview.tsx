@@ -6,7 +6,8 @@ import { Modal } from "@/components/modal"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList } from "@/components/choice-row"
 import { ArrowRight, Plus, RefreshClockwise, TerminalWindow } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { facts } from "@/components/fact-line"
 import { MissingThing } from "@/components/missing-thing"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -82,7 +83,7 @@ export function RemoteDesktopOverview() {
   )
 
   const identity = (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise"
       logo={data ? <Marks overview={data} /> : <Skeleton className="size-10 rounded-lg" />}
       fallback={TerminalWindow}
@@ -100,7 +101,7 @@ export function RemoteDesktopOverview() {
         </span>
       }
       state={data ? <Verdict overview={data} /> : null}
-      facts={data ? <Facts overview={data} /> : <Skeleton className="h-4 w-72 max-w-full" />}
+      facts={data ? overviewFacts(data) : <Skeleton className="h-4 w-72 max-w-full" />}
       command={
         <Button size="sm" asChild>
           <Link href={NEW_HREF} aria-label="Add a computer">
@@ -252,11 +253,12 @@ function Marks({ overview }: { overview: RdOverview }) {
   )
 }
 
-function Facts({ overview }: { overview: RdOverview }) {
+/** The overview's facts as `Fact`s, called for rather than rendered, so the header's line sees each one. */
+function overviewFacts(overview: RdOverview) {
   const { computers, tailnet, sessions } = overview
   const ready = computers.filter((computer) => computer.reach.state === "open").length
   const last = sessions.find((session) => session.endedAt > 0)
-  const facts = [
+  return facts([
     <span key="count" className="numeric">
       {plural(computers.length, "computer")}
     </span>,
@@ -289,10 +291,7 @@ function Facts({ overview }: { overview: RdOverview }) {
         last session {relativeTime(isoOf(last.endedAt))}
       </span>
     ),
-  ]
-    .filter(Boolean)
-    .flatMap((fact, index) => (index === 0 ? [fact] : [<FactDot key={`dot-${index}`} />, fact]))
-  return <>{facts}</>
+  ])
 }
 
 function Verdict({ overview }: { overview: RdOverview }) {

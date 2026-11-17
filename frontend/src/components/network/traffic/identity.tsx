@@ -4,7 +4,7 @@ import type { NetworkLink } from "@/lib/types"
 import { observationAge } from "@/lib/network/traffic"
 import { ChartActivity } from "@/components/icons"
 import { useNow } from "@/hooks/use-now"
-import { HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
 import type { LiveTraffic } from "@/components/network/use-live-traffic"
 import { FactGroups } from "./facts"
@@ -52,7 +52,7 @@ export function TrafficIdentity({
     <Status state="running" label={`read ${age.seconds}s ago`} />
   )
   return (
-    <HostIdentity
+    <IdentityHeader
       label="About the traffic"
       className={className}
       // Titled by the page, not by one device: the page charts every device,
