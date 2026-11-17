@@ -97,14 +97,8 @@ function publish() {
     const root = document.documentElement.style
     root.setProperty("--bottom-occupied", `${snapshot.occupied}px`)
     root.setProperty("--bottom-stack", `${snapshot.top}px`)
-    // The shell's scroller is where a focused field is scrolled into view:
-    // with a bar up, it stops short of the bar.
-    for (const scroller of document.querySelectorAll<HTMLElement>(
-      "[data-workspace-shell-scroll]",
-    )) {
-      scroller.style.scrollPaddingBottom =
-        snapshot.occupied > 0 ? "calc(var(--bottom-occupied) + 0.5rem)" : ""
-    }
+    // The shell's scroller reads `--bottom-occupied` for its scroll padding
+    // (globals.css), so a focused field stops short of the bars.
   }
   for (const listener of listeners) listener()
 }

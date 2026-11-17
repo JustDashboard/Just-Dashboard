@@ -188,9 +188,9 @@ it covers anything else.
   corner first), then the assistant's conversations (`order` 1). `Dock` is the frame: a popover's
   surface, 22rem wide and the window less its gutters on a phone, rising in and sinking away.
 - **What the page gets.** The stack publishes `--bottom-occupied` (what the bars cover) and
-  `--bottom-stack` (the top of everything, docks included) on the root, and gives the shell's
-  scroller a `scroll-padding-bottom` of the first, so a focused field near the foot of a long form
-  is scrolled clear of the save bar instead of sitting under it.
+  `--bottom-stack` (the top of everything, docks included) on the root. The shell's scroller takes
+  a `scroll-padding-bottom` of the first in `globals.css`, so a focused field near the foot of a
+  long form is scrolled clear of the save bar instead of sitting under it.
 - **`stackOffsets`** is the arithmetic and `watchOccupant` the measuring, both unit-tested in
   `components/dock.test.js`.
 
