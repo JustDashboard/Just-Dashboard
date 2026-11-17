@@ -706,6 +706,69 @@ test("a width left over from a wider screen is fitted on arrival", async ({ page
 })
 
 /**
+ * The column's four views are whole at a laptop's width with the column at its
+ * default: "Branches" sat under the strip's fade and "GitHub" was reached only
+ * by scrolling the strip. Measured with a count on Changes and on GitHub, the
+ * widest the labels get, in every view. The graph's toggle left the strip for
+ * the head, beside the branch.
+ */
+test("the four views fit the strip at 1440 with the default column", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const pulls: Summary = {
+    available: true,
+    repos: [
+      {
+        path: "/srv/app",
+        repository: "acme/app",
+        pulls: [pr(12, "Add caching"), pr(13, "Fix login"), pr(14, "Bump dependencies")],
+        deployments: [],
+      },
+    ],
+  }
+  await mockGit(page, pulls)
+  // Signed in, so the GitHub view counts its requests.
+  await page.route(
+    (url) => url.pathname === "/api/v1/git/github/",
+    (route) =>
+      json(route, {
+        available: true,
+        account: { loggedIn: true, login: "octo", gitConfigured: true },
+      }),
+  )
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  const strip = page.getByRole("tablist", { name: "Repository views" })
+  await expect(strip.getByRole("tab", { name: /GitHub/ })).toContainText("3")
+  await expect(strip.getByRole("tab", { name: /Changes/ })).toHaveAttribute("data-state", "active")
+  const measure = () =>
+    strip.evaluate((list) => {
+      const tabs = [...list.querySelectorAll<HTMLElement>("[role=tab]")]
+      const box = list.getBoundingClientRect()
+      return {
+        names: tabs.map((tab) => tab.textContent?.trim()),
+        right: Math.round(box.right),
+        last: Math.round(tabs.at(-1)!.getBoundingClientRect().right),
+        scroll: list.scrollWidth - list.clientWidth,
+      }
+    })
+  const changes = await measure()
+  expect(changes.names).toHaveLength(4)
+  expect(changes.last, JSON.stringify(changes)).toBeLessThanOrEqual(changes.right)
+  expect(changes.scroll).toBeLessThanOrEqual(0)
+
+  // Every view, not only the one the strip opens on.
+  for (const name of ["History", "Branches", "GitHub"]) {
+    await strip.getByRole("tab", { name: new RegExp(name) }).click()
+    const shown = await measure()
+    expect(shown.last, `${name}: ${JSON.stringify(shown)}`).toBeLessThanOrEqual(shown.right)
+    expect(shown.scroll).toBeLessThanOrEqual(0)
+  }
+  const graph = page.getByRole("button", { name: "Branch graph", exact: true })
+  await expect(strip.locator("..").getByRole("button", { name: "Branch graph" })).toHaveCount(0)
+  await graph.click()
+  await expect(graph).toHaveAttribute("aria-pressed", "true")
+})
+
+/**
  * The design system's structural rules, on both faces of the page: every
  * icon-only control carries an accessible name, and nothing is a filled pill.
  */
