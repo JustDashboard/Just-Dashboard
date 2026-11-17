@@ -210,9 +210,9 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
   // lower than its sibling pages'. The `?` closes the identity line instead,
   // after the `⋯` (`help` below).
   const header = <PageContext title="Firewall" />
-  // A phone has no keyboard for the shortcuts, so it is never drawn there.
+  // A touch screen has no keyboard for the shortcuts, so it is never drawn there.
   const help = (
-    <span className="max-sm:hidden">
+    <span className="flex max-sm:hidden pointer-coarse:hidden">
       <WorkspaceHelp compact />
     </span>
   )
@@ -243,7 +243,14 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
             )
           }
           facts={failed ? <Fact>The firewall could not be read.</Fact> : undefined}
-          menu={<VerbMenu verbs={[refreshVerb]} label="Firewall actions" />}
+          menu={
+            <>
+              <VerbMenu verbs={[refreshVerb]} label="Firewall actions" />
+              {/* The `?`'s place, held until the workspace that draws it is
+                  up, so the `⋯` does not move when the firewall is read. */}
+              <span aria-hidden className="size-6 shrink-0 max-sm:hidden pointer-coarse:hidden" />
+            </>
+          }
         />
         {failed && error ? (
           <ErrorState error={error} onRetry={refresh} />
