@@ -384,8 +384,10 @@ export function BarReading({
                   // about its centre, so a mark with words ("2 stack is down")
                   // ate more of the gap after it than a glyph did, and the
                   // strip's gaps went uneven. The face stays the containing
-                  // block a whole-mark transform made it, so a mark drawn
-                  // `absolute inset-0` (Docker's disk kinds) still fills it.
+                  // block a whole-mark transform made it, so anything a mark
+                  // lays over itself is held to its cell. No mark needs that
+                  // today: Docker's disk kinds, which did, are a box of their
+                  // own since 0.9.0 (`docker/image-band.tsx`).
                   const face = (
                     <span className="relative flex min-w-3.5 items-center justify-center [&_[aria-hidden]:empty]:scale-115 [&_img]:scale-115 [&_svg]:scale-115">
                       {part.mark}
