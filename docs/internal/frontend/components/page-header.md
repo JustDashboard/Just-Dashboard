@@ -40,6 +40,7 @@ page passes move the pages that do otherwise.
 | --- | --- | --- |
 | The way back to the list | the back line, left | `PageContext back={{ href, label }}` |
 | Walk arrows (Alt+Up/Down) and the shortcuts' help | the back line, right | `PageContext actions`, hidden below `sm` |
+| The shortcuts' help on a page with no way back | the identity line's end, after `⋯` | `IdentityHeader menu`, hidden below `sm`; never a row of its own |
 | Mark, name | the identity line | `IdentityHeader mark`/`logo`, `title` |
 | State word | beside the name | `IdentityHeader state` (a `Status`) |
 | Facts | under the name | `IdentityHeader facts`, written as `Fact`s |
