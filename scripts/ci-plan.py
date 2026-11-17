@@ -628,7 +628,13 @@ def shards(root, specs, per_shard=TESTS_PER_SHARD):
             return path.read_text(errors="replace") if path.is_file() else None
 
         text = (root / spec).read_text(errors="replace")
-        weights[spec] = spec_weight(text, read)
+        try:
+            weights[spec] = spec_weight(text, read)
+        except Exception as error:  # noqa: BLE001 - a spec the reader cannot follow must never stop CI
+            # The reader is a small parser of TypeScript; a construct it has
+            # not met falls back to counting `test(` and says so in the log.
+            weights[spec] = max(1, len(re.findall(r"(?<![\w.])test\(", text)))
+            print(f"{spec}: weighed by its test( calls, since it could not be read ({error!r})", file=sys.stderr)
         if "ci-plan:" in text and not any(said.group(1) or said.group(2) for said in SAID.finditer(text)):
             print(f"{spec}: its `ci-plan:` comment says neither `N tests` nor `each weighs N`", file=sys.stderr)
     jobs = [[] for _ in range(max(1, min(MOST_SHARDS, math.ceil(sum(weights.values()) / per_shard))))]

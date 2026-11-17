@@ -468,6 +468,25 @@ class PlanTest(unittest.TestCase):
         self.assertIn("gate.spec.ts", log.getvalue())
         self.assertNotIn("a.spec.ts", log.getvalue())
 
+    def test_a_spec_the_reader_cannot_follow_is_weighed_by_its_test_calls(self):
+        specs = self.write_specs({"a": 3, "b": 2})
+        real = ci_plan.spec_weight
+
+        def broken(text, read=None):
+            if text.count("test(") == 3:
+                raise ValueError("a construct the reader has not met")
+            return real(text, read)
+
+        ci_plan.spec_weight = broken
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as log:
+                jobs = ci_plan.shards(self.root, specs)
+        finally:
+            ci_plan.spec_weight = real
+        self.assertEqual(sorted(spec for job in jobs for spec in job), specs)
+        self.assertIn("a.spec.ts", log.getvalue())
+        self.assertNotIn("b.spec.ts", log.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
