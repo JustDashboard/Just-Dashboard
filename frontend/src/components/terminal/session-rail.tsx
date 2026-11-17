@@ -10,6 +10,7 @@ import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
 import { Button } from "@/components/ui/button"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { Pane, PaneHeader } from "@/components/panel"
+import { ProductGlyph } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
 
 type RowHandlers = {
@@ -57,7 +58,10 @@ export function SessionRail({
 
   return (
     <Pane flush aria-label="Terminal sessions" className={cn("w-full shrink-0", className)}>
-      <PaneHeader className="h-10 gap-1 py-0 pl-3">
+      {/* The workbench's mark heads its rail, as the board's and Git's head
+          their strips: the terminal draws no page header to carry it. */}
+      <PaneHeader className="h-10 gap-2 py-0 pl-3">
+        <ProductGlyph id="terminal" className="size-4" />
         <span className="text-body font-medium">Sessions</span>
         <span className="flex-1" />
         <IconAction label="New session" className="size-7" onClick={onNew}>

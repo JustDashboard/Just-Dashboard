@@ -1215,3 +1215,53 @@ for (const [label, viewport] of [
     })
   }
 }
+
+/**
+ * On a phone an identity header is one row over one line of facts, and what
+ * does not fit is cut a whole fact at a time. A fact drawn in the warning or
+ * the danger ink is the one that asks for something, so it leads the line
+ * and is never the one cut. One left off a phone on purpose (`max-sm:hidden`,
+ * because the state beside the name says it) is not cut: it is not drawn.
+ * The pages are the ones whose fixtures put such a fact on the line.
+ */
+const TONED_LINES: [path: string, mock: (page: Page) => Promise<unknown>][] = [
+  ["/proxy", (page) => mockProxy(page, { included: true })],
+  ["/proxy/certificates", (page) => mockProxy(page, { included: true })],
+  ["/packages", (page) => mockPackages(page)],
+]
+
+const clippedToneFacts = (page: Page) =>
+  page.evaluate(() => {
+    const cut: string[] = []
+    let seen = 0
+    for (const line of document.querySelectorAll<HTMLElement>("[data-layout=project]")) {
+      for (const box of line.querySelectorAll<HTMLElement>("*")) {
+        if (getComputedStyle(box).overflowY !== "clip") continue
+        const edge = box.getBoundingClientRect()
+        for (const fact of box.querySelectorAll<HTMLElement>(
+          "[class*=text-destructive], [class*=text-warning]",
+        )) {
+          if (fact.getClientRects().length === 0) continue
+          seen += 1
+          const at = fact.getBoundingClientRect()
+          if (at.top >= edge.bottom - 1 || at.left >= edge.right - 1)
+            cut.push(fact.textContent?.trim() ?? "")
+        }
+      }
+    }
+    return { seen, cut }
+  })
+
+for (const [path, mock] of TONED_LINES) {
+  test(`${path}'s identity line on a phone cuts no warning or danger fact`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mock(page)
+    await page.goto(path)
+    await expect(page.locator("[data-layout=project]").first()).toBeVisible()
+    await page.waitForLoadState("networkidle")
+    const { seen, cut } = await clippedToneFacts(page)
+    // The fixture does put one on the line, or the check proves nothing.
+    expect(seen, `no warning or danger fact on ${path}'s line`).toBeGreaterThan(0)
+    expect(cut).toEqual([])
+  })
+}

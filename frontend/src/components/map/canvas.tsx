@@ -77,6 +77,18 @@ const FIT_PADDING = 0.06
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
 const FLY = { padding: 0.04, maxZoom: 1 }
 
+/**
+ * A fly-to's length, or none when the reader asked for less motion — in the
+ * system or with the product's pause (`data-motion="paused"`). The root rule
+ * that stills every CSS animation cannot reach a duration handed to the
+ * canvas, so the view lands where it was going without the travel.
+ */
+function glide(ms: number) {
+  if (typeof window === "undefined") return ms
+  if (document.documentElement.dataset.motion === "paused") return 0
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : ms
+}
+
 const clampZoom = (z: number) => Math.min(ZOOM.max, Math.max(ZOOM.min, z))
 
 type Seat = { system: System; placed: Placed; origin: Point }
@@ -156,8 +168,7 @@ export function MapCanvas({
   initialSystem?: string
   /**
    * On a phone, the rail and the inspector as panes with a bar at the foot to
-   * reach them. Without it a phone has the canvas alone, as the server map
-   * decided for itself.
+   * reach them. Without it a phone has the canvas alone. Both maps ask for it.
    */
   panes?: boolean
 }) {
@@ -243,7 +254,7 @@ export function MapCanvas({
 
   const flyTo = useCallback(
     (id: string, duration = 450) => {
-      void flow.fitView({ ...FLY, nodes: [{ id: `frame:${id}` }], duration })
+      void flow.fitView({ ...FLY, nodes: [{ id: `frame:${id}` }], duration: glide(duration) })
     },
     [flow],
   )
@@ -252,7 +263,7 @@ export function MapCanvas({
     setChosen(null)
     setKinds(null)
     update({ focus: undefined })
-    void flow.fitView({ padding: 0.06, duration: 450 })
+    void flow.fitView({ padding: 0.06, duration: glide(450) })
   }, [flow, update])
   const focusOn = useCallback(
     (id: string, fly = true) => {
@@ -273,7 +284,7 @@ export function MapCanvas({
       void flow.fitView({
         nodes: ids.map((n) => ({ id: n })),
         padding: 0.25,
-        duration: 400,
+        duration: glide(400),
         maxZoom: 1.1,
       })
     },
@@ -300,12 +311,12 @@ export function MapCanvas({
       const zoom = zoomKey(e)
       if (zoom) {
         e.preventDefault()
-        if (zoom === "in") void flow.zoomIn({ duration: 150 })
-        else if (zoom === "out") void flow.zoomOut({ duration: 150 })
-        else void flow.zoomTo(1, { duration: 150 })
+        if (zoom === "in") void flow.zoomIn({ duration: glide(150) })
+        else if (zoom === "out") void flow.zoomOut({ duration: glide(150) })
+        else void flow.zoomTo(1, { duration: glide(150) })
       } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit1") {
         e.preventDefault()
-        void flow.fitView({ padding: 0.06, duration: 300 })
+        void flow.fitView({ padding: 0.06, duration: glide(300) })
       } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit2") {
         e.preventDefault()
         const { chosen: id, focus: system } = chosenRef.current
@@ -665,7 +676,7 @@ export function MapCanvas({
       void flow.fitView({
         nodes: ids.map((id) => ({ id })),
         padding: 0.12,
-        duration: 400,
+        duration: glide(400),
         maxZoom: 1,
       })
     },
@@ -677,7 +688,7 @@ export function MapCanvas({
     if (target.closest("input, textarea, [role=menu], [role=dialog]")) return
     if (e.key === "f") {
       if (focus) flyTo(focus)
-      else void flow.fitView({ padding: 0.06, duration: 300 })
+      else void flow.fitView({ padding: 0.06, duration: glide(300) })
     } else if (e.key === "i") {
       setInspectorOpen((open) => !open)
     } else if (e.key === "Enter" && chosenNode) {
@@ -787,7 +798,7 @@ export function MapCanvas({
           {systems.length > 0 && !bare && (
             <CanvasZoom
               onFit={() =>
-                focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: 300 })
+                focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: glide(300) })
               }
               extra={<CanvasZoomWord onClick={showAll}>All</CanvasZoomWord>}
               onTidy={isArranged(doc) ? tidy : undefined}

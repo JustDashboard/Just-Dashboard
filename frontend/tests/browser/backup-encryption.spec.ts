@@ -338,6 +338,8 @@ test("at 390px neither page scrolls sideways", async ({ page }) => {
   await expect(keyPanel(page)).toContainText("not exported yet")
   expect(await noSidewaysScroll(page)).toBe(false)
   await page.goto("/backups/2")
+  // On a phone a run is opened from the list, in its place.
+  await page.getByRole("button", { name: /^Run \d+,/ }).first().click()
   await expect(page.getByRole("region", { name: "Encryption" })).toContainText(RECIPIENT)
   expect(await noSidewaysScroll(page)).toBe(false)
 })

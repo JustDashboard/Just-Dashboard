@@ -175,9 +175,10 @@ it covers anything else.
 
 - **Bars** span the foot: `FloatingBar` (the settings save bar, a proxy site's two-save bar) and a
   pane page's bottom bar on a phone (`PaneBar`, 56px and the home indicator). A bar reports how far
-  up from the window's edge it reaches (`useStackOccupant(element, "bar")`); the bars share the
-  foot, so the stack takes the tallest of them, not their sum. No page shows a save bar over a
-  `PaneBar`.
+  up from the window's edge it reaches (`useStackOccupant(element, "bar")`). A bar of a higher
+  `order` stands above the ones under it, lifted by how far they reach: the save bar is order 1 and
+  a `PaneBar` order 0, so the two on one phone page stand one above the other rather than one on
+  the other's stops. The stack takes the tallest reach, which is the upper bar's.
 - **Docks** sit in the bottom-right corner above every bar, and on each other in `order`, each
   lifted by the measured height of the ones below: Remote Desktop's held sessions (`order` 0, the
   corner first), then the assistant's conversations (`order` 1). `Dock` is the frame: a popover's

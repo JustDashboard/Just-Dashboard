@@ -1,7 +1,19 @@
 "use client"
 
 import { useState } from "react"
-import { Warning } from "@/components/icons"
+import {
+  ChartActivity,
+  Clock,
+  Database,
+  Lightning,
+  ListUnordered,
+  Play,
+  Logs as LogsGlyph,
+  Warning,
+} from "@/components/icons"
+import { useBelow } from "@/lib/breakpoints"
+import { cn } from "@/lib/utils"
+import { useSessionState } from "@/lib/view-state"
 import { get } from "@/lib/api"
 import type { DbConnection, DbLogSources } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -13,6 +25,7 @@ import {
   type ServiceLogsView,
 } from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
+import { PaneBar, type PaneStop } from "@/components/phone-panes"
 import { ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import type { Engine } from "@/components/database/engine"
@@ -69,7 +82,10 @@ export function Logs() {
   const onQuery = engine.can("sql") ? (sql: string) => goto("query", { sql }) : undefined
 
   return (
-    <SectionFrame section="logs">
+    // Below `lg` the log is the screen under the header, edge to edge, with
+    // its views on a bar at the foot, as a project's Logs is: in the page's
+    // gutter it was a framed box with its views as a strip across its top.
+    <SectionFrame section="logs" className="max-lg:gap-0 max-lg:p-0">
       {found.error && !latest ? (
         // Where the server's log is could not be found out: said, with the
         // way to ask again, rather than left to the next poll.
@@ -77,9 +93,10 @@ export function Logs() {
           what="where this server writes its log"
           error={found.error}
           onRetry={found.refresh}
+          className="max-lg:m-5"
         />
       ) : !latest ? (
-        <Pane className="min-h-0 flex-1">
+        <Pane className={cn("min-h-0 flex-1", EDGE)}>
           <LoadingRows rows={8} className="p-3" />
         </Pane>
       ) : latest.sources.length > 0 ? (
@@ -122,6 +139,8 @@ function ServerLogs({
   const noun = queryNoun(engine)
   const sources = found.sources
   const primary = sources.find((s) => s.primary)
+  const phone = useBelow("lg")
+  const storageKey = `databases.${conn.id}.logs`
 
   // A statement's rows came from the server's own log, so the log around one
   // is that log — not the journal beside it, which holds systemd's starts and
@@ -144,15 +163,42 @@ function ServerLogs({
     ...kindViews(source),
   ]
 
+  // The bar's stops are the pane's own readings, and the one lit is the one
+  // the pane shows: what the address names, else what this tab last read
+  // (`ServiceLogs` keeps both under the page's key), else its first.
+  const [keptMode] = useSessionState<string>(`${storageKey}.mode`, "")
+  const [keptSource] = useSessionState<string>(`${storageKey}.source`, "")
+  const shownSource = sources.find((s) => s.id === (param("source") || keptSource)) ?? sources[0]
+  const stops: PaneStop<string>[] = [
+    { key: "live", label: "Live", icon: <LogsGlyph /> },
+    { key: "search", label: "History", icon: <Clock /> },
+    { key: "insights", label: "Insights", icon: <ChartActivity /> },
+    ...views(shownSource).map((view) => ({
+      key: view.id,
+      label: view.label,
+      icon: VIEW_GLYPH[view.id] ?? <ListUnordered />,
+    })),
+  ]
+  const wanted = param("view") || keptMode
+  const active = stops.some((stop) => stop.key === wanted) ? wanted : stops[0].key
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 max-lg:gap-0">
       {found.note && (
-        <Notice tone="warning" icon={Warning} title="The server is not answering">
+        <Notice
+          tone="warning"
+          icon={Warning}
+          title="The server is not answering"
+          className="max-lg:m-3"
+        >
           <p className="max-w-3xl text-pretty">{found.note}</p>
         </Notice>
       )}
       {found.refused?.map((r) => (
-        <p key={r.path} className="shrink-0 text-hint text-pretty text-muted-foreground">
+        <p
+          key={r.path}
+          className="shrink-0 text-hint text-pretty text-muted-foreground max-lg:px-3 max-lg:py-2"
+        >
           Also writes <span className="font-mono wrap-anywhere">{r.path}</span>, which is {r.reason}
         </p>
       ))}
@@ -166,12 +212,20 @@ function ServerLogs({
         onSourceChange={(id) => select({ source: id })}
         view={param("view") || null}
         onViewChange={(id) => select({ view: id })}
-        storageKey={`databases.${conn.id}.logs`}
+        storageKey={storageKey}
         views={views}
         readings="chips"
         insightTiles={false}
         pickerLabel="Server log"
-        className="min-h-0 flex-1"
+        // The strip's views are the bar's on a phone.
+        flush={phone}
+        className="min-h-0 flex-1 max-lg:[&_nav[aria-label='Log_mode']]:hidden"
+      />
+      <PaneBar
+        label="Log views"
+        stops={stops}
+        active={active}
+        onPick={(id) => select({ view: id })}
       />
     </div>
   )
@@ -198,8 +252,18 @@ function QueriesAlone({
 }) {
   const why = reason ?? (refused?.length ? `${refused[0].path} is ${refused[0].reason}.` : "")
   return (
-    <Pane className="min-h-[24rem] flex-1">
+    <Pane className={cn("min-h-[24rem] flex-1", EDGE)}>
       <DatabaseQueries conn={conn} engine={engine} onQuery={onQuery} heading={{ why }} />
     </Pane>
   )
+}
+
+/** Below `lg` a pane here is the screen's width: no frame of its own. */
+const EDGE = "max-lg:rounded-none max-lg:border-0"
+
+/** The glyph of a reading the page or the source adds, on the phone's bar. */
+const VIEW_GLYPH: Record<string, React.ReactNode> = {
+  queries: <Database />,
+  events: <Lightning />,
+  runs: <Play />,
 }
