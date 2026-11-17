@@ -377,19 +377,21 @@ export function BarReading({
                   // The mark alone. A rule in the part's colour under each one
                   // read as a row of tabs; the line's tick already carries the
                   // colour, and the span lights when its mark is pointed at.
-                  // Its drawing scaled rather than resized, so every caller's
-                  // glyph, logo or dot grows alike: the svgs, the images and
-                  // the empty `aria-hidden` dots. The words beside a dot are
-                  // not scaled. A scale of the whole mark grew it past its box
-                  // about its centre, so a mark with words ("2 stack is down")
-                  // ate more of the gap after it than a glyph did, and the
-                  // strip's gaps went uneven. The face stays the containing
-                  // block a whole-mark transform made it, so anything a mark
-                  // lays over itself is held to its cell. No mark needs that
-                  // today: Docker's disk kinds, which did, are a box of their
-                  // own since 0.9.0 (`docker/image-band.tsx`).
+                  //
+                  // One rule for which marks scale: a mark's picture is drawn
+                  // at 115%, its words never are. The picture is its outermost
+                  // graphic: a glyph, an image, a dot (a live one too, whose
+                  // pulse is a child of it), or a tile, which scales whole
+                  // with its logo inside, so the logo keeps its margin. Words,
+                  // a count included, keep the strip's hint size. It was any
+                  // svg, image or empty dot at any depth, which grew a tile's
+                  // logo inside an unscaled tile and left a live dot small.
+                  // Scaled rather than resized, so every caller's mark grows
+                  // alike; the face stays the containing block a whole-mark
+                  // transform made it, so anything a mark lays over itself is
+                  // held to its cell.
                   const face = (
-                    <span className="relative flex min-w-3.5 items-center justify-center [&_[aria-hidden]:empty]:scale-115 [&_img]:scale-115 [&_svg]:scale-115">
+                    <span className="relative flex min-w-3.5 items-center justify-center [&_[aria-hidden]:not([aria-hidden]_*)]:scale-115 [&_img:not([aria-hidden]_*)]:scale-115 [&_svg:not([aria-hidden]_*)]:scale-115">
                       {part.mark}
                     </span>
                   )
@@ -520,8 +522,10 @@ function Line({
       )}
     >
       <span aria-hidden className="h-3 w-0.5 shrink-0 rounded-full" style={{ background: color }} />
-      {/* The name gives way last: the detail truncates long before it does. */}
-      <span className="min-w-0 shrink-[0.25] truncate font-medium">{name}</span>
+      {/* The name gives way last: the detail truncates long before it does.
+          Its cut is 24px tall, not the line's 20, so an Explain term in a
+          name keeps a pointer's press box; the line does not grow. */}
+      <span className="-my-0.5 min-w-0 shrink-[0.25] truncate py-0.5 font-medium">{name}</span>
       {detail && (
         <span className="numeric min-w-0 shrink-[4] truncate text-hint text-muted-foreground">
           {detail}
