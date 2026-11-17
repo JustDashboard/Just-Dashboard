@@ -1100,7 +1100,7 @@ test.describe("a deployment's traffic", () => {
 
     // The release is the reader's next move, so it is a link to the run that
     // put it there rather than a piece of text.
-    await expect(page.getByRole("link", { name: "· release 20" }).first()).toHaveAttribute(
+    await expect(page.getByRole("link", { name: "release 20" }).first()).toHaveAttribute(
       "href",
       "/deploy/7/runs/84",
     )

@@ -765,7 +765,8 @@ test("the configuration page opens where it will stand, and an install nobody ca
     })
   })
   await page.goto("/dashboard/configuration")
-  const outline = page.locator("[data-slot=skeleton]").first()
+  // The identity line's outline: a card's ghost where the page draws one, a bare skeleton before.
+  const outline = page.locator("[data-slot=choice-list-skeleton], [data-slot=skeleton]").first()
   await expect(outline).toBeVisible()
   const waiting = await outline.boundingBox()
   release()
