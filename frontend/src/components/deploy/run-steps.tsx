@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { Logs } from "@/components/icons"
-import { clock, plural, timestamp } from "@/lib/format"
+import { clock, duration, plural, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import type {
@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button"
 import {
   RELEASE_GROUPS,
   StepMark,
-  formatDuration,
   frameworkLabel,
   groupedState,
   stageName,
@@ -407,7 +406,7 @@ function StageHead({
         <Segment state={state} />
       </span>
       <span className="numeric w-10 shrink-0 text-right text-hint text-muted-foreground">
-        {seconds !== undefined ? formatDuration(seconds) : ""}
+        {seconds !== undefined ? duration(seconds) : ""}
       </span>
     </div>
   )
@@ -488,7 +487,7 @@ function StepRow({
             </span>
             <span className="numeric shrink-0 text-hint text-muted-foreground">
               {step.attempt > 1 && `attempt ${step.attempt} · `}
-              {seconds !== undefined ? formatDuration(seconds) : stepStateLabel(step.state)}
+              {seconds !== undefined ? duration(seconds) : stepStateLabel(step.state)}
             </span>
           </span>
           <span className="flex min-w-0 items-baseline gap-2 text-hint text-muted-foreground">
@@ -583,7 +582,7 @@ function Inspector({
               />
               {seconds !== undefined && (
                 <span>
-                  took <span className="numeric text-foreground">{formatDuration(seconds)}</span>
+                  took <span className="numeric text-foreground">{duration(seconds)}</span>
                 </span>
               )}
               {step.startedAt && (

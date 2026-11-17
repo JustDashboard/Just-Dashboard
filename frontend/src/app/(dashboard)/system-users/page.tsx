@@ -21,7 +21,8 @@ import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { Address } from "@/components/security/marks"
-import { FactDot, HostIdentity } from "@/components/identity-header"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { platformProduct, ProductGlyph } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
@@ -264,7 +265,7 @@ function SystemUsers() {
     <Page rise>
       <PageContext eyebrow="Advanced" title="System users" />
 
-      <HostIdentity
+      <IdentityHeader
         mark={platformProduct(host?.platform)}
         fallback={Users}
         title={host?.hostname ?? "Accounts"}
@@ -279,13 +280,11 @@ function SystemUsers() {
         facts={
           data ? (
             <>
-              <span className="numeric">{plural(figures.people, "person", "people")}</span>
-              <FactDot />
-              <span className="numeric">{figures.root} reach root</span>
+              <Fact className="numeric">{plural(figures.people, "person", "people")}</Fact>
+              <Fact className="numeric">{figures.root} reach root</Fact>
               {figures.latest && (
-                <>
-                  <FactDot />
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                <Fact>
+                  <span className="inline-flex max-w-full min-w-0 items-center gap-1.5 align-top">
                     <span className="shrink-0 text-foreground">{figures.latest.username}</span>
                     <span className="numeric shrink-0">
                       {relativeTime(figures.latest.lastLogin)}
@@ -294,7 +293,7 @@ function SystemUsers() {
                       <Address ip={figures.latest.lastLoginFrom} className="min-w-0" />
                     )}
                   </span>
-                </>
+                </Fact>
               )}
             </>
           ) : error ? (

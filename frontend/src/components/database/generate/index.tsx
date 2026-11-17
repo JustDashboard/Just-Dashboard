@@ -9,7 +9,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard } from "@/components/choice-card"
 import { Segments } from "@/components/segments"
 import { GroupRule } from "@/components/choice-row"
-import { Disclosure, Field, InfoTip, OptionRow } from "@/components/form"
+import { Disclosure, Field, OptionRow } from "@/components/form"
+import { Explain } from "@/components/explain"
 import { LanguageMark } from "@/components/language-icon"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { hasProductLogo, ProductLogo } from "@/components/product-logo"
@@ -415,11 +416,11 @@ export function Generate() {
                   {/* What it writes, and that it only reads: it was a
                       paragraph in the files' place before anything was
                       written, where it stood between the reader and Generate. */}
-                  <InfoTip label={`What ${target.label} writes`}>
+                  <Explain label={`What ${target.label} writes`}>
                     {target.description} Generate reads the catalogue and writes{" "}
                     {target.filename || "the files"} for you to review; nothing in the database is
                     changed.
-                  </InfoTip>
+                  </Explain>
                 </span>
               }
               actions={

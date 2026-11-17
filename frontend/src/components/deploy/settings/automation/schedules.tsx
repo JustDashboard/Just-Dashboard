@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { ApiError, del, get, post, put } from "@/lib/api"
 import { describeCron, isValidCron, nextCronRunsIn } from "@/lib/cron"
-import { plural, relativeTime } from "@/lib/format"
+import { duration, plural, relativeTime } from "@/lib/format"
 import { useSessionState } from "@/lib/view-state"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -83,7 +83,6 @@ import { SettingSection } from "@/components/settings/setting-card"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import {
   RunStatus,
-  formatDuration,
   humanize,
   isActiveRun,
   runDurationSeconds,
@@ -1034,7 +1033,7 @@ function ScheduleRunsSheet({
                             <>
                               <RunStatus state={run.state} />
                               <span className="numeric w-16 text-right text-hint whitespace-nowrap text-muted-foreground">
-                                {formatDuration(runDurationSeconds(run))}
+                                {duration(runDurationSeconds(run))}
                               </span>
                             </>
                           }

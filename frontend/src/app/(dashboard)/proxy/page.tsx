@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Bell, Globe } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { ago, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type {
@@ -54,7 +54,6 @@ import {
   reading,
   REFRESH_DEADLINE_MS,
   unanswered,
-  updatedLabel,
   type Answer,
   type Reading,
 } from "@/components/proxy/freshness"
@@ -785,7 +784,7 @@ function Freshness({
 }) {
   const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
   if (late.length > 0) return noAnswerLabel(late)
-  return refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)
+  return refreshing ? "Refreshing…" : at !== undefined && `Updated ${ago(at, now, { units: 2 })}`
 }
 
 /**

@@ -5,7 +5,7 @@ import { Copy, External, Key, Play, Warning } from "@/components/icons"
 import { SourceBranch, SourcePull } from "@/components/git/glyphs"
 import { get, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { relativeTime } from "@/lib/format"
+import { duration, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -36,7 +36,6 @@ import { VariablesPanel } from "@/components/deploy/settings/variables"
 import { RunStrip } from "@/components/deploy/run-marks"
 import {
   RunStatus,
-  formatDuration,
   hostOf,
   humanize,
   isActiveRun,
@@ -950,7 +949,7 @@ function PreviewSheet({
                       <>
                         <RunStatus state={run.state} />
                         <span className="numeric w-16 text-right text-hint whitespace-nowrap text-muted-foreground">
-                          {formatDuration(runDurationSeconds(run))}
+                          {duration(runDurationSeconds(run))}
                         </span>
                       </>
                     }

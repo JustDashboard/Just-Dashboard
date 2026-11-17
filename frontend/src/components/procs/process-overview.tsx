@@ -16,7 +16,7 @@ import { bytes, compactCount, duration, percent, plural, timestamp } from "@/lib
 import type { ProcessInspect, ProcessLink, ProcessRow, ProcessTree } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { scrollIntoViewRespectingMotion } from "@/lib/motion"
-import { ShellWords } from "@/components/deploy/run-evidence"
+import { ShellWords } from "@/components/code"
 import { useNow } from "@/hooks/use-now"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { IconAction } from "@/components/icon-action"

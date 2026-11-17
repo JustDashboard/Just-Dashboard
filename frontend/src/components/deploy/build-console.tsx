@@ -20,13 +20,12 @@ import {
 import {
   RUN_LABELS,
   StepMark,
-  formatDuration,
   runFailed,
   runTone,
   stepName,
   stepSeconds,
 } from "@/components/deploy/vocabulary"
-import { clock, plural } from "@/lib/format"
+import { clock, duration, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { transcriptLine, type TranscriptLine } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
@@ -622,7 +621,7 @@ function StepRule({
       </span>
       {seconds !== undefined && (
         <span className="numeric shrink-0 text-hint text-muted-foreground">
-          {formatDuration(seconds)}
+          {duration(seconds)}
         </span>
       )}
       <span className="numeric ml-auto shrink-0 text-hint text-muted-foreground">
@@ -711,7 +710,7 @@ function StageRail({
             </span>
             {seconds !== undefined && (
               <span className="numeric shrink-0 text-hint text-muted-foreground">
-                {formatDuration(seconds)}
+                {duration(seconds)}
               </span>
             )}
             <span

@@ -9,7 +9,8 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/hooks/use-now"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/identity-header"
+import { IdentityHeader, platformName } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { HUE } from "@/components/live-figure"
 import { Page, PageContext } from "@/components/page"
 import { RowLink } from "@/components/row-link"
@@ -253,7 +254,7 @@ export function Services() {
       <Page rise {...inspection.bindings}>
         {header}
 
-        <HostIdentity
+        <IdentityHeader
           mark={platformProduct(host?.platform)}
           fallback={Servers}
           title={host?.hostname ?? "Services"}
@@ -262,32 +263,20 @@ export function Services() {
               {/* The host's facts arrive on their own read, and an install
                   that cannot say its distribution still lists its services. */}
               {host?.platform && (
-                <>
-                  <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
-                  <FactDot />
-                </>
+                <Fact product={platformProduct(host.platform)}>{platformName(host)}</Fact>
               )}
-              {version && (
-                <>
-                  <span>systemd {version}</span>
-                  <FactDot />
-                </>
-              )}
-              <span className="numeric">
+              {version && <Fact>systemd {version}</Fact>}
+              <Fact className="numeric">
                 {counts.bucket.active} of {plural(installed.length, "service")} active
-              </span>
-              <FactDot />
-              <span className="numeric">{counts.boot.enabled ?? 0} start on boot</span>
+              </Fact>
+              <Fact className="numeric">{counts.boot.enabled ?? 0} start on boot</Fact>
               {manager?.bootedAt && (
-                <>
-                  <FactDot />
-                  <span
-                    className="numeric"
-                    title={new Date(manager.bootedAt * 1000).toLocaleString()}
-                  >
-                    booted {ago(manager.bootedAt, now)}
-                  </span>
-                </>
+                <Fact
+                  className="numeric"
+                  title={new Date(manager.bootedAt * 1000).toLocaleString()}
+                >
+                  booted {ago(manager.bootedAt, now)}
+                </Fact>
               )}
             </>
           }
@@ -325,7 +314,7 @@ export function Services() {
                 </Button>
               )}
               <span className="max-sm:hidden">
-                <WorkspaceHelp compact />
+                <WorkspaceHelp />
               </span>
             </span>
           }
