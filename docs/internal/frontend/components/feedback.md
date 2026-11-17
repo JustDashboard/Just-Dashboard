@@ -108,7 +108,10 @@ rules out.
 ## The phone
 
 A console is the pane's full height on a phone: one pane, never a short box inside a scrolling page
-(see [Workbench](workbench.md)).
+(see [Workbench](workbench.md)). Its head is one row there: the run's name, its state and Stop or
+Dismiss. `ConsoleView`'s `note` (a job's "Keeps running if you leave") is drawn from `sm` up, so the
+name has the room; a name still too long is cut at its end, whole on hover and in its accessible
+name.
 
 ## Related
 

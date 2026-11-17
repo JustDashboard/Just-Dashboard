@@ -504,7 +504,10 @@ The checkouts under the git roots (`JD_GIT_ROOTS`) shelved by the account their 
 (`lib/git-repos.ts`), as repository cards under the chips All, Uncommitted, Behind, Unpushed,
 Detached, Pull requests and Worktrees, with worktrees in a section of their own; Clone for
 `service.control` and the GitHub account beside them. A selected checkout takes the whole page as
-its workspace (`repo-workspace.tsx`)
+its workspace (`repo-workspace.tsx`). Its middle column opens 424px wide, the width its four views
+(Changes, History, Branches, GitHub, with their counts) need whole on the shared strip; the strip
+holds only the views, the branch graph's toggle sits in the head beside the branch, and Alt+↑ and
+Alt+↓ walk the changed files
 
 **Implementation:** `app/(dashboard)/git/page.tsx`, `components/git/`, `lib/git-repos.ts`; checked
 by `tests/browser/git-ui.spec.ts`, `git-panel.spec.ts` and `git-features.spec.ts`; backend contract

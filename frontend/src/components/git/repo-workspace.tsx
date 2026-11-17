@@ -6,8 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Workspace } from "@/components/workspace/workspace"
 import {
   Archive,
-  ChevronDown,
-  ChevronUp,
   ChevronDoubleDown,
   ChevronDoubleUp,
   CloudUpload,
@@ -70,7 +68,6 @@ import { useGitRun } from "@/components/git/run"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Page } from "@/components/page"
-import { IconAction } from "@/components/icon-action"
 import { WorkbenchHeader } from "@/components/workbench-header"
 import { PaneBar } from "@/components/phone-panes"
 import { Notice } from "@/components/state"
@@ -89,9 +86,12 @@ const onePane = () => window.matchMedia(breakpointQuery("lg", "below")).matches
 
 // The preview is the column that needs the room — a diff is wider than a
 // file name or a commit subject — so the other two start narrow and can be
-// dragged wider; at 1280 with the sidebar open the diff still gets 400px.
+// dragged wider; at 1280 with the sidebar open the diff still gets 360px.
+// The middle column starts at the width its four views need whole, counts
+// included, at the shared strip's spacing: at 392 "Branches" sat under the
+// strip's fade and "GitHub" was reached only by scrolling it.
 const TREE = { min: 208, max: 480, base: 240 }
-const WORK = { min: 300, max: 640, base: 392 }
+const WORK = { min: 300, max: 640, base: 424 }
 // What the preview column may never be dragged below. A per-panel maximum is
 // not a layout constraint: two panes each inside their own limit still add up
 // to more than a 1280 row has, and the preview — `flex-1 min-w-0`, so it
@@ -744,6 +744,31 @@ export function RepoWorkspace({
                     </TooltipContent>
                   </Tooltip>
 
+                  {/* The graph beside where HEAD is: it draws the whole
+                repository's branches, not a view of the middle column, and
+                on that column's strip it pushed the last of the four views
+                out of sight. Below `lg` it is in the menu. */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon-sm"
+                        variant="outline"
+                        aria-pressed={graphOpen}
+                        aria-label="Branch graph"
+                        className={cn(
+                          "shrink-0 max-lg:hidden",
+                          graphOpen
+                            ? "bg-accent text-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={() => setGraphOpen((v) => !v)}
+                      >
+                        <SourceFork className="size-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>See every branch and where it forked</TooltipContent>
+                  </Tooltip>
+
                   {/* Fetch, pull and push as one control: three verbs on one
                 remote, read as a set. Push keeps the command face — it is
                 the one that sends anything anywhere. */}
@@ -962,43 +987,6 @@ export function RepoWorkspace({
                     },
                   ]}
                   className="px-1 max-lg:hidden"
-                  trailing={
-                    <>
-                      {shown === "changes" && (
-                        <>
-                          <IconAction
-                            label="Previous changed file (Alt+↑)"
-                            onClick={() => changeBy(-1)}
-                          >
-                            <ChevronUp />
-                          </IconAction>
-                          <IconAction label="Next changed file (Alt+↓)" onClick={() => changeBy(1)}>
-                            <ChevronDown />
-                          </IconAction>
-                        </>
-                      )}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-pressed={graphOpen}
-                            aria-label="Branch graph"
-                            className={cn(
-                              "size-7 shrink-0 p-0",
-                              graphOpen
-                                ? "bg-accent text-foreground"
-                                : "text-muted-foreground hover:text-foreground",
-                            )}
-                            onClick={() => setGraphOpen((v) => !v)}
-                          >
-                            <SourceFork className="size-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>See every branch and where it forked</TooltipContent>
-                      </Tooltip>
-                    </>
-                  }
                 />
                 <TabsPrimitive.Content value="changes" className={PANEL}>
                   <ChangesPanel

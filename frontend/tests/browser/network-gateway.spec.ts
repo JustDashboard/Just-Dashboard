@@ -579,7 +579,9 @@ test.describe("installed, measured and previewed", () => {
     await expect(sheet.getByText("The host's networks changed since auto decided")).toBeVisible()
     await sheet.getByRole("button", { name: "Check the target" }).click()
     await expect(sheet.getByText("10.0.1.9:25565 refused the connection")).toBeVisible()
-    expect(mutations.at(-1)).toEqual({
+    // The editor's dry run is asked 400ms after it opens, so it can land after the check.
+    const changes = () => mutations.filter((m) => m.path !== "/network/gateway/preview")
+    expect(changes().at(-1)).toEqual({
       method: "POST",
       path: "/network/gateway/verify",
       body: { forwardId: 2 },
@@ -589,8 +591,8 @@ test.describe("installed, measured and previewed", () => {
       "/network/external",
     )
     await sheet.getByRole("button", { name: "Decide again" }).click()
-    await expect.poll(() => mutations.at(-1)?.path).toBe("/network/gateway/forwards/2")
-    expect(mutations.at(-1)?.method).toBe("PUT")
+    await expect.poll(() => changes().at(-1)?.path).toBe("/network/gateway/forwards/2")
+    expect(changes().at(-1)?.method).toBe("PUT")
     // The verified forward shows its external source instead.
     await page.keyboard.press("Escape")
     await page.getByRole("button", { name: "Edit :8080 → 10.0.4.5:80" }).click()

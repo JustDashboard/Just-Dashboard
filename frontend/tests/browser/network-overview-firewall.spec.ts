@@ -208,6 +208,56 @@ for (const width of [1280, 390]) {
   })
 }
 
+// The 16 Nov rule: `?` closes the identity line, and has a row of its own
+// only beside a back link. Firewall has none, and its row of `?` alone set its
+// header 50px under Interfaces'.
+for (const [width, touch] of [
+  [1440, false],
+  [390, true],
+] as const) {
+  test.describe(`${width} wide`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: touch })
+
+    test("the firewall's header starts where a sibling's does, and `?` closes its line", async ({
+      page,
+    }) => {
+      await mockNetwork(page)
+      await mockHostLogs(page)
+      await page.goto("/network/interfaces")
+      await loaded(page)
+      const sibling = page.getByRole("region", { name: "About the interfaces" })
+      await expect(sibling).toBeVisible()
+      await risen(page)
+      const siblingTop = await top(sibling)
+
+      await page.goto("/network/firewall")
+      await loaded(page)
+      const identity = page.getByRole("region", { name: "About the firewall" })
+      await expect(identity).toContainText("Active")
+      await risen(page)
+      expect(await top(identity)).toBe(siblingTop)
+      // No row above the line: nothing the page draws stands over it.
+      await expect(page.locator("[data-slot=page] [data-slot=page-context]")).toHaveCount(0)
+
+      const help = page.getByRole("button", { name: "Firewall shortcuts" })
+      if (width < 640) {
+        // A phone has no keyboard for the shortcuts.
+        await expect(help).toBeHidden()
+        return
+      }
+      const line = (await identity.boundingBox())!
+      const cap = (await help.boundingBox())!
+      const menu = (await identity.getByRole("button", { name: "Firewall actions" }).boundingBox())!
+      // On the line's own row, after the `⋯`, at its far end.
+      expect(cap.y).toBeGreaterThanOrEqual(line.y)
+      expect(cap.y + cap.height).toBeLessThanOrEqual(line.y + line.height)
+      expect(Math.abs(cap.y + cap.height / 2 - (menu.y + menu.height / 2))).toBeLessThanOrEqual(1)
+      expect(cap.x).toBeGreaterThan(menu.x + menu.width - 1)
+      expect(line.x + line.width - (cap.x + cap.width)).toBeLessThanOrEqual(1)
+    })
+  })
+}
+
 test("the overview's command, menu and readings are where the tiles' figures went", async ({
   page,
 }) => {
