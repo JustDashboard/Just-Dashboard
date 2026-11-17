@@ -28,7 +28,8 @@ describe("FactLine", () => {
 
   test("a fact's title is on its own words, not on the dot before it", () => {
     const html = draw(h(Fact, null, "a"), h(Fact, { title: "basis" }, "2.1 a week"))
-    expect(html).toContain('<span title="basis">2.1 a week</span>')
+    // The words' own span carries the title (and the classes that hold it to the line).
+    expect(html).toMatch(/<span title="basis"[^>]*>2\.1 a week<\/span>/)
   })
 
   test("facts inside fragments and behind conditions are flattened in order", () => {
