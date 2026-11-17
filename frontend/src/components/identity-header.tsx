@@ -249,7 +249,7 @@ function factRun(facts: React.ReactNode) {
   // takes `hit-area`, a press box of 24px under a mouse and 44px under a
   // finger, without growing the line (PGP-19).
   return (
-    <FactLine className="w-full max-sm:w-auto max-sm:flex-1 [&>span]:gap-y-1 [&_a]:hit-area">
+    <FactLine className="w-full max-sm:w-auto max-sm:flex-1 [&_a]:hit-area [&>span]:gap-y-1">
       {facts}
     </FactLine>
   )

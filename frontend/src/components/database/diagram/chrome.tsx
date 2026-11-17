@@ -5,7 +5,7 @@ import { Crosshair, Fingerprint, Key, Linked, LockClosed, Trash } from "@/compon
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Keycaps } from "@/components/keycaps"
-import { ARROW_CAPS } from "@/components/canvas-move"
+import { ARROW_CAPS } from "@/components/map/canvas-keys"
 import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
 import { Field } from "@/components/form"
 import { Modal } from "@/components/modal"

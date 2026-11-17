@@ -135,7 +135,7 @@ takes Safari's pinch, so the map and a database's Diagram answer one gesture the
   slide by the pointer is. A box or a system's frame reached by Tab shows the focus ring and is not
   picked: the arrows go on sliding until Enter picks it, as on a database's Diagram. A chosen box, or a
   frame Enter picked, moves 8px, 40 with Shift, saved as a drag is. Escape lets it go and leaves the
-  keyboard on the canvas (`components/canvas-move.ts`).
+  keyboard on the canvas (`components/map/canvas-keys.ts`).
 - **Nothing changes size but by the zoom.** Every word, box and line is drawn once at its own size and
   the zoom scales the picture; from far out the boxes and their names are smaller, never re-lettered,
   faded or swapped for a title.

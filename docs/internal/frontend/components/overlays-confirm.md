@@ -182,7 +182,7 @@ it covers anything else.
   a `PaneBar` order 0, so the two on one phone page stand one above the other rather than one on
   the other's stops. The stack takes the tallest reach, which is the upper bar's: a bar is measured
   again when its size changes and when its `style` does, since a lift moves its reach without
-  changing its size (`watchOccupant`).
+  changing its size (`watchOccupant`, `lib/stack-occupant.ts`).
 - **Docks** sit in the bottom-right corner above every bar, and on each other in `order`, each
   lifted by the measured height of the ones below: Remote Desktop's held sessions (`order` 0, the
   corner first), then the assistant's conversations (`order` 1). `Dock` is the frame: a popover's

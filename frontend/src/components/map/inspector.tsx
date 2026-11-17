@@ -12,7 +12,7 @@ import {
 } from "@/components/icons"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { Keycaps } from "@/components/keycaps"
-import { ARROW_CAPS } from "@/components/canvas-move"
+import { ARROW_CAPS } from "@/components/map/canvas-keys"
 import { Status } from "@/components/status-dot"
 import { PaneSection } from "@/components/panel"
 import { Detail, DetailList } from "@/components/detail-list"

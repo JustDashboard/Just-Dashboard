@@ -44,14 +44,8 @@ import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
 import { motionMs } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import {
-  CANVAS_MOVE,
-  arrowOf,
-  moved,
-  panned,
-  useCanvasPinch,
-  zoomKey,
-} from "@/components/canvas-move"
+import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
+import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
 import { CanvasZoom, CanvasZoomWord, FLOAT } from "@/components/canvas-zoom"
 import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
 import { edgeTypes, type WireData } from "@/components/map/edges"

@@ -431,7 +431,9 @@ export function ChoiceListSkeleton({
               <div
                 className={cn(CHOICE_ROW_BOX, "items-center gap-3 max-sm:flex-col max-sm:gap-2.5")}
               >
-                <div className="flex min-w-0 flex-1 items-center gap-3 max-sm:self-stretch">{line}</div>
+                <div className="flex min-w-0 flex-1 items-center gap-3 max-sm:self-stretch">
+                  {line}
+                </div>
                 <div className="flex min-w-0 flex-col gap-y-2 self-stretch sm:hidden">
                   {Array.from({ length: band }, (_, at) => (
                     <span key={at} className="block text-hint">

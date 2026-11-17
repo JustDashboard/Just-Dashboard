@@ -3,6 +3,7 @@
 import { useEffect, useId, useState, useSyncExternalStore } from "react"
 import { AnimatePresence, MotionConfig, motion } from "motion/react"
 import { cn } from "@/lib/utils"
+import { watchOccupant } from "@/lib/stack-occupant"
 
 /**
  * The bottom stack: everything that floats at the foot of the window, and
@@ -143,26 +144,6 @@ function extentOf(element: HTMLElement, layer: StackLayer) {
   if (layer === "dock") return height
   const bottom = Number.parseFloat(getComputedStyle(element).bottom)
   return height + (Number.isFinite(bottom) ? bottom : 0)
-}
-
-/**
- * Calls `measure` whenever what an occupant reaches can change: its size, the
- * window's, and for a bar its own `style`. A bar is lifted by setting its
- * `bottom`, which changes its reach without changing its size, so a size
- * watch alone kept the reach it had before the lift and the stack's top fell
- * short by the bar under it. Returns the way to stop watching.
- */
-export function watchOccupant(element: HTMLElement, layer: StackLayer, measure: () => void) {
-  const sized = new ResizeObserver(measure)
-  sized.observe(element)
-  const styled = layer === "bar" ? new MutationObserver(measure) : null
-  styled?.observe(element, { attributes: true, attributeFilter: ["style"] })
-  window.addEventListener("resize", measure)
-  return () => {
-    sized.disconnect()
-    styled?.disconnect()
-    window.removeEventListener("resize", measure)
-  }
 }
 
 /**

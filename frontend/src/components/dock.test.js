@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { STACK_EDGE, STACK_GAP, stackOffsets, watchOccupant } from "./dock"
+import { STACK_EDGE, STACK_GAP, stackOffsets } from "./dock"
+import { watchOccupant } from "../lib/stack-occupant"
 
 // Where the bottom stack puts each thing. Measuring the elements needs a
 // document; the sum it is fed is held here.

@@ -85,10 +85,13 @@ and database fleet cards still carry the shell by hand.
 
 ## States
 
-- **Loading.** `ChoiceListSkeleton({ rows, mark = "sm", lines = 1, aside = true })` draws ghost
-  cards at `CHOICE_ROW_BOX` inside the same edge: a mark's place (`sm` 32px, `md` 40px, `false`
-  none), a bone where the name goes, a second under it with `lines={2}`, and a trailing bone
-  hidden on a phone. Every piece keeps `data-slot="skeleton"`. `rows={0}` draws nothing. It replaced
+- **Loading.** `ChoiceListSkeleton({ rows, mark = "sm", lines = 1, aside = true, band })` draws
+  ghost cards at `CHOICE_ROW_BOX` inside the same edge: a mark's place (`sm` 32px, `md` 40px,
+  `false` none), a bone where the name goes, a second under it with `lines={2}`, and a trailing
+  bone hidden on a phone. Pass `lines={2}` whenever the rows carry a `description`: a card with
+  one is 59px, a pixel over the box. `band={1 | 2}` is for rows that draw `children` on a phone
+  only: below `sm` each ghost holds that many lines of hint under its line, so a phone's list
+  waits as tall as it lands. Every piece keeps `data-slot="skeleton"`. `rows={0}` draws nothing. It replaced
   `LoadingRows` forced into a card with `[&>*]:h-14`; the Network area's `GhostRows` and
   `CardRowsSkeleton` are the hand copies still to move onto it.
 - **Empty.** `EmptyState` with the products the list is for as its `mark`.

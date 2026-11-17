@@ -52,14 +52,8 @@ import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useFullscreen } from "@/hooks/use-fullscreen"
 import { usePoll } from "@/hooks/use-poll"
-import {
-  CANVAS_MOVE,
-  arrowOf,
-  moved,
-  panned,
-  useCanvasPinch,
-  zoomKey,
-} from "@/components/canvas-move"
+import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
+import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/segments"
 import { FormFact } from "@/components/form"
