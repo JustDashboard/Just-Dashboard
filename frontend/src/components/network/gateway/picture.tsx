@@ -9,7 +9,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { staggerOf } from "@/components/wire/wire-flow-model"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { LinkGlyph, linkProduct } from "@/components/network/marks"
 import { ArrivalMark, Endpoint, Port, TargetMark } from "@/components/network/gateway/marks"
 import {

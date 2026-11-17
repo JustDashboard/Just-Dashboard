@@ -275,9 +275,9 @@ function Session({ pid }: { pid: string | null }) {
           },
         ]
       : []),
-    // Beside a statement to cancel, ending the session is the heavier of the
-    // two and stands in the menu; alone, it is the page's command.
-    ...(offered.cancel && offered.terminate
+    // Ending the session is destructive, so it never takes the line's
+    // command: it stands in the menu, in the destructive ink, and asks first.
+    ...(offered.terminate
       ? [
           {
             key: "terminate",
@@ -353,13 +353,6 @@ function Session({ pid }: { pid: string | null }) {
                 <StopCircle />
                 <span>
                   Cancel<span className="max-sm:sr-only"> statement</span>
-                </span>
-              </Button>
-            ) : offered.terminate ? (
-              <Button size="sm" variant="destructive" onClick={() => stopping.terminate(session)}>
-                <Cross />
-                <span>
-                  Terminate<span className="max-sm:sr-only"> session</span>
                 </span>
               </Button>
             ) : undefined

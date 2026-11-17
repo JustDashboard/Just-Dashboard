@@ -1,10 +1,9 @@
 "use client"
 
 import { useMemo } from "react"
-import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { mongoCollections, mongoDatabases, type MongoTarget } from "@/components/database/mongo/api"
-import { useDatabase } from "@/components/database/shell/database-context"
+import { useDatabase, useDatabaseRole } from "@/components/database/shell/database-context"
 
 /**
  * What every MongoDB page starts from: which database and collection the
@@ -21,7 +20,7 @@ import { useDatabase } from "@/components/database/shell/database-context"
  */
 export function useMongo() {
   const ctx = useDatabase()
-  const { can } = useAuth()
+  const role = useDatabaseRole()
   const { id, selection, conn } = ctx
 
   const database = selection.db || conn.database || ""
@@ -38,13 +37,8 @@ export function useMongo() {
     /** The collection the address names, `""` when none is open. */
     collection,
     target,
-    /** The console's own route, and a pipeline: any run needs `service.control`. */
-    canRun: can("service.control"),
-    canWrite: !ctx.readOnly && can("service.control"),
-    canDestroy: !ctx.readOnly && can("destructive"),
-    /** Stopping an operation is let through on a protected connection: it changes no data. */
-    canKill: can("destructive"),
-    admin: can("system.admin"),
+    // The console's own route and a pipeline need `service.control`, as every run does.
+    ...role,
   }
 }
 

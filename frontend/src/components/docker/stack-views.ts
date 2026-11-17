@@ -1,5 +1,6 @@
 import type { DiffLine, StackDeployment } from "@/lib/types"
 import { LANES } from "@/lib/hue"
+import { lineDiff as sharedLineDiff } from "@/lib/line-diff"
 
 /**
  * What a stack's other views read out of its compose file, its deployment
@@ -77,75 +78,13 @@ function trackSection(current: string, line: string) {
   return current
 }
 
-const CONTEXT = 3
-
 /**
- * Two versions of a file as the lines that changed between them, with three
- * unchanged lines around each change and a gap where more were left out —
- * the shape the server's preview diff has, so the same view draws both.
+ * Two versions of a compose file as the lines that changed between them,
+ * each under its service: the shared diff (`lib/line-diff.ts`) with the
+ * server's section rule.
  */
-export function lineDiff(before: string, after: string): DiffLine[] {
-  const left = before.replace(/\s+$/, "").split("\n")
-  const right = after.replace(/\s+$/, "").split("\n")
-  const n = left.length
-  const m = right.length
-  // The longest common subsequence from each pair of positions to the end.
-  const lcs = Array.from({ length: n + 1 }, () => new Int32Array(m + 1))
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] =
-        left[i] === right[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
-    }
-  }
-  const lines: DiffLine[] = []
-  let section = ""
-  let i = 0
-  let j = 0
-  while (i < n && j < m) {
-    if (left[i] === right[j]) {
-      section = trackSection(section, left[i])
-      lines.push({ kind: "same", text: left[i], section })
-      i++
-      j++
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      // A removed line names its own section without moving the running one:
-      // a removed `db:` is db's change, and the file after it has no such line.
-      lines.push({ kind: "removed", text: left[i], section: trackSection(section, left[i]) })
-      i++
-    } else {
-      section = trackSection(section, right[j])
-      lines.push({ kind: "added", text: right[j], section })
-      j++
-    }
-  }
-  for (; i < n; i++) {
-    lines.push({ kind: "removed", text: left[i], section: trackSection(section, left[i]) })
-  }
-  for (; j < m; j++) {
-    section = trackSection(section, right[j])
-    lines.push({ kind: "added", text: right[j], section })
-  }
-
-  const keep = lines.map(() => false)
-  lines.forEach((line, k) => {
-    if (line.kind === "same") return
-    for (let c = Math.max(0, k - CONTEXT); c <= Math.min(lines.length - 1, k + CONTEXT); c++) {
-      keep[c] = true
-    }
-  })
-  const out: DiffLine[] = []
-  let gap = false
-  lines.forEach((line, k) => {
-    if (!keep[k]) {
-      gap = out.length > 0
-      return
-    }
-    if (gap) out.push({ kind: "gap", text: "…" })
-    gap = false
-    out.push(line)
-  })
-  return out
-}
+export const lineDiff = (before: string, after: string): DiffLine[] =>
+  sharedLineDiff(before, after, { sectionOf: trackSection })
 
 export type DiffHunk = { section?: string; lines: DiffLine[]; added: number; removed: number }
 
@@ -173,12 +112,7 @@ export function diffHunks(lines: DiffLine[]): DiffHunk[] {
   return hunks
 }
 
-export function diffCounts(lines: DiffLine[]) {
-  return {
-    added: lines.filter((l) => l.kind === "added").length,
-    removed: lines.filter((l) => l.kind === "removed").length,
-  }
-}
+export { diffCounts } from "@/lib/line-diff"
 
 /** An image reference's repository and tag: the tag is after the last colon past the last slash. */
 export function splitImage(image: string) {

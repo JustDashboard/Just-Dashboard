@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { ROW_HEIGHT } from "@/components/network/protection/exceptions"
 import {
   EXPIRY_CHOICES,

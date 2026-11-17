@@ -5,7 +5,7 @@ import { ArrowRight, Key, Location, Play, Plus, RefreshClockwise } from "@/compo
 import { Page, PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { ErrorState, NeedsAdmin, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -203,7 +203,7 @@ export function ExternalChecksPage() {
         facts={
           <IdentityFacts loading={loading}>
             {!admin ? (
-              <span>needs system administrator access</span>
+              <span>needs an administrator</span>
             ) : (
               <>
                 <span className="numeric">{plural(counts.enrolled, "source")} enrolled</span>
@@ -244,10 +244,10 @@ export function ExternalChecksPage() {
         menu={admin ? <VerbMenu verbs={menu} label="More external check actions" /> : undefined}
       />
       {!admin ? (
-        <EmptyState
+        <NeedsAdmin
+          what="External checks"
           icon={Location}
-          title="External checks need an administrator"
-          description="External measurements and agent management require system administrator access."
+          why="External measurements and agent management require system administrator access."
         />
       ) : readError && !vantages.data && !checks.data ? (
         <ErrorState error={readError} onRetry={refresh} retryable />

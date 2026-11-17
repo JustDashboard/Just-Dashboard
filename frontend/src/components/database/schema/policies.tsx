@@ -7,7 +7,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { Segments } from "@/components/segments"
 import { Field, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
-import { EmptyNote } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
@@ -32,7 +32,6 @@ import {
 } from "@/components/ui/table"
 import { VerbActions, VerbMenu } from "@/components/verbs"
 import { read } from "@/components/database/home/read"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import type { DbRole, DbRoles } from "@/components/database/ops/access-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { ChangeDialog, type Risk } from "@/components/database/schema/change-dialog"
@@ -320,7 +319,7 @@ export function PoliciesPlaceholder({
   if (error) {
     return (
       <div className="p-4">
-        <ReadFailed error={error} onRetry={onRetry} />
+        <ErrorState error={error} onRetry={onRetry} retryable />
       </div>
     )
   }

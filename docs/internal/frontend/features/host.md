@@ -462,7 +462,10 @@ search and ranking, held while the pointer is in it, the process on screen fille
 arrows to walk it, the view on screen carried to the next process; the identity line (the process as
 its product with its state in the corner, the PID to copy, its user, its supervisor with that
 supervisor's mark as a link, uptime ticking, its parent, its threads, and its state and wait channel
-at the end) under Terminate, Kill and a menu of every other signal and "with its children"; then the
+at the end) with its logs as the one command where its owner keeps any (a zombie's parent before
+them) and every signal in its `⋯`, Terminate, Kill and "with its children" last in the destructive
+ink, each asking first: no destructive verb takes the command, and a process with no logs draws
+only the menu; then the
 views as the underlined strip, `?tab=` in the address — **Overview** (`process-overview.tsx`:
 notices for an exit or a reused PID, a zombie, a kernel thread, a paused process, a binary or
 library an upgrade replaced, descriptors near their limit, deleted files held open and a waiting

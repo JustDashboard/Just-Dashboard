@@ -28,7 +28,7 @@ import type {
 } from "@/components/database/ops/access-types"
 import { accountHref } from "@/components/database/ops/account-address"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useColumnWidth } from "@/hooks/use-column-width"
 import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
@@ -68,7 +68,7 @@ export function SqlAccess() {
   const { confirm, dialog } = useConfirm()
   // Every dialog here is opened by state: this hands the keyboard back to
   // the row or the button that opened one.
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const [creating, setCreating] = useState(false)
   const [password, setPassword] = useState<DbRole>()

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { openerOf } from "@/hooks/use-focus-return"
 
 /**
  * Where the keyboard goes when a form or a confirmation closes: back to the
@@ -27,20 +28,6 @@ const NEAREST = [
 ]
 
 const SURFACE = '[role="dialog"], [role="alertdialog"], [role="menu"]'
-
-/** The control a press came from: the focused one, or the button of the menu it sits in. */
-export function openerOf(active: Element | null): HTMLElement | null {
-  let from = active instanceof HTMLElement && active !== document.body ? active : null
-  // A menu's row is taken away with the menu; its button stays. A submenu's
-  // button is itself a row of the menu above it.
-  for (let depth = 0; from && depth < 4; depth += 1) {
-    const by = from.closest('[role="menu"]')?.getAttribute("aria-labelledby")
-    const trigger = by ? document.getElementById(by) : null
-    if (!trigger) break
-    from = trigger
-  }
-  return from
-}
 
 /** The control focused now, as the one to come back to. */
 export function currentOpener(): HTMLElement | null {
@@ -91,7 +78,9 @@ export function returnFocus(to: HTMLElement | null) {
 }
 
 /**
- * For a surface that is on the page for as long as `open` is true. The
+ * For a surface that is on the page for as long as `open` is true. Named for
+ * what it is (a surface's return, with the schema's nearest fallbacks), so it
+ * is not taken for the shared `useFocusReturn` or `useFocusTrail`. The
  * opener is read during the render that opens it — before the surface takes
  * the keyboard — and focused again after the render that closes it.
  *
@@ -99,7 +88,7 @@ export function returnFocus(to: HTMLElement | null) {
  * page: a menu opened at a point rather than from a button has no button of
  * its own to return to, and its caller knows which control asked for it.
  */
-export function useFocusReturn(open: boolean, find?: () => HTMLElement | null) {
+export function useSurfaceFocusReturn(open: boolean, find?: () => HTMLElement | null) {
   const [was, setWas] = useState(false)
   const [from, setFrom] = useState<HTMLElement | null>(null)
   if (open !== was) {

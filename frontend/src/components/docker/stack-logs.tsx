@@ -145,7 +145,7 @@ export function StackLogs({
         storageKey={`docker.stack.${stack.name}.logs`}
         views={views}
         ask={ask}
-        readings
+        readings="lines"
         className="min-h-0 flex-1"
         paneClassName="min-h-[30rem]"
       />

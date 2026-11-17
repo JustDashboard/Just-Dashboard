@@ -415,6 +415,31 @@ export default function ProxyOverviewPage() {
     .map((fact, at) => ({ fact, at }))
     .sort((a, b) => urgency(a.fact) - urgency(b.fact) || a.at - b.at)
     .map(({ fact }) => fact)
+  // What wants action goes in the line's urgent slot, which leads the engine's
+  // own facts (ingress, certbot): "2 certificates, 2 not valid" before
+  // "certbot", so a phone's one line of facts still shows it.
+  const wanting = inventory.filter((fact) => urgency(fact) < 2)
+  const counted = inventory.filter((fact) => urgency(fact) === 2)
+  const inventoryFact = (fact: InventoryFact) =>
+    fact.error ? (
+      <Fact key={fact.key} className="font-medium text-warning" title={errorMessage(fact.error)}>
+        {`couldn't read ${fact.key}`}
+      </Fact>
+    ) : (
+      <Fact key={fact.key}>
+        <Link
+          href={fact.href}
+          title={fact.title}
+          className={cn(
+            "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+            fact.tone === "danger" && "font-medium text-destructive",
+            fact.tone === "warning" && "font-medium text-warning",
+          )}
+        >
+          {fact.text}
+        </Link>
+      </Fact>
+    )
   // The way to the Alerts page, which is a rule's own page now; what fires
   // is said on the line itself, where it is seen without opening the menu.
   const alertVerbs: Verb[] = admin
@@ -441,35 +466,16 @@ export default function ProxyOverviewPage() {
         serviceBusy={control.pending}
         certbotVersion={renewal?.version}
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
-        inventory={
+        urgent={
           <>
             {/* What is firing is the most urgent fact the line has. */}
             {firingFact(admin && !alerts.error ? alerts.data : undefined)}
-            {inventory.map((fact) =>
-              fact.error ? (
-                <Fact
-                  key={fact.key}
-                  className="font-medium text-warning"
-                  title={errorMessage(fact.error)}
-                >
-                  {`couldn't read ${fact.key}`}
-                </Fact>
-              ) : (
-                <Fact key={fact.key}>
-                  <Link
-                    href={fact.href}
-                    title={fact.title}
-                    className={cn(
-                      "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
-                      fact.tone === "danger" && "font-medium text-destructive",
-                      fact.tone === "warning" && "font-medium text-warning",
-                    )}
-                  >
-                    {fact.text}
-                  </Link>
-                </Fact>
-              ),
-            )}
+            {wanting.map(inventoryFact)}
+          </>
+        }
+        inventory={
+          <>
+            {counted.map(inventoryFact)}
             {/* "Updated just now" would spend the line's width on the one
                 reading that is nearly always fine; the menu says it beside
                 Refresh. Hidden as a whole fact, so it takes its dot with it. */}

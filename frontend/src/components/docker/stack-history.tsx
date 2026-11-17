@@ -30,7 +30,8 @@ import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
-import { ComposeDiff, DiffCount, ServiceLabel } from "@/components/docker/stack-diff"
+import { ComposeDiff, ServiceLabel } from "@/components/docker/stack-diff"
+import { DiffCount } from "@/components/diff-count"
 import {
   configHues,
   diffCounts,

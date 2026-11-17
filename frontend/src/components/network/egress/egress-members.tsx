@@ -251,13 +251,9 @@ function SampleStrip({ points }: { points: EgressPoint[] }) {
 
 function Readiness({ group }: { group: EgressGroup }) {
   const problems = group.readiness.filter((f) => f.level !== "ok")
-  if (problems.length === 0) {
-    return (
-      <p className="text-hint text-muted-foreground">
-        {group.readiness[0]?.text ?? "Readiness has not been read."}
-      </p>
-    )
-  }
+  // Nothing in the way is no news: the members' table already says each is
+  // up. Only what stands before relying on the paths is said.
+  if (problems.length === 0) return null
   return (
     <Notice
       tone={problems.some((f) => f.level === "error") ? "danger" : "warning"}

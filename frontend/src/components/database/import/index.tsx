@@ -76,7 +76,7 @@ const NO_PLAN: Plan = {
  * none named the page opens on the one that is still going.
  */
 export function OnlineImport() {
-  const { id, conn, engine, readOnly, status, param, select, goto } = useDatabase()
+  const { id, conn, engine, readOnly, status, param, select, goto, href } = useDatabase()
   const { refresh: refreshConnections } = useDatabases()
   const { can } = useAuth()
   const router = useRouter()
@@ -361,9 +361,11 @@ export function OnlineImport() {
       {/* One centred column for the question, the steps and what they ask, so the
           spine is exactly as wide as the panel under it. */}
       <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-6 md:gap-8">
-        {/* The database's header above already names it and says it is
-            protected; the eyebrow says where in the sequence this is. */}
+        {/* A flow opens on its question with the way back to the database
+            above it, as adding one does; the eyebrow says where in the
+            sequence this is. */}
         <FlowHeader
+          back={{ href: href("home"), label: conn.name }}
           eyebrow={step >= steps.length ? "Done" : `Step ${step + 1} of ${steps.length}`}
           question={question}
           steps={<FlowSteps steps={steps} current={step} />}

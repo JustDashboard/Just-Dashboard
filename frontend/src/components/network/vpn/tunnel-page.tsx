@@ -12,7 +12,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { DetailPage, useSiblingSteps, type Step } from "@/components/detail-page"
 import { FactDot, HostFact, HostIdentity } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyState, ErrorState, NeedsAdmin } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ViewTabList, type TabView } from "@/components/tabs"
 import { ProductGlyph } from "@/components/product-logo"
@@ -102,10 +102,9 @@ export function TunnelPage() {
     return (
       <Page>
         <PageContext back={BACK} title={name} />
-        <EmptyState
-          icon={LockClosed}
-          title="VPN needs the admin capability"
-          description="Tunnel peers and their client configurations are visible to administrators."
+        <NeedsAdmin
+          what="VPN"
+          why="Tunnel peers and their client configurations are visible to administrators."
         />
       </Page>
     )
