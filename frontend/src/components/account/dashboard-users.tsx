@@ -240,7 +240,7 @@ function PeopleIdentity({
                 : `${active.length} can sign in`}
           </Fact>
           <Fact>
-            <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1.5 align-top">
               <AvatarRun users={admins} />
               {plural(admins.length, "administrator")}
             </span>

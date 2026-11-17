@@ -973,7 +973,7 @@ function stackFacts({
       <Link
         href={`/git?repo=${encodeURIComponent(git.path)}`}
         title={git.subject}
-        className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-sm align-top focus-ring hover:text-foreground"
       >
         <ProductGlyph id="git" />
         <span className="truncate">{git.branch ?? "repository"}</span>

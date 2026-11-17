@@ -241,7 +241,7 @@ function TLSFleetPage() {
           // Every state is a fact, so each stands in the line the facts land in.
           loading ? (
             <Fact>
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1.5 align-top">
                 <Spinner className="size-3" /> reading the stored reports
               </span>
             </Fact>

@@ -161,7 +161,7 @@ export function RunRow({
       {wide ? undefined : (
         <FactLine className="text-hint text-muted-foreground">
           <Fact>
-            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 align-top">
               {state}
               {failure && <span className="text-destructive">{failure}</span>}
             </span>
@@ -172,7 +172,7 @@ export function RunRow({
             </span>
           </Fact>
           <Fact>
-            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 align-top">
               <span className="numeric">{when}</span>
               {!stage && tags}
             </span>
@@ -181,7 +181,7 @@ export function RunRow({
               line: in one fact with the age, it took the age down with it. */}
           {stage && (
             <Fact>
-              <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 align-top">
                 {stage}
                 {tags}
               </span>

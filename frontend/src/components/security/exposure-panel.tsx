@@ -89,7 +89,7 @@ export function ExposureIdentity({
       facts={
         <>
           <Fact>
-            <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-1 align-top">
               <span>allowed</span>
               {exposure.allowlist.length === 0 ? (
                 <span className="font-medium text-warning">every address</span>
@@ -100,7 +100,7 @@ export function ExposureIdentity({
           </Fact>
           {exposure.interfaces.length > 0 && (
             <Fact>
-              <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-1 align-top">
                 <span>via</span>
                 {exposure.interfaces.map((name) => (
                   <Tag key={name} mono>
@@ -112,7 +112,7 @@ export function ExposureIdentity({
           )}
           {exposure.tailscaleIp && (
             <Fact>
-              <span className="inline-flex items-center gap-1">
+              <span className="inline-flex items-center gap-1 align-top">
                 <span>this host</span>
                 <span className="font-mono text-foreground" title="This host's tailnet address">
                   {exposure.tailscaleIp}
@@ -122,7 +122,7 @@ export function ExposureIdentity({
           )}
           {exposure.client && (
             <Fact>
-              <span className="inline-flex min-w-0 items-center gap-1">
+              <span className="inline-flex min-w-0 items-center gap-1 align-top">
                 <span>you</span>
                 <NetworkFact
                   ip={exposure.client}

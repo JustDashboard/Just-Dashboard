@@ -213,7 +213,7 @@ function LoginsIdentity({
           <>
             <Fact>
               {latest ? (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
                   <span>last login</span>
                   <span className="font-medium text-foreground">{latest.user}</span>
                   <span className="numeric" title={timestamp(latest.loginTime)}>

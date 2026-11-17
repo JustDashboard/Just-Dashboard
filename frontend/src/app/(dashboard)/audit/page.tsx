@@ -652,7 +652,7 @@ function AuditIdentity({
             </Fact>
             {who && (
               <Fact>
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
                   <FaceRun names={reading.people} />
                   <span className="truncate">{who}</span>
                 </span>
@@ -660,7 +660,7 @@ function AuditIdentity({
             )}
             <Fact>
               {last ? (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
                   <span className="shrink-0">
                     {plural(reading.signIns.ok, "sign-in")}, the last by{" "}
                     <span className="text-foreground">{last.username || "someone"}</span>

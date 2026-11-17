@@ -211,7 +211,7 @@ export function IntrusionPanels() {
             )}
             {exposure?.client && (
               <Fact>
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 align-top">
                   <span>you</span>
                   <Address ip={exposure.client} className="text-foreground" />
                 </span>

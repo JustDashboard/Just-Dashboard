@@ -113,7 +113,7 @@ function Defaults() {
                 {/* Held to the line's height: a mono word in a sans line
                       makes the line a pixel taller than it is while waiting. */}
                 <Fact>
-                  <span className="inline-flex h-4 min-w-0 items-center gap-1.5">
+                  <span className="inline-flex h-4 min-w-0 items-center gap-1.5 align-top">
                     <ShellGlyph shell={data.shell} />
                     <span className="truncate font-mono leading-4">{data.shell}</span>
                   </span>

@@ -134,7 +134,7 @@ export function TailscaleBlock({
             {tailscale.version && <Fact>v{tailscale.version.split("-")[0]}</Fact>}
             {self?.keyExpiry ? (
               <Fact>
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
                   <span className="truncate">{keyExpiry(self.keyExpiry).label}</span>
                   {keyExpiryTip(tailscale) && (
                     <InfoTip label="Disable key expiry for this machine">

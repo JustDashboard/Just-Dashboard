@@ -433,7 +433,7 @@ function NetworkIdentity({
           )}
           {overview.client.address && (
             <Fact>
-              <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
                 <span>you</span>
                 <NetworkFact ip={overview.client.address} glyph />
                 {overview.client.device && !overview.client.local && (

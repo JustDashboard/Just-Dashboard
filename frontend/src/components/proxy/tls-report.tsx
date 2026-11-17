@@ -950,7 +950,7 @@ function reportFacts({
   } else if (busy) {
     facts.push(
       <Fact key="busy">
-        <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5 align-top">
           <Spinner className="size-3" /> scanning
         </span>
       </Fact>,
@@ -981,7 +981,7 @@ function GradeWord({ grade }: { grade: string }) {
   return (
     <span
       data-slot="grade"
-      className={cn("inline-flex items-center gap-1.5 font-medium", TONE_TEXT[verdict])}
+      className={cn("inline-flex items-center gap-1.5 align-top font-medium", TONE_TEXT[verdict])}
     >
       <StatusDot
         tone={verdict === "success" ? "running" : verdict === "warning" ? "warning" : "danger"}

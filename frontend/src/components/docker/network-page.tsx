@@ -659,7 +659,7 @@ function NetworkIdentity({
             {owner.kind === "compose" && owner.project ? (
               <Link
                 href={`/docker/stacks/${encodeURIComponent(owner.project)}`}
-                className="inline-flex min-w-0 items-center gap-1 rounded-sm text-foreground focus-ring hover:underline"
+                className="inline-flex min-w-0 items-center gap-1 rounded-sm align-top text-foreground focus-ring hover:underline"
               >
                 <span className="truncate">{owner.label}</span>
                 <ArrowUpRight aria-hidden className="size-3 shrink-0" />
@@ -671,7 +671,10 @@ function NetworkIdentity({
           <Fact>{network.driver === "null" ? "no network" : network.driver}</Fact>
           <Fact>
             {first ? (
-              <span className="inline-flex items-center gap-1.5" title={network.subnets.join(", ")}>
+              <span
+                className="inline-flex items-center gap-1.5 align-top"
+                title={network.subnets.join(", ")}
+              >
                 <Cidr cidr={first} className="text-foreground" />
                 {more.length > 0 && <span className="numeric">+{more.length}</span>}
               </span>

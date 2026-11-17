@@ -388,7 +388,7 @@ function ImageMain({
                   <button
                     type="button"
                     onClick={() => void copyText(known.id, "ID copied")}
-                    className="group inline-flex items-center gap-1 rounded-sm font-mono focus-ring hover:text-foreground"
+                    className="group inline-flex items-center gap-1 rounded-sm align-top font-mono focus-ring hover:text-foreground"
                     aria-label={`Copy image id ${shortId(known.id)}`}
                   >
                     {shortId(known.id)}

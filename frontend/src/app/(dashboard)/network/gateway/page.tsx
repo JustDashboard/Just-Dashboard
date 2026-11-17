@@ -183,10 +183,13 @@ export default function NetworkGatewayPage() {
                 {made > 0 && ` · ${made} made by the VPN page`}
               </Fact>
               <Fact>
-                <PolicyEvidence
-                  view={view}
-                  onRepair={admission.offered ? admission.repair : undefined}
-                />
+                {/* Its trigger is an inline box: held to the line's top, as a run of the old line was. */}
+                <span className="inline-flex max-w-full min-w-0 align-top">
+                  <PolicyEvidence
+                    view={view}
+                    onRepair={admission.offered ? admission.repair : undefined}
+                  />
+                </span>
               </Fact>
             </FactLine>
           ) : failed ? (

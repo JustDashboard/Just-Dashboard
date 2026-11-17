@@ -363,7 +363,7 @@ export function SSHPanel() {
             )}
             {data.managedFile && (
               <Fact>
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 align-top">
                   saved to a drop-in
                   <InfoTip label="Where SSH changes are saved">{data.managedFile}</InfoTip>
                 </span>
