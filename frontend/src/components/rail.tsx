@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useRef } from "react"
+import { Fragment, createContext, useContext, useEffect, useRef } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { SearchInput } from "@/components/search-input"
@@ -336,7 +336,7 @@ export function RailRow({
         </span>
       )}
       <span className="min-w-0 flex-1">{children}</span>
-      {end}
+      {label !== undefined && end ? <span aria-hidden>{end}</span> : end}
     </>
   )
   const shared = {
@@ -366,16 +366,27 @@ export function RailRow({
           }
           {...shared}
         >
-          {content}
+          <Labelled.Provider value={label !== undefined}>{content}</Labelled.Provider>
         </Link>
       ) : (
         <button type="button" onClick={() => onOpen?.()} {...shared}>
-          {content}
+          <Labelled.Provider value={label !== undefined}>{content}</Labelled.Provider>
         </button>
       )}
     </li>
   )
 }
+
+/**
+ * Whether the row is named by its `label` rather than by what it shows. Its
+ * name is then the label, which starts with the item's name, and the row's
+ * second line and its end are said by the label or not at all: a voice user
+ * says the name they see, and the name a screen reader hears holds the words
+ * on screen (WCAG 2.5.3, axe `label-content-name-mismatch`). The second
+ * line's words are hidden from the name's check, as they were already left
+ * out of the name.
+ */
+const Labelled = createContext(false)
 
 /** A rail row's first line: the item's name, heavier on the one on screen. */
 export function RailName({
@@ -417,8 +428,10 @@ export function RailLine({
   style?: React.CSSProperties
   children: React.ReactNode
 }) {
+  const labelled = useContext(Labelled)
   return (
     <span
+      aria-hidden={labelled || undefined}
       className={cn("block truncate text-hint", ink || "text-muted-foreground", className)}
       style={style}
     >

@@ -1,3 +1,4 @@
+import { useId } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { Icon } from "@/components/icons"
@@ -62,16 +63,24 @@ export function ReadingLine({
   trend?: React.ReactNode
   className?: string
 }) {
+  const reading = useId()
+  // A link named by `label` ("CPU on Metrics") holds the words it shows in
+  // its name: the measure's name does, and the reading and its detail are
+  // the link's description instead, outside the name's check (WCAG 2.5.3,
+  // axe `label-content-name-mismatch`). A screen reader still hears them.
+  const described = Boolean(href && label)
   const body = (
     <>
       {mark}
       <span className="block min-w-0 flex-1">
         <span className="eyebrow flex items-center gap-1.5">{name}</span>
-        <span className="block truncate text-body leading-snug font-medium">{children}</span>
-        {/* The line's third row holds its place when there is no detail, so
-            a line with a hint and one without are the same height. */}
-        <span className="block truncate text-hint leading-snug text-muted-foreground">
-          {hint ?? " "}
+        <span id={reading} aria-hidden={described || undefined} className="block min-w-0">
+          <span className="block truncate text-body leading-snug font-medium">{children}</span>
+          {/* The line's third row holds its place when there is no detail, so
+              a line with a hint and one without are the same height. */}
+          <span className="block truncate text-hint leading-snug text-muted-foreground">
+            {hint ?? " "}
+          </span>
         </span>
       </span>
       <span className="hidden w-32 shrink-0 sm:block 2xl:w-48">{trend}</span>
@@ -103,6 +112,7 @@ export function ReadingLine({
     <Link
       href={href}
       aria-label={label}
+      aria-describedby={described ? reading : undefined}
       data-slot="reading-line"
       className={cn(shape, "focus-ring transition-colors hover:bg-row-hover", className)}
     >

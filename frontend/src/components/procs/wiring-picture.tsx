@@ -1,6 +1,6 @@
 "use client"
 
-import { createRef, useMemo, useRef, useState, type RefObject } from "react"
+import { createRef, useId, useMemo, useRef, useState, type RefObject } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { WireNode } from "@/components/wire/wire"
@@ -185,7 +185,13 @@ function PictureItem({
   onPointerEnter: () => void
   onPointerLeave: () => void
 }) {
-  const body = (
+  // A node named by its `label` ("Open the PM2 daemon, PID 900") says what
+  // it shows as its description instead, kept out of the name's check, so
+  // the name holds no words the reader cannot see and the words they see
+  // are still heard (WCAG 2.5.3, axe `label-content-name-mismatch`).
+  const shown = useId()
+  const labelled = Boolean(node.label && (node.href || node.open))
+  const drawn = (
     <WireNode
       align={align}
       mark={
@@ -197,6 +203,13 @@ function PictureItem({
       title={node.title}
       hint={node.hint}
     />
+  )
+  const body = labelled ? (
+    <span id={shown} aria-hidden className="block">
+      {drawn}
+    </span>
+  ) : (
+    drawn
   )
   const face =
     "-m-1.5 block w-[calc(100%+0.75rem)] rounded-lg p-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
@@ -210,6 +223,7 @@ function PictureItem({
         <Link
           href={node.href}
           aria-label={node.label}
+          aria-describedby={labelled ? shown : undefined}
           className={cn(face, align === "end" && "lg:text-right")}
         >
           {body}
@@ -219,6 +233,7 @@ function PictureItem({
           type="button"
           onClick={node.open}
           aria-label={node.label}
+          aria-describedby={labelled ? shown : undefined}
           className={cn(face, align === "end" && "lg:text-right")}
         >
           {body}
