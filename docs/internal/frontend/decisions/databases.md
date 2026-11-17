@@ -39,7 +39,7 @@ as zero, the line giving the products that read each; and **Backups**, every dat
 can dump counted never, over a week ago — the age every other reading of the section calls stale —
 this week and today on one bar, worst first, the line naming the worst database in that standing
 with its newest dump's age. A press opens the database, or under Backups its Backups page. Until
-0.8.5 each block's five were rows under its bar, Backups' on a `StandingBar`. Backups and
+0.8.5 each block's five were rows under its bar, Backups' on a `StandingBar` (removed after 0.8.5). Backups and
 the Sites page's Certificates had also drawn a track under every row with a dot on it until 0.7.5, which
 went at the operator's request: the track had no scale, so the dot said less than the age beside
 it, a database never backed up was drawn at a place it did not have, and the track's hairline
@@ -117,7 +117,8 @@ it leaves and the page's own gutters. Three kinds of page keep a line of their o
 rule is where each is named: **a workbench that heads itself** (Data, Query, Schema, the Diagram)
 carries the database's line as its frame's head and the shell draws nothing over it; **the page of
 one item two levels down** (a statement, a table or a session under Performance, an account under
-Access) opens on that item's identity line and keeps the one-line strip above it, so the page is
+Access) opens on that item's identity line and keeps the one-line strip above it (a smaller copy of
+the header in its order: state beside the name, the Open command, Connect and the menu), so the page is
 not about two things; and nothing else. Until 0.8.7 only Home had the header and every other page
 the strip. Where the line itself is under 42rem wide (a tablet beside the rail, a phone) the
 command, Connect and the menu stand in a row of their own under the facts (`HostIdentity foot`), so

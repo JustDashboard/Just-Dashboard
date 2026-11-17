@@ -4,6 +4,11 @@ One recipe per page shape. Pick the shape (the test is in
 [`../patterns/registers.md`](../patterns/registers.md)), open its recipe, and build the page in
 the order it gives.
 
+Every recipe has the same parts: the reference route and its shot, the regions in order, a
+skeleton on the catalogue's components, the four states (loading, empty, unavailable, failed), the
+phone, a checklist and the spec to add. The identity line's rules are the same on every shape:
+[`../components/page-header.md`](../components/page-header.md#the-identity-lines-rules).
+
 | Recipe | Shape | Reference |
 | --- | --- | --- |
 | [`reading-page.md`](reading-page.md) | A page that reports (§15) | a project's Overview, `/deploy/[id]` |

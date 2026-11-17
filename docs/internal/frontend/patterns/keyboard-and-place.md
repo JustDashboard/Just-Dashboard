@@ -1,6 +1,22 @@
 # Keyboard and place
 
-This page was `patterns/keyboard-and-place.md` until 0.9.0.
+A page owns its keys and remembers its place.
+
+## The rule
+
+- **A list page's keys come from `Workspace`** (`components/workspace/`): arrows, Home and End and
+  first letters move between rows, Enter opens, Ctrl/⌘+F goes to the page's search, F5 and
+  Ctrl/⌘+R refresh its reads, `?` opens the help. Other page-wide keys go through `useShortcuts`.
+- **Whoever is typing owns the keyboard.** A field, an editor, a terminal, a dialog and a menu take
+  their keys first.
+- **Single keys can be turned off**, in every help sheet.
+- **Back returns to where the reader was**: the row, the scroll, the search and the filters. A
+  filter worth sharing is in the address; a view is `?tab=`, replaced, never pushed.
+- **A detail page walks its siblings** with Alt+↑ and Alt+↓ and two arrows, the view carried.
+- **On a phone a page of several panes shows one**, over a bar at the foot.
+
+The contract for a keyboard and a screen reader is in [`accessibility.md`](accessibility.md). What
+follows is each surface's behaviour.
 
 `components/workspace/` supplies page-owned keyboard commands and place memory to Processes,
 Services, Git, Logs, the Docker overview and containers, Docker images, Docker stacks, Docker volumes, Docker networks, Packages, Backups, deployment setup, Audit and the Security
@@ -8,13 +24,21 @@ Connections, Logins and Firewall lists. Files retains its existing interaction c
 
 A workspace registers its read commands in the command palette's **This page** group. Ctrl/Cmd+F
 focuses the page's search field where one exists. F5 and Ctrl/Cmd+R refresh the current reads;
-Shift+Refresh retains the browser's reload behavior. `?` and the named shortcuts button open help.
+Shift+Refresh retains the browser's reload behavior. `?` and the `?` cap open help; there is no
+named shortcuts button. One-character shortcuts (`?`, `n`, `t`, a name's first letters from outside
+the list) can be turned off in the help sheet; then a list's letters answer only while focus is in
+it, and chords with Ctrl, ⌘ or Alt keep working (WCAG 2.1.4).
 Arrow keys, Home/End and name typing move between marked visible rows; Enter uses the row's
 existing inspect or navigation action. Read-only rows advertise movement rather than an open action.
 Inputs, Monaco, xterm, contenteditable elements and open dialogs, menus or listboxes own their keys.
 An Escape in a page search clears its filter where supported and returns to the list.
 Audit keeps its shortcuts and new-arrival controls in the trail toolbar, preserving the reading
 page's opening on its figures rather than adding a context header.
+
+Page-wide keys go through `useShortcuts` (`hooks/use-shortcuts.ts`): written as the help prints
+them, guarded by `isTypingTarget` and `keyOwnedElsewhere` (`lib/keys.ts`). The proxy section's `t`,
+Shift+R, `/` and `g` then s, c or p are its layout's; Sites' `j` and `k` walk the list only while
+focus is in it.
 
 | Surface | Behavior |
 | --- | --- |
@@ -88,7 +112,8 @@ More menu. The hardware back button still leaves the page rather than closing a 
 That layout is `components/phone-panes.tsx`, and a page with several panels uses its parts rather than
 stacking them: `paneShown(shown, until)` on each pane (hidden below the break while it is not the one
 picked, untouched from the break up), `PaneBar` at the foot of the frame (one 56px stop for each pane, a
-count on a glyph's shoulder, clear of the home indicator, not drawn from the break up) and `PaneBack` in the
+count on a glyph's shoulder, clear of the home indicator, not drawn from the break up: a `nav` of
+buttons with the stop on screen `aria-current="page"`, its words at the hint size) and `PaneBack` in the
 head of a page a row opened. The page keeps its own state for which pane is shown, and the frame is held
 to the window below the break so the pane has a height to be the whole of. These pages are on it:
 
@@ -135,8 +160,9 @@ holds both at 390×844, the strip at 800px and the columns at 1280px.
 A database's four workbenches are on it too, through `components/database/workbench/chrome.tsx`
 (`WorkbenchFrame` takes the bar as `bar` and draws it at the foot of the frame, under the head every one
 of them shares). Their break is not a window width: each shows one pane exactly where its side column
-already lay over the work instead of beside it (the table editor and the SQL editor decide that from the
-frame's measured width, the rest at `lg`), so the bar names states the page already had and adds none.
+already lay over the work instead of beside it (every one decides it from the frame's measured width
+by one rule, `useSideColumn` in `database/workbench/chrome.tsx`: a side column stands beside the work
+while the work keeps 480px), so the bar names states the page already had and adds none.
 
 | Workbench | Stops | Opens on |
 | --- | --- | --- |

@@ -88,7 +88,8 @@ use it, or why this dashboard cannot deploy it; and each service it runs with it
 one marked. A card's own verbs are *Deploy* (into the picker with it chosen, not offered for a
 template that cannot be deployed), *Export as JSON* and *Remove template* (whose confirmation says
 those deployments keep running from their own copy); the head counts them (*3 templates · 1 in
-use*) and carries *Import…* for an exported file and *Add from Compose file*, a sheet whose *Check*
+use*) and carries *Add from Compose file*, and *Import a template file* in the ⋯ beside it; Add
+from Compose file is a sheet whose *Check*
 shows what the template will ask before it is added (`template-preview.tsx`) and says the
 catalogue's refusal under the form; empty, it offers the three ways as cards, each with a product's
 mark. Settings → General carries *Save as template…* on a deployment that runs published
@@ -152,6 +153,8 @@ and the exact masked text that was sent — is kept with the run, and an adminis
 up from there (`deploy-run-diagnosis.spec.ts`). `/deploy/notifications`
 (`components/deploy/notifications-page.tsx`) manages Discord, Slack, Microsoft Teams, Mattermost,
 Telegram, ntfy, Gotify, Pushover, e-mail and signed webhook channels with event selection, pause/resume, test delivery and delivery history.
+Its picture is a `WireFlow` (`marks` on a phone): projects, this server, and a node per channel with
+dashed rings for kinds not yet added; a channel's history sheet is titled `{name} · history`.
 `/deploy/variables` (`components/deploy/shared-variables-page.tsx` over the list in
 `shared-variables.tsx`, Deployments → Shared variables) lists the
 server's shared variables and Settings → Variables a project's own under *Project variables*, the same

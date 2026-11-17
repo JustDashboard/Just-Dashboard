@@ -8,12 +8,15 @@ Empty, absent, failed, stale, notice and loading: each one designed, and each at
 `MissingScreen`, `MissingOrError`, `MissingLine` (`components/missing-thing.tsx`, words in
 `missing-thing-model.ts`); `InstallHandoff` (`components/install-handoff.tsx`); `Spinner`,
 `LoadingRows`, `LoadingPanel`, `Hold`, `Sweep` (`components/loading.tsx`); `Bone`;
-`MissingPage` and `StandaloneState` for a whole route.
+`MissingPage` and `StandaloneState` for a whole route, and `DatabaseMissingPage`
+(`database/shell/missing-page.tsx`) under a database, whose rail is the nearest pages.
 
-**Deprecated, kept until the page passes move their callers:** `CouldNotRead` and `NotUpdating`
-(`database/home/blocks.tsx`), `ReadFailed` (`database/fleet/read-failed.tsx`), `ReadError`
-(`database/kit/read-error.tsx`; `database/redis/read-error.tsx` re-exports it), `NetworkReadWarning` (`network/read-warning.tsx`). Each is now
-one call of the member named in its `@deprecated` line.
+**Deprecated, kept while they have callers:** `ReadFailed` (`database/fleet/read-failed.tsx`,
+called only from `database/schema/` and `database/diagram/` now), `ReadError`
+(`database/kit/read-error.tsx`; `database/redis/read-error.tsx` re-exports it),
+`NetworkReadWarning` (`network/read-warning.tsx`). Each is one call of the member named in its
+`@deprecated` line. The database home's own two copies are gone: its blocks use `ErrorState` and
+`Stale`.
 
 ## Which one
 
@@ -132,8 +135,9 @@ identity header so the page keeps its shape.
   `className`; `track` draws the channel; `tone="quiet"` is the foreground fill over a reading that
   is already coloured; `label` makes it a `progressbar` of that name, otherwise it is `aria-hidden`.
   Under reduced motion, from the system or from `data-motion="paused"`, the bar stops and fills the
-  track in `--faint`. `OperationProgress` and the shell's splash draw through it; the other
-  hand-built bars move to it in the page passes, and then nothing else writes `animate-sweep`.
+  track in `--faint`. `OperationProgress` and the shell's splash draw through it; a few hand-built bars (a
+  deployment's build console, run pipeline and site preview, the credentials page, a bar reading's
+  own sweep) still write `animate-sweep` themselves.
 
 ## The phone
 

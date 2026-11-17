@@ -2,16 +2,20 @@
 
 ## Build a page in five steps
 
-1. **Pick the shape.** A page that reports is a reading page, one where the reader decides a
-   sequence is a flow page, a workbench is one frame held to the window, and an item's detail is a
-   page with a rail. [`patterns/registers.md`](patterns/registers.md) has the test.
-2. **Open its recipe** in [`recipes/`](recipes/README.md): the reference route, the order of the
-   regions, the four states, the phone shape and the spec to add.
+1. **Pick the shape.** A page that reports is a reading page, a list of things you open is a list
+   page, an item's detail is a page with a rail, settings are one column under one save bar, a
+   page where the reader decides a sequence is a flow page, and a workbench is one frame held to
+   the window. [`patterns/registers.md`](patterns/registers.md) has the test.
+2. **Open its recipe** in [`recipes/`](recipes/README.md): the reference route and its shot, the
+   order of the regions, a skeleton, the four states, the phone shape, a checklist and the spec to
+   add.
 3. **Take its components from the catalogue**, [`components/README.md`](components/README.md).
    A component another page could want is shared, and
    [`contributing-a-component.md`](contributing-a-component.md) says when to promote one and how.
 4. **Declare the register** (`data-register` through `Page`), and hold the page to
-   [`standard.md`](standard.md): the operator's decisions and D1 to D14.
+   [`standard.md`](standard.md), the operator's decisions and D1 to D14, and to
+   [`patterns/accessibility.md`](patterns/accessibility.md), what it owes a keyboard and a screen
+   reader.
 5. **Run the spec.** `scripts/test-changed.sh` runs `design-system.spec.ts` for any UI change and
    the specs that open the page. Then look at it at 1440 and at 390 on a touch device.
 
@@ -22,8 +26,8 @@
 | [`standard.md`](standard.md) | The operator's decisions, D1 to D14, and the tensions' answers, each with what holds it |
 | [`foundations/`](foundations/README.md) | Tokens and scales: colour, surfaces, type, spacing, motion, words, layout and the phone |
 | [`components/`](components/README.md) | The catalogue: one row per shared export, one page per family |
-| [`patterns/`](patterns/README.md) | Rules that span components |
-| [`recipes/`](recipes/README.md) | One recipe per page shape |
+| [`patterns/`](patterns/README.md) | Rules that span components, and the accessibility contract |
+| [`recipes/`](recipes/README.md) | One recipe per page shape: reading, list, detail with a rail, settings, flow, workbench |
 | [`decisions/`](decisions/README.md) | Why each page looks as it does: the dated stories, by section |
 | [`design-system.md`](design-system.md) | The index from each `§n` cited in the code to its page |
 | [`shell.md`](shell.md) | Routing, the shell, the rail, sign-in, the hub link, command search, the editor |

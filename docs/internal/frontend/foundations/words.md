@@ -11,7 +11,7 @@
 | How long something took is said in words: "19 in 20 inside 412ms", never p50, p95 or p99. | lint `design-system/latency-words` |
 | A failure is said in a sentence, in one place: `ErrorState` (not found, unavailable, throttled, failed). | convention |
 | Names, addresses and paths are mono. | convention |
-| One way to say a value: bytes, rates, how long ago, a certificate's time left. | convention; coming: the format helpers (WP-14) |
+| One way to say a value: bytes, rates, how long ago, a certificate's time left. | the format helpers (`lib/format.ts`, `lib/certificates.ts`, [`../components/values.md`](../components/values.md)); unit `format.test.js`; convention for using them |
 | When there is too much on a page, cut words; do not rearrange them. | convention |
 
 ## 4. One vocabulary per idea

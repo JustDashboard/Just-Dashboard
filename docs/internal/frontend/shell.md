@@ -38,6 +38,14 @@ sessions. Recovery for the same account keeps those mounts and their drafts.
 **The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for
 the remaining height (`<Page fill>`) instead of growing past the viewport.
 
+**The first Tab on every page is "Skip to content"** (`SkipToContent` in
+`(dashboard)/layout.tsx`). It stands above the window until it has the focus. Enter moves the
+focus to the page's `h1` rather than the address, so a screen reader says which page this is and
+the next Tab is the page's first control. The heading holds a `tabindex` only until it loses the
+focus. `<main>` is never focusable: a click anywhere in a focusable `<main>` would move the focus
+to it, and the browser scrolls with the keyboard from the focused element outwards, which would
+take Page Down away from the pane that was clicked.
+
 **A table comes fully on screen before its rows scroll.** A capped table (`max-h-[calc(100svh-22rem)]`
 and the like) is sized to fit under the page's header, so with the page anywhere but its top the
 wheel would scroll a grid half below the fold. Every `ui/table.tsx` container listens through
@@ -51,8 +59,14 @@ page around it to move.
 
 The navigation sidebar is always expanded on desktop: the shell disables desktop collapse in
 `SidebarProvider` and does not read the old `shell.sidebar` preference. Desktop has no toggle
-and Ctrl/Cmd+B does not collapse it. Below `md`, the header opens the mobile sheet and the
-sidebar header closes it; Ctrl/Cmd+B still toggles that sheet.
+and Ctrl/Cmd+B does not collapse it. Below `md` the rail is a sheet. The strip across the top opens
+it and the sheet's own head closes it; Ctrl/Cmd+B still toggles it. A page opened from the sheet
+puts it away: `SidebarProvider` closes it when the pathname changes, and a page's row closes it on
+the press, so the row of the page you are already on closes it too. A row that only drills into a
+panel (the way back out, a group) leaves it open. Below `md` the sheet's rows, the way back out,
+Search and the close control are 44px, and so are the strip's three controls (sidebar, Ask,
+Search) in its 48px. The strip is a `<header>` beside `<main>`, so it is the phone's banner, as
+the rail's head is the desk's. `shell-phone.spec.ts` holds all of it.
 
 ### When there is no page to show
 
@@ -154,8 +168,13 @@ levels down still lights one row. The exception keeps a parent and its child fro
 other rows of the panel hang under (Docker's Overview at `/docker`, a database's Home, Metrics above its
 Alerts) is the landing page and is current on its own address alone, unless it is the list its items
 open under (`LIST_LANDINGS`: Live for `/processes/<pid>`, Projects for a project and `/deploy/new`,
-Control center for a database), which keeps the addresses no other row owns. A run is one of its
-project's Deployments. An address under a section that no row owns lights nothing.
+Databases for a database), which keeps the addresses no other row owns. A run is one of its
+project's Deployments. An address under a section that no row owns lights nothing. The lit row is
+drawn three ways: the selection fill (`bg-accent`), a 2px brand bar on its leading edge and the
+medium label. The pointer gets the menu's hover fill (`bg-menu-hover`), so the page you are on and
+the row under the pointer never look alike. It is said, too: a page's row carries
+`aria-current="page"`, and a section or group you are inside, seen from a level above, carries
+`aria-current="true"`.
 
 A section with more pages than a reader scans as one list puts them under **headings**, as a project's
 rail does with *Settings*: a `NavChild` names its `group`, `groupedChildren` (`nav.ts`) turns the list
@@ -322,7 +341,7 @@ product to draw a list the page beneath it already holds. A project's run page k
 panel, with Deployments marked as where you are, because a run is opened from there.
 
 **Which database is the path, and only the path.** The section's static children in `nav.ts` are the
-three pages about every database at once — Control center (`/databases`), Map (`/databases/map`) and
+three pages about every database at once — Databases (`/databases`), Map (`/databases/map`) and
 Add a database (`/databases/new`, `system.admin`) — and one database's pages are
 `/databases/<id>` and `/databases/<id>/<section>`, built by `sectionHref` in the engine registry and
 never by hand. `database/shell/routes.ts` holds the one spelling of an id (`DATABASE_ID`, digits with
@@ -453,7 +472,11 @@ opens with a small picture, display name, sign-in name and a role `Tag`, then th
 card on the product's ease, and its rows `rise` in an 18ms stagger starting from the row nearest the
 card; the stagger is `motion-safe` because the reduced-motion rule collapses durations, not delays.
 Menu rows are 32px on desktop and 44px on a phone, with the current page marked by `aria-current`, an
-accent wash and a brand glyph. The picture is `components/user-avatar.tsx`: the stored image when
+accent wash and a brand glyph. The card is named by the words it shows and then by what it opens:
+"Operator, admin, account menu" (WCAG 2.5.3). Between the pages and Sign out is **Pause
+animations**, a checked menu row that keeps the menu open when pressed: it is this browser's, not
+the account's (`components/shell/motion-pause.ts`,
+[`foundations/motion.md`](foundations/motion.md)). The picture is `components/user-avatar.tsx`: the stored image when
 there is one, otherwise the display name's initials in a hue taken from the username (`lib/hue.ts`'s
 `LANES`, so the same person keeps one colour in the rail, the users list and their profile). Pictures and
 initials are circular at every account-avatar size and carry `data-slot="user-avatar"`, the design
@@ -466,7 +489,10 @@ retains the compact mark radius used in commit lines and forge faces.
 
 `components/shell/command-palette.tsx` opens with Ctrl/Cmd+K, the rail's search field (drawn as a framed field with
 the shortcut in keycaps for the reader's platform — ⌘K on Apple keyboards, Ctrl K elsewhere, via
-`lib/platform.ts`), or the search button in the top strip a phone gets in place of the rail. An
+`lib/platform.ts`; the field is a well with the button and the keycaps side by side, not a button
+holding both: a control is named by the words it shows, and inside the button the caps were words
+it showed. The button's `::after` covers the well, so a press on the caps is a press on Search,
+and the shortcut is said by `aria-keyshortcuts`), or the search button in the top strip a phone gets in place of the rail. An
 empty search puts the
 previous distinct destination first, then the other recent destinations, current page commands
 and permission-visible navigation outside the sections the account keeps out of its sidebar, whose
@@ -513,11 +539,12 @@ entries; the Recent scope searches history explicitly. At most 60 results are sh
 matching count and a suggestion to narrow when there are more. A narrowed search with no matches
 offers to search everything for the same words. A section's landing page is listed once under the
 section's name and also answers to the name the rail gives it inside the section (Deployments'
-"Projects", Databases' "Control center", Processes' "Live").
+"Projects", Processes' "Live").
 
 Every result is one line — its mark, its name, its second line in the hint size after it, and at
 the far end its state, when it was visited, *Previous*, *Current* or its shortcut — so a screen holds
-twice the rows the two-line list did. The mark is drawn as what the result is
+twice the rows the two-line list did. The highlighted result takes the menus' hover fill with a
+brand bar on its leading edge; it is where the keyboard is, not a selection. The mark is drawn as what the result is
 (`command-search/marks.tsx`). An inventory row carries the product it is as a `ProductLogo` key — a
 container its image's, a database its flavour or driver, a site nginx or Caddy, a repository its forge
 or Git, a service the unit's program, a PM2 app its interpreter, a stack Compose's, a project

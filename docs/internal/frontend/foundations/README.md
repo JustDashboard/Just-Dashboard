@@ -17,5 +17,6 @@ to be its `design-system.md` section underneath.
 | [`layout-phone.md`](layout-phone.md) | Breakpoints, container queries, z layers, control sizes, touch, the phone | new |
 
 These pages describe the scales as 0.9.0 accepts them (the UI-system plan of 15 Nov 2026, with the
-operator's answers to T1, T2, T3 and T9). WP-01 writes them into `globals.css` in the same wave;
-where a value here and the stylesheet differ, the stylesheet is the bug.
+operator's answers to T1, T2, T3 and T9), and `globals.css` holds them. [`tokens.md`](tokens.md) is
+printed from the stylesheet and checked against it, so it is the reference for a value; where a
+rule here and the stylesheet differ, the stylesheet is the bug.

@@ -1,7 +1,24 @@
 # Data flow
 
-API and socket state, metrics state, confirmations, progress and updates (this page was
-`patterns/data-flow.md` until 0.9.0).
+API and socket state, metrics state, confirmations, progress and updates.
+
+## The rule
+
+- **A page reads through the shared hooks**: `usePoll` for a read on an interval (shared between
+  blocks with `sharedPoll`), `useSocket` for a push socket, `useMetrics` for the metrics stream.
+  No block opens a socket or a timer of its own.
+- **The server decides.** A capability the account lacks is not offered, and a control the page
+  draws is still checked by the server. A confirmation guards a slip; it enforces nothing.
+- **An action in flight is said where it was started**: a dialog's footer
+  (`OperationProgress`), a row's own state, a job's console. A wait is never a percentage the
+  interface invented.
+- **A read that fails keeps what it had** ([`live-data.md`](live-data.md)), and a write that is
+  refused keeps the draft.
+- **Selection and filters worth sharing live in the address** (`useQuerySelection`, `useViewTab`);
+  a preference of this browser lives in its storage; nothing secret lives in either.
+
+The short forms are in [`live-data.md`](live-data.md) and [`confirmations.md`](confirmations.md).
+What follows is the detail, by subject.
 
 A dialog's action in flight uses `components/operation-progress.tsx` for a named working bar and
 elapsed time, and only a dialog does: `Modal` takes the reading as its `progress` prop and draws it
@@ -490,7 +507,8 @@ are dated evidence, not proof of current attachment ownership.
   nobody. Colours live on `:root` in `globals.css`. `lib/themes.ts` is now one function —
   `themeBootstrapScript()`, inlined in `<head>` with the request's CSP nonce — which puts `.dark` on the
   root element before first paint so the generated shadcn primitives' `dark:` variants resolve, sets
-  `color-scheme`, and clears the stored light/dark preference from anyone upgrading. the theme hook,
+  `color-scheme`, puts `data-motion="paused"` on the root for a browser that paused the product's
+  animations, and clears the stored light/dark preference from anyone upgrading. the theme hook,
   the top bar's toggle, the palette's theme commands and `/appearance` are all gone; `<html>` keeps
   `suppressHydrationWarning` because the class is still applied by script.
 

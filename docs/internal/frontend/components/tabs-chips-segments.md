@@ -91,9 +91,9 @@ between two modes of a control (a command palette's scope, a log's Live and Hist
 that shows no panel is `Segments`.
 
 **`tabClasses` is deprecated.** It is the look without the roles, and the 75 strips built on it gave
-the same mark four keyboard models (A11Y-02). New code uses `ViewTabs`; the wave-2 passes move the
-callers and WP-39 bans `TabsPrimitive.List` and `tabClasses` outside `ui/tabs` and `ViewTabs`. The
-editor's `TabStrip` keeps the look for its own control.
+the same mark four keyboard models. New code uses `ViewTabs`; the strips still on it move as
+their pages are touched, and WP-39 bans `TabsPrimitive.List` and `tabClasses` outside `ui/tabs`
+and `ViewTabs`. The editor's `TabStrip` keeps the look for its own control.
 
 ## FilterChip, ChipStrip and ChipCount
 

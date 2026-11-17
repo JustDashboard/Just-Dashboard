@@ -683,17 +683,21 @@ else off the screen. It is `components/docker/events-page.tsx` over three files 
 on the Docker section's identity line (Docker as its mark and version, the host, how long the
 dashboard has been listening and how much it has kept) with the verdict beside its name — a loop
 still going is named, then the containers that failed, then *Nothing failed* — beside the socket's
-`Status live`, and at its end a 1h / 6h / 24h / All window that every block below reads over. Pass 2 is kept,
-the Logs page's way: four `StatButton` tiles (failures, restarts, created or removed, external),
+`Status live`, and at its end a 1h / 6h / 24h / All window that every block below reads over. Pass 2 was kept
+the Logs page's way until 0.9.0: four `StatButton` tiles (failures, restarts, created or removed, external),
 each counting up as it lands with its shape across the window as its `TileTrend`, keyed by its
-line's colour, and each narrowing the table and the feed to what it counts. The containers the
+line's colour, and each narrowing the table and the feed to what it counts. Since 0.9.0 they are
+the band every Docker page opens on (`event-band.tsx`): what happened as one bar of four kinds,
+each a press that narrows the page, and Recent, the newest of those on the window's axis, with the
+window on the band's line. The containers the
 record names are a framed table, one row each and worst first (`event-activity.tsx`): the
 container as its product with its last outcome in the corner, its state now from Docker's own
 listing (a loop shimmering, *out of memory · 25m ago*, *Removed*), its window as a lane of marks —
 each outcome in its hue, a failure a dot, a loop a red band, dashed where the dashboard was not yet
 listening, the newest mark breathing for two minutes — its failures, its comebacks and who last
 acted on it. A row narrows the feed; its name opens the container. The feed (`event-feed.tsx`)
-folds a restart loop into one row and a container's run of events moments apart (a restart's kill,
+folds a restart loop into one row, whose events open in a popover off its button so the row keeps
+one height, and a container's run of events moments apart (a restart's kill,
 exit, stop, start and restart) into another (`foldBursts`), each row its product mark, its subject in
 the project's lane hue and who did it with the audit log's account of how that is known; a row new
 since the page opened rises. The feed is a plain section since 0.8.7 — a title, a hairline, a
