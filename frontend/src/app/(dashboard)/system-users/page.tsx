@@ -51,6 +51,7 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import type { BulkResults, SystemUser } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -231,7 +232,7 @@ function SystemUsers() {
   // brings them into view.
   const narrow = (next: Scope) => {
     setScope(next)
-    list.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    scrollIntoViewRespectingMotion(list.current, { block: "start" })
   }
 
   const row = (user: SystemUser) => (
