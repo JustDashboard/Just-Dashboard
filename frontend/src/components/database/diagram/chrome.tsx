@@ -4,7 +4,8 @@ import { useEffect, useId, useRef, useState } from "react"
 import { Crosshair, Fingerprint, Key, Linked, LockClosed, Trash } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { KEYCAP } from "@/components/command-search/keycaps"
+import { Keycaps } from "@/components/keycaps"
+import { ARROW_CAPS } from "@/components/map/canvas-keys"
 import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
 import { Field } from "@/components/form"
 import { Modal } from "@/components/modal"
@@ -14,6 +15,7 @@ import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
 import { NameMark } from "@/components/database/kit/marks"
 import type { MemoryStatus } from "@/components/database/diagram/memory"
 
+/** How long a fit glides; the diagram asks `motionMs` for it, so a reduced-motion reader gets none. */
 export const FIT = { duration: 300 }
 
 /**
@@ -122,26 +124,44 @@ export function CanvasHolds({
   )
 }
 
-/** The diagram's keys, as caps, at the foot of its inspector — where the map says its own. */
+/**
+ * The diagram's keys, as caps, at the foot of its inspector — where the map
+ * says its own. A key means nothing under a finger, so a touch screen is not
+ * shown them.
+ */
 export function KeyLegend() {
   return (
     <div
       data-slot="diagram-keys"
-      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-3 py-2.5 text-hint text-muted-foreground"
+      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-3 py-2.5 text-hint text-muted-foreground pointer-coarse:hidden"
     >
       <Keycap cap="F">Fit</Keycap>
       <Keycap cap="/">Find</Keycap>
       <Keycap cap="I">Panel</Keycap>
       <Keycap cap="H">Hide</Keycap>
       <Keycap cap="Esc">Let go</Keycap>
+      <Keycap
+        cap={ARROW_CAPS}
+        title="Arrows slide the canvas, or move the chosen tables. Shift takes a longer step."
+      >
+        Move
+      </Keycap>
     </div>
   )
 }
 
-function Keycap({ cap, children }: { cap: string; children: React.ReactNode }) {
+function Keycap({
+  cap,
+  title,
+  children,
+}: {
+  cap: string
+  title?: string
+  children: React.ReactNode
+}) {
   return (
-    <span className="flex items-center gap-1.5">
-      <kbd className={KEYCAP}>{cap}</kbd>
+    <span title={title} className="flex items-center gap-1.5">
+      <Keycaps keys={cap} />
       {children}
     </span>
   )

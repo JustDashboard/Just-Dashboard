@@ -9,6 +9,7 @@ import {
   CaptureUpdateAction,
   convertToExcalidrawElements,
   Excalidraw,
+  getCommonBounds,
   hashElementsVersion,
   isLinearElement,
   reconcileElements,
@@ -57,6 +58,8 @@ import { sectionHref } from "@/components/database/engine"
 import { ApiError, del, get, put } from "@/lib/api"
 import { dashboardResource, embeddable } from "@/lib/board/embeds"
 import { EXCALIDRAW_ASSETS } from "@/lib/vendored"
+import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
+import { arrowOf, panned } from "@/components/map/canvas-keys"
 import { BOARD_FILE_TYPES, shownFileIds } from "@/lib/board/files"
 import type { Board, BoardSaved, BoardScene } from "@/lib/board/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
@@ -243,6 +246,57 @@ export default function BoardWorkspace({ id }: { id: number }) {
       </Page>
     )
   return <LoadedBoard key={board.id} board={board} />
+}
+
+/**
+ * The arrows on a drawing with nothing selected slide it (T10), as they do
+ * the map and a database's diagram. Excalidraw moves a selection with them
+ * itself (1px, 5px with Shift) and has nothing for them otherwise: it slides
+ * by Page Up and Page Down alone. So this answers only where Excalidraw did
+ * not — no selection, no text being written, no dialog or menu of its own
+ * open — and the drawing is never slid out of sight.
+ */
+function slideScene(api: ExcalidrawImperativeAPI | null, event: React.KeyboardEvent) {
+  const direction = arrowOf(event)
+  if (!api || !direction || isTypingTarget(event.target)) return
+  // Excalidraw's confirmations (Reset the canvas, the overwrite on Open) are
+  // dialogs its app state does not name, and a key pressed in one still
+  // comes up through here.
+  if ((event.target as Element).closest?.(OWNER_SELECTOR)) return
+  const state = api.getAppState()
+  if (
+    Object.values(state.selectedElementIds).some(Boolean) ||
+    state.editingTextElement ||
+    state.newElement ||
+    state.openDialog ||
+    state.openMenu ||
+    state.openPopup
+  )
+    return
+  event.preventDefault()
+  const zoom = state.zoom.value
+  const elements = api.getSceneElements()
+  const fence =
+    elements.length > 0
+      ? (() => {
+          const [minX, minY, maxX, maxY] = getCommonBounds(elements)
+          return {
+            bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+            size: { width: state.width, height: state.height },
+          }
+        })()
+      : undefined
+  // Excalidraw draws a scene point at (point + scroll) × zoom.
+  const next = panned(
+    { x: state.scrollX * zoom, y: state.scrollY * zoom, zoom },
+    direction,
+    event.shiftKey,
+    fence,
+  )
+  api.updateScene({
+    appState: { scrollX: next.x / zoom, scrollY: next.y / zoom },
+    captureUpdate: CaptureUpdateAction.NEVER,
+  })
 }
 
 function LoadedBoard({ board }: { board: Board }) {
@@ -723,7 +777,11 @@ function LoadedBoard({ board }: { board: Board }) {
           menu={<VerbMenu label="Drawing actions" verbs={verbs} />}
         />
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
-          <div className="min-h-0 min-w-0 flex-1" aria-label={`${name} drawing canvas`}>
+          <div
+            className="min-h-0 min-w-0 flex-1"
+            aria-label={`${name} drawing canvas`}
+            onKeyDown={(event) => slideScene(apiRef.current, event)}
+          >
             <LiveCardProvider open={(href) => void go(href)}>
               <Excalidraw
                 initialData={
