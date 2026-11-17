@@ -572,13 +572,36 @@ async function serious(page: Page) {
     }))
 }
 
-/** Reads the page with axe and holds it to the gate, less what `KNOWN` names for it. */
+/**
+ * Reads the page with axe and holds it to the gate, less what `KNOWN` names for it.
+ *
+ * A known violation is often in something a later read draws with no bone
+ * standing for it (the ad-blocker's row on DNS services), so on a busy
+ * machine it can land after `settle` has stopped waiting. The page then read
+ * as fixed, and the gate told whoever was running it to take a line out of
+ * `KNOWN` that is still needed. So a route is called fixed only after it has
+ * been read again, for long enough for that read to land.
+ */
 async function gate(page: Page, key: string, url: string) {
-  const found = await serious(page)
+  let found = await serious(page)
   const known = KNOWN[key] ?? []
+  const gone = () =>
+    known.filter((entry) => !found.some((violation) => violation.rule === entry.rule))
+  if (gone().length > 0) {
+    await expect
+      .poll(
+        async () => {
+          found = await serious(page)
+          return gone().length
+        },
+        { timeout: 12_000, intervals: [1_000, 2_000, 3_000] },
+      )
+      .toBe(0)
+      .catch(() => undefined)
+  }
   const fresh = found.filter((violation) => !known.some((entry) => entry.rule === violation.rule))
   expect(fresh, `serious or critical axe violations on ${url}`).toEqual([])
-  const fixed = known.filter((entry) => !found.some((violation) => violation.rule === entry.rule))
+  const fixed = gone()
   expect(
     fixed.map((entry) => `${entry.rule} (${entry.finding})`),
     `fixed on ${key}: take these out of KNOWN in axe-gate.spec.ts`,
