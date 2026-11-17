@@ -372,26 +372,35 @@ const GHOST_WIDTHS = ["w-32", "w-40", "w-28", "w-36"]
  * the readings stand, which a phone does not draw. Every piece keeps
  * `data-slot="skeleton"`, the mark a spec waits on. No rows draws nothing:
  * the empty slab is the caller's to say.
+ *
+ * `band` is for rows that carry `children` on a phone only (the readings a
+ * narrow screen moves under the name): below `sm` each ghost holds that many
+ * lines of hint under its line, as the row does, so the list is as tall
+ * waiting as landed. Pass `lines={2}` too when the rows have a description:
+ * a row with one is a pixel taller than the 56px box.
  */
 export function ChoiceListSkeleton({
   rows,
   mark = "sm",
   lines = 1,
   aside = true,
+  band,
   className,
 }: {
   rows: number
   mark?: "sm" | "md" | false
   lines?: 1 | 2
   aside?: boolean
+  /** Lines of hint the rows carry under their line on a phone (`children` below `sm`). */
+  band?: 1 | 2
   className?: string
 }) {
   if (rows <= 0) return null
   return (
     <ul aria-hidden data-slot="choice-list-skeleton" className={cn("min-w-0 space-y-2", className)}>
-      {Array.from({ length: rows }, (_, index) => (
-        <li key={index} className={CHOICE_ROW_EDGE}>
-          <div className={cn(CHOICE_ROW_BOX, "items-center gap-3")}>
+      {Array.from({ length: rows }, (_, index) => {
+        const line = (
+          <>
             {mark && (
               <Skeleton
                 className={cn("shrink-0 rounded-lg", mark === "md" ? "size-10" : "size-8")}
@@ -412,9 +421,31 @@ export function ChoiceListSkeleton({
                 <Bone className="w-24" />
               </span>
             )}
-          </div>
-        </li>
-      ))}
+          </>
+        )
+        return (
+          <li key={index} className={CHOICE_ROW_EDGE}>
+            {band ? (
+              // The row's own two layouts: its line with the band under it
+              // on a phone, as `children` draws it, and the line alone above.
+              <div
+                className={cn(CHOICE_ROW_BOX, "items-center gap-3 max-sm:flex-col max-sm:gap-2.5")}
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-3 max-sm:self-stretch">{line}</div>
+                <div className="flex min-w-0 flex-col gap-y-2 self-stretch sm:hidden">
+                  {Array.from({ length: band }, (_, at) => (
+                    <span key={at} className="block text-hint">
+                      <Bone className={at === 0 ? "w-28" : "w-40"} />
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className={cn(CHOICE_ROW_BOX, "items-center gap-3")}>{line}</div>
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }

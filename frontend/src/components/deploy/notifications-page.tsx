@@ -852,7 +852,9 @@ export function NotificationsPage() {
             {channels.error && !channels.data ? (
               <ErrorState error={channels.error} onRetry={channels.refresh} />
             ) : !channels.data ? (
-              <ChoiceListSkeleton rows={3} />
+              // A card says its target under its name, and on a phone its last
+              // delivery and its events under that.
+              <ChoiceListSkeleton rows={3} lines={2} band={2} />
             ) : list.length === 0 ? (
               // The picture above already offers kinds to add; the list
               // only has to say it is empty.
@@ -1292,7 +1294,10 @@ function Fanout({
         nodes: targets,
         max: PICTURE_TARGETS,
         more: { words: (hidden) => plural(hidden, "more channel") },
-        loadingRows: 3,
+        // The column is never shorter than PICTURE_TARGETS: the kinds not set
+        // up fill it. So it waits at that many, and the list under the
+        // picture stands where it lands.
+        loadingRows: PICTURE_TARGETS,
         // A channel is its service and a line of detail: no eyebrow over it.
         loadingLines: { eyebrow: false },
       }}
