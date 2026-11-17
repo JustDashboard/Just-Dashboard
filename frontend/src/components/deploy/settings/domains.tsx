@@ -843,6 +843,14 @@ function DomainRow({
       ? liveCertificate
       : undefined
   const renewal = certificateRead && certificateTip(certificateRead)
+  // A certificate that wants attention leads the line's facts, because the
+  // line cuts what does not fit: behind a redirect's target, "Certificate
+  // expired" was cut down to its dot.
+  const certificateUrgent =
+    certificateRead !== undefined &&
+    (certificateRead.certificate === "expired" ||
+      certificateRead.certificate === "expiring" ||
+      certificateRead.certificate === "missing")
 
   const issuer = tunnel ? "cloudflare" : issuerProduct(liveCertificate?.certificateIssuer)
 
@@ -868,6 +876,42 @@ function DomainRow({
       protectionUserProblem(protection.username) ||
       (!protection.hash && !password) ||
       (password && typedProblem)),
+  )
+
+  // One group, so turning HTTPS back on brings the live certificate's
+  // readings back together rather than popping in one by one. It gives way
+  // without clipping itself: the line cuts what does not fit, and a clip on
+  // the group cut the focus ring of its status on three sides.
+  const certificateFacts = certificateRead && (
+    <span
+      className={cn(
+        "flex animate-rise items-center gap-x-3",
+        // Whole when it leads; at the line's end it gives way.
+        certificateUrgent ? "shrink-0" : "min-w-0",
+      )}
+    >
+      {renewal ? (
+        <Explain face="wrap" tip={renewal}>
+          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
+          <span tabIndex={0} className="rounded-sm focus-ring">
+            <CertificateStatus domain={certificateRead} named />
+          </span>
+        </Explain>
+      ) : (
+        <CertificateStatus domain={certificateRead} named />
+      )}
+      {typeof certificateRead.certificateDaysLeft === "number" &&
+        certificateRead.certificateDaysLeft > 0 && (
+          <span
+            className={cn(
+              "numeric",
+              certificateRead.certificate === "expiring" ? "text-warning" : "text-muted-foreground",
+            )}
+          >
+            {plural(certificateRead.certificateDaysLeft, "day")} left
+          </span>
+        )}
+    </span>
   )
 
   return (
@@ -906,6 +950,8 @@ function DomainRow({
             keeps its height with a password on or a redirect set (PGD-26).
             What wants a press comes first, as marks that never clip: the
             sign-in's key, then where a redirecting name sends its visitors.
+            A certificate that wants attention stands between the two, since a
+            danger at the end of a line that cuts is a danger not seen.
             The days left and who renews it were 11px beside 12px readings,
             two baselines for one row of facts. */}
         <div className="flex h-4.5 min-w-0 items-center gap-x-3 overflow-x-clip text-xs whitespace-nowrap">
@@ -990,9 +1036,12 @@ function DomainRow({
               </PopoverContent>
             </Popover>
           )}
+          {certificateUrgent && certificateFacts}
           {/* A redirecting name says where it sends visitors, and the two
               choices are a layer over the row: they were a band under it,
-              which made the row taller than its siblings. */}
+              which made the row taller than its siblings. Its target is whole
+              unless a certificate that wants attention stands before it; then
+              the target gives way, with an ellipsis. */}
           {domain.redirectTo && (
             <Popover open={routing} onOpenChange={setRouting}>
               <PopoverTrigger asChild>
@@ -1000,7 +1049,10 @@ function DomainRow({
                   type="button"
                   aria-label={`Sends visitors from ${host} to ${domain.redirectTo}`}
                   title={`Sends visitors to ${domain.redirectTo} · ${domain.redirectCode ?? 308}`}
-                  className="inline-flex max-w-48 min-w-0 shrink-0 animate-rise items-center gap-1 rounded-sm text-muted-foreground focus-ring hover:underline"
+                  className={cn(
+                    "inline-flex max-w-48 min-w-0 animate-rise items-center gap-1 rounded-sm text-muted-foreground focus-ring hover:underline",
+                    !certificateUrgent && "shrink-0",
+                  )}
                 >
                   <CornerUpRight aria-hidden className="size-3 shrink-0" />
                   <span className="truncate font-mono">{domain.redirectTo}</span>
@@ -1080,38 +1132,7 @@ function DomainRow({
           {route && !unsaved && httpsChanging && (
             <Status key={nextScheme} tone="notice" label={nextScheme} className="animate-rise" />
           )}
-          {/* One group, so turning HTTPS back on brings the live certificate's
-              readings back together rather than popping in one by one. It
-              gives way without clipping itself: the line cuts what does not
-              fit, and a clip on the group cut the focus ring of its status
-              on three sides. */}
-          {certificateRead && (
-            <span className="flex min-w-0 animate-rise items-center gap-x-3">
-              {renewal ? (
-                <Explain face="wrap" tip={renewal}>
-                  {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
-                  <span tabIndex={0} className="rounded-sm focus-ring">
-                    <CertificateStatus domain={certificateRead} named />
-                  </span>
-                </Explain>
-              ) : (
-                <CertificateStatus domain={certificateRead} named />
-              )}
-              {typeof certificateRead.certificateDaysLeft === "number" &&
-                certificateRead.certificateDaysLeft > 0 && (
-                  <span
-                    className={cn(
-                      "numeric",
-                      certificateRead.certificate === "expiring"
-                        ? "text-warning"
-                        : "text-muted-foreground",
-                    )}
-                  >
-                    {plural(certificateRead.certificateDaysLeft, "day")} left
-                  </span>
-                )}
-            </span>
-          )}
+          {!certificateUrgent && certificateFacts}
         </div>
       </div>
       <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2 pl-11 @min-[44rem]:contents">
