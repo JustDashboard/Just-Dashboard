@@ -1,6 +1,70 @@
 {
-  "latest": "0.8.7",
+  "latest": "0.9.0",
   "releases": [
+    {
+      "version": "0.9.0",
+      "date": "2026-11-18",
+      "title": "One design system across every page, and a calmer phone",
+      "summary": "Every page now draws from the same set of parts, and a test opens every page and checks it for accessibility problems. On a phone, each page has one header row, its commands are icons, and pages that show several panels show one at a time with a bar at the bottom. Arrow keys now move around the server map, the database diagram and a drawing, and animations can be paused from the account menu.",
+      "breaking": false,
+      "changes": [
+        {
+          "kind": "changed",
+          "text": "A phone's header is one row",
+          "detail": "The page's state and its facts stand on a single line, danger and warnings first, and a command is its icon with a tooltip. Terminate, Kill and other destructive commands sit behind the ⋯ menu and are never the page's main button."
+        },
+        {
+          "kind": "changed",
+          "text": "One panel at a time on a phone",
+          "detail": "A run's logs, the server map, the assistant and similar pages fill the screen with a bar at the bottom to switch between their parts, instead of stacking them."
+        },
+        {
+          "kind": "added",
+          "text": "Arrow keys on the map, the diagram and drawings",
+          "detail": "Arrows slide the canvas, and move the box you have picked. Shift takes a longer step. Typing in a field never moves anything."
+        },
+        {
+          "kind": "added",
+          "text": "Pause animations",
+          "detail": "One switch in the account menu stops every moving thing in the dashboard, the same as a device set to reduce motion."
+        },
+        {
+          "kind": "changed",
+          "text": "Shortcuts are drawn as keys, and single-key shortcuts can be turned off",
+          "detail": "A shortcut shows one cap per key, and is hidden on touch screens. Links inside a sentence are underlined."
+        },
+        {
+          "kind": "changed",
+          "text": "Errors stay until you close them",
+          "detail": "A failure's message no longer disappears after a few seconds, and the terminal has a screen reader mode."
+        },
+        {
+          "kind": "changed",
+          "text": "Easier to press and to read on a touch screen",
+          "detail": "Small controls have a finger-sized press area, hints and small text are larger on touch screens, the menu closes when you open a page, and form fields have a clearer edge."
+        },
+        {
+          "kind": "changed",
+          "text": "Tables sort and tab alike",
+          "detail": "Every sortable table has one sort control in its head and one keyboard stop per row."
+        },
+        {
+          "kind": "changed",
+          "text": "Pictures of how things connect fit a phone",
+          "detail": "The proxy, ports, tunnels, remote desktop and alerts pictures keep their names whole on a narrow screen."
+        },
+        {
+          "kind": "fixed",
+          "text": "A domain's expired certificate is never cut off",
+          "detail": "A domain row keeps one height whether a password or a redirect is set, and a certificate that is expired or missing is always shown whole."
+        },
+        {
+          "kind": "fixed",
+          "text": "Shortcuts' ? on the page header",
+          "detail": "Firewall, Git and Logs show the shortcuts button at the end of their header line, not on a row of its own, and Git's four views fit their tab strip."
+        }
+      ]
+    },
     {
       "version": "0.8.7",
       "date": "2026-11-14",
